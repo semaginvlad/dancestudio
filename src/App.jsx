@@ -53,11 +53,6 @@ function getSubStatus(sub) {
   if (dl <= 3 || tl <= 1) return "warning";
   return "active";
 }
-function getMonthDates(y, m, schedule) {
-  const dates = [], dim = new Date(y, m+1, 0).getDate();
-  for (let d=1; d<=dim; d++) { const dt=new Date(y,m,d), dow=dt.getDay(), match=schedule.find(s=>s.day===dow); if(match) dates.push({date:toISO(dt),day:dow,time:match.time}); }
-  return dates;
-}
 
 const STATUS_LABELS = { active: "Активний", warning: "Закінчується", expired: "Протермінований" };
 const STATUS_COLORS = { active: "#2ECC71", warning: "#F9A03F", expired: "#E84855" };
@@ -93,16 +88,28 @@ export default function App() {
   const [cancelled, setCancelled] = useState([]);
   const [modLog, setModLog] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
-  const [waitlist, setWaitlist] = useState([]); // Стан для листа очікування
+  const [waitlist, setWaitlist] = useState([]); 
   const [tab, setTab] = useState("dashboard");
   const [modal, setModal] = useState(null);
   const [editItem, setEditItem] = useState(null);
-  const [financeDetailItem, setFinanceDetailItem] = useState(null); // Стан для деталізації зарплати
+  const [financeDetailItem, setFinanceDetailItem] = useState(null);
   const [searchQ, setSearchQ] = useState("");
+  
+  // Фільтри Абонементів
   const [filterDir, setFilterDir] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [calMonth, setCalMonth] = useState(()=>{const n=new Date();return{y:n.getFullYear(),m:n.getMonth()}});
+
+  // Фільтри Учениць (Нові)
+  const [stFilterDir, setStFilterDir] = useState("all");
+  const [stFilterGroup, setStFilterGroup] = useState("all");
+
+  // Стейт для Відвідувань (Винесено з AttendancePanel щоб не стрибало)
+  const [attnGid, setAttnGid] = useState("");
+  const [attnDate, setAttnDate] = useState(today());
+  const [manualName, setManualName] = useState("");
+  const [manualType, setManualType] = useState("trial");
+
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
@@ -110,11 +117,11 @@ export default function App() {
   useEffect(()=>{(async()=>{try{
     const [st,gr,su,at,ca,ml,sg]=await Promise.all([db.fetchStudents(),db.fetchGroups(),db.fetchSubs(),db.fetchAttendance(),db.fetchCancelled(),db.fetchModLog(),db.fetchStudentGroups()]);
     setStudents(st||[]);if(gr?.length)setGroups(gr);setSubs(su||[]);setAttn(at||[]);setCancelled(ca||[]);setModLog(ml||[]);setStudentGrps(sg||[]);
-    
-    // Спроба завантажити waitlist (щоб не падало, якщо Клод ще не додав це в db.js)
     try { if (db.fetchWaitlist) { const wl = await db.fetchWaitlist(); setWaitlist(wl || []); } } catch(e) {}
-
   }catch(e){console.error("Load error:",e)}setLoading(false)})()},[]);
+
+  // Синхронізація групи для відвідувань
+  useEffect(() => { if (groups.length > 0 && !attnGid) setAttnGid(groups[0].id); }, [groups, attnGid]);
 
   // ─── MAPS ───
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
@@ -246,79 +253,30 @@ export default function App() {
   const addWaitlist=async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}])}}catch(e){console.error(e)}setModal(null)};
   const removeWaitlist=async(id)=>{try{if(db.deleteWaitlist) await db.deleteWaitlist(id);setWaitlist(p=>p.filter(w=>w.id!==id));}catch(e){console.error(e)}};
 
-  // ═══ ATTENDANCE PANEL ═══
-  function AttendancePanel(){
-    const [gid,setGid]=useState(groups[0]?.id||"");
-    const [date,setDate]=useState(today());
-    const [manualName,setManualName]=useState("");
-    const [manualType,setManualType]=useState("trial");
-    const groupSubs=activeSubs.filter(s=>s.groupId===gid);
-    const isCan=cancelled.some(c=>c.groupId===gid&&c.date===date);
-    const studs=groupSubs.map(sub=>({sub,student:studentMap[sub.studentId],attended:attn.some(a=>a.subId===sub.id&&a.date===date)})).filter(x=>x.student);
-    const guests=attn.filter(a=>a.guestName&&a.groupId===gid&&a.date===date);
-
-    const toggle = async (sub, attended) => {
-      try {
-        const existing = attn.find(a => a.subId === sub.id && a.date === date);
-        if (attended) {
-          await db.deleteAttendanceBySubAndDate(sub.id, date);
-          await db.decrementUsed(sub.id, existing?.quantity || 1);
-          setAttn(p => p.filter(a => !(a.subId === sub.id && a.date === date)));
-          setSubs(p => p.map(s => s.id === sub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (existing?.quantity || 1)) } : s));
-        } else {
-          const a = await db.insertAttendance({ subId: sub.id, date, quantity: 1, entryType: "subscription" });
-          await db.incrementUsed(sub.id, 1);
-          setAttn(p => [...p, a]);
-          setSubs(p => p.map(s => s.id === sub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
-        }
-      } catch (e) { console.error(e); }
-    };
-    const addManual = async () => {
-      if (!manualName.trim()) return;
-      try {
-        const a = await db.insertAttendance({ guestName: manualName.trim(), guestType: manualType, groupId: gid, date, quantity: 1, entryType: manualType === "trial" ? "trial" : "single" });
-        setAttn(p => [...p, a]);
-      } catch (e) { console.error(e); }
-      setManualName("");
-    };
-    const removeGuest=async(id)=>{try{await db.deleteAttendance(id);setAttn(p=>p.filter(a=>a.id!==id))}catch(e){console.error(e)}};
-
-    return(<div>
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}><GroupSelect groups={groups} value={gid} onChange={setGid}/><input style={{...inputSt,width:"auto"}} type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
-      {isCan&&<div style={{background:"#E8485515",border:"1px solid #E8485533",borderRadius:8,padding:"10px 14px",marginBottom:14}}><p style={{margin:0,fontSize:13,color:"#E84855"}}>❌ Відмінено</p></div>}
-      {studs.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>З абонементом ({studs.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {studs.map(({sub,student,attended})=><div key={sub.id} onClick={()=>!isCan&&toggle(sub,attended)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:attended?"rgba(46,204,113,.1)":"#0d1117",border:`1px solid ${attended?"rgba(46,204,113,.25)":"#21262d"}`,borderRadius:8,cursor:isCan?"default":"pointer",opacity:isCan?.5:1}}>
-          <div><div style={{color:"#e6edf3",fontWeight:500,fontSize:14}}>{student.name}</div><div style={{color:"#8892b0",fontSize:11,marginTop:2}}>{sub.usedTrainings}/{sub.totalTrainings} · до {fmt(sub.endDate)}</div></div>
-          <div style={{width:28,height:28,borderRadius:6,background:attended?"#2ECC71":"#21262d",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff"}}>{attended?"✓":""}</div>
-        </div>)}
-      </div></div>}
-      {guests.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>Ручний запис ({guests.length})</div>{guests.map(g=><div key={g.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",background:"rgba(52,152,219,.08)",border:"1px solid rgba(52,152,219,.2)",borderRadius:8,marginBottom:4}}><div><span style={{color:"#e6edf3",fontWeight:500}}>{g.guestName}</span> <Badge color={g.entryType==="trial" ? "#2ECC71" : "#F9A03F"}>{g.entryType==="trial" ? "Пробне" : "Разове"}</Badge></div><button onClick={()=>removeGuest(g.id)} style={{...btnS,padding:"4px 8px",fontSize:11,color:"#E84855"}}>✕</button></div>)}</div>}
-      <div style={{background:"#161b22",borderRadius:8,padding:"14px 16px",border:"1px solid #21262d"}}><div style={{fontSize:12,color:"#8892b0",marginBottom:8,textTransform:"uppercase"}}>+ Додати вручну</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}><div style={{flex:1,minWidth:160}}><input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я" onKeyDown={e=>e.key==="Enter"&&addManual()}/></div>
-          <div style={{display:"flex",gap:4}}><Pill active={manualType==="trial"} onClick={()=>setManualType("trial")}>Пробне</Pill><Pill active={manualType==="single"} onClick={()=>setManualType("single")}>Разове</Pill></div>
-          <button style={{...btnP,padding:"10px 16px"}} onClick={addManual}>+</button>
-        </div>
-      </div>
-    </div>);
-  }
-
   // ═══ FILTERED DATA ═══
   const filteredSubs=useMemo(()=>{
     let r=subsExt;
     if(filterDir!=="all"){const gids=groups.filter(g=>g.directionId===filterDir).map(g=>g.id);r=r.filter(s=>gids.includes(s.groupId))}
-    if(filterGroup!=="all")r=r.filter(s=>s.groupId===filterGroup); // НОВИЙ ФІЛЬТР ПО ГРУПАХ
+    if(filterGroup!=="all")r=r.filter(s=>s.groupId===filterGroup);
     if(filterStatus!=="all")r=r.filter(s=>s.status===filterStatus);
     if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>studentMap[s.studentId]?.name?.toLowerCase().includes(q))}
     return r.sort((a,b)=>({warning:0,active:1,expired:2}[a.status]??3)-({warning:0,active:1,expired:2}[b.status]??3));
   },[subsExt,filterDir,filterGroup,filterStatus,searchQ,groups,studentMap]);
 
+  // НОВІ ФІЛЬТРИ УЧЕНИЦЬ
   const filteredStudents=useMemo(()=>{
     let r=students;
     if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>s.name.toLowerCase().includes(q)||s.phone?.includes(q)||s.telegram?.toLowerCase().includes(q))}
+    if(stFilterDir !== "all"){
+        const gids = groups.filter(g => g.directionId === stFilterDir).map(g => g.id);
+        r = r.filter(st => studentGrps.some(sg => sg.studentId === st.id && gids.includes(sg.groupId)));
+    }
+    if(stFilterGroup !== "all"){
+        r = r.filter(st => studentGrps.some(sg => sg.studentId === st.id && sg.groupId === stFilterGroup));
+    }
     return r.sort((a,b)=>a.name.localeCompare(b.name,"uk"));
-  },[students,searchQ]);
+  },[students, searchQ, stFilterDir, stFilterGroup, groups, studentGrps]);
 
-  // Students grouped
   const studentsByDirection=useMemo(()=>{
     const result={};
     DIRECTIONS.forEach(d=>{result[d.id]={direction:d,students:[]}});
@@ -333,7 +291,6 @@ export default function App() {
     return{grouped:Object.values(result).filter(d=>d.students.length>0),ungrouped};
   },[filteredStudents,studentGrps,groupMap]);
 
-  // Subs grouped
   const subsGroupedByDir = useMemo(()=>{
     const result={};
     DIRECTIONS.forEach(d=>{result[d.id]={direction:d,subs:[]}});
@@ -360,24 +317,15 @@ export default function App() {
       if(total>0){const tPct=g.trainerPct||50;splits.push({group:g,total,trainer:Math.round(total*tPct/100),studio:Math.round(total*(100-tPct)/100), subs: gSubs})}
     });
 
-    // LTV & Conversion (Базова логіка)
-    let totalLTV = 0;
-    let usersWithPurchases = 0;
-    let trialUsers = 0;
-    let convertedUsers = 0;
-
+    let totalLTV = 0; let usersWithPurchases = 0; let trialUsers = 0; let convertedUsers = 0;
     Object.values(studentMap).forEach(st => {
       const stSubs = subs.filter(s => s.studentId === st.id);
       if(stSubs.length > 0) {
         const moneySpent = stSubs.filter(s => s.paid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
         if(moneySpent > 0) { totalLTV += moneySpent; usersWithPurchases++; }
-        
         const hadTrial = stSubs.some(s => s.planType === "trial");
         const hadFull = stSubs.some(s => s.planType !== "trial");
-        if(hadTrial) {
-          trialUsers++;
-          if(hadFull) convertedUsers++;
-        }
+        if(hadTrial) { trialUsers++; if(hadFull) convertedUsers++; }
       }
     });
 
@@ -446,9 +394,16 @@ export default function App() {
         </div>}
 
         {tab==="students"&&<div>
-          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",justifyContent:"space-between"}}>
-            <input style={{...inputSt,maxWidth:350}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
-            <button style={{...btnP, background: "#F9A03F"}} onClick={()=>setModal("addWaitlist")}>+ В резерв (Очікування)</button>
+          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",justifyContent:"space-between", background: "#161b22", padding: 12, borderRadius: 10}}>
+            <div style={{display: "flex", gap: 8, flexWrap: "wrap", flex: 1}}>
+              <input style={{...inputSt,maxWidth:250}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+              <select style={{...inputSt,width:"auto"}} value={stFilterDir} onChange={e=>{setStFilterDir(e.target.value);setStFilterGroup("all")}}>
+                <option value="all">Всі напрямки</option>
+                {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
+            </div>
+            <button style={{...btnP, background: "#F9A03F", height: "fit-content"}} onClick={()=>setModal("addWaitlist")}>+ В резерв</button>
           </div>
           
           <div style={{display:"flex",flexDirection:"column",gap:10, marginBottom: 20}}>
@@ -478,7 +433,6 @@ export default function App() {
             })}
           </div>
 
-          {/* ─── ЛИСТ ОЧІКУВАННЯ (WAITLIST) ─── */}
           {waitlist.length > 0 && (
             <div style={{border:`1px solid #F9A03F44`, borderRadius: 10, overflow: 'hidden', background: "#161b22"}}>
               <div style={{padding:'14px 18px', borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between"}}>
@@ -504,7 +458,6 @@ export default function App() {
           )}
         </div>}
 
-        {/* ─── АБОНЕМЕНТИ З НОВИМ ФІЛЬТРОМ ─── */}
         {tab==="subs"&&<div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap", background: "#161b22", padding: 12, borderRadius: 10}}>
             <input style={{...inputSt,width:"auto",minWidth:180, flexGrow: 1}} placeholder="Пошук за іменем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
@@ -512,7 +465,6 @@ export default function App() {
               <option value="all">Всі напрямки</option>
               {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            {/* ФІЛЬТР ПО ГРУПІ */}
             <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
               <option value="all">Всі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option>
@@ -522,7 +474,6 @@ export default function App() {
           {filteredSubs.length===0?<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає абонементів</div>:
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {subsGroupedByDir.grouped.filter(d => filterDir === "all" || d.direction.id === filterDir).map(({direction, subs: dSubs}) => {
-              // Якщо вибрана конкретна група, фільтруємо всередині напрямку
               const finalSubs = filterGroup !== "all" ? dSubs.filter(s => s.groupId === filterGroup) : dSubs;
               if (finalSubs.length === 0) return null;
               
@@ -573,7 +524,118 @@ export default function App() {
           </div>}
         </div>}
 
-        {tab==="attendance"&&<AttendancePanel/>}
+        {/* ─── ОНОВЛЕНА ВКЛАДКА ВІДВІДУВАНЬ ─── */}
+        {tab==="attendance"&&(()=>{
+          const isCan=cancelled.some(c=>c.groupId===attnGid&&c.date===attnDate);
+          const guests=attn.filter(a=>a.guestName&&a.groupId===attnGid&&a.date===attnDate);
+
+          // Збираємо всіх учениць, які прив'язані до групи або мали в ній абонемент
+          const stIdsInGroup = new Set([
+            ...studentGrps.filter(sg => sg.groupId === attnGid).map(sg => sg.studentId),
+            ...subs.filter(s => s.groupId === attnGid).map(s => s.studentId)
+          ]);
+          const studsInGroup = Array.from(stIdsInGroup).map(id => studentMap[id]).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, "uk"));
+
+          const studsWithSub = [];
+          const studsWithoutSub = [];
+
+          studsInGroup.forEach(student => {
+            const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === attnGid);
+            const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.endDate) - new Date(a.endDate))[0];
+
+            if (bestSub && getSubStatus(bestSub) !== "expired") {
+                const attended = attn.some(a => a.subId === bestSub.id && a.date === attnDate);
+                studsWithSub.push({ student, sub: bestSub, attended });
+            } else {
+                const guestEntry = guests.find(g => g.guestName === student.name);
+                studsWithoutSub.push({ student, sub: bestSub, attended: !!guestEntry, guestEntry });
+            }
+          });
+
+          // Фільтруємо ручних гостей, щоб не дублювати тих, кого ми додали автокліком
+          const manualGuests = guests.filter(g => !studsWithoutSub.some(s => s.student.name === g.guestName));
+
+          const toggle = async (sub, attended) => {
+            try {
+              const existing = attn.find(a => a.subId === sub.id && a.date === attnDate);
+              if (attended) {
+                await db.deleteAttendanceBySubAndDate(sub.id, attnDate);
+                await db.decrementUsed(sub.id, existing?.quantity || 1);
+                setAttn(p => p.filter(a => !(a.subId === sub.id && a.date === attnDate)));
+                setSubs(p => p.map(s => s.id === sub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (existing?.quantity || 1)) } : s));
+              } else {
+                const a = await db.insertAttendance({ subId: sub.id, date: attnDate, quantity: 1, entryType: "subscription", groupId: attnGid });
+                await db.incrementUsed(sub.id, 1);
+                setAttn(p => [...p, a]);
+                setSubs(p => p.map(s => s.id === sub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
+              }
+            } catch (e) { console.error(e); }
+          };
+
+          const toggleNoSub = async (student, guestEntry, attended) => {
+            try {
+              if (attended && guestEntry) {
+                await db.deleteAttendance(guestEntry.id);
+                setAttn(p => p.filter(a => a.id !== guestEntry.id));
+              } else if (!attended) {
+                const a = await db.insertAttendance({ guestName: student.name, guestType: "single", groupId: attnGid, date: attnDate, quantity: 1, entryType: "single" });
+                setAttn(p => [...p, a]);
+              }
+            } catch (e) { console.error(e); }
+          };
+
+          const addManual = async () => {
+            if (!manualName.trim()) return;
+            try {
+              const a = await db.insertAttendance({ guestName: manualName.trim(), guestType: manualType, groupId: attnGid, date: attnDate, quantity: 1, entryType: manualType === "trial" ? "trial" : "single" });
+              setAttn(p => [...p, a]);
+            } catch (e) { console.error(e); }
+            setManualName("");
+          };
+          const removeGuest = async(id) => { try{await db.deleteAttendance(id);setAttn(p=>p.filter(a=>a.id!==id))}catch(e){console.error(e)} };
+
+          return(<div>
+            <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+              <GroupSelect groups={groups} value={attnGid} onChange={setAttnGid}/>
+              <input style={{...inputSt,width:"auto"}} type="date" value={attnDate} onChange={e=>setAttnDate(e.target.value)}/>
+            </div>
+            {isCan&&<div style={{background:"#E8485515",border:"1px solid #E8485533",borderRadius:8,padding:"10px 14px",marginBottom:14}}><p style={{margin:0,fontSize:13,color:"#E84855"}}>❌ Відмінено</p></div>}
+            
+            {studsWithSub.length>0&&<div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>З абонементом ({studsWithSub.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {studsWithSub.map(({sub,student,attended})=><div key={sub.id} onClick={()=>!isCan&&toggle(sub,attended)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:attended?"rgba(46,204,113,.1)":"#0d1117",border:`1px solid ${attended?"rgba(46,204,113,.25)":"#21262d"}`,borderRadius:8,cursor:isCan?"default":"pointer",opacity:isCan?.5:1}}>
+                <div><div style={{color:"#e6edf3",fontWeight:500,fontSize:14}}>{student.name}</div><div style={{color:"#8892b0",fontSize:11,marginTop:2}}>{sub.usedTrainings}/{sub.totalTrainings} · до {fmt(sub.endDate)}</div></div>
+                <div style={{width:28,height:28,borderRadius:6,background:attended?"#2ECC71":"#21262d",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff"}}>{attended?"✓":""}</div>
+              </div>)}
+              </div>
+            </div>}
+
+            {studsWithoutSub.length>0&&<div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>Без активного абонемента ({studsWithoutSub.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {studsWithoutSub.map(({student,sub,attended,guestEntry})=><div key={student.id} onClick={()=>!isCan&&toggleNoSub(student,guestEntry,attended)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:attended?"rgba(249,160,63,.1)":"#0d1117",border:`1px solid ${attended?"rgba(249,160,63,.25)":"#21262d"}`,borderRadius:8,cursor:isCan?"default":"pointer",opacity:isCan?.5:1}}>
+                <div>
+                  <div style={{color:"#e6edf3",fontWeight:500,fontSize:14}}>{student.name}</div>
+                  <div style={{color:attended?"#F9A03F":"#E84855",fontSize:11,marginTop:2}}>
+                    {attended ? "✅ Відмічено як разове гостьове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
+                  </div>
+                </div>
+                <div style={{width:28,height:28,borderRadius:6,background:attended?"#F9A03F":"#21262d",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff"}}>{attended?"✓":""}</div>
+              </div>)}
+              </div>
+            </div>}
+
+            {manualGuests.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>Нові гості ({manualGuests.length})</div>{manualGuests.map(g=><div key={g.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",background:"rgba(52,152,219,.08)",border:"1px solid rgba(52,152,219,.2)",borderRadius:8,marginBottom:4}}><div><span style={{color:"#e6edf3",fontWeight:500}}>{g.guestName}</span> <Badge color={g.entryType==="trial" ? "#2ECC71" : "#F9A03F"}>{g.entryType==="trial" ? "Пробне" : "Разове"}</Badge></div><button onClick={()=>removeGuest(g.id)} style={{...btnS,padding:"4px 8px",fontSize:11,color:"#E84855"}}>✕</button></div>)}</div>}
+            
+            <div style={{background:"#161b22",borderRadius:8,padding:"14px 16px",border:"1px solid #21262d"}}><div style={{fontSize:12,color:"#8892b0",marginBottom:8,textTransform:"uppercase"}}>+ Додати вручну</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}><div style={{flex:1,minWidth:160}}><input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я" onKeyDown={e=>e.key==="Enter"&&addManual()}/></div>
+                <div style={{display:"flex",gap:4}}><Pill active={manualType==="trial"} onClick={()=>setManualType("trial")}>Пробне</Pill><Pill active={manualType==="single"} onClick={()=>setManualType("single")}>Разове</Pill></div>
+                <button style={{...btnP,padding:"10px 16px"}} onClick={addManual}>+</button>
+              </div>
+            </div>
+          </div>);
+        })()}
 
         {tab==="alerts"&&<div>
           {notifications.length===0?<div style={{textAlign:"center",padding:50,color:"#8892b0"}}>✨ Все добре!</div>:
