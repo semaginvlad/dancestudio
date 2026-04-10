@@ -84,7 +84,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
   const [manualName, setManualName] = useState("");
   const [manualType, setManualType] = useState("trial");
 
-  // Страховка: якщо групи підвантажились пізніше
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
   const isCan = cancelled.some(c => c.groupId === gid && c.date === date);
@@ -143,16 +142,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
         setAttn(p => [...p, a]);
       }
     } catch (e) { console.error(e); }
-    // Фільтри Учениць
-  const [stFilterDir, setStFilterDir] = useState("all");
-  const [stFilterGroup, setStFilterGroup] = useState("all");
-
-  // 👇 ДОДАЙ ЦЕ СЮДИ (Фільтри Фінансів) 👇
-  const [finFilterDir, setFinFilterDir] = useState("all");
-  const [finFilterGroup, setFinFilterGroup] = useState("all");
-  const [finSortBy, setFinSortBy] = useState("total"); 
-  const [finSortOrder, setFinSortOrder] = useState("desc"); 
-  // 👆 КІНЕЦЬ ВСТАВКИ 👆
   };
 
   const addManual = async () => {
@@ -170,7 +159,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 
   return (
     <div style={{ maxWidth: 800 }}>
-      {/* Контрольна панель зверху */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
         <GroupSelect groups={groups} value={gid} onChange={setGid}/>
         <input style={{...inputSt, width: "auto", minWidth: 160}} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
@@ -178,7 +166,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 
       {isCan && <div style={{ background: "#E8485515", border: "1px solid #E8485533", borderRadius: 10, padding: "12px 16px", marginBottom: 20, color: "#E84855", fontWeight: 500 }}>❌ Тренування відмінено</div>}
 
-      {/* Блок з активними абонементами */}
       {studsWithSub.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 11, color: "#8892b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, paddingLeft: 4 }}>
@@ -188,12 +175,9 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
             {studsWithSub.map(({sub, student, attended}, i) => (
               <div key={sub.id} onClick={() => toggle(sub, attended)} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "16px 20px",
-                borderBottom: i < studsWithSub.length - 1 ? "1px solid #21262d" : "none",
-                cursor: isCan ? "default" : "pointer",
-                transition: "background 0.2s",
-                background: attended ? "rgba(46,204,113,0.06)" : "transparent",
-                opacity: isCan ? 0.5 : 1
+                padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? "1px solid #21262d" : "none",
+                cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
+                background: attended ? "rgba(46,204,113,0.06)" : "transparent", opacity: isCan ? 0.5 : 1
               }}>
                 <div>
                   <div style={{ color: "#fff", fontSize: 16, fontWeight: 500 }}>{student.name}</div>
@@ -201,14 +185,10 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
                     <span style={{ color: attended ? "#2ECC71" : "#c9d1d9", fontWeight: 600 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
                   </div>
                 </div>
-                {/* Новий квадратний чекбокс */}
                 <div style={{
-                  width: 26, height: 26, borderRadius: 6,
-                  border: `2px solid ${attended ? "#2ECC71" : "#30363d"}`,
-                  background: attended ? "#2ECC71" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontSize: 16, fontWeight: "bold",
-                  transition: "all 0.2s"
+                  width: 26, height: 26, borderRadius: 6, border: `2px solid ${attended ? "#2ECC71" : "#30363d"}`,
+                  background: attended ? "#2ECC71" : "transparent", display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 16, fontWeight: "bold", transition: "all 0.2s"
                 }}>
                   {attended && "✓"}
                 </div>
@@ -218,7 +198,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
         </div>
       )}
 
-      {/* Блок БЕЗ абонемента */}
       {studsWithoutSub.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 11, color: "#8892b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, paddingLeft: 4 }}>
@@ -228,12 +207,9 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
             {studsWithoutSub.map(({student, sub, attended, guestEntry}, i) => (
               <div key={student.id} onClick={() => toggleNoSub(student, guestEntry, attended)} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "16px 20px",
-                borderBottom: i < studsWithoutSub.length - 1 ? "1px solid #21262d" : "none",
-                cursor: isCan ? "default" : "pointer",
-                transition: "background 0.2s",
-                background: attended ? "rgba(249,160,63,0.08)" : "transparent",
-                opacity: isCan ? 0.5 : 1
+                padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? "1px solid #21262d" : "none",
+                cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
+                background: attended ? "rgba(249,160,63,0.08)" : "transparent", opacity: isCan ? 0.5 : 1
               }}>
                 <div>
                   <div style={{ color: "#fff", fontSize: 16, fontWeight: 500 }}>{student.name}</div>
@@ -242,12 +218,9 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
                   </div>
                 </div>
                 <div style={{
-                  width: 26, height: 26, borderRadius: 6,
-                  border: `2px solid ${attended ? "#F9A03F" : "#30363d"}`,
-                  background: attended ? "#F9A03F" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontSize: 16, fontWeight: "bold",
-                  transition: "all 0.2s"
+                  width: 26, height: 26, borderRadius: 6, border: `2px solid ${attended ? "#F9A03F" : "#30363d"}`,
+                  background: attended ? "#F9A03F" : "transparent", display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 16, fontWeight: "bold", transition: "all 0.2s"
                 }}>
                   {attended && "✓"}
                 </div>
@@ -257,7 +230,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
         </div>
       )}
 
-      {/* Гості (введені вручну) */}
       {manualGuests.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 11, color: "#8892b0", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, paddingLeft: 4 }}>
@@ -267,8 +239,7 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
             {manualGuests.map((g, i) => (
               <div key={g.id} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "16px 20px",
-                borderBottom: i < manualGuests.length - 1 ? "1px solid #21262d" : "none",
+                padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? "1px solid #21262d" : "none",
               }}>
                 <div>
                   <div style={{ color: "#fff", fontSize: 16, fontWeight: 500 }}>{g.guestName}</div>
@@ -283,7 +254,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
         </div>
       )}
       
-      {/* Форма додавання вручну */}
       <div style={{ background: "linear-gradient(180deg, #161b22, #0d1117)", borderRadius: 12, padding: "20px", border: "1px dashed #30363d" }}>
         <div style={{ fontSize: 13, color: "#8892b0", marginBottom: 12, fontWeight: 500 }}>+ Додати нову людину вручну</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
@@ -320,14 +290,17 @@ export default function App() {
   const [financeDetailItem, setFinanceDetailItem] = useState(null);
   const [searchQ, setSearchQ] = useState("");
   
-  // Фільтри Абонементів
   const [filterDir, setFilterDir] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
 
-  // Фільтри Учениць
   const [stFilterDir, setStFilterDir] = useState("all");
   const [stFilterGroup, setStFilterGroup] = useState("all");
+
+  const [finFilterDir, setFinFilterDir] = useState("all");
+  const [finFilterGroup, setFinFilterGroup] = useState("all");
+  const [finSortBy, setFinSortBy] = useState("total"); 
+  const [finSortOrder, setFinSortOrder] = useState("desc");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -479,7 +452,6 @@ export default function App() {
     return r.sort((a,b)=>({warning:0,active:1,expired:2}[a.status]??3)-({warning:0,active:1,expired:2}[b.status]??3));
   },[subsExt,filterDir,filterGroup,filterStatus,searchQ,groups,studentMap]);
 
-  // НОВІ ФІЛЬТРИ УЧЕНИЦЬ
   const filteredStudents=useMemo(()=>{
     let r=students;
     if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>s.name.toLowerCase().includes(q)||s.phone?.includes(q)||s.telegram?.toLowerCase().includes(q))}
@@ -767,9 +739,8 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* ─── ФІНАНСИ З ДЕТАЛІЗАЦІЄЮ ЗАРПЛАТИ ─── */}
+        {/* ─── ОНОВЛЕНІ ФІНАНСИ З АНАЛІТИКОЮ ─── */}
         {tab==="finance" && (() => {
-          // Логіка фільтрації та сортування
           let finData = [...analytics.splits];
           if (finFilterDir !== "all") finData = finData.filter(s => s.group.directionId === finFilterDir);
           if (finFilterGroup !== "all") finData = finData.filter(s => s.group.id === finFilterGroup);
@@ -784,7 +755,6 @@ export default function App() {
 
           return (
             <div>
-              {/* Головні метрики */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:24}}>
                 <div style={{...cardSt, borderTop:"4px solid #2ECC71", background: "linear-gradient(180deg, rgba(46,204,113,0.05), transparent)"}}>
                   <div style={{fontSize:12,color:"#8892b0",textTransform:"uppercase", letterSpacing: 1}}>Загалом оплачено</div>
@@ -796,7 +766,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Панель фільтрів */}
               <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap", background: "#161b22", padding: 14, borderRadius: 12, border: "1px solid #21262d"}}>
                 <div style={{flex: 1, display: "flex", gap: 10, minWidth: 300, flexWrap: "wrap"}}>
                   <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}>
@@ -830,8 +799,6 @@ export default function App() {
                   
                   return (
                     <div key={sp.group.id} style={{background: "#161b22", borderRadius: 12, border: "1px solid #21262d", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14}}>
-                      
-                      {/* Верхній рядок: Назва і головна сума */}
                       <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10}}>
                         <div>
                           <div style={{display: "flex", alignItems: "center", gap: 8, marginBottom: 4}}>
@@ -846,13 +813,11 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Візуальний бар розподілу */}
                       <div style={{height: 6, width: "100%", display: "flex", borderRadius: 4, overflow: "hidden"}}>
                         <div style={{width: `${trainerPct}%`, background: "#3498DB"}} title="Тренер"></div>
                         <div style={{width: `${studioPct}%`, background: "#2ECC71"}} title="Студія"></div>
                       </div>
 
-                      {/* Нижній рядок: Деталі розподілу і кнопка */}
                       <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10}}>
                         <div style={{display: "flex", gap: 24}}>
                           <div>
@@ -875,3 +840,51 @@ export default function App() {
             </div>
           )
         })()}
+
+      </main>
+
+      <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide>
+        {financeDetailItem && (
+          <div>
+            <div style={{display: "flex", justifyContent: "space-between", background: "#0d1117", padding: "12px 16px", borderRadius: 8, marginBottom: 16}}>
+              <div><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#3498DB"}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
+              <div style={{textAlign: "right"}}><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#2ECC71"}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
+            </div>
+            
+            <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
+              <thead>
+                <tr style={{color: "#8892b0", borderBottom: "1px solid #30363d"}}>
+                  <th style={{padding: "8px 0", fontWeight: 500}}>Учениця</th>
+                  <th style={{padding: "8px 0", fontWeight: 500}}>Тип</th>
+                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right"}}>Оплачено</th>
+                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right", color: "#3498DB"}}>Частка тренера</th>
+                </tr>
+              </thead>
+              <tbody>
+                {financeDetailItem.subs.map(sub => {
+                  const st = studentMap[sub.studentId];
+                  const planLabel = PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
+                  const trainerCut = Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100));
+                  return (
+                    <tr key={sub.id} style={{borderBottom: "1px solid #21262d"}}>
+                      <td style={{padding: "10px 0", color: "#fff"}}>{st?.name}</td>
+                      <td style={{padding: "10px 0", color: "#8892b0"}}>{planLabel}</td>
+                      <td style={{padding: "10px 0", textAlign: "right"}}>{sub.amount} ₴</td>
+                      <td style={{padding: "10px 0", textAlign: "right", color: "#3498DB", fontWeight: 600}}>+ {trainerCut} ₴</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onDone={addStudent}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати"><StudentForm initial={editItem} onDone={editStudent}/></Modal>
+      <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Новий абонемент"><SubForm onDone={addSub}/></Modal>
+      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm initial={editItem} onDone={editSub}/></Modal>
+      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onDone={addWaitlist}/></Modal>
+    </div>
+  );
+}
