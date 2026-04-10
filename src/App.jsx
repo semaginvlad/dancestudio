@@ -100,6 +100,7 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [calMonth, setCalMonth] = useState(()=>{const n=new Date();return{y:n.getFullYear(),m:n.getMonth()}});
   const [expandedDirs, setExpandedDirs] = useState({});
+  const [expandedSubDirs, setExpandedSubDirs] = useState({}); // Стан для акордеона абонементів
 
   // ─── LOAD ───
   useEffect(()=>{(async()=>{try{
@@ -440,6 +441,23 @@ export default function App() {
     return{grouped:Object.values(result).filter(d=>d.students.length>0),ungrouped};
   },[filteredStudents,studentGrps,groupMap]);
 
+  // Subs grouped by direction for the new table view
+  const subsGroupedByDir = useMemo(()=>{
+    const result={};
+    DIRECTIONS.forEach(d=>{result[d.id]={direction:d,subs:[]}});
+    const ungrouped=[];
+    filteredSubs.forEach(sub=>{
+      const gr=groupMap[sub.groupId];
+      if(!gr){ungrouped.push(sub);return;}
+      if(result[gr.directionId]){
+        result[gr.directionId].subs.push(sub);
+      }else{
+        ungrouped.push(sub);
+      }
+    });
+    return {grouped:Object.values(result).filter(d=>d.subs.length>0), ungrouped};
+  },[filteredSubs, groupMap]);
+
   const analytics=useMemo(()=>{
     const activeStudentIds=new Set(activeSubs.map(s=>s.studentId));
     const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
@@ -482,6 +500,27 @@ export default function App() {
     </div>;
   };
 
+  const renderSubTableRow=(sub)=>{
+    const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
+    return (
+      <tr key={sub.id} style={{borderTop: "1px solid #21262d"}}>
+        <td style={{padding: "10px 14px", color: "#fff", fontWeight: 500, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
+        <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8892b0", fontSize:12}}>{gr?.name}</span></td>
+        <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#c9d1d9", fontSize:12}}>{planLabel}</span></td>
+        <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#fff", fontWeight: 600}}>{sub.usedTrainings}</span><span style={{color: "#8892b0", fontSize:12}}> / {sub.totalTrainings}</span></td>
+        <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8892b0", fontSize:12, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
+        <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}>
+          <Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>
+          {!sub.paid&&<span style={{marginLeft: 6}}><Badge color="#E84855">💰 Борг</Badge></span>}
+        </td>
+        <td style={{padding: "10px 14px", textAlign: "right", whiteSpace:"nowrap"}}>
+          <button style={{background:"none",border:"none",cursor:"pointer",fontSize:14,marginRight:12}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
+          <button style={{background:"none",border:"none",cursor:"pointer",fontSize:14}} onClick={()=>deleteSub(sub.id)}>🗑</button>
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div style={{minHeight:"100vh",background:"#0d1117",color:"#c9d1d9",fontFamily:"'DM Sans',-apple-system,sans-serif"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
@@ -516,7 +555,6 @@ export default function App() {
 
         {tab==="students"&&<div>
           <input style={{...inputSt,maxWidth:350,marginBottom:14}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
-          
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {studentsByDirection.grouped.map(({direction,students:dStudents})=>{
               const isExpanded = expandedDirs[direction.id];
@@ -537,7 +575,6 @@ export default function App() {
                 </div>
               );
             })}
-
             {studentsByDirection.ungrouped.length>0&&<div style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
               <button 
                 onClick={() => setExpandedDirs(p => ({...p, 'ungrouped': !p['ungrouped']}))}
@@ -553,11 +590,10 @@ export default function App() {
               )}
             </div>}
           </div>
-
           {filteredStudents.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>{students.length===0?"Ще немає учениць":"Не знайдено"}</div>}
         </div>}
 
-        {/* ─── ОНОВЛЕНА ВКЛАДКА АБОНЕМЕНТІВ (СІТКА-ВІДЖЕТИ) ─── */}
+        {/* ─── ОНОВЛЕНА ВКЛАДКА АБОНЕМЕНТІВ (АКОРДЕОН З ТАБЛИЦЕЮ) ─── */}
         {tab==="subs"&&<div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             <input style={{...inputSt,width:"auto",minWidth:180}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
@@ -566,51 +602,79 @@ export default function App() {
           </div>
           
           {filteredSubs.length===0?<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає</div>:
-          <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(290px, 1fr))", gap:16}}>
-            {filteredSubs.map(sub=>{const st=studentMap[sub.studentId],gr=groupMap[sub.groupId],dir=gr?dirMap[gr.directionId]:null,pct=sub.totalTrainings>0?(sub.usedTrainings/sub.totalTrainings*100):0,planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-            return<div key={sub.id} style={{...cardSt, borderTop:`4px solid ${STATUS_COLORS[sub.status]}`, display: "flex", flexDirection: "column"}}>
-              
-              {/* Заголовок: Ім'я і статус */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-                <div style={{color:"#fff",fontWeight:700,fontSize:16,lineHeight:1.2}}>{st?.name||"?"}</div>
-                <Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>
-              </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            
+            {subsGroupedByDir.grouped.map(({direction, subs: dSubs}) => {
+              const isExpanded = expandedSubDirs[direction.id];
+              return (
+                <div key={direction.id} style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
+                  <button 
+                    onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))}
+                    style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}
+                  >
+                    <div style={{fontSize:15,fontWeight:600,color:direction.color}}>{direction.name} <span style={{color:"#8892b0",fontSize:13,fontWeight:400}}>({dSubs.length})</span></div>
+                    <div style={{color:"#8892b0", fontSize: 12}}>{isExpanded ? "▲" : "▼"}</div>
+                  </button>
+                  
+                  {isExpanded && (
+                    <div style={{overflowX: "auto", background:'#0d1117'}}>
+                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
+                        <thead>
+                          <tr style={{color: "#8892b0", textTransform: "uppercase", fontSize: 11, letterSpacing: 0.5}}>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Учениця</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Група</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Абонемент</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Заняття</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Термін</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500}}>Статус</th>
+                            <th style={{padding: "12px 14px", fontWeight: 500, textAlign: "right"}}>Дії</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dSubs.map(renderSubTableRow)}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
-              {/* Теги: Група, Борг, Знижка */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-                <Badge color={dir?.color||"#888"}>{gr?.name}</Badge>
-                {!sub.paid&&<Badge color="#E84855">💰 Борг</Badge>}
-                {sub.discountPct>0&&<Badge color="#3498DB">-{sub.discountPct}%</Badge>}
+            {subsGroupedByDir.ungrouped.length > 0 && (
+              <div style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
+                <button 
+                  onClick={() => setExpandedSubDirs(p => ({...p, 'ungrouped': !p['ungrouped']}))}
+                  style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}
+                >
+                  <div style={{fontSize:15,fontWeight:600,color:'#8892b0'}}>Без напрямку <span style={{fontSize:13,fontWeight:400}}>({subsGroupedByDir.ungrouped.length})</span></div>
+                  <div style={{color:"#8892b0", fontSize: 12}}>{expandedSubDirs['ungrouped'] ? "▲" : "▼"}</div>
+                </button>
+                {expandedSubDirs['ungrouped'] && (
+                  <div style={{overflowX: "auto", background:'#0d1117'}}>
+                    <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
+                      <thead>
+                        <tr style={{color: "#8892b0", textTransform: "uppercase", fontSize: 11, letterSpacing: 0.5}}>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Учениця</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Група</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Абонемент</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Заняття</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Термін</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500}}>Статус</th>
+                          <th style={{padding: "12px 14px", fontWeight: 500, textAlign: "right"}}>Дії</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {subsGroupedByDir.ungrouped.map(renderSubTableRow)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              
-              {/* Блок з деталями абонемента */}
-              <div style={{background:"#0d1117", borderRadius:8, padding:12, marginBottom:14, flexGrow: 1}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <span style={{color:"#c9d1d9",fontSize:13,fontWeight:600}}>{planLabel}</span>
-                  <span style={{color:"#8892b0",fontSize:12}}>{sub.amount}₴ {sub.payMethod==="cash"?"💵":"💳"}</span>
-                </div>
-                <div style={{color:"#8892b0",fontSize:11,marginBottom:10}}>Термін: {fmt(sub.startDate)} — {fmt(sub.endDate)}</div>
-                
-                {/* Прогрес бар */}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11,color:"#8892b0",marginBottom:4}}>
-                  <span>Використано: <strong style={{color:"#fff"}}>{sub.usedTrainings}</strong> / {sub.totalTrainings}</span>
-                  <span>{Math.round(pct)}%</span>
-                </div>
-                <div style={{height:6,background:"#21262d",borderRadius:3,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:STATUS_COLORS[sub.status],borderRadius:3}}/>
-                </div>
-              </div>
-              
-              {/* Кнопки дій */}
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-                <button style={{...btnS,padding:"6px 12px",fontSize:11}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️ Редаг.</button>
-                <button style={{...btnS,padding:"6px 12px",fontSize:11,color:"#E84855"}} onClick={()=>deleteSub(sub.id)}>🗑</button>
-              </div>
+            )}
 
-            </div>})}
           </div>}
         </div>}
-        {/* ────────────────────────────────────────────────── */}
+        {/* ────────────────────────────────────────────────────────── */}
 
         {tab==="attendance"&&<AttendancePanel/>}
         {tab==="calendar"&&<CalendarView/>}
