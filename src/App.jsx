@@ -1,13 +1,14 @@
 // src/App.jsx
 import { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
-import { DIRECTIONS, PLAN_TYPES, DEFAULT_GROUPS, today, daysLeft, getSubStatus, STATUS_COLORS, STATUS_LABELS } from "./utils";
-import { btnP, btnS, cardSt, Modal, Field, Badge, Pill } from "./ui";
+import { DIRECTIONS, PLAN_TYPES, DEFAULT_GROUPS, today, daysLeft, getSubStatus, STATUS_COLORS, STATUS_LABELS } from "./utils.js";
+import { btnP, btnS, cardSt, Modal, Field, Badge, Pill } from "./ui.jsx";
 
-import AttendanceTab from "./AttendanceTab";
-import DashboardTab from "./DashboardTab";
-import FinanceTab from "./FinanceTab";
-import StudentsTab from "./StudentsTab";
+// Додаємо .jsx до кожного імпорту, щоб Vercel не тупив
+import AttendanceTab from "./AttendanceTab.jsx";
+import DashboardTab from "./DashboardTab.jsx";
+import FinanceTab from "./FinanceTab.jsx";
+import StudentsTab from "./StudentsTab.jsx";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -138,7 +139,7 @@ export default function App() {
             </div>
             <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
               <thead><tr style={{color: "#8E8E93", borderBottom: "1px solid #3A3A3C"}}><th style={{padding: "12px 0", fontWeight: 600}}>Учениця</th><th style={{padding: "12px 0", fontWeight: 600}}>Тип</th><th style={{padding: "12px 0", fontWeight: 600, textAlign: "right"}}>Оплачено</th><th style={{padding: "12px 0", fontWeight: 600, textAlign: "right", color: "#0A84FF"}}>Частка тренера</th></tr></thead>
-              <tbody>{financeDetailItem.subs.map(sub => (<tr key={sub.id} style={{borderBottom: "1px solid #2C2C2E"}}><td style={{padding: "14px 0", color: "#fff", fontWeight: 500}}>{studentMap[sub.studentId]?.name}</td><td style={{padding: "14px 0", color: "#8E8E93"}}>{PLAN_TYPES.find(p=>p.id===sub.planType)?.name}</td><td style={{padding: "14px 0", textAlign: "right"}}>{sub.amount} ₴</td><td style={{padding: "14px 0", textAlign: "right", color: "#0A84FF", fontWeight: 700}}>+ {Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100))} ₴</td></tr>))}</tbody>
+              <tbody>{financeDetailItem.subs.map(sub => (<tr key={sub.id} style={{borderBottom: "1px solid #2C2C2E"}}><td style={{padding: "14px 0", color: "#fff", fontWeight: 500}}>{studentMap[sub.studentId]?.name}</td><td style={{padding: "14px 0", color: "#8E8E93"}}>{PLAN_TYPES.find(p=>p.id===sub.planType)?.name}</td><td style={{padding: "14px 0", textAlign: "right", fontWeight: 500}}>{sub.amount} ₴</td><td style={{padding: "14px 0", textAlign: "right", color: "#0A84FF", fontWeight: 700}}>+ {Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100))} ₴</td></tr>))}</tbody>
             </table>
           </div>
         )}
