@@ -129,7 +129,9 @@ export default function App() {
   },[warnSubs,expSubs,studentMap,groupMap,subs,dirMap]);
 
   function getNotifMsg(sub,student,group,direction){
-    const name=student?.name?.split(" ")[0]||"",gName=group?.name||"",dName=direction?.name||"";
+    const name=student?.name?.split(" ")[0]||"";
+    const gName=group?.name||"";
+    const dName=direction?.name||"";
     const tpl=student?.messageTemplate||student?.message_template;
     if(tpl)return tpl.replace(/\{ім'я\}/g,name).replace(/\{група\}/g,gName).replace(/\{напрямок\}/g,dName);
     return `Привіт, ${name}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
@@ -276,7 +278,7 @@ export default function App() {
   const deleteStudent=async(id)=>{if(!confirm("Видалити?"))return;try{await db.deleteStudent(id);setStudents(p=>p.filter(s=>s.id!==id));setSubs(p=>p.filter(s=>s.studentId!==id))}catch(e){alert(e.message)}};
   const addSub=async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s,...p])}catch(e){alert(e.message)}setModal(null)};
   const editSub=async(d)=>{try{const s=await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===s.id?s:x))}catch(e){alert(e.message)}setModal(null);setEditItem(null)};
-  const deleteSub=async(id)=>{if(!confirm("Видалити?"))return;try{await db.deleteSub(id);setSubs(p=>p.filter(s=>s.id!==id));setAttn(p=>p.filter(a=>a.subId!==id))}catch(e){alert(e.message)}};
+  const deleteSub=async(id)=>{if(!confirm("Видалити?"))return;try{await db.deleteSub(id);setAttn(p=>p.filter(a=>a.subId!==id));setSubs(p=>p.filter(s=>s.id!==id))}catch(e){alert(e.message)}};
   const markNotified=async(subId)=>{try{await db.updateSub(subId,{notificationSent:true});setSubs(p=>p.map(s=>s.id===subId?{...s,notificationSent:true}:s))}catch(e){console.error(e)}};
   const saveGroup=async(g)=>{try{const u=await db.updateGroup(g.id,g);setGroups(p=>p.map(x=>x.id===u.id?u:x));alert("Збережено!")}catch(e){alert("Помилка: "+e.message)}setModal(null);setEditItem(null)};
 
@@ -290,9 +292,70 @@ export default function App() {
     const isCan=cancelled.some(c=>c.groupId===gid&&c.date===date);
     const studs=groupSubs.map(sub=>({sub,student:studentMap[sub.studentId],attended:attn.some(a=>a.subId===sub.id&&a.date===date)})).filter(x=>x.student);
     const guests=attn.filter(a=>a.guestName&&a.groupId===gid&&a.date===date);
-    const toggle=async(sub,att)=>{try{if(att){await db.deleteAttendanceBySubAndDate(sub.id,date);await db.decrementUsed(sub.id);setAttn(p=>p.filter(a=>!(a.subId===sub.id&&a.date===date)));setSubs(p=>p.map(s=>s.id===sub.id?{...s,usedTrainings:Math.max(0,(s.usedTrainings||0)-1)}:s))}else{const a=await db.insertAttendance({subId:sub.id,date});await db.incrementUsed(sub.id);setAttn(p=>[...p,a]);setSubs(p=>p.map(s=>s.id===sub.id?{...s,usedTrainings:(s.usedTrainings||0)+1}:s))}}catch(e){console.error(e)}};
-    const addManual=async()=>{if(!manualName.trim())return;try{const a=await db.insertAttendance({guestName:manualName.trim(),guestType:manualType,groupId:gid,date});setAttn(p=>[...p,a])}catch(e){console.error(e)}setManualName("")};
+
+    const toggle = async (sub, attended) => {
+      try {
+        const existing = attn.find(a => a.subId === sub.id && a.date === date);
+
+        if (attended) {
+          await db.deleteAttendanceBySubAndDate(sub.id, date);
+          await db.decrementUsed(sub.id, existing?.quantity || 1);
+
+          setAttn(p => p.filter(a => !(a.subId === sub.id && a.date === date)));
+          setSubs(p =>
+            p.map(s =>
+              s.id === sub.id
+                ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (existing?.quantity || 1)) }
+                : s
+            )
+          );
+        } else {
+          const a = await db.insertAttendance({
+            subId: sub.id,
+            date,
+            quantity: 1,
+            entryType: "subscription"
+          });
+
+          await db.incrementUsed(sub.id, 1);
+
+          setAttn(p => [...p, a]);
+          setSubs(p =>
+            p.map(s =>
+              s.id === sub.id
+                ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 }
+                : s
+            )
+          );
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    const addManual = async () => {
+      if (!manualName.trim()) return;
+
+      try {
+        const a = await db.insertAttendance({
+          guestName: manualName.trim(),
+          guestType: manualType,
+          groupId: gid,
+          date,
+          quantity: 1,
+          entryType: manualType === "trial" ? "trial" : "single"
+        });
+
+        setAttn(p => [...p, a]);
+      } catch (e) {
+        console.error(e);
+      }
+
+      setManualName("");
+    };
+
     const removeGuest=async(id)=>{try{await db.deleteAttendance(id);setAttn(p=>p.filter(a=>a.id!==id))}catch(e){console.error(e)}};
+
     return(<div>
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}><GroupSelect groups={groups} value={gid} onChange={setGid}/><input style={{...inputSt,width:"auto"}} type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
       {isCan&&<div style={{background:"#E8485515",border:"1px solid #E8485533",borderRadius:8,padding:"10px 14px",marginBottom:14}}><p style={{margin:0,fontSize:13,color:"#E84855"}}>❌ Відмінено</p></div>}
@@ -302,7 +365,7 @@ export default function App() {
           <div style={{width:28,height:28,borderRadius:6,background:attended?"#2ECC71":"#21262d",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff"}}>{attended?"✓":""}</div>
         </div>)}
       </div></div>}
-      {guests.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>Ручний запис ({guests.length})</div>{guests.map(g=><div key={g.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",background:"rgba(52,152,219,.08)",border:"1px solid rgba(52,152,219,.2)",borderRadius:8,marginBottom:4}}><div><span style={{color:"#e6edf3",fontWeight:500}}>{g.guestName}</span> <Badge color="#3498DB">{g.guestType==="trial"?"Пробне":"Разове"}</Badge></div><button onClick={()=>removeGuest(g.id)} style={{...btnS,padding:"4px 8px",fontSize:11,color:"#E84855"}}>✕</button></div>)}</div>}
+      {guests.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,color:"#8892b0",marginBottom:6,textTransform:"uppercase"}}>Ручний запис ({guests.length})</div>{guests.map(g=><div key={g.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",background:"rgba(52,152,219,.08)",border:"1px solid rgba(52,152,219,.2)",borderRadius:8,marginBottom:4}}><div><span style={{color:"#e6edf3",fontWeight:500}}>{g.guestName}</span> <Badge color={g.entryType==="trial" ? "#2ECC71" : "#F9A03F"}>{g.entryType==="trial" ? "Пробне" : "Разове"}</Badge></div><button onClick={()=>removeGuest(g.id)} style={{...btnS,padding:"4px 8px",fontSize:11,color:"#E84855"}}>✕</button></div>)}</div>}
       <div style={{background:"#161b22",borderRadius:8,padding:"14px 16px",border:"1px solid #21262d"}}><div style={{fontSize:12,color:"#8892b0",marginBottom:8,textTransform:"uppercase"}}>+ Додати вручну</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}><div style={{flex:1,minWidth:160}}><input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я" onKeyDown={e=>e.key==="Enter"&&addManual()}/></div>
           <div style={{display:"flex",gap:4}}><Pill active={manualType==="trial"} onClick={()=>setManualType("trial")}>Пробне</Pill><Pill active={manualType==="single"} onClick={()=>setManualType("single")}>Разове</Pill></div>
@@ -441,7 +504,6 @@ export default function App() {
 
       <main style={{maxWidth:1200,margin:"0 auto",padding:20}}>
 
-        {/* DASHBOARD */}
         {tab==="dashboard"&&<div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:24}}>
             {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:"#3498DB"},{l:"Абонементів",v:activeSubs.length,s:`${warnSubs.length} закінч.`,c:"#2ECC71"},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ неопл.`,c:"#F9A03F"},{l:"Сповіщення",v:notifications.filter(n=>!n.notified).length,s:"непрочит.",c:"#E84855"}].map((c,i)=><div key={i} style={{...cardSt,borderLeft:`3px solid ${c.c}`}}><div style={{fontSize:10,color:"#8892b0",textTransform:"uppercase"}}>{c.l}</div><div style={{fontSize:24,fontWeight:700,color:"#fff",margin:"2px 0"}}>{c.v}</div><div style={{fontSize:11,color:"#8892b0"}}>{c.s}</div></div>)}
@@ -451,7 +513,6 @@ export default function App() {
           </div>
         </div>}
 
-        {/* STUDENTS — grouped by direction */}
         {tab==="students"&&<div>
           <input style={{...inputSt,maxWidth:350,marginBottom:14}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
           {studentsByDirection.grouped.map(({direction,students:dStudents})=><div key={direction.id} style={{marginBottom:20}}>
@@ -465,7 +526,6 @@ export default function App() {
           {filteredStudents.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>{students.length===0?"Ще немає учениць":"Не знайдено"}</div>}
         </div>}
 
-        {/* SUBS */}
         {tab==="subs"&&<div>
           <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
             <input style={{...inputSt,width:"auto",minWidth:180}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
@@ -474,7 +534,7 @@ export default function App() {
           </div>
           {filteredSubs.length===0?<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає</div>:
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {filteredSubs.map(sub=>{const st=studentMap[sub.studentId],gr=groupMap[sub.groupId],dir=gr?dirMap[gr.directionId]:null,tl=(sub.totalTrainings||0)-(sub.usedTrainings||0),pct=sub.totalTrainings>0?(sub.usedTrainings/sub.totalTrainings*100):0,planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
+            {filteredSubs.map(sub=>{const st=studentMap[sub.studentId],gr=groupMap[sub.groupId],dir=gr?dirMap[gr.directionId]:null,pct=sub.totalTrainings>0?(sub.usedTrainings/sub.totalTrainings*100):0,planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
             return<div key={sub.id} style={{...cardSt,borderLeft:`3px solid ${STATUS_COLORS[sub.status]}`}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:6}}>
                 <div style={{flex:1,minWidth:200}}>
@@ -500,7 +560,6 @@ export default function App() {
         {tab==="attendance"&&<AttendancePanel/>}
         {tab==="calendar"&&<CalendarView/>}
 
-        {/* ALERTS */}
         {tab==="alerts"&&<div>
           {notifications.length===0?<div style={{textAlign:"center",padding:50,color:"#8892b0"}}>✨ Все добре!</div>:
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -521,7 +580,6 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* FINANCE */}
         {tab==="finance"&&<div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:24}}>
             <div style={{...cardSt,borderLeft:"3px solid #2ECC71"}}><div style={{fontSize:10,color:"#8892b0",textTransform:"uppercase"}}>Дохід</div><div style={{fontSize:24,fontWeight:700,color:"#2ECC71"}}>{analytics.totalRev.toLocaleString()}₴</div></div>
