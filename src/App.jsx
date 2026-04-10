@@ -143,6 +143,16 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
         setAttn(p => [...p, a]);
       }
     } catch (e) { console.error(e); }
+    // Фільтри Учениць
+  const [stFilterDir, setStFilterDir] = useState("all");
+  const [stFilterGroup, setStFilterGroup] = useState("all");
+
+  // 👇 ДОДАЙ ЦЕ СЮДИ (Фільтри Фінансів) 👇
+  const [finFilterDir, setFinFilterDir] = useState("all");
+  const [finFilterGroup, setFinFilterGroup] = useState("all");
+  const [finSortBy, setFinSortBy] = useState("total"); 
+  const [finSortOrder, setFinSortOrder] = useState("desc"); 
+  // 👆 КІНЕЦЬ ВСТАВКИ 👆
   };
 
   const addManual = async () => {
@@ -758,72 +768,111 @@ export default function App() {
         </div>}
 
         {/* ─── ФІНАНСИ З ДЕТАЛІЗАЦІЄЮ ЗАРПЛАТИ ─── */}
-        {tab==="finance"&&<div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:24}}>
-            <div style={{...cardSt,borderLeft:"3px solid #2ECC71"}}><div style={{fontSize:10,color:"#8892b0",textTransform:"uppercase"}}>Оплачено</div><div style={{fontSize:24,fontWeight:700,color:"#2ECC71"}}>{analytics.totalRev.toLocaleString()}₴</div></div>
-            <div style={{...cardSt,borderLeft:"3px solid #E84855"}}><div style={{fontSize:10,color:"#8892b0",textTransform:"uppercase"}}>Борги учениць</div><div style={{fontSize:24,fontWeight:700,color:"#E84855"}}>{analytics.unpaid.toLocaleString()}₴</div></div>
-          </div>
-          <h3 style={{color:"#fff",fontSize:15,marginBottom:10}}>Тренер / Студія (Зарплатна відомість)</h3>
-          {analytics.splits.length===0?<div style={{color:"#8892b0",padding:20}}>Немає оплат</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {analytics.splits.map(sp=>{const dir=dirMap[sp.group.directionId];return<div key={sp.group.id} style={{...cardSt,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-              <div>
-                <span style={{color:"#fff",fontWeight:600}}>{sp.group.name}</span> <Badge color={dir?.color||"#888"}>{sp.group.trainerPct}% Тренеру</Badge>
-                <div style={{fontSize:11,color:"#8892b0",marginTop:4}}>Всього зібрано: {sp.total.toLocaleString()}₴</div>
-              </div>
-              <div style={{display:"flex",gap:14, alignItems: "center"}}>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#8892b0"}}>Тренер</div><div style={{fontSize:16,fontWeight:700,color:"#3498DB"}}>{sp.trainer.toLocaleString()}₴</div></div>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#8892b0"}}>Студія</div><div style={{fontSize:16,fontWeight:700,color:"#2ECC71"}}>{sp.studio.toLocaleString()}₴</div></div>
-                <button style={{...btnS, padding: "6px 12px", marginLeft: 10}} onClick={() => setFinanceDetailItem(sp)}>Детально 🧾</button>
-              </div>
-            </div>})}
-          </div>}
-        </div>}
+      {/* ─── ОНОВЛЕНІ ФІНАНСИ З АНАЛІТИКОЮ ─── */}
+        {tab==="finance" && (() => {
+          // Логіка фільтрації та сортування
+          let finData = [...analytics.splits];
+          if (finFilterDir !== "all") finData = finData.filter(s => s.group.directionId === finFilterDir);
+          if (finFilterGroup !== "all") finData = finData.filter(s => s.group.id === finFilterGroup);
+          
+          finData.sort((a, b) => {
+            let valA = finSortBy === "name" ? a.group.name : a[finSortBy];
+            let valB = finSortBy === "name" ? b.group.name : b[finSortBy];
+            if (valA < valB) return finSortOrder === "asc" ? -1 : 1;
+            if (valA > valB) return finSortOrder === "asc" ? 1 : -1;
+            return 0;
+          });
 
-      </main>
+          return (
+            <div>
+              {/* Головні метрики */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:24}}>
+                <div style={{...cardSt, borderTop:"4px solid #2ECC71", background: "linear-gradient(180deg, rgba(46,204,113,0.05), transparent)"}}>
+                  <div style={{fontSize:12,color:"#8892b0",textTransform:"uppercase", letterSpacing: 1}}>Загалом оплачено</div>
+                  <div style={{fontSize:32,fontWeight:700,color:"#2ECC71", marginTop: 4}}>{analytics.totalRev.toLocaleString()} ₴</div>
+                </div>
+                <div style={{...cardSt, borderTop:"4px solid #E84855", background: "linear-gradient(180deg, rgba(232,72,85,0.05), transparent)"}}>
+                  <div style={{fontSize:12,color:"#8892b0",textTransform:"uppercase", letterSpacing: 1}}>Борги учениць (очікується)</div>
+                  <div style={{fontSize:32,fontWeight:700,color:"#E84855", marginTop: 4}}>{analytics.unpaid.toLocaleString()} ₴</div>
+                </div>
+              </div>
 
-      <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide>
-        {financeDetailItem && (
-          <div>
-            <div style={{display: "flex", justifyContent: "space-between", background: "#0d1117", padding: "12px 16px", borderRadius: 8, marginBottom: 16}}>
-              <div><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#3498DB"}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
-              <div style={{textAlign: "right"}}><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#2ECC71"}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
-            </div>
-            
-            <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
-              <thead>
-                <tr style={{color: "#8892b0", borderBottom: "1px solid #30363d"}}>
-                  <th style={{padding: "8px 0", fontWeight: 500}}>Учениця</th>
-                  <th style={{padding: "8px 0", fontWeight: 500}}>Тип</th>
-                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right"}}>Оплачено</th>
-                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right", color: "#3498DB"}}>Частка тренера</th>
-                </tr>
-              </thead>
-              <tbody>
-                {financeDetailItem.subs.map(sub => {
-                  const st = studentMap[sub.studentId];
-                  const planLabel = PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-                  const trainerCut = Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100));
+              {/* Панель фільтрів */}
+              <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap", background: "#161b22", padding: 14, borderRadius: 12, border: "1px solid #21262d"}}>
+                <div style={{flex: 1, display: "flex", gap: 10, minWidth: 300, flexWrap: "wrap"}}>
+                  <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}>
+                    <option value="all">Всі напрямки</option>
+                    {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
+                </div>
+                <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
+                  <select style={{...inputSt, width: "auto"}} value={finSortBy} onChange={e=>setFinSortBy(e.target.value)}>
+                    <option value="total">За доходом</option>
+                    <option value="trainer">За ЗП тренера</option>
+                    <option value="studio">За доходом студії</option>
+                    <option value="name">За назвою</option>
+                  </select>
+                  <button style={{...btnS, padding: "0 14px", fontSize: 16}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>
+                    {finSortOrder === "desc" ? "⬇" : "⬆"}
+                  </button>
+                </div>
+              </div>
+
+              <h3 style={{color:"#fff",fontSize:16,marginBottom:16, fontWeight: 600}}>Деталізація по групах ({finData.length})</h3>
+              
+              {finData.length === 0 ? <div style={{color:"#8892b0",padding:40,textAlign:"center"}}>За цими фільтрами немає оплат</div> :
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {finData.map(sp => {
+                  const dir = dirMap[sp.group.directionId];
+                  const trainerPct = sp.group.trainerPct;
+                  const studioPct = 100 - trainerPct;
+                  const paidCount = sp.subs.length;
+                  
                   return (
-                    <tr key={sub.id} style={{borderBottom: "1px solid #21262d"}}>
-                      <td style={{padding: "10px 0", color: "#fff"}}>{st?.name}</td>
-                      <td style={{padding: "10px 0", color: "#8892b0"}}>{planLabel}</td>
-                      <td style={{padding: "10px 0", textAlign: "right"}}>{sub.amount} ₴</td>
-                      <td style={{padding: "10px 0", textAlign: "right", color: "#3498DB", fontWeight: 600}}>+ {trainerCut} ₴</td>
-                    </tr>
+                    <div key={sp.group.id} style={{background: "#161b22", borderRadius: 12, border: "1px solid #21262d", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14}}>
+                      
+                      {/* Верхній рядок: Назва і головна сума */}
+                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10}}>
+                        <div>
+                          <div style={{display: "flex", alignItems: "center", gap: 8, marginBottom: 4}}>
+                            <span style={{color:"#fff",fontWeight:600, fontSize: 16}}>{sp.group.name}</span>
+                            <Badge color={dir?.color||"#888"}>{dir?.name}</Badge>
+                          </div>
+                          <div style={{fontSize: 12, color: "#8892b0"}}>Оплачених абонементів: <strong style={{color: "#c9d1d9"}}>{paidCount}</strong></div>
+                        </div>
+                        <div style={{textAlign: "right"}}>
+                          <div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Загальний збір</div>
+                          <div style={{fontSize: 22, fontWeight: 700, color: "#fff"}}>{sp.total.toLocaleString()} ₴</div>
+                        </div>
+                      </div>
+
+                      {/* Візуальний бар розподілу */}
+                      <div style={{height: 6, width: "100%", display: "flex", borderRadius: 4, overflow: "hidden"}}>
+                        <div style={{width: `${trainerPct}%`, background: "#3498DB"}} title="Тренер"></div>
+                        <div style={{width: `${studioPct}%`, background: "#2ECC71"}} title="Студія"></div>
+                      </div>
+
+                      {/* Нижній рядок: Деталі розподілу і кнопка */}
+                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10}}>
+                        <div style={{display: "flex", gap: 24}}>
+                          <div>
+                            <div style={{fontSize:11,color:"#8892b0"}}>Тренер ({trainerPct}%)</div>
+                            <div style={{fontSize:16,fontWeight:600,color:"#3498DB"}}>{sp.trainer.toLocaleString()} ₴</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:11,color:"#8892b0"}}>Студія ({studioPct}%)</div>
+                            <div style={{fontSize:16,fontWeight:600,color:"#2ECC71"}}>{sp.studio.toLocaleString()} ₴</div>
+                          </div>
+                        </div>
+                        <button style={{...btnS, padding: "8px 16px", background: "#0d1117"}} onClick={() => setFinanceDetailItem(sp)}>
+                          🧾 Детальний звіт
+                        </button>
+                      </div>
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Modal>
-
-      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onDone={addStudent}/></Modal>
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати"><StudentForm initial={editItem} onDone={editStudent}/></Modal>
-      <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Новий абонемент"><SubForm onDone={addSub}/></Modal>
-      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm initial={editItem} onDone={editSub}/></Modal>
-      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onDone={addWaitlist}/></Modal>
-    </div>
-  );
-}
+              </div>}
+            </div>
+          )
+        })()}
