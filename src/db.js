@@ -21,6 +21,8 @@ export async function updateStudent(id, s) {
   if (s.telegram !== undefined) payload.telegram = s.telegram
   if (s.notes !== undefined) payload.notes = s.notes
   if (s.message_template !== undefined) payload.message_template = s.message_template
+  if (s.telegram_user_id !== undefined) payload.telegram_user_id = s.telegram_user_id
+  if (s.telegram_display_name !== undefined) payload.telegram_display_name = s.telegram_display_name
   const { data, error } = await supabase.from('students').update(payload).eq('id', id).select().single()
   if (error) throw error
   return { ...data, messageTemplate: data.message_template }
