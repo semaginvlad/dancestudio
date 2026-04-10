@@ -353,4 +353,273 @@ export default function App() {
         {tab === "students" && (
           <div>
             <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap", background: "#1C1C1E", padding: 16, borderRadius: 20 }}>
-              <input style={{ ...inputSt, flex: 1, minWidth: 250 }} placeholder="Пошук учениці..." value={searchQ} onChange={e => setSearchQ(e
+              <input style={{ ...inputSt, flex: 1, minWidth: 250 }} placeholder="Пошук учениці..." value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+              <select style={{ ...inputSt, width: "auto" }} value={stFilterDir} onChange={e => { setStFilterDir(e.target.value); setStFilterGroup("all"); }}>
+                <option value="all">Усі напрямки</option>
+                {DIRECTIONS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {DIRECTIONS.filter(d => stFilterDir === "all" || d.id === stFilterDir).map(dir => {
+                const dirStuds = students.filter(s => studentGrps.some(sg => sg.studentId === s.id && groupMap[sg.groupId]?.directionId === dir.id));
+                const filtered = dirStuds.filter(s => s.name.toLowerCase().includes(searchQ.toLowerCase())).sort((a,b) => a.name.localeCompare(b.name, "uk"));
+                if (filtered.length === 0) return null;
+                const isExp = expandedDirs[dir.id];
+
+                return (
+                  <div key={dir.id} style={{ ...cardSt, padding: 0, overflow: "hidden" }}>
+                    <div onClick={() => setExpandedDirs(p => ({...p, [dir.id]: !p[dir.id]}))} style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: isExp ? "#2C2C2E" : "transparent" }}>
+                      <div style={{ fontSize: 17, fontWeight: 800, color: dir.color }}>{dir.name} <span style={{ color: "#8E8E93", fontSize: 14, fontWeight: 500 }}>({filtered.length})</span></div>
+                      <div style={{ color: "#8E8E93" }}>{isExp ? "▲" : "▼"}</div>
+                    </div>
+                    {isExp && (
+                      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                        {filtered.map(st => (
+                          <div key={st.id} style={{ background: "#2C2C2E", padding: "16px 20px", borderRadius: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 16 }}>{st.name}</div>
+                              <div style={{ color: "#8E8E93", fontSize: 13, marginTop: 4 }}>{st.phone || "Без телефону"}</div>
+                            </div>
+                            <button style={btnS} onClick={() => { setEditItem(st); setModal("editStudent"); }}>✏️</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: SUBSCRIPTIONS */}
+        {tab === "subs" && (
+          <div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap", background: "#1C1C1E", padding: 16, borderRadius: 20 }}>
+              <input style={{ ...inputSt, flex: 1, minWidth: 200 }} placeholder="Пошук за іменем..." value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+              <select style={{ ...inputSt, width: "auto" }} value={subFilterStatus} onChange={e => setSubFilterStatus(e.target.value)}>
+                <option value="all">Усі статуси</option>
+                <option value="active">Активні</option>
+                <option value="warning">Закінчуються</option>
+                <option value="expired">Протерміновані</option>
+              </select>
+            </div>
+
+            {DIRECTIONS.map(dir => {
+              const dirSubs = subsExt.filter(s => groupMap[s.groupId]?.directionId === dir.id);
+              const filtered = dirSubs.filter(s => {
+                const matchName = studentMap[s.studentId]?.name.toLowerCase().includes(searchQ.toLowerCase());
+                const matchStatus = subFilterStatus === "all" || s.status === subFilterStatus;
+                return matchName && matchStatus;
+              });
+              if (filtered.length === 0) return null;
+              const isExp = expandedSubDirs[dir.id];
+
+              return (
+                <div key={dir.id} style={{ ...cardSt, padding: 0, overflow: "hidden", marginBottom: 16 }}>
+                  <div onClick={() => setExpandedSubDirs(p => ({...p, [dir.id]: !p[dir.id]}))} style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: isExp ? "#2C2C2E" : "transparent" }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: dir.color }}>{dir.name} <span style={{ color: "#8E8E93", fontSize: 14, fontWeight: 500 }}>({filtered.length})</span></div>
+                    <div style={{ color: "#8E8E93" }}>{isExp ? "▲" : "▼"}</div>
+                  </div>
+                  {isExp && (
+                    <div style={{ overflowX: "auto", padding: "0 20px 20px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left" }}>
+                        <thead>
+                          <tr style={{ color: "#8E8E93" }}><th style={{ padding: "14px" }}>Учениця</th><th style={{ padding: "14px" }}>Заняття</th><th style={{ padding: "14px" }}>Термін</th><th style={{ padding: "14px" }}>Статус</th></tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map(s => (
+                            <tr key={s.id} style={{ borderTop: "1px solid #2C2C2E" }}>
+                              <td style={{ padding: "14px", fontWeight: 700 }}>{studentMap[s.studentId]?.name}</td>
+                              <td style={{ padding: "14px" }}>{s.usedTrainings}/{s.totalTrainings}</td>
+                              <td style={{ padding: "14px", fontSize: 12 }}>{fmt(s.startDate)} - {fmt(s.endDate)}</td>
+                              <td style={{ padding: "14px" }}><Badge color={STATUS_COLORS[s.status]}>{STATUS_LABELS[s.status]}</Badge></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* TAB: ATTENDANCE (WITH JOURNAL) */}
+        {tab === "attendance" && (
+          <div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 24, borderBottom: "1px solid #1C1C1E", paddingBottom: 20 }}>
+              <Pill active={viewMode === "daily"} onClick={() => setViewMode("daily")}>📝 Відмітити</Pill>
+              <Pill active={viewMode === "journal"} onClick={() => setViewMode("journal")}>🗓 Журнал</Pill>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
+              <select style={{ ...inputSt, width: "auto" }} value={attnGid} onChange={e => setAttnGid(e.target.value)}>
+                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+              {viewMode === "daily" 
+                ? <input style={{ ...inputSt, width: "auto" }} type="date" value={attnDate} onChange={e => setAttnDate(e.target.value)} onClick={e => e.target.showPicker()} />
+                : <input style={{ ...inputSt, width: "auto" }} type="month" value={journalMonth} onChange={e => setJournalMonth(e.target.value)} onClick={e => e.target.showPicker()} />
+              }
+            </div>
+
+            {viewMode === "daily" ? (
+              <div>
+                <div style={{ ...cardSt, padding: 0, overflow: "hidden" }}>
+                  {(() => {
+                    const stIds = new Set([...studentGrps.filter(sg => sg.groupId === attnGid).map(sg => sg.studentId), ...subs.filter(s => s.groupId === attnGid).map(s => s.studentId)]);
+                    const groupStuds = Array.from(stIds).map(id => studentMap[id]).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, "uk"));
+                    
+                    return groupStuds.map((st, i) => {
+                      const stSubs = subs.filter(s => s.studentId === st.id && s.groupId === attnGid);
+                      const sub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs[0];
+                      const key = sub ? `sub_${s.id}` : `guest_${st.name}`;
+                      const isMarked = !!draft[sub ? `sub_${sub.id}` : `guest_${st.name}`];
+
+                      return (
+                        <div key={st.id} onClick={() => setDraft(p => ({ ...p, [sub ? `sub_${sub.id}` : `guest_${st.name}`]: !p[sub ? `sub_${sub.id}` : `guest_${st.name}`] }))} style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: i < groupStuds.length - 1 ? "1px solid #2C2C2E" : "none", cursor: "pointer", background: isMarked ? "rgba(255,59,48,0.05)" : "transparent" }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 17 }}>{st.name}</div>
+                            <div style={{ color: "#8E8E93", fontSize: 13, marginTop: 4 }}>
+                              {sub ? `${sub.usedTrainings}/${sub.totalTrainings} · до ${fmt(sub.endDate)}` : "Немає абонемента"}
+                            </div>
+                          </div>
+                          <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? "#FF453A" : "#3A3A3C"}`, background: isMarked ? "#FF453A" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: "bold" }}>{isMarked && "✓"}</div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+                <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", width: "calc(100% - 48px)", maxWidth: 400, zIndex: 100 }}>
+                  <button onClick={saveAttendance} disabled={isSaving} style={{ ...btnP, width: "100%", fontSize: 17, height: 64, borderRadius: 24 }}>{isSaving ? "Збереження..." : "💾 Зберегти відмітки"}</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ ...cardSt, padding: 12, overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "10px", textAlign: "left", position: "sticky", left: 0, background: "#1C1C1E" }}>Учениця</th>
+                      {Array.from({ length: 31 }, (_, i) => <th key={i} style={{ padding: "8px", color: "#8E8E93" }}>{i + 1}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const stIds = new Set([...studentGrps.filter(sg => sg.groupId === attnGid).map(sg => sg.studentId), ...subs.filter(s => s.groupId === attnGid).map(s => s.studentId)]);
+                      return Array.from(stIds).map(id => studentMap[id]).filter(Boolean).map(st => (
+                        <tr key={st.id} style={{ borderTop: "1px solid #2C2C2E" }}>
+                          <td style={{ padding: "12px 10px", fontWeight: 700, position: "sticky", left: 0, background: "#1C1C1E" }}>{st.name}</td>
+                          {Array.from({ length: 31 }, (_, i) => {
+                            const d = `${journalMonth}-${String(i+1).padStart(2,'0')}`;
+                            const isAttended = attn.some(a => a.groupId === attnGid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
+                            return (
+                              <td key={i} style={{ textAlign: "center" }}>
+                                {isAttended && <div style={{ width: 10, height: 10, background: "#30D158", borderRadius: "50%", margin: "0 auto" }}></div>}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: FINANCE */}
+        {tab === "finance" && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16, marginBottom: 24 }}>
+              <div style={{ ...cardSt, background: "linear-gradient(135deg, #1C1C1E, #14281D)" }}>
+                <div style={{ fontSize: 13, color: "#30D158", fontWeight: 700 }}>ОПЛАЧЕНО</div>
+                <div style={{ fontSize: 36, fontWeight: 800, marginTop: 8 }}>{analytics.totalRev.toLocaleString()} ₴</div>
+              </div>
+              <div style={{ ...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2D1516)" }}>
+                <div style={{ fontSize: 13, color: "#FF453A", fontWeight: 700 }}>БОРГИ</div>
+                <div style={{ fontSize: 36, fontWeight: 800, marginTop: 8 }}>{analytics.unpaid.toLocaleString()} ₴</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {analytics.splits.map(sp => (
+                <div key={sp.group.id} style={cardSt}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 800 }}>{sp.group.name}</div>
+                      <Badge color="#007AFF">{sp.group.trainerPct}% Тренеру</Badge>
+                    </div>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>{sp.total.toLocaleString()}₴</div>
+                  </div>
+                  <div style={{ height: 10, background: "#2C2C2E", borderRadius: 100, overflow: "hidden", display: "flex" }}>
+                    <div style={{ width: `${sp.group.trainerPct}%`, background: "#007AFF" }} />
+                    <div style={{ flex: 1, background: "#30D158" }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
+                    <div><span style={{ color: "#8E8E93", fontSize: 11, fontWeight: 700 }}>ТРЕНЕР</span><div style={{ fontSize: 18, fontWeight: 800, color: "#007AFF" }}>{sp.trainer.toLocaleString()}₴</div></div>
+                    <div style={{ textAlign: "right" }}><span style={{ color: "#8E8E93", fontSize: 11, fontWeight: 700 }}>СТУДІЯ</span><div style={{ fontSize: 18, fontWeight: 800, color: "#30D158" }}>{sp.studio.toLocaleString()}₴</div></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: ALERTS */}
+        {tab === "alerts" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {notifications.length === 0 ? <div style={{ color: "#8E8E93", textAlign: "center", padding: 50 }}>✨ Всі абонементи активні</div> : 
+              notifications.map(n => (
+                <div key={n.subId} style={{ ...cardSt, display: "flex", justifyContent: "space-between", alignItems: "center", borderLeft: `4px solid ${STATUS_COLORS[n.status]}` }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 16 }}>{n.student.name}</div>
+                    <div style={{ color: "#8E8E93", fontSize: 13, marginTop: 4 }}>{n.group.name} · <Badge color={STATUS_COLORS[n.status]}>{STATUS_LABELS[n.status]}</Badge></div>
+                  </div>
+                  <button style={{ ...btnS, background: "#007AFF22", color: "#007AFF" }} onClick={() => window.open(`https://t.me/${n.student.telegram?.replace('@','') || ''}`, '_blank')}>💬 Написати</button>
+                </div>
+              ))
+            }
+          </div>
+        )}
+
+      </main>
+
+      {/* MODALS */}
+      <Modal open={modal === "addSub"} title="Новий абонемент" onClose={() => setModal(null)}>
+        <Field label="Учениця"><select style={inputSt} id="st_id">{students.sort((a,b)=>a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+        <Field label="Група"><select style={inputSt} id="gr_id">{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></Field>
+        <Field label="Тип"><select style={inputSt} id="pl_id">{PLAN_TYPES.map(p => <option key={p.id} value={p.id}>{p.name} ({p.trainings} зан.) - {p.price}₴</option>)}</select></Field>
+        <Field label="Дата початку"><input style={inputSt} type="date" defaultValue={today()} id="sd" onClick={e => e.target.showPicker()} /></Field>
+        <button style={{ ...btnP, width: "100%", marginTop: 10 }} onClick={async () => {
+          const plan = PLAN_TYPES.find(p=>p.id===document.getElementById('pl_id').value);
+          const d = { studentId: document.getElementById('st_id').value, groupId: document.getElementById('gr_id').value, planType: plan.id, startDate: document.getElementById('sd').value, endDate: addMonth(document.getElementById('sd').value), totalTrainings: plan.trainings, usedTrainings: 0, amount: plan.price, paid: true };
+          const s = await db.insertSub(d); setSubs(p => [s, ...p]); setModal(null);
+        }}>Створити абонемент</button>
+      </Modal>
+
+      <Modal open={modal === "addStudent"} title="Нова учениця" onClose={() => setModal(null)}>
+        <Field label="Прізвище та ім'я"><input style={inputSt} id="st_name" placeholder="Петренко Олена" /></Field>
+        <Field label="Телефон"><input style={inputSt} id="st_phone" placeholder="+380..." /></Field>
+        <button style={{ ...btnP, width: "100%", marginTop: 10 }} onClick={async () => {
+          const name = document.getElementById('st_name').value;
+          if(!name) return;
+          const s = await db.insertStudent({ name, first_name: name.split(' ')[0], phone: document.getElementById('st_phone').value });
+          setStudents(p => [...p, s]); setModal(null);
+        }}>Додати в базу</button>
+      </Modal>
+
+      <Modal open={modal === "editStudent"} title="Редагувати профіль" onClose={() => setModal(null)}>
+        <Field label="Прізвище та ім'я"><input style={inputSt} id="edit_name" defaultValue={editItem?.name} /></Field>
+        <Field label="Телефон"><input style={inputSt} id="edit_phone" defaultValue={editItem?.phone} /></Field>
+        <button style={{ ...btnP, width: "100%", marginTop: 10 }} onClick={async () => {
+          const s = await db.updateStudent(editItem.id, { name: document.getElementById('edit_name').value, phone: document.getElementById('edit_phone').value });
+          setStudents(p => p.map(x => x.id === s.id ? s : x)); setModal(null);
+        }}>Зберегти зміни</button>
+      </Modal>
+
+    </div>
+  );
+}
