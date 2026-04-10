@@ -413,3 +413,38 @@ export async function decrementUsed(subId, qty = 1) {
       .eq('id', subId)
   }
 }
+// --- ЛИСТ ОЧІКУВАННЯ (WAITLIST) ---
+
+export async function fetchWaitlist() {
+  const { data, error } = await supabase.from('waitlist').select('*');
+  if (error) {
+    console.error("Помилка завантаження листа очікування:", error);
+    return [];
+  }
+  return data || [];
+}
+
+export async function insertWaitlist(item) {
+  const { data, error } = await supabase
+    .from('waitlist')
+    .insert([item])
+    .select();
+    
+  if (error) {
+    console.error("Помилка додавання в резерв:", error);
+    throw error;
+  }
+  return data[0];
+}
+
+export async function deleteWaitlist(id) {
+  const { error } = await supabase
+    .from('waitlist')
+    .delete()
+    .eq('id', id);
+    
+  if (error) {
+    console.error("Помилка видалення з резерву:", error);
+    throw error;
+  }
+}
