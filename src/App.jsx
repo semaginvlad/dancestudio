@@ -133,7 +133,7 @@ export default function App() {
         <Field label="Кінець (авто)"><input style={{...inputSt,opacity:.6, cursor: "not-allowed"}} type="date" value={endDate} readOnly/></Field>
       </div>
 
-      <div style={{background:"#161b22",borderRadius:8,padding:"12px 14px",marginBottom:12,border:"1px solid #21262d"}}>
+      <div style={{background:"#1C1C1E",borderRadius:16,padding:"16px",marginBottom:12}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <Field label="Знижка (%)"><input style={{...inputSt,width:80}} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
           <Field label="За рахунок"><div style={{display:"flex",gap:4}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
@@ -144,7 +144,7 @@ export default function App() {
         <Field label="Сума (грн)"><input style={inputSt} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
         <Field label="Оплата"><div style={{display:"flex",gap:6}}>{PAY_METHODS.map(m=><Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>)}</div></Field>
       </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,color:"#c9d1d9",cursor:"pointer",fontSize:14,marginBottom:8}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)}/> Оплачено</label>
+      <label style={{display:"flex",alignItems:"center",gap:8,color:"#c9d1d9",cursor:"pointer",fontSize:14,marginBottom:16}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)} style={{width: 18, height: 18}}/> Оплачено</label>
       <Field label="Нотатки"><textarea style={{...inputSt,minHeight:40,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
         <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
@@ -258,7 +258,7 @@ export default function App() {
     return{totalStudents:students.length,activeStudents:activeStudentIds.size,totalRev,unpaid,byDir,splits, avgLTV, conversionRate};
   },[students,subs,activeSubs,groups, studentMap]);
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0d1117",color:"#8892b0",fontFamily:"DM Sans,sans-serif"}}>Завантаження...</div>;
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#000000",color:"#8E8E93",fontFamily:"DM Sans,sans-serif"}}>Завантаження...</div>;
 
   const TABS=[
     {id:"dashboard",icon:"📊",label:"Дашборд"},
@@ -270,84 +270,106 @@ export default function App() {
   ];
 
   return (
-    <div style={{minHeight:"100vh",background:"#0d1117",color:"#c9d1d9",fontFamily:"'DM Sans',-apple-system,sans-serif", paddingBottom: 60}}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+    <div style={{minHeight:"100vh", background:"#000000", color:"#FFFFFF", fontFamily:"'DM Sans',-apple-system,sans-serif", paddingBottom: 80}}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 
-      <header style={{background:"linear-gradient(135deg,#1a1a2e,#16213e)",borderBottom:"1px solid #21262d",padding:"14px 20px"}}>
-        <div style={{maxWidth:1200,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-          <div><h1 style={{margin:0,fontSize:20,fontWeight:700,color:"#fff"}}>💃 Dance Studio</h1></div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            <button style={{...btnP,fontSize:12,padding:"8px 14px"}} onClick={()=>setModal("addStudent")}>+ Учениця</button>
-            <button style={{...btnP,fontSize:12,padding:"8px 14px",background:"#7B2D8E"}} onClick={()=>setModal("addSub")}>+ Абонемент</button>
+      {/* НОВА ШАПКА В СТИЛІ BENTO */}
+      <header style={{padding:"20px 24px", paddingTop: 30}}>
+        <div style={{maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:14}}>
+          <div><h1 style={{margin:0, fontSize:26, fontWeight:800, color:"#fff", letterSpacing: "-0.5px"}}>Dance Studio.</h1></div>
+          <div style={{display:"flex", gap:10, flexWrap:"wrap"}}>
+            <button style={{...btnS, fontSize:14}} onClick={()=>setModal("addStudent")}>+ Учениця</button>
+            <button style={{...btnP, fontSize:14, background: "#0A84FF", boxShadow: "0 4px 14px rgba(10, 132, 255, 0.3)"}} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           </div>
         </div>
       </header>
 
-      <nav style={{background:"#161b22",borderBottom:"1px solid #21262d",overflowX:"auto"}}>
-        <div style={{maxWidth:1200,margin:"0 auto",display:"flex",padding:"0 16px"}}>
-          {TABS.map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding:"10px 14px",background:"none",border:"none",borderBottom:tab===t.id?"2px solid #E84855":"2px solid transparent",color:tab===t.id?"#fff":"#8892b0",fontSize:12,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>{t.icon} {t.label}</button>)}
+      {/* НОВЕ МЕНЮ (ПІГУЛКА ЯК В iOS) */}
+      <nav style={{maxWidth:1200, margin:"0 auto", padding:"0 20px", marginBottom: 30, overflowX:"auto"}}>
+        <div style={{display:"inline-flex", background: "#1C1C1E", borderRadius: 100, padding: 6}}>
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{
+              padding: "10px 20px", background: tab===t.id ? "#3A3A3C" : "transparent", 
+              border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : "#8E8E93", 
+              fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", 
+              fontFamily: "inherit", transition: "all 0.2s"
+            }}>
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
       </nav>
 
-      <main style={{maxWidth:1200,margin:"0 auto",padding:20}}>
+      <main style={{maxWidth:1200, margin:"0 auto", padding:"0 20px"}}>
 
         {tab==="dashboard"&&<div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:24}}>
-            {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:"#3498DB"},{l:"Абонементів",v:activeSubs.length,s:`${warnSubs.length} закінч.`,c:"#2ECC71"},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ неопл.`,c:"#F9A03F"},{l:"Сповіщення",v:notifications.filter(n=>!n.notified).length,s:"непрочит.",c:"#E84855"}].map((c,i)=><div key={i} style={{...cardSt,borderLeft:`3px solid ${c.c}`}}><div style={{fontSize:10,color:"#8892b0",textTransform:"uppercase"}}>{c.l}</div><div style={{fontSize:24,fontWeight:700,color:"#fff",margin:"2px 0"}}>{c.v}</div><div style={{fontSize:11,color:"#8892b0"}}>{c.s}</div></div>)}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:30}}>
+            {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:"#0A84FF"},{l:"Абонементів",v:activeSubs.length,s:`${warnSubs.length} закінч.`,c:"#30D158"},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ неопл.`,c:"#FF9F0A"},{l:"Сповіщення",v:notifications.filter(n=>!n.notified).length,s:"непрочит.",c:"#FF453A"}].map((c,i)=>(
+              <div key={i} style={{...cardSt, display: "flex", flexDirection: "column", gap: 6}}>
+                <div style={{fontSize:13,color:"#8E8E93",textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 600}}>{c.l}</div>
+                <div style={{fontSize:32,fontWeight:800,color:c.c}}>{c.v}</div>
+                <div style={{fontSize:13,color:"#8E8E93", fontWeight: 500}}>{c.s}</div>
+              </div>
+            ))}
           </div>
           
-          <h3 style={{color:"#fff",fontSize:16,marginBottom:12, borderBottom: "1px solid #21262d", paddingBottom: 8}}>Глибока аналітика 🧠</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:24}}>
-            <div style={{...cardSt, borderTop: "3px solid #9B59B6"}}>
-              <div style={{fontSize:11,color:"#8892b0",textTransform:"uppercase"}}>LTV (Середній чек за весь час)</div>
-              <div style={{fontSize:22,fontWeight:700,color:"#fff",margin:"4px 0"}}>{analytics.avgLTV.toLocaleString()} ₴</div>
-              <div style={{fontSize:11,color:"#8892b0"}}>З однієї учениці</div>
+          <h3 style={{color:"#fff",fontSize:18,marginBottom:16, fontWeight: 700}}>Глибока аналітика 🧠</h3>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16,marginBottom:30}}>
+            <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2C1A35)"}}>
+              <div style={{fontSize:13,color:"#E58EED",textTransform:"uppercase", fontWeight: 600}}>LTV (Середній чек)</div>
+              <div style={{fontSize:28,fontWeight:800,color:"#fff",margin:"8px 0"}}>{analytics.avgLTV.toLocaleString()} ₴</div>
+              <div style={{fontSize:13,color:"#8E8E93"}}>З однієї учениці за весь час</div>
             </div>
-            <div style={{...cardSt, borderTop: "3px solid #E67E22"}}>
-              <div style={{fontSize:11,color:"#8892b0",textTransform:"uppercase"}}>Конверсія з пробного</div>
-              <div style={{fontSize:22,fontWeight:700,color:"#fff",margin:"4px 0"}}>{analytics.conversionRate} %</div>
-              <div style={{fontSize:11,color:"#8892b0"}}>Купили повний абонемент</div>
+            <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #352115)"}}>
+              <div style={{fontSize:13,color:"#FF9F0A",textTransform:"uppercase", fontWeight: 600}}>Конверсія з пробного</div>
+              <div style={{fontSize:28,fontWeight:800,color:"#fff",margin:"8px 0"}}>{analytics.conversionRate} %</div>
+              <div style={{fontSize:13,color:"#8E8E93"}}>Купили повний абонемент</div>
             </div>
           </div>
 
-          <h3 style={{color:"#fff",fontSize:16,marginBottom:12, borderBottom: "1px solid #21262d", paddingBottom: 8}}>За напрямками</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
-            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt,borderTop:`3px solid ${d.color}`}}><div style={{fontSize:12,fontWeight:600,color:d.color}}>{d.name}</div><div style={{fontSize:20,fontWeight:700,color:"#fff"}}>{data.students}</div></div>})}
+          <h3 style={{color:"#fff",fontSize:18,marginBottom:16, fontWeight: 700}}>За напрямками</h3>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return(
+              <div key={d.id} style={{...cardSt, padding: "18px 24px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div>
+                <div style={{fontSize:24,fontWeight:800,color:"#fff"}}>{data.students} <span style={{fontSize: 14, color: "#8E8E93", fontWeight: 500}}>уч.</span></div>
+              </div>
+            )})}
           </div>
         </div>}
 
         {tab==="students"&&<div>
-          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",justifyContent:"space-between", background: "#161b22", padding: 12, borderRadius: 10}}>
-            <div style={{display: "flex", gap: 8, flexWrap: "wrap", flex: 1}}>
-              <input style={{...inputSt,maxWidth:250}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+          <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",justifyContent:"space-between", background: "#1C1C1E", padding: 16, borderRadius: 20}}>
+            <div style={{display: "flex", gap: 10, flexWrap: "wrap", flex: 1}}>
+              <input style={{...inputSt,maxWidth:250}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
               <select style={{...inputSt,width:"auto"}} value={stFilterDir} onChange={e=>{setStFilterDir(e.target.value);setStFilterGroup("all")}}>
                 <option value="all">Всі напрямки</option>
                 {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
               <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
             </div>
-            <button style={{...btnP, background: "#F9A03F", height: "fit-content"}} onClick={()=>setModal("addWaitlist")}>+ В резерв</button>
+            <button style={{...btnP, background: "#FF9F0A", height: "fit-content"}} onClick={()=>setModal("addWaitlist")}>+ В резерв</button>
           </div>
           
-          <div style={{display:"flex",flexDirection:"column",gap:10, marginBottom: 20}}>
+          <div style={{display:"flex",flexDirection:"column",gap:16, marginBottom: 24}}>
             {studentsByDirection.grouped.map(({direction,students:dStudents})=>{
               const isExpanded = expandedDirs[direction.id];
               return (
-                <div key={direction.id} style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
-                  <button onClick={() => setExpandedDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}>
-                    <div style={{fontSize:15,fontWeight:600,color:direction.color}}>{direction.name} <span style={{color:"#8892b0",fontSize:13,fontWeight:400}}>({dStudents.length})</span></div>
-                    <div style={{color:"#8892b0", fontSize: 12}}>{isExpanded ? "▲" : "▼"}</div>
+                <div key={direction.id} style={{background: "#1C1C1E", borderRadius: 24, overflow: 'hidden'}}>
+                  <button onClick={() => setExpandedDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
+                    <div style={{fontSize:16,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:"#8E8E93",fontSize:14,fontWeight:500, marginLeft: 6}}>({dStudents.length})</span></div>
+                    <div style={{color:"#8E8E93", fontSize: 14}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
-                  {isExpanded && (<div style={{padding:'12px 18px', background:'#0d1117', borderTop:`1px solid #21262d`, display:'flex', flexDirection:'column', gap:6}}>
+                  {isExpanded && (<div style={{padding:'0 24px 20px 24px', display:'flex', flexDirection:'column', gap:8}}>
                     {dStudents.map(st => {
                       const active=subsExt.filter(s=>s.studentId===st.id && s.status!=="expired");
-                      return <div key={st.id} style={{...cardSt,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,marginBottom:6}}>
+                      return <div key={st.id} style={{background: "#2C2C2E", borderRadius: 16, padding: "16px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                         <div style={{minWidth:180}}>
-                          <div style={{color:"#fff",fontWeight:600,fontSize:14}}>{st.name}</div>
-                          <div style={{color:"#8892b0",fontSize:11}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
+                          <div style={{color:"#fff",fontWeight:600,fontSize:15}}>{st.name}</div>
+                          <div style={{color:"#8E8E93",fontSize:13, marginTop: 4}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
                         </div>
-                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
-                        <div style={{display:"flex",gap:4}}><button style={{...btnS,padding:"5px 10px",fontSize:11}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button><button style={{...btnS,padding:"5px 10px",fontSize:11,color:"#E84855"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
+                        <div style={{display:"flex",gap:6}}><button style={{...btnS,padding:"8px 12px",fontSize:13}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>Редагувати</button></div>
                       </div>
                     })}
                   </div>)}
@@ -357,22 +379,22 @@ export default function App() {
           </div>
 
           {waitlist.length > 0 && (
-            <div style={{border:`1px solid #F9A03F44`, borderRadius: 10, overflow: 'hidden', background: "#161b22"}}>
-              <div style={{padding:'14px 18px', borderBottom: "1px solid #21262d", display: "flex", justifyContent: "space-between"}}>
-                <span style={{fontSize:15,fontWeight:600,color:"#F9A03F"}}>⏳ Лист очікування ({waitlist.length})</span>
+            <div style={{background: "linear-gradient(135deg, #1C1C1E, #352115)", borderRadius: 24, overflow: 'hidden'}}>
+              <div style={{padding:'20px 24px', display: "flex", justifyContent: "space-between"}}>
+                <span style={{fontSize:16,fontWeight:700,color:"#FF9F0A"}}>⏳ Лист очікування ({waitlist.length})</span>
               </div>
-              <div style={{padding:'12px 18px', display:'flex', flexDirection:'column', gap:6}}>
+              <div style={{padding:'0 24px 20px 24px', display:'flex', flexDirection:'column', gap:8}}>
                 {waitlist.map(w => {
                   const st = studentMap[w.studentId];
                   const gr = groupMap[w.groupId];
                   if(!st || !gr) return null;
                   return (
-                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#0d1117", padding: "10px 14px", borderRadius: 8}}>
+                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#2C2C2E", padding: "16px", borderRadius: 16}}>
                       <div>
-                        <div style={{color:"#fff",fontWeight:500,fontSize:14}}>{st.name}</div>
-                        <div style={{color:"#8892b0",fontSize:11}}>Хоче в: <strong style={{color:"#e6edf3"}}>{gr.name}</strong></div>
+                        <div style={{color:"#fff",fontWeight:600,fontSize:15}}>{st.name}</div>
+                        <div style={{color:"#8E8E93",fontSize:13, marginTop: 4}}>Хоче в: <strong style={{color:"#fff"}}>{gr.name}</strong></div>
                       </div>
-                      <button style={{...btnS,padding:"5px 10px",fontSize:11,color:"#E84855"}} onClick={()=>removeWaitlist(w.id)}>Видалити</button>
+                      <button style={{...btnS,padding:"8px 12px",fontSize:13,color:"#FF453A"}} onClick={()=>removeWaitlist(w.id)}>Видалити</button>
                     </div>
                   )
                 })}
@@ -382,7 +404,7 @@ export default function App() {
         </div>}
 
         {tab==="subs"&&<div>
-          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap", background: "#161b22", padding: 12, borderRadius: 10}}>
+          <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap", background: "#1C1C1E", padding: 16, borderRadius: 20}}>
             <input style={{...inputSt,width:"auto",minWidth:180, flexGrow: 1}} placeholder="Пошук за іменем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
               <option value="all">Всі напрямки</option>
@@ -394,46 +416,46 @@ export default function App() {
             </select>
           </div>
           
-          {filteredSubs.length===0?<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає абонементів</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filteredSubs.length===0?<div style={{color:"#8E8E93",padding:40,textAlign:"center"}}>Немає абонементів</div>:
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {subsGroupedByDir.grouped.filter(d => filterDir === "all" || d.direction.id === filterDir).map(({direction, subs: dSubs}) => {
               const finalSubs = filterGroup !== "all" ? dSubs.filter(s => s.groupId === filterGroup) : dSubs;
               if (finalSubs.length === 0) return null;
               
               const isExpanded = expandedSubDirs[direction.id];
               return (
-                <div key={direction.id} style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
-                  <button onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}>
-                    <div style={{fontSize:15,fontWeight:600,color:direction.color}}>{direction.name} <span style={{color:"#8892b0",fontSize:13,fontWeight:400}}>({finalSubs.length})</span></div>
-                    <div style={{color:"#8892b0", fontSize: 12}}>{isExpanded ? "▲" : "▼"}</div>
+                <div key={direction.id} style={{background: "#1C1C1E", borderRadius: 24, overflow: 'hidden'}}>
+                  <button onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
+                    <div style={{fontSize:16,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:"#8E8E93",fontSize:14,fontWeight:500, marginLeft: 6}}>({finalSubs.length})</span></div>
+                    <div style={{color:"#8E8E93", fontSize: 14}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
                   {isExpanded && (
-                    <div style={{overflowX: "auto", background:'#0d1117'}}>
-                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
+                    <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}}>
+                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
                         <thead>
-                          <tr style={{color: "#8892b0", textTransform: "uppercase", fontSize: 11, letterSpacing: 0.5}}>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Учениця</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Група</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Абонемент</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Заняття</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Термін</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500}}>Статус</th>
-                            <th style={{padding: "12px 14px", fontWeight: 500, textAlign: "right"}}>Дії</th>
+                          <tr style={{color: "#8E8E93", textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Учениця</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Група</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Абонемент</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Заняття</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Термін</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600}}>Статус</th>
+                            <th style={{padding: "12px 14px", fontWeight: 600, textAlign: "right"}}>Дії</th>
                           </tr>
                         </thead>
                         <tbody>
                           {finalSubs.map(sub => {
                             const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-                            return <tr key={sub.id} style={{borderTop: "1px solid #21262d"}}>
-                              <td style={{padding: "10px 14px", color: "#fff", fontWeight: 500, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
-                              <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8892b0", fontSize:12}}>{gr?.name}</span></td>
-                              <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#c9d1d9", fontSize:12}}>{planLabel}</span></td>
-                              <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#fff", fontWeight: 600}}>{sub.usedTrainings}</span><span style={{color: "#8892b0", fontSize:12}}> / {sub.totalTrainings}</span></td>
-                              <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8892b0", fontSize:12, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
-                              <td style={{padding: "10px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 6}}><Badge color="#E84855">💰 Борг</Badge></span>}</td>
-                              <td style={{padding: "10px 14px", textAlign: "right", whiteSpace:"nowrap"}}>
-                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:14,marginRight:12}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
-                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:14}} onClick={()=>deleteSub(sub.id)}>🗑</button>
+                            return <tr key={sub.id} style={{borderTop: "1px solid #2C2C2E"}}>
+                              <td style={{padding: "14px", color: "#fff", fontWeight: 600, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
+                              <td style={{padding: "14px", whiteSpace:"nowrap"}}><span style={{color: "#8E8E93"}}>{gr?.name}</span></td>
+                              <td style={{padding: "14px", whiteSpace:"nowrap"}}><span style={{color: "#c9d1d9"}}>{planLabel}</span></td>
+                              <td style={{padding: "14px", whiteSpace:"nowrap"}}><span style={{color: "#fff", fontWeight: 700}}>{sub.usedTrainings}</span><span style={{color: "#8E8E93"}}> / {sub.totalTrainings}</span></td>
+                              <td style={{padding: "14px", whiteSpace:"nowrap"}}><span style={{color: "#8E8E93", fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
+                              <td style={{padding: "14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 6}}><Badge color="#FF453A">Борг</Badge></span>}</td>
+                              <td style={{padding: "14px", textAlign: "right", whiteSpace:"nowrap"}}>
+                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:16,marginRight:16}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
+                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:16}} onClick={()=>deleteSub(sub.id)}>🗑</button>
                               </td>
                             </tr>
                           })}
@@ -447,7 +469,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* ─── ВІДВІДУВАННЯ ─── */}
+        {/* ─── ВІДВІДУВАННЯ (Окремий модуль) ─── */}
         {tab==="attendance" && (
           <AttendanceTab 
             groups={groups} subs={subs} setSubs={setSubs} attn={attn} setAttn={setAttn}
@@ -456,18 +478,25 @@ export default function App() {
         )}
 
         {tab==="alerts"&&<div>
-          {notifications.length===0?<div style={{textAlign:"center",padding:50,color:"#8892b0"}}>✨ Все добре!</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {notifications.length===0?<div style={{textAlign:"center",padding:50,color:"#8E8E93"}}>✨ Всі абонементи активні!</div>:
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {notifications.map(n=>{
               const msg=getNotifMsg(null,n.student,n.group,n.direction);
               const tgUser=n.student?.telegram?.replace("@","");
               const tgLink=tgUser?`https://t.me/${tgUser}?text=${encodeURIComponent(msg)}`:null;
-              return<div key={n.subId} style={{...cardSt,borderLeft:`3px solid ${n.type==="expired"?"#E84855":"#F9A03F"}`,opacity:n.notified?.6:1}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
-                  <div><span style={{color:"#fff",fontWeight:600}}>{n.student?.name}</span> <Badge color={n.type==="expired"?"#E84855":"#F9A03F"}>{n.message}</Badge>{n.notified&&<Badge color="#8892b0">✅</Badge>}<div style={{color:"#8892b0",fontSize:12,marginTop:2}}>{n.group?.name}</div></div>
-                  <div style={{display:"flex",gap:6}}>
-                    {tgLink&&<a href={tgLink} target="_blank" rel="noopener noreferrer" onClick={()=>markNotified(n.subId)} style={{padding:"6px 12px",borderRadius:8,background:"#229ED922",color:"#229ED9",fontSize:11,textDecoration:"none",border:"1px solid #229ED944"}}>💬 Telegram</a>}
-                    {!n.notified&&<button style={{...btnS,padding:"6px 12px",fontSize:11}} onClick={()=>markNotified(n.subId)}>Позначити</button>}
+              return<div key={n.subId} style={{...cardSt, opacity:n.notified?.6:1}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{display: "flex", gap: 10, alignItems: "center", marginBottom: 6}}>
+                      <span style={{color:"#fff",fontWeight:700, fontSize: 16}}>{n.student?.name}</span> 
+                      <Badge color={n.type==="expired"?"#FF453A":"#FF9F0A"}>{n.message}</Badge>
+                      {n.notified&&<Badge color="#8E8E93">✅ Відправлено</Badge>}
+                    </div>
+                    <div style={{color:"#8E8E93",fontSize:14}}>{n.group?.name}</div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    {tgLink&&<a href={tgLink} target="_blank" rel="noopener noreferrer" onClick={()=>markNotified(n.subId)} style={{padding:"10px 16px",borderRadius:12,background:"#0A84FF22",color:"#0A84FF",fontSize:13,fontWeight: 600, textDecoration:"none"}}>💬 Написати</a>}
+                    {!n.notified&&<button style={{...btnS,padding:"10px 16px",fontSize:13}} onClick={()=>markNotified(n.subId)}>Позначити</button>}
                   </div>
                 </div>
               </div>})}
@@ -490,18 +519,18 @@ export default function App() {
 
           return (
             <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:24}}>
-                <div style={{...cardSt, borderTop:"4px solid #2ECC71", background: "linear-gradient(180deg, rgba(46,204,113,0.05), transparent)"}}>
-                  <div style={{fontSize:12,color:"#8892b0",textTransform:"uppercase", letterSpacing: 1}}>Загалом оплачено</div>
-                  <div style={{fontSize:32,fontWeight:700,color:"#2ECC71", marginTop: 4}}>{analytics.totalRev.toLocaleString()} ₴</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16,marginBottom:30}}>
+                <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #14281D)"}}>
+                  <div style={{fontSize:13,color:"#30D158",textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 600}}>Загалом оплачено</div>
+                  <div style={{fontSize:36,fontWeight:800,color:"#30D158", marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div>
                 </div>
-                <div style={{...cardSt, borderTop:"4px solid #E84855", background: "linear-gradient(180deg, rgba(232,72,85,0.05), transparent)"}}>
-                  <div style={{fontSize:12,color:"#8892b0",textTransform:"uppercase", letterSpacing: 1}}>Борги учениць (очікується)</div>
-                  <div style={{fontSize:32,fontWeight:700,color:"#E84855", marginTop: 4}}>{analytics.unpaid.toLocaleString()} ₴</div>
+                <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2D1516)"}}>
+                  <div style={{fontSize:13,color:"#FF453A",textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 600}}>Борги учениць</div>
+                  <div style={{fontSize:36,fontWeight:800,color:"#FF453A", marginTop: 8}}>{analytics.unpaid.toLocaleString()} ₴</div>
                 </div>
               </div>
 
-              <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap", background: "#161b22", padding: 14, borderRadius: 12, border: "1px solid #21262d"}}>
+              <div style={{display:"flex",gap:10,marginBottom:24,flexWrap:"wrap", background: "#1C1C1E", padding: 16, borderRadius: 20}}>
                 <div style={{flex: 1, display: "flex", gap: 10, minWidth: 300, flexWrap: "wrap"}}>
                   <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}>
                     <option value="all">Всі напрямки</option>
@@ -516,16 +545,16 @@ export default function App() {
                     <option value="studio">За доходом студії</option>
                     <option value="name">За назвою</option>
                   </select>
-                  <button style={{...btnS, padding: "0 14px", fontSize: 16}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>
+                  <button style={{...btnS, padding: "0 16px", fontSize: 16}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>
                     {finSortOrder === "desc" ? "⬇" : "⬆"}
                   </button>
                 </div>
               </div>
 
-              <h3 style={{color:"#fff",fontSize:16,marginBottom:16, fontWeight: 600}}>Деталізація по групах ({finData.length})</h3>
+              <h3 style={{color:"#fff",fontSize:18,marginBottom:16, fontWeight: 700}}>Деталізація по групах ({finData.length})</h3>
               
-              {finData.length === 0 ? <div style={{color:"#8892b0",padding:40,textAlign:"center"}}>За цими фільтрами немає оплат</div> :
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {finData.length === 0 ? <div style={{color:"#8E8E93",padding:40,textAlign:"center"}}>За цими фільтрами немає оплат</div> :
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
                 {finData.map(sp => {
                   const dir = dirMap[sp.group.directionId];
                   const trainerPct = sp.group.trainerPct;
@@ -533,38 +562,38 @@ export default function App() {
                   const paidCount = sp.subs.length;
                   
                   return (
-                    <div key={sp.group.id} style={{background: "#161b22", borderRadius: 12, border: "1px solid #21262d", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14}}>
-                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10}}>
+                    <div key={sp.group.id} style={{background: "#1C1C1E", borderRadius: 24, padding: "24px", display: "flex", flexDirection: "column", gap: 20}}>
+                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
                         <div>
-                          <div style={{display: "flex", alignItems: "center", gap: 8, marginBottom: 4}}>
-                            <span style={{color:"#fff",fontWeight:600, fontSize: 16}}>{sp.group.name}</span>
+                          <div style={{display: "flex", alignItems: "center", gap: 10, marginBottom: 6}}>
+                            <span style={{color:"#fff",fontWeight:700, fontSize: 18}}>{sp.group.name}</span>
                             <Badge color={dir?.color||"#888"}>{dir?.name}</Badge>
                           </div>
-                          <div style={{fontSize: 12, color: "#8892b0"}}>Оплачених абонементів: <strong style={{color: "#c9d1d9"}}>{paidCount}</strong></div>
+                          <div style={{fontSize: 14, color: "#8E8E93", fontWeight: 500}}>Оплачених абонементів: <strong style={{color: "#fff"}}>{paidCount}</strong></div>
                         </div>
                         <div style={{textAlign: "right"}}>
-                          <div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Загальний збір</div>
-                          <div style={{fontSize: 22, fontWeight: 700, color: "#fff"}}>{sp.total.toLocaleString()} ₴</div>
+                          <div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 600}}>Загальний збір</div>
+                          <div style={{fontSize: 26, fontWeight: 800, color: "#fff"}}>{sp.total.toLocaleString()} ₴</div>
                         </div>
                       </div>
 
-                      <div style={{height: 6, width: "100%", display: "flex", borderRadius: 4, overflow: "hidden"}}>
-                        <div style={{width: `${trainerPct}%`, background: "#3498DB"}} title="Тренер"></div>
-                        <div style={{width: `${studioPct}%`, background: "#2ECC71"}} title="Студія"></div>
+                      <div style={{height: 8, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>
+                        <div style={{width: `${trainerPct}%`, background: "#0A84FF"}} title="Тренер"></div>
+                        <div style={{width: `${studioPct}%`, background: "#30D158"}} title="Студія"></div>
                       </div>
 
-                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10}}>
-                        <div style={{display: "flex", gap: 24}}>
+                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12}}>
+                        <div style={{display: "flex", gap: 32}}>
                           <div>
-                            <div style={{fontSize:11,color:"#8892b0"}}>Тренер ({trainerPct}%)</div>
-                            <div style={{fontSize:16,fontWeight:600,color:"#3498DB"}}>{sp.trainer.toLocaleString()} ₴</div>
+                            <div style={{fontSize:12,color:"#8E8E93", fontWeight: 600}}>Тренер ({trainerPct}%)</div>
+                            <div style={{fontSize:20,fontWeight:700,color:"#0A84FF", marginTop: 4}}>{sp.trainer.toLocaleString()} ₴</div>
                           </div>
                           <div>
-                            <div style={{fontSize:11,color:"#8892b0"}}>Студія ({studioPct}%)</div>
-                            <div style={{fontSize:16,fontWeight:600,color:"#2ECC71"}}>{sp.studio.toLocaleString()} ₴</div>
+                            <div style={{fontSize:12,color:"#8E8E93", fontWeight: 600}}>Студія ({studioPct}%)</div>
+                            <div style={{fontSize:20,fontWeight:700,color:"#30D158", marginTop: 4}}>{sp.studio.toLocaleString()} ₴</div>
                           </div>
                         </div>
-                        <button style={{...btnS, padding: "8px 16px", background: "#0d1117"}} onClick={() => setFinanceDetailItem(sp)}>
+                        <button style={{...btnS, padding: "12px 20px", background: "#2C2C2E"}} onClick={() => setFinanceDetailItem(sp)}>
                           🧾 Детальний звіт
                         </button>
                       </div>
@@ -581,18 +610,18 @@ export default function App() {
       <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide>
         {financeDetailItem && (
           <div>
-            <div style={{display: "flex", justifyContent: "space-between", background: "#0d1117", padding: "12px 16px", borderRadius: 8, marginBottom: 16}}>
-              <div><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#3498DB"}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
-              <div style={{textAlign: "right"}}><div style={{fontSize: 11, color: "#8892b0", textTransform: "uppercase"}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 20, fontWeight: 700, color: "#2ECC71"}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
+            <div style={{display: "flex", justifyContent: "space-between", background: "#2C2C2E", padding: "16px 20px", borderRadius: 16, marginBottom: 20}}>
+              <div><div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 600}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 24, fontWeight: 800, color: "#0A84FF", marginTop: 4}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
+              <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 600}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 24, fontWeight: 800, color: "#30D158", marginTop: 4}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
             </div>
             
-            <table style={{width: "100%", borderCollapse: "collapse", fontSize: 13, textAlign: "left"}}>
+            <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
               <thead>
-                <tr style={{color: "#8892b0", borderBottom: "1px solid #30363d"}}>
-                  <th style={{padding: "8px 0", fontWeight: 500}}>Учениця</th>
-                  <th style={{padding: "8px 0", fontWeight: 500}}>Тип</th>
-                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right"}}>Оплачено</th>
-                  <th style={{padding: "8px 0", fontWeight: 500, textAlign: "right", color: "#3498DB"}}>Частка тренера</th>
+                <tr style={{color: "#8E8E93", borderBottom: "1px solid #3A3A3C"}}>
+                  <th style={{padding: "12px 0", fontWeight: 600}}>Учениця</th>
+                  <th style={{padding: "12px 0", fontWeight: 600}}>Тип</th>
+                  <th style={{padding: "12px 0", fontWeight: 600, textAlign: "right"}}>Оплачено</th>
+                  <th style={{padding: "12px 0", fontWeight: 600, textAlign: "right", color: "#0A84FF"}}>Частка тренера</th>
                 </tr>
               </thead>
               <tbody>
@@ -601,11 +630,11 @@ export default function App() {
                   const planLabel = PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
                   const trainerCut = Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100));
                   return (
-                    <tr key={sub.id} style={{borderBottom: "1px solid #21262d"}}>
-                      <td style={{padding: "10px 0", color: "#fff"}}>{st?.name}</td>
-                      <td style={{padding: "10px 0", color: "#8892b0"}}>{planLabel}</td>
-                      <td style={{padding: "10px 0", textAlign: "right"}}>{sub.amount} ₴</td>
-                      <td style={{padding: "10px 0", textAlign: "right", color: "#3498DB", fontWeight: 600}}>+ {trainerCut} ₴</td>
+                    <tr key={sub.id} style={{borderBottom: "1px solid #2C2C2E"}}>
+                      <td style={{padding: "14px 0", color: "#fff", fontWeight: 500}}>{st?.name}</td>
+                      <td style={{padding: "14px 0", color: "#8E8E93"}}>{planLabel}</td>
+                      <td style={{padding: "14px 0", textAlign: "right", fontWeight: 500}}>{sub.amount} ₴</td>
+                      <td style={{padding: "14px 0", textAlign: "right", color: "#0A84FF", fontWeight: 700}}>+ {trainerCut} ₴</td>
                     </tr>
                   )
                 })}
