@@ -10,7 +10,6 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const ADMIN_ID = 5681410336;
 
-// Тимчасова пам'ять для збереження стану
 const stateStore = new Map();
 
 const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
@@ -110,13 +109,12 @@ async function renderGroupList(ctx, groupId) {
                 const daysLeft = (new Date(bestSub.end_date) - new Date(formattedToday)) / (1000 * 60 * 60 * 24);
                 const isExpiring = (bestSub.total_trainings - (bestSub.used_trainings || 0) <= 1) || (daysLeft <= 2);
 
-                if (!bestSub.paid) marker = '💸'; // Боржниця
-                else if (isExpiring) marker = '🟡'; // Закінчується
-                else marker = '🟢'; // Все ок
+                if (!bestSub.paid) marker = '💸'; 
+                else if (isExpiring) marker = '🟡'; 
+                else marker = '🟢'; 
 
                 subText = `(${bestSub.used_trainings || 0}/${bestSub.total_trainings})`;
             } else {
-                // Якщо закінчився, але ще не оплачений - все одно показуємо як борг
                 marker = !bestSub.paid ? '💸' : '🔴';
                 subText = '(Закінчився)';
             }
@@ -182,7 +180,6 @@ safeAction(/debt_(.+)/, async (ctx) => {
     const groupId = ctx.match[1];
     await ctx.answerCbQuery();
 
-    // Забрав прив'язку до дати, тепер шукає ВСІ неоплачені абонементи в цій групі
     const { data: subs } = await supabase.from('subscriptions')
         .select('*, students(name)')
         .eq('group_id', groupId)
@@ -233,9 +230,8 @@ safeAction(/sub_(.+)/, async (ctx) => {
         [{ text: '💳 Створити новий', callback_data: `pay_menu_${subId}` }]
     ];
 
-    // Якщо абонемент не оплачений, додаємо кнопку оплати
     if (!sub.paid) {
-        buttons.splice(1, 0, [{ text: `💰 Відмітити оплату (${sub.price} грн)`, callback_data: `markpaid_${subId}` }]);
+        buttons.splice(1, 0, [{ text: `💰 Внести оплату (${sub.price} грн)`, callback_data: `markpaid_${subId}` }]);
     }
     
     buttons.push([{ text: '🔙 Назад до списку', callback_data: `grp_${sub.group_id.substring(0, 30)}` }]);
@@ -314,18 +310,52 @@ safeAction(/undo_(.+)/, async (ctx) => {
 });
 
 // ==========================================
-// 7. Створення абонементів та Оплати
+// 7. Створення абонементів та Оплати (ОНОВЛЕНО)
 // ==========================================
+
+// КРОК 1: Запит форми оплати
 safeAction(/markpaid_(.+)/, async (ctx) => {
     const subId = ctx.match[1];
-    await supabase.from('subscriptions').update({ paid: true }).eq('id', subId);
-    await ctx.answerCbQuery('✅ Позначено як оплачено!');
+    await ctx.answerCbQuery();
     
-    const { data: sub } = await supabase.from('subscriptions').select('group_id').eq('id', subId).single();
-    if(sub) await renderGroupList(ctx, sub.group_id);
+    await ctx.editMessageText('💵 Оберіть форму оплати:', {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '💵 Готівка', callback_data: `payok_cash_${subId}` }, { text: '💳 На картку', callback_data: `payok_card_${subId}` }],
+                [{ text: '🔙 Назад', callback_data: `sub_${subId}` }]
+            ]
+        }
+    });
 });
 
-// Меню вибору, якщо абонемент Є
+// КРОК 2: Підтвердження оплати
+safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
+    const methodStr = ctx.match[1] === 'cash' ? 'Готівка' : 'На картку';
+    const subId = ctx.match[2];
+
+    const { data: sub } = await supabase.from('subscriptions').select('*, students(name)').eq('id', subId).single();
+    if (!sub) return ctx.answerCbQuery('❌ Помилка', { show_alert: true });
+
+    // Оновлюємо статус на "Оплачено"
+    await supabase.from('subscriptions').update({ paid: true }).eq('id', subId);
+
+    await ctx.answerCbQuery('✅ Оплата пройшла!');
+
+    // Показуємо красивий чек з усією інфою
+    await ctx.editMessageText(
+        `✅ **Оплату успішно внесено!**\n\n👩 Учениця: ${sub.students?.name || 'Невідомо'}\n💰 Сума: ${sub.price} грн\n💳 Форма оплати: ${methodStr}\n📅 Дата початку: ${sub.start_date}\n⏳ Діє до: ${sub.end_date}`,
+        {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🔙 Меню учениці', callback_data: `sub_${subId}` }],
+                    [{ text: '🔙 До списку групи', callback_data: `grp_${sub.group_id}` }]
+                ]
+            }
+        }
+    );
+});
+
 safeAction(/pay_menu_(.+)/, async (ctx) => {
     const subId = ctx.match[1];
     await ctx.answerCbQuery();
@@ -343,7 +373,6 @@ safeAction(/pay_menu_(.+)/, async (ctx) => {
     });
 });
 
-// Меню вибору, якщо абонемента НЕМАЄ
 safeAction(/newpay_menu_(.+)_(.+)/, async (ctx) => {
     const shortId = ctx.match[1];
     const grpId = ctx.match[2];
@@ -361,7 +390,6 @@ safeAction(/newpay_menu_(.+)_(.+)/, async (ctx) => {
     });
 });
 
-// Логіка створення: ціни та статус неоплачено
 safeAction(/cr_(\d+)_(.+)_(.+)/, async (ctx) => {
     const count = parseInt(ctx.match[1]);
     const shortStId = ctx.match[2];
@@ -394,7 +422,7 @@ safeAction(/cr_(\d+)_(.+)_(.+)/, async (ctx) => {
         start_date: formattedStart,
         end_date: formattedEnd,
         price: price,
-        paid: false // ТЕПЕР СТВОРЮЄТЬСЯ ЯК БОРГ
+        paid: false
     });
 
     await ctx.answerCbQuery('✅ Абонемент створено! (Не оплачений)');
