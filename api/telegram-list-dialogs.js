@@ -27,7 +27,6 @@ export default async function handler(req, res) {
     await client.connect();
 
     const dialogs = await client.getDialogs({ limit: 100 });
-
     const result = [];
 
     for (const d of dialogs) {
@@ -56,8 +55,7 @@ export default async function handler(req, res) {
     console.error("telegram-list-dialogs error:", error);
     return res.status(500).json({
       error: "Failed to list dialogs",
-      details: String(error?.message || error),
-      stack: error?.stack || null
+      details: String(error?.message || error)
     });
   } finally {
     if (client) {
