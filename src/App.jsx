@@ -86,7 +86,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
   const [manualName, setManualName] = useState("");
   const [manualType, setManualType] = useState("trial");
 
-  // Чернетка для пакетного збереження
   const [draft, setDraft] = useState({}); 
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -97,7 +96,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
   const todayAttn = attn.filter(a => a.groupId === gid && a.date === date);
   const guests = todayAttn.filter(a => a.guestName);
 
-  // Скидання чернетки при зміні дати/групи
   useEffect(() => {
     const initialDraft = {};
     todayAttn.forEach(a => {
@@ -131,14 +129,12 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 
   const manualGuests = guests.filter(g => !studsWithoutSub.some(s => s.student.name === g.guestName));
 
-  // Перемикання в чернетці (БЕЗ збереження в БД)
   const toggleDraft = (key) => {
     if (isCan) return;
     setDraft(p => ({ ...p, [key]: !p[key] }));
     setIsDirty(true);
   };
 
-  // ПАКЕТНЕ ЗБЕРЕЖЕННЯ
   const saveBatch = async () => {
     setIsSaving(true);
     let newAttn = [...attn];
@@ -197,7 +193,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
     try{ await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
   };
 
-  // --- ЛОГІКА ЖУРНАЛУ (ТАБЛИЦІ) ---
   const generateDays = () => {
     const [y, m] = journalMonth.split('-');
     const daysInMonth = new Date(y, m, 0).getDate();
@@ -206,7 +201,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord, relevantSub) => {
     if (isCurrentlyAttended && dbRecord) {
-      // Видаляємо з минулого
       await db.deleteAttendance(dbRecord.id);
       if (relevantSub) {
          await db.decrementUsed(relevantSub.id, dbRecord.quantity || 1);
@@ -214,7 +208,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
       }
       setAttn(p => p.filter(a => a.id !== dbRecord.id));
     } else {
-      // Додаємо в минуле
       if (relevantSub) {
         const a = await db.insertAttendance({ subId: relevantSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid });
         await db.incrementUsed(relevantSub.id, 1);
@@ -229,7 +222,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 
   return (
     <div style={{ maxWidth: viewMode === "journal" ? "100%" : 800 }}>
-      {/* Навігація Відвідувань */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: "1px solid #21262d", paddingBottom: 16 }}>
         <button style={{...btnS, background: viewMode === "daily" ? "#21262d" : "transparent", color: viewMode === "daily" ? "#fff" : "#8892b0", border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
         <button style={{...btnS, background: viewMode === "journal" ? "#21262d" : "transparent", color: viewMode === "journal" ? "#fff" : "#8892b0", border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
@@ -244,7 +236,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
       </div>
 
       {viewMode === "journal" ? (
-        // ================= ЖУРНАЛ (ТАБЛИЦЯ) =================
         <div style={{ overflowX: "auto", background: "#161b22", borderRadius: 12, border: "1px solid #21262d", padding: 10 }}>
           <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
             <thead>
@@ -266,7 +257,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
                   {generateDays().map(d => {
                     const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
                     const isAttended = !!rec;
-                    // Шукаємо активний абонемент на цю дату (для списання)
                     const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === gid && s.startDate <= d && s.endDate >= d);
                     
                     return (
@@ -284,7 +274,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
           <div style={{fontSize: 11, color: "#8892b0", marginTop: 14}}>* Клікніть на клітинку, щоб додати або видалити відвідування минулою датою (зберігається миттєво).</div>
         </div>
       ) : (
-        // ================= ДЕННИЙ РЕЖИМ (ЧЕРНЕТКА) =================
         <>
           {isCan && <div style={{ background: "#E8485515", border: "1px solid #E8485533", borderRadius: 10, padding: "12px 16px", marginBottom: 20, color: "#E84855", fontWeight: 500 }}>❌ Тренування відмінено</div>}
 
@@ -350,7 +339,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
             </div>
           )}
 
-          {/* Плаваюча кнопка "Зберегти" */}
           {isDirty && (
             <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, background: "#1a1a2e", padding: "10px 16px", borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,0.8)", border: "1px solid #2ECC71" }}>
               <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, background: "#2ECC71", padding: "12px 30px", fontSize: 16 }}>
@@ -374,23 +362,6 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
           </div>
         </>
       )}
-    </div>
-  );
-}
-      
-      <div style={{ background: "linear-gradient(180deg, #161b22, #0d1117)", borderRadius: 12, padding: "20px", border: "1px dashed #30363d" }}>
-        <div style={{ fontSize: 13, color: "#8892b0", marginBottom: 12, fontWeight: 500 }}>+ Додати нову людину вручну</div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <input style={{...inputSt, height: "100%"}} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
-          </div>
-          <div style={{ display: "flex", gap: 6, background: "#0d1117", padding: 4, borderRadius: 8, border: "1px solid #30363d" }}>
-            <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color="#2ECC71">Пробне</Pill>
-            <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color="#F9A03F">Разове</Pill>
-          </div>
-          <button style={{...btnP, padding: "0 24px"}} onClick={addManual}>Додати</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -468,6 +439,36 @@ export default function App() {
   }
 
   // ═══ FORMS ═══
+  function StudentForm({initial,onDone}){
+    const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
+    const [lastName,setLastName]=useState(initial?.lastName||initial?.last_name||"");
+    const [phone,setPhone]=useState(initial?.phone||"");
+    const [telegram,setTelegram]=useState(initial?.telegram||"");
+    const [notes,setNotes]=useState(initial?.notes||"");
+    const [msgTpl,setMsgTpl]=useState(initial?.messageTemplate||initial?.message_template||"");
+    const [selGrps,setSelGrps]=useState(()=>initial?.id?studentGrps.filter(sg=>sg.studentId===initial.id).map(sg=>sg.groupId):[]);
+    const toggleGrp=(gid)=>setSelGrps(p=>p.includes(gid)?p.filter(g=>g!==gid):[...p,gid]);
+    return(<div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
+        <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
+      </div>
+      <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
+      <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
+      <Field label="Групи / напрямки">
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {DIRECTIONS.map(d=><div key={d.id}><div style={{fontSize:11,color:d.color,fontWeight:600,marginBottom:2}}>{d.name}</div><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{groups.filter(g=>g.directionId===d.id).map(g=><Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>)}</div></div>)}
+        </div>
+      </Field>
+      <Field label="Шаблон повідомлення"><textarea style={{...inputSt,minHeight:50,resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/><div style={{fontSize:10,color:"#8892b0",marginTop:2}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div></Field>
+      <Field label="Нотатки"><textarea style={{...inputSt,minHeight:40,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
+        <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
+        <button style={{...btnP,opacity:firstName.trim()?1:.4}} onClick={()=>{if(!firstName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[firstName.trim(),lastName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти":"Додати"}</button>
+      </div>
+    </div>);
+  }
+
   function SubForm({initial,onDone}){
     const [studentId,setStudentId]=useState(initial?.studentId||"");
     const [groupId,setGroupId]=useState(initial?.groupId||"");
@@ -492,55 +493,10 @@ export default function App() {
       <Field label="Тип"><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} ({p.trainings}) — {p.price}₴</Pill>)}</div></Field>
       
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        {/* Додано виклик календаря (showPicker) при кліку */}
         <Field label="Початок (натисніть)"><input style={{...inputSt, cursor: "pointer"}} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} /></Field>
         <Field label="Кінець (авто)"><input style={{...inputSt,opacity:.6, cursor: "not-allowed"}} type="date" value={endDate} readOnly/></Field>
       </div>
 
-      <div style={{background:"#161b22",borderRadius:8,padding:"12px 14px",marginBottom:12,border:"1px solid #21262d"}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Field label="Знижка (%)"><input style={{...inputSt,width:80}} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
-          <Field label="За рахунок"><div style={{display:"flex",gap:4}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
-        </div>
-        {discountPct>0&&<div style={{fontSize:12,color:"#F9A03F",marginTop:6}}>Базова: {basePrice}₴ → -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:"#2ECC71"}}>{basePrice-Math.round(basePrice*discountPct/100)}₴</strong></div>}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Field label="Сума (грн)"><input style={inputSt} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
-        <Field label="Оплата"><div style={{display:"flex",gap:6}}>{PAY_METHODS.map(m=><Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>)}</div></Field>
-      </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,color:"#c9d1d9",cursor:"pointer",fontSize:14,marginBottom:8}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)}/> Оплачено</label>
-      <Field label="Нотатки"><textarea style={{...inputSt,minHeight:40,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
-      <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
-        <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
-        <button style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings,usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти":"Додати"}</button>
-      </div>
-    </div>);
-  }
-
-  function SubForm({initial,onDone}){
-    const [studentId,setStudentId]=useState(initial?.studentId||"");
-    const [groupId,setGroupId]=useState(initial?.groupId||"");
-    const [planType,setPlanType]=useState(initial?.planType||"8pack");
-    const [startDate,setStartDate]=useState(initial?.startDate||today());
-    const [amount,setAmount]=useState(initial?.amount||1500);
-    const [paid,setPaid]=useState(initial?.paid??false);
-    const [payMethod,setPayMethod]=useState(initial?.payMethod||"card");
-    const [discountPct,setDiscountPct]=useState(initial?.discountPct||0);
-    const [discountSource,setDiscountSource]=useState(initial?.discountSource||"studio");
-    const [notes,setNotes]=useState(initial?.notes||"");
-    const plan=PLAN_TYPES.find(p=>p.id===planType);
-    const totalTrainings=plan?.trainings||8;
-    const endDate=addMonth(startDate);
-    const basePrice=plan?.price||0;
-    useEffect(()=>{if(!initial){const p=PLAN_TYPES.find(p=>p.id===planType);if(p)setAmount(p.price-Math.round(p.price*discountPct/100))}},[planType,discountPct]);
-    return(<div>
-      <Field label="Учениця *"><select style={inputSt} value={studentId} onChange={e=>setStudentId(e.target.value)}><option value="">Обрати...</option>{students.sort((a,b)=>a.name.localeCompare(b.name,"uk")).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-      <Field label="Група *"><select style={inputSt} value={groupId} onChange={e=>setGroupId(e.target.value)}><option value="">Обрати...</option>{DIRECTIONS.map(d=><optgroup key={d.id} label={d.name}>{groups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</optgroup>)}</select></Field>
-      <Field label="Тип"><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} ({p.trainings}) — {p.price}₴</Pill>)}</div></Field>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Field label="Початок"><input style={inputSt} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></Field>
-        <Field label="Кінець (авто)"><input style={{...inputSt,opacity:.6}} type="date" value={endDate} readOnly/></Field>
-      </div>
       <div style={{background:"#161b22",borderRadius:8,padding:"12px 14px",marginBottom:12,border:"1px solid #21262d"}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <Field label="Знижка (%)"><input style={{...inputSt,width:80}} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
@@ -882,7 +838,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* ─── ОНОВЛЕНІ ФІНАНСИ З АНАЛІТИКОЮ ─── */}
+        {/* ─── ФІНАНСИ З АНАЛІТИКОЮ ─── */}
         {tab==="finance" && (() => {
           let finData = [...analytics.splits];
           if (finFilterDir !== "all") finData = finData.filter(s => s.group.directionId === finFilterDir);
