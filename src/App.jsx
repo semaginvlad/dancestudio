@@ -100,7 +100,7 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [calMonth, setCalMonth] = useState(()=>{const n=new Date();return{y:n.getFullYear(),m:n.getMonth()}});
   const [expandedDirs, setExpandedDirs] = useState({});
-  const [expandedSubDirs, setExpandedSubDirs] = useState({}); // Стан для акордеона абонементів
+  const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
   // ─── LOAD ───
   useEffect(()=>{(async()=>{try{
@@ -378,35 +378,64 @@ export default function App() {
     </div>);
   }
 
-  // ═══ CALENDAR ═══
+  // ═══ CALENDAR (ОНОВЛЕНО НА 3 МІСЯЦІ) ═══
   function CalendarView(){
     const [gid,setGid]=useState(groups[0]?.id||"");
     const gr=groupMap[gid];
-    const dates=gr?getMonthDates(calMonth.y,calMonth.m,gr.schedule||[]):[];
-    const monthName=new Date(calMonth.y,calMonth.m).toLocaleDateString("uk-UA",{month:"long",year:"numeric"});
+    
+    // Генеруємо масив з 3 місяців: Попередній, Поточний, Наступний
+    const monthsToDisplay = useMemo(() => {
+      const prev = { y: calMonth.m === 0 ? calMonth.y - 1 : calMonth.y, m: calMonth.m === 0 ? 11 : calMonth.m - 1 };
+      const curr = { y: calMonth.y, m: calMonth.m };
+      const next = { y: calMonth.m === 11 ? calMonth.y + 1 : calMonth.y, m: calMonth.m === 11 ? 0 : calMonth.m + 1 };
+      return [prev, curr, next];
+    }, [calMonth]);
+
     const cancelledDates=cancelled.filter(c=>c.groupId===gid).map(c=>c.date);
+
     return(<div>
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between"}}>
         <GroupSelect groups={groups} value={gid} onChange={setGid}/>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <button style={btnS} onClick={()=>setCalMonth(p=>{let m=p.m-1,y=p.y;if(m<0){m=11;y--}return{y,m}})}>←</button>
-          <span style={{color:"#fff",fontWeight:600,minWidth:140,textAlign:"center",textTransform:"capitalize"}}>{monthName}</span>
-          <button style={btnS} onClick={()=>setCalMonth(p=>{let m=p.m+1,y=p.y;if(m>11){m=0;y++}return{y,m}})}>→</button>
+          <button style={btnS} onClick={()=>setCalMonth(p=>{let m=p.m-1,y=p.y;if(m<0){m=11;y--}return{y,m}})}>← Минулий</button>
+          <button style={btnS} onClick={()=>setCalMonth(p=>{let m=p.m+1,y=p.y;if(m>11){m=0;y++}return{y,m}})}>Наступний →</button>
         </div>
       </div>
-      {gr&&<div style={{marginBottom:12,color:"#8892b0",fontSize:13}}>
+      {gr&&<div style={{marginBottom:20,color:"#8892b0",fontSize:13}}>
         {(gr.schedule||[]).map(s=>`${WEEKDAYS[s.day]} ${s.time}`).join(", ")} · {gr.trainerPct||50}%/{100-(gr.trainerPct||50)}%
         <button style={{...btnS,padding:"4px 10px",fontSize:11,marginLeft:8}} onClick={()=>{setEditItem(gr);setModal("editGroup")}}>⚙️</button>
       </div>}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(90px, 1fr))",gap:8}}>
-        {dates.map(d=>{const isCan=cancelledDates.includes(d.date),isT=d.date===today();
-          return<div key={d.date} style={{...cardSt,padding:"10px 12px",textAlign:"center",border:isT?"2px solid #E84855":"1px solid #21262d",opacity:isCan?.5:1,background:isCan?"#E8485510":"#161b22"}}>
-            <div style={{fontSize:18,fontWeight:700,color:isCan?"#E84855":"#fff"}}>{new Date(d.date+"T12:00:00").getDate()}</div>
-            <div style={{fontSize:10,color:"#8892b0"}}>{WEEKDAYS[d.day]} · {d.time}</div>
-            {isCan&&<div style={{fontSize:9,color:"#E84855",marginTop:2}}>ВІДМІНЕНО</div>}
-          </div>})}
+      
+      {/* Контейнер для 3 місяців (з горизонтальним скролом на мобілках) */}
+      <div style={{display:"flex", gap: 20, overflowX: "auto", paddingBottom: 10}}>
+        {monthsToDisplay.map((monthObj, index) => {
+          const dates = gr ? getMonthDates(monthObj.y, monthObj.m, gr.schedule||[]) : [];
+          const monthName = new Date(monthObj.y, monthObj.m).toLocaleDateString("uk-UA", {month:"long", year:"numeric"});
+          const isCurrentMonth = index === 1; // Центральний місяць
+          
+          return (
+            <div key={`${monthObj.y}-${monthObj.m}`} style={{minWidth: 280, flex: 1, opacity: isCurrentMonth ? 1 : 0.6, transition: "opacity 0.3s"}}>
+              <h3 style={{color: isCurrentMonth ? "#fff" : "#8892b0", fontSize: 16, marginBottom: 12, textTransform: "capitalize", textAlign: "center", fontWeight: isCurrentMonth ? 700 : 500}}>
+                {monthName}
+              </h3>
+              
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(75px, 1fr))",gap:8}}>
+                {dates.map(d=>{
+                  const isCan=cancelledDates.includes(d.date), isT=d.date===today();
+                  return (
+                    <div key={d.date} style={{...cardSt,padding:"10px 8px",textAlign:"center",border:isT?"2px solid #E84855":"1px solid #21262d",opacity:isCan?.5:1,background:isCan?"#E8485510":"#161b22"}}>
+                      <div style={{fontSize:16,fontWeight:700,color:isCan?"#E84855":"#fff"}}>{new Date(d.date+"T12:00:00").getDate()}</div>
+                      <div style={{fontSize:9,color:"#8892b0"}}>{WEEKDAYS[d.day]}</div>
+                      {isCan&&<div style={{fontSize:8,color:"#E84855",marginTop:2}}>ВІДМІНЕНО</div>}
+                    </div>
+                  )
+                })}
+              </div>
+              {dates.length===0&&<div style={{color:"#8892b0",padding:20,textAlign:"center",fontSize:12}}>Немає розкладу</div>}
+            </div>
+          )
+        })}
       </div>
-      {dates.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає розкладу</div>}
     </div>);
   }
 
@@ -593,7 +622,6 @@ export default function App() {
           {filteredStudents.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>{students.length===0?"Ще немає учениць":"Не знайдено"}</div>}
         </div>}
 
-        {/* ─── ОНОВЛЕНА ВКЛАДКА АБОНЕМЕНТІВ (АКОРДЕОН З ТАБЛИЦЕЮ) ─── */}
         {tab==="subs"&&<div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             <input style={{...inputSt,width:"auto",minWidth:180}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
@@ -674,7 +702,6 @@ export default function App() {
 
           </div>}
         </div>}
-        {/* ────────────────────────────────────────────────────────── */}
 
         {tab==="attendance"&&<AttendancePanel/>}
         {tab==="calendar"&&<CalendarView/>}
