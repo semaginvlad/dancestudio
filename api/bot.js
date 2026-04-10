@@ -310,7 +310,7 @@ safeAction(/undo_(.+)/, async (ctx) => {
 });
 
 // ==========================================
-// 7. Створення абонементів та Оплати (ОНОВЛЕНО)
+// 7. Створення абонементів та Оплати
 // ==========================================
 
 // КРОК 1: Запит форми оплати
@@ -328,16 +328,19 @@ safeAction(/markpaid_(.+)/, async (ctx) => {
     });
 });
 
-// КРОК 2: Підтвердження оплати
+// КРОК 2: Підтвердження оплати і запис у базу
 safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
-    const methodStr = ctx.match[1] === 'cash' ? 'Готівка' : 'На картку';
+    const methodStr = ctx.match[1] === 'cash' ? 'Готівка' : 'Картка';
     const subId = ctx.match[2];
 
     const { data: sub } = await supabase.from('subscriptions').select('*, students(name)').eq('id', subId).single();
     if (!sub) return ctx.answerCbQuery('❌ Помилка', { show_alert: true });
 
-    // Оновлюємо статус на "Оплачено"
-    await supabase.from('subscriptions').update({ paid: true }).eq('id', subId);
+    // Оновлюємо статус на "Оплачено" і зберігаємо метод оплати!
+    await supabase.from('subscriptions').update({ 
+        paid: true,
+        payment_method: methodStr 
+    }).eq('id', subId);
 
     await ctx.answerCbQuery('✅ Оплата пройшла!');
 
