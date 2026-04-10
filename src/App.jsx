@@ -99,7 +99,7 @@ export default function App() {
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [calMonth, setCalMonth] = useState(()=>{const n=new Date();return{y:n.getFullYear(),m:n.getMonth()}});
-  const [expandedDirs, setExpandedDirs] = useState({}); // Стан для акордеона учениць
+  const [expandedDirs, setExpandedDirs] = useState({});
 
   // ─── LOAD ───
   useEffect(()=>{(async()=>{try{
@@ -514,7 +514,6 @@ export default function App() {
           </div>
         </div>}
 
-        {/* ─── ОНОВЛЕНА ВКЛАДКА УЧЕНИЦЬ (АКОРДЕОН) ─── */}
         {tab==="students"&&<div>
           <input style={{...inputSt,maxWidth:350,marginBottom:14}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
           
@@ -557,38 +556,61 @@ export default function App() {
 
           {filteredStudents.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>{students.length===0?"Ще немає учениць":"Не знайдено"}</div>}
         </div>}
-        {/* ────────────────────────────────────────── */}
 
+        {/* ─── ОНОВЛЕНА ВКЛАДКА АБОНЕМЕНТІВ (СІТКА-ВІДЖЕТИ) ─── */}
         {tab==="subs"&&<div>
-          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             <input style={{...inputSt,width:"auto",minWidth:180}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Всі напрямки</option>{DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Всі</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option></select>
           </div>
+          
           {filteredSubs.length===0?<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>Немає</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(290px, 1fr))", gap:16}}>
             {filteredSubs.map(sub=>{const st=studentMap[sub.studentId],gr=groupMap[sub.groupId],dir=gr?dirMap[gr.directionId]:null,pct=sub.totalTrainings>0?(sub.usedTrainings/sub.totalTrainings*100):0,planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-            return<div key={sub.id} style={{...cardSt,borderLeft:`3px solid ${STATUS_COLORS[sub.status]}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:6}}>
-                <div style={{flex:1,minWidth:200}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    <span style={{color:"#fff",fontWeight:600,fontSize:14}}>{st?.name||"?"}</span>
-                    <Badge color={dir?.color||"#888"}>{gr?.name}</Badge>
-                    <Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>
-                    {!sub.paid&&<Badge color="#E84855">💰</Badge>}
-                    {sub.discountPct>0&&<Badge color="#3498DB">-{sub.discountPct}%</Badge>}
-                  </div>
-                  <div style={{color:"#8892b0",fontSize:11,marginTop:4}}>{planLabel} · {fmt(sub.startDate)}—{fmt(sub.endDate)} · {sub.usedTrainings}/{sub.totalTrainings} · {sub.amount}₴ {sub.payMethod==="cash"?"💵":"💳"}</div>
-                  <div style={{marginTop:4,height:3,background:"#21262d",borderRadius:2,overflow:"hidden",maxWidth:180}}><div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:STATUS_COLORS[sub.status],borderRadius:2}}/></div>
+            return<div key={sub.id} style={{...cardSt, borderTop:`4px solid ${STATUS_COLORS[sub.status]}`, display: "flex", flexDirection: "column"}}>
+              
+              {/* Заголовок: Ім'я і статус */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                <div style={{color:"#fff",fontWeight:700,fontSize:16,lineHeight:1.2}}>{st?.name||"?"}</div>
+                <Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>
+              </div>
+
+              {/* Теги: Група, Борг, Знижка */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                <Badge color={dir?.color||"#888"}>{gr?.name}</Badge>
+                {!sub.paid&&<Badge color="#E84855">💰 Борг</Badge>}
+                {sub.discountPct>0&&<Badge color="#3498DB">-{sub.discountPct}%</Badge>}
+              </div>
+              
+              {/* Блок з деталями абонемента */}
+              <div style={{background:"#0d1117", borderRadius:8, padding:12, marginBottom:14, flexGrow: 1}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{color:"#c9d1d9",fontSize:13,fontWeight:600}}>{planLabel}</span>
+                  <span style={{color:"#8892b0",fontSize:12}}>{sub.amount}₴ {sub.payMethod==="cash"?"💵":"💳"}</span>
                 </div>
-                <div style={{display:"flex",gap:4}}>
-                  <button style={{...btnS,padding:"5px 10px",fontSize:11}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
-                  <button style={{...btnS,padding:"5px 10px",fontSize:11,color:"#E84855"}} onClick={()=>deleteSub(sub.id)}>🗑</button>
+                <div style={{color:"#8892b0",fontSize:11,marginBottom:10}}>Термін: {fmt(sub.startDate)} — {fmt(sub.endDate)}</div>
+                
+                {/* Прогрес бар */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11,color:"#8892b0",marginBottom:4}}>
+                  <span>Використано: <strong style={{color:"#fff"}}>{sub.usedTrainings}</strong> / {sub.totalTrainings}</span>
+                  <span>{Math.round(pct)}%</span>
+                </div>
+                <div style={{height:6,background:"#21262d",borderRadius:3,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:STATUS_COLORS[sub.status],borderRadius:3}}/>
                 </div>
               </div>
+              
+              {/* Кнопки дій */}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button style={{...btnS,padding:"6px 12px",fontSize:11}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️ Редаг.</button>
+                <button style={{...btnS,padding:"6px 12px",fontSize:11,color:"#E84855"}} onClick={()=>deleteSub(sub.id)}>🗑</button>
+              </div>
+
             </div>})}
           </div>}
         </div>}
+        {/* ────────────────────────────────────────────────── */}
 
         {tab==="attendance"&&<AttendancePanel/>}
         {tab==="calendar"&&<CalendarView/>}
