@@ -137,7 +137,8 @@ export default function App() {
 
   // ═══ STUDENT FORM ═══
   function StudentForm({initial,onDone}){
-    const [name,setName]=useState(initial?.name||"");
+    const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
+    const [lastName,setLastName]=useState(initial?.lastName||initial?.last_name||"");
     const [phone,setPhone]=useState(initial?.phone||"");
     const [telegram,setTelegram]=useState(initial?.telegram||"");
     const [notes,setNotes]=useState(initial?.notes||"");
@@ -145,7 +146,10 @@ export default function App() {
     const [selGrps,setSelGrps]=useState(()=>initial?.id?studentGrps.filter(sg=>sg.studentId===initial.id).map(sg=>sg.groupId):[]);
     const toggleGrp=(gid)=>setSelGrps(p=>p.includes(gid)?p.filter(g=>g!==gid):[...p,gid]);
     return(<div>
-      <Field label="Ім'я *"><input style={inputSt} value={name} onChange={e=>setName(e.target.value)} placeholder="Олена Петренко"/></Field>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
+        <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
+      </div>
       <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
       <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
       <Field label="Групи / напрямки">
@@ -157,7 +161,7 @@ export default function App() {
       <Field label="Нотатки"><textarea style={{...inputSt,minHeight:40,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
         <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
-        <button style={{...btnP,opacity:name.trim()?1:.4}} onClick={()=>{if(!name.trim())return;onDone({name:name.trim(),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти":"Додати"}</button>
+        <button style={{...btnP,opacity:firstName.trim()?1:.4}} onClick={()=>{if(!firstName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[firstName.trim(),lastName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти":"Додати"}</button>
       </div>
     </div>);
   }
@@ -400,7 +404,7 @@ export default function App() {
     const stGrps=studentGrps.filter(sg=>sg.studentId===st.id);
     return <div key={st.id} style={{...cardSt,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,marginBottom:6}}>
       <div style={{minWidth:180}}>
-        <div style={{color:"#fff",fontWeight:600,fontSize:14}}>{st.name}</div>
+        <div style={{color:"#fff",fontWeight:600,fontSize:14}}>{[st.firstName,st.lastName].filter(Boolean).join(' ')||st.name}</div>
         <div style={{color:"#8892b0",fontSize:11}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
         {stGrps.length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:3}}>
           {stGrps.map(sg=>{const g=groupMap[sg.groupId];const d=g?dirMap[g.directionId]:null;return g?<span key={sg.id} style={{fontSize:9,color:d?.color||"#888"}}>{g.name}</span>:null}).filter(Boolean).reduce((prev,curr,i)=>i===0?[curr]:[...prev,<span key={`s${i}`} style={{fontSize:9,color:"#555"}}>·</span>,curr],[])}
