@@ -246,8 +246,10 @@ safeAction(/nost_(.+)_(.+)/, async (ctx) => {
     const grpId = ctx.match[2];
     await ctx.answerCbQuery();
 
-    const { data: student } = await supabase.from('students').select('name, id').ilike('id', `${shortId}%`).single();
-    if (!student) throw new Error("Ученицю не знайдено");
+    // ШУКАЄМО УЧЕНИЦЮ (Виправлено баг з UUID)
+    const { data: allStudents } = await supabase.from('students').select('name, id');
+    const student = allStudents?.find(s => s.id.startsWith(shortId));
+    if (!student) throw new Error("Ученицю не знайдено в базі");
 
     await ctx.editMessageText(`👩 ${student.name}\nАбонемент відсутній або закінчився.`, {
         reply_markup: {
@@ -313,7 +315,7 @@ safeAction(/undo_(.+)/, async (ctx) => {
 // 7. Створення абонементів та Оплати
 // ==========================================
 
-// КРОК 1: Запит форми оплати
+// Запит форми оплати
 safeAction(/markpaid_(.+)/, async (ctx) => {
     const subId = ctx.match[1];
     await ctx.answerCbQuery();
@@ -328,7 +330,7 @@ safeAction(/markpaid_(.+)/, async (ctx) => {
     });
 });
 
-// КРОК 2: Підтвердження оплати і запис у базу
+// Підтвердження оплати і запис у базу
 safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
     const methodStr = ctx.match[1] === 'cash' ? 'Готівка' : 'Картка';
     const subId = ctx.match[2];
@@ -336,7 +338,7 @@ safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
     const { data: sub } = await supabase.from('subscriptions').select('*, students(name)').eq('id', subId).single();
     if (!sub) return ctx.answerCbQuery('❌ Помилка', { show_alert: true });
 
-    // Оновлюємо статус на "Оплачено" і зберігаємо метод оплати!
+    // Оновлюємо статус і метод
     await supabase.from('subscriptions').update({ 
         paid: true,
         payment_method: methodStr 
@@ -344,7 +346,6 @@ safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
 
     await ctx.answerCbQuery('✅ Оплата пройшла!');
 
-    // Показуємо красивий чек з усією інфою
     await ctx.editMessageText(
         `✅ **Оплату успішно внесено!**\n\n👩 Учениця: ${sub.students?.name || 'Невідомо'}\n💰 Сума: ${sub.price} грн\n💳 Форма оплати: ${methodStr}\n📅 Дата початку: ${sub.start_date}\n⏳ Діє до: ${sub.end_date}`,
         {
@@ -364,12 +365,15 @@ safeAction(/pay_menu_(.+)/, async (ctx) => {
     await ctx.answerCbQuery();
     const { data: sub } = await supabase.from('subscriptions').select('group_id, student_id').eq('id', subId).single();
 
+    const stShort = sub.student_id.substring(0, 8);
+    const grpShort = sub.group_id.substring(0, 15);
+
     await ctx.editMessageText('Оберіть формат нового абонемента:', {
         reply_markup: {
             inline_keyboard: [
-                [{ text: 'Разове (300)', callback_data: `cr_1_${sub.student_id.substring(0, 8)}_${sub.group_id}` }, { text: 'Пробне (150)', callback_data: `cr_0_${sub.student_id.substring(0, 8)}_${sub.group_id}` }],
-                [{ text: '4 зан. (1000)', callback_data: `cr_4_${sub.student_id.substring(0, 8)}_${sub.group_id}` }, { text: '8 зан. (1500)', callback_data: `cr_8_${sub.student_id.substring(0, 8)}_${sub.group_id}` }],
-                [{ text: '12 зан. (1800)', callback_data: `cr_12_${sub.student_id.substring(0, 8)}_${sub.group_id}` }],
+                [{ text: 'Разове (300)', callback_data: `cr_1_${stShort}_${grpShort}` }, { text: 'Пробне (150)', callback_data: `cr_0_${stShort}_${grpShort}` }],
+                [{ text: '4 зан. (1000)', callback_data: `cr_4_${stShort}_${grpShort}` }, { text: '8 зан. (1500)', callback_data: `cr_8_${stShort}_${grpShort}` }],
+                [{ text: '12 зан. (1800)', callback_data: `cr_12_${stShort}_${grpShort}` }],
                 [{ text: '🔙 Назад', callback_data: `sub_${subId}` }]
             ]
         }
@@ -396,10 +400,16 @@ safeAction(/newpay_menu_(.+)_(.+)/, async (ctx) => {
 safeAction(/cr_(\d+)_(.+)_(.+)/, async (ctx) => {
     const count = parseInt(ctx.match[1]);
     const shortStId = ctx.match[2];
-    const grpId = ctx.match[3];
+    const shortGrpId = ctx.match[3];
 
-    const { data: student } = await supabase.from('students').select('id').ilike('id', `${shortStId}%`).single();
-    if (!student) return ctx.answerCbQuery('Помилка: ученицю не знайдено');
+    // ШУКАЄМО (Виправлено баг з UUID)
+    const { data: allStudents } = await supabase.from('students').select('id');
+    const student = allStudents?.find(s => s.id.startsWith(shortStId));
+    if (!student) return ctx.answerCbQuery('Помилка: ученицю не знайдено', { show_alert: true });
+
+    const { data: allGroups } = await supabase.from('groups').select('id');
+    const group = allGroups?.find(g => g.id.startsWith(shortGrpId));
+    if (!group) return ctx.answerCbQuery('Помилка: групу не знайдено', { show_alert: true });
 
     const startDate = new Date();
     const endDate = new Date();
@@ -419,7 +429,7 @@ safeAction(/cr_(\d+)_(.+)_(.+)/, async (ctx) => {
 
     await supabase.from('subscriptions').insert({
         student_id: student.id,
-        group_id: grpId,
+        group_id: group.id,
         total_trainings: totalTrainings,
         used_trainings: 0,
         start_date: formattedStart,
@@ -429,7 +439,7 @@ safeAction(/cr_(\d+)_(.+)_(.+)/, async (ctx) => {
     });
 
     await ctx.answerCbQuery('✅ Абонемент створено! (Не оплачений)');
-    await renderGroupList(ctx, grpId);
+    await renderGroupList(ctx, group.id);
 });
 
 // ==========================================
