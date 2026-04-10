@@ -195,11 +195,34 @@ export async function insertModLog(l) {
 }
 
 // ─── HELPERS ───
-export async function incrementUsed(subId) {
-  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-  if (sub) await supabase.from('subscriptions').update({ used_trainings: (sub.used_trainings || 0) + 1 }).eq('id', subId)
+// ─── HELPERS ───
+export async function incrementUsed(subId, qty = 1) {
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('used_trainings')
+    .eq('id', subId)
+    .single()
+
+  if (sub) {
+    await supabase
+      .from('subscriptions')
+      .update({ used_trainings: (sub.used_trainings || 0) + qty })
+      .eq('id', subId)
+  }
 }
-export async function decrementUsed(subId) {
-  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-  if (sub) await supabase.from('subscriptions').update({ used_trainings: Math.max(0, (sub.used_trainings || 0) - 1) }).eq('id', subId)
+
+export async function decrementUsed(subId, qty = 1) {
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('used_trainings')
+    .eq('id', subId)
+    .single()
+
+  if (sub) {
+    await supabase
+      .from('subscriptions')
+      .update({ used_trainings: Math.max(0, (sub.used_trainings || 0) - qty) })
+      .eq('id', subId)
+  }
+}
 }
