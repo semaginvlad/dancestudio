@@ -1,9 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
 
-// ==========================================
-// UTILS & CONSTANTS
-// ==========================================
+// ─── КОНСТАНТИ ТА УТИЛІТИ ───
 const DIRECTIONS = [
   { id: "latina", name: "Latina Solo", color: "#FF3B30" },
   { id: "bachata", name: "Bachata Lady Style", color: "#FF9F0A" },
@@ -52,19 +50,20 @@ function getSubStatus(sub) {
   return "active";
 }
 
-// ==========================================
-// UI COMPONENTS
-// ==========================================
+const STATUS_LABELS = { active: "Активний", warning: "Закінчується", expired: "Протермінований" };
+const STATUS_COLORS = { active: "#30D158", warning: "#FF9F0A", expired: "#FF453A" };
+
+// ─── UI КОМПОНЕНТИ (BENTO STYLE) ───
 const inputSt = { width:"100%", padding:"16px", background:"#1C1C1E", border:"none", borderRadius:16, color:"#fff", fontSize:15, outline:"none", boxSizing:"border-box" };
-const btnP = { padding:"14px 24px", background:"#FF3B30", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:600, cursor:"pointer", boxShadow:"0 4px 12px rgba(255,59,48,0.3)" };
+const btnP = { padding:"14px 24px", background:"#FF453A", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:700, cursor:"pointer", boxShadow:"0 4px 12px rgba(255,69,58,0.3)" };
 const btnS = { padding:"14px 24px", background:"#2C2C2E", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:600, cursor:"pointer" };
 const cardSt = { background:"#1C1C1E", borderRadius:28, padding:"24px" };
 
 function Modal({open, onClose, title, children, wide}){
   if(!open) return null;
   return(
-    <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,.8)", backdropFilter:"blur(8px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E", borderRadius:32, padding:"32px", width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"auto"}}>
+    <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,.85)", backdropFilter:"blur(10px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E", borderRadius:32, padding:"32px", width:wide?900:500, maxWidth:"100%", maxHeight:"90vh", overflow:"auto", border: "1px solid #2C2C2E"}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24}}>
           <h3 style={{margin:0, fontSize:22, color:"#fff", fontWeight:800}}>{title}</h3>
           <button onClick={onClose} style={{background:"#2C2C2E", borderRadius:"50%", width:36, height:36, border:"none", color:"#8E8E93", cursor:"pointer"}}>✕</button>
@@ -76,7 +75,7 @@ function Modal({open, onClose, title, children, wide}){
 }
 
 function Field({label, children}){
-  return(<div style={{marginBottom:16}}><label style={{display:"block", fontSize:12, color:"#8E8E93", marginBottom:8, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5}}>{label}</label>{children}</div>);
+  return(<div style={{marginBottom:16}}><label style={{display:"block", fontSize:12, color:"#8E8E93", marginBottom:8, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5}}>{label}</label>{children}</div>);
 }
 
 function Badge({color, children}){
@@ -84,12 +83,26 @@ function Badge({color, children}){
 }
 
 function Pill({active, onClick, children, color}){
-  return <button onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||"#FF3B30"):"#2C2C2E", color:active?"#fff":"#8E8E93", border:"none", transition:"all 0.2s"}}>{children}</button>;
+  return <button onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:700, cursor:"pointer", background:active?(color||"#FF453A"):"#2C2C2E", color:active?"#fff":"#8E8E93", border:"none", transition:"all 0.2s"}}>{children}</button>;
 }
 
-// ==========================================
+function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = false}) {
+  const filteredGroups = filterDir === "all" ? groups : groups.filter(g => g.directionId === filterDir);
+  return (
+    <select style={{...inputSt, width:"auto", minWidth:200}} value={value} onChange={e=>onChange(e.target.value)}>
+      {allowAll && <option value="all">Усі групи</option>}
+      {DIRECTIONS.filter(d => filterDir === "all" || d.id === filterDir).map(d=>(
+        <optgroup key={d.id} label={d.name}>
+          {filteredGroups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+// ═══════════════════════════════════════
 // MAIN APP
-// ==========================================
+// ═══════════════════════════════════════
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -106,15 +119,29 @@ export default function App() {
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]);
 
-  // States for Attendance
+  // States для фільтрів
+  const [stFilterDir, setStFilterDir] = useState("all");
+  const [stFilterGroup, setStFilterGroup] = useState("all");
+  const [subFilterDir, setSubFilterDir] = useState("all");
+  const [subFilterGroup, setSubFilterGroup] = useState("all");
+  const [subFilterStatus, setSubFilterStatus] = useState("all");
+  const [finFilterDir, setFinFilterDir] = useState("all");
+  const [finFilterGroup, setFinFilterGroup] = useState("all");
+  const [finSortBy, setFinSortBy] = useState("total");
+  const [finSortOrder, setFinSortOrder] = useState("desc");
+
+  // States для Відвідувань
+  const [viewMode, setViewMode] = useState("daily");
   const [attnGid, setAttnGid] = useState("");
   const [attnDate, setAttnDate] = useState(today());
-  const [viewMode, setViewMode] = useState("daily");
+  const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   const [draft, setDraft] = useState({});
   const [isSaving, setIsSaving] = useState(false);
-  const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
 
-  // Load Data
+  const [expandedDirs, setExpandedDirs] = useState({});
+  const [expandedSubDirs, setExpandedSubDirs] = useState({});
+
+  // ─── ЗАВАНТАЖЕННЯ ДАНИХ ───
   useEffect(() => {
     (async () => {
       try {
@@ -132,20 +159,73 @@ export default function App() {
           const wl = await db.fetchWaitlist();
           setWaitlist(wl || []);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("Load error:", e); }
       setLoading(false);
     })();
   }, []);
 
   useEffect(() => { if (groups.length > 0 && !attnGid) setAttnGid(groups[0].id); }, [groups, attnGid]);
 
-  // Maps
+  // ─── MAPS ───
   const studentMap = useMemo(() => Object.fromEntries(students.map(s => [s.id, s])), [students]);
   const groupMap = useMemo(() => Object.fromEntries(groups.map(g => [g.id, g])), [groups]);
+  const dirMap = useMemo(() => Object.fromEntries(DIRECTIONS.map(d => [d.id, d])), []);
   const subsExt = useMemo(() => subs.map(s => ({ ...s, status: getSubStatus(s) })), [subs]);
   const activeSubs = useMemo(() => subsExt.filter(s => s.status !== "expired"), [subsExt]);
 
-  // Attendance Logic
+  // ─── ANALYTICS ───
+  const analytics = useMemo(() => {
+    const totalRev = subs.filter(s => s.paid).reduce((a, s) => a + (s.amount || 0), 0);
+    const unpaid = subs.filter(s => !s.paid && getSubStatus(s) !== "expired").reduce((a, s) => a + (s.amount || 0), 0);
+    const byDir = {}; DIRECTIONS.forEach(d => {
+      const gids = groups.filter(g => g.directionId === d.id).map(g => g.id);
+      const ds = activeSubs.filter(s => gids.includes(s.groupId));
+      byDir[d.id] = { students: new Set(ds.map(s => s.studentId)).size };
+    });
+    const splits = []; groups.forEach(g => {
+      const gSubs = subs.filter(s => s.groupId === g.id && s.paid);
+      const total = gSubs.reduce((a, s) => a + (s.amount || 0), 0);
+      if (total > 0) {
+        splits.push({ group: g, total, trainer: Math.round(total * (g.trainerPct || 50) / 100), studio: Math.round(total * (100 - (g.trainerPct || 50)) / 100), subs: gSubs });
+      }
+    });
+    let totalLTV = 0; let usersWithPurchases = 0; let trialUsers = 0; let convertedUsers = 0;
+    Object.values(studentMap).forEach(st => {
+      const stSubs = subs.filter(s => s.studentId === st.id);
+      if (stSubs.length > 0) {
+        const moneySpent = stSubs.filter(s => s.paid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+        if (moneySpent > 0) { totalLTV += moneySpent; usersWithPurchases++; }
+        if (stSubs.some(s => s.planType === "trial")) {
+          trialUsers++;
+          if (stSubs.some(s => s.planType !== "trial")) convertedUsers++;
+        }
+      }
+    });
+    return { 
+      totalStudents: students.length, 
+      activeStudents: new Set(activeSubs.map(s => s.studentId)).size, 
+      totalRev, unpaid, byDir, splits,
+      avgLTV: usersWithPurchases > 0 ? Math.round(totalLTV / usersWithPurchases) : 0,
+      conversionRate: trialUsers > 0 ? Math.round((convertedUsers / trialUsers) * 100) : 0
+    };
+  }, [students, subs, activeSubs, groups, studentMap]);
+
+  // ─── СПОВІЩЕННЯ ───
+  const notifications = useMemo(() => {
+    const items = [];
+    subsExt.filter(s => s.status !== "active").forEach(sub => {
+      const st = studentMap[sub.studentId]; if (!st) return;
+      if (sub.status === "expired" && subs.some(s => s.studentId === sub.studentId && s.groupId === sub.groupId && getSubStatus(s) !== "expired")) return;
+      items.push({ 
+        subId: sub.id, student: st, group: groupMap[sub.groupId], status: sub.status,
+        message: sub.status === "expired" ? "Абонемент закінчився" : "Залишилось мало занять",
+        notified: sub.notificationSent 
+      });
+    });
+    return items;
+  }, [subsExt, studentMap, groupMap, subs]);
+
+  // ─── ВІДВІДУВАННЯ ЛОГІКА ───
   useEffect(() => {
     const initialDraft = {};
     const dayRecords = attn.filter(a => a.groupId === attnGid && a.date === attnDate);
@@ -198,159 +278,79 @@ export default function App() {
           }
         }
       }
-      alert("Збережено!");
+      alert("✅ Збережено успішно!");
     } catch (e) { console.error(e); }
     setIsSaving(false);
   };
 
-  // Analytics
-  const analytics = useMemo(() => {
-    const totalRev = subs.filter(s => s.paid).reduce((a, s) => a + (s.amount || 0), 0);
-    const unpaid = subs.filter(s => !s.paid && getSubStatus(s) !== "expired").reduce((a, s) => a + (s.amount || 0), 0);
-    const splits = [];
-    groups.forEach(g => {
-      const gSubs = subs.filter(s => s.groupId === g.id && s.paid);
-      const total = gSubs.reduce((a, s) => a + (s.amount || 0), 0);
-      if (total > 0) splits.push({ group: g, total, trainer: Math.round(total * (g.trainerPct || 50) / 100), studio: Math.round(total * (100 - (g.trainerPct || 50)) / 100), subs: gSubs });
-    });
-    return { totalStudents: students.length, activeStudents: new Set(activeSubs.map(s => s.studentId)).size, totalRev, unpaid, splits };
-  }, [students, subs, activeSubs, groups]);
-
   if (loading) return <div style={{ height: "100vh", background: "#000", color: "#8E8E93", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif" }}>Завантаження...</div>;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#000", color: "#fff", fontFamily: "'DM Sans', sans-serif", paddingBottom: 100 }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700;800&display=swap" rel="stylesheet" />
+    <div style={{ minHeight: "100vh", background: "#000", color: "#fff", fontFamily: "'DM Sans', sans-serif", paddingBottom: 120 }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&display=swap" rel="stylesheet" />
       
       {/* HEADER */}
-      <header style={{ padding: "30px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: 1200, margin: "0 auto" }}>
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>Dance Studio.</h1>
+      <header style={{ padding: "30px 24px", maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, letterSpacing: "-1px" }}>Dance Studio.</h1>
         <div style={{ display: "flex", gap: 12 }}>
           <button style={btnS} onClick={() => setModal("addStudent")}>+ Учениця</button>
           <button style={{ ...btnP, background: "#007AFF", boxShadow: "0 4px 12px rgba(0,122,255,0.3)" }} onClick={() => setModal("addSub")}>+ Абонемент</button>
         </div>
       </header>
 
-      {/* NAV */}
+      {/* NAVIGATION */}
       <nav style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px 30px", overflowX: "auto" }}>
         <div style={{ display: "inline-flex", background: "#1C1C1E", borderRadius: 100, padding: 6 }}>
-          {["dashboard", "students", "subs", "attendance", "finance"].map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 20px", background: tab === t ? "#3A3A3C" : "transparent", border: "none", borderRadius: 100, color: tab === t ? "#fff" : "#8E8E93", fontSize: 14, fontWeight: 600, cursor: "pointer", textTransform: "capitalize" }}>{t}</button>
+          {[
+            { id: "dashboard", label: "📊 Дашборд" },
+            { id: "students", label: "👩‍🎤 Учениці" },
+            { id: "subs", label: "🎫 Абонементи" },
+            { id: "attendance", label: "✅ Відвідування" },
+            { id: "alerts", label: `🔔 Сповіщення (${notifications.filter(n=>!n.notified).length})` },
+            { id: "finance", label: "💰 Фінанси" }
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "10px 20px", background: tab === t.id ? "#3A3A3C" : "transparent", border: "none", borderRadius: 100, color: tab === t.id ? "#fff" : "#8E8E93", fontSize: 14, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s" }}>{t.label}</button>
           ))}
         </div>
       </nav>
 
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
         
-        {/* DASHBOARD */}
+        {/* TAB: DASHBOARD */}
         {tab === "dashboard" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
-            <div style={cardSt}>
-              <div style={{ color: "#8E8E93", fontSize: 13, fontWeight: 600 }}>УЧЕНИЦЬ</div>
-              <div style={{ fontSize: 36, fontWeight: 800, marginTop: 8 }}>{analytics.totalStudents}</div>
-              <div style={{ color: "#007AFF", fontSize: 14, marginTop: 4 }}>{analytics.activeStudents} активних</div>
-            </div>
-            <div style={cardSt}>
-              <div style={{ color: "#8E8E93", fontSize: 13, fontWeight: 600 }}>ДОХІД</div>
-              <div style={{ fontSize: 36, fontWeight: 800, marginTop: 8, color: "#30D158" }}>{analytics.totalRev.toLocaleString()}₴</div>
-              <div style={{ color: "#FF3B30", fontSize: 14, marginTop: 4 }}>{analytics.unpaid.toLocaleString()}₴ борги</div>
-            </div>
-          </div>
-        )}
-
-        {/* ATTENDANCE */}
-        {tab === "attendance" && (
           <div>
-            <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-              <select style={{ ...inputSt, width: "auto" }} value={attnGid} onChange={e => setAttnGid(e.target.value)}>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </select>
-              <input style={{ ...inputSt, width: "auto" }} type="date" value={attnDate} onChange={e => setAttnDate(e.target.value)} onClick={e => e.target.showPicker()} />
-            </div>
-
-            <div style={{ ...cardSt, padding: 0, overflow: "hidden" }}>
-              {(() => {
-                const stIds = new Set([...studentGrps.filter(sg => sg.groupId === attnGid).map(sg => sg.studentId), ...subs.filter(s => s.groupId === attnGid).map(s => s.studentId)]);
-                const groupStuds = Array.from(stIds).map(id => studentMap[id]).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, "uk"));
-                
-                return groupStuds.map((st, i) => {
-                  const stSubs = subs.filter(s => s.studentId === st.id && s.groupId === attnGid);
-                  const sub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs[0];
-                  const key = sub ? `sub_${sub.id}` : `guest_${st.name}`;
-                  const isMarked = !!draft[key];
-
-                  return (
-                    <div key={st.id} onClick={() => setDraft(p => ({ ...p, [key]: !p[key] }))} style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: i < groupStuds.length - 1 ? "1px solid #2C2C2E" : "none", cursor: "pointer", background: isMarked ? "rgba(255,59,48,0.05)" : "transparent" }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 17 }}>{st.name}</div>
-                        <div style={{ color: "#8E8E93", fontSize: 13, marginTop: 4 }}>
-                          {sub ? `${sub.usedTrainings}/${sub.totalTrainings} · до ${fmt(sub.endDate)}` : "Немає абонемента"}
-                        </div>
-                      </div>
-                      <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? "#FF3B30" : "#3A3A3C"}`, background: isMarked ? "#FF3B30" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: "bold" }}>{isMarked && "✓"}</div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-            
-            <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", width: "calc(100% - 48px)", maxWidth: 400 }}>
-              <button onClick={saveAttendance} disabled={isSaving} style={{ ...btnP, width: "100%", fontSize: 17, height: 60, borderRadius: 20 }}>{isSaving ? "Збереження..." : "💾 Зберегти відмітки"}</button>
-            </div>
-          </div>
-        )}
-
-        {/* FINANCE */}
-        {tab === "finance" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {analytics.splits.map(sp => (
-              <div key={sp.group.id} style={cardSt}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 800 }}>{sp.group.name}</div>
-                    <Badge color="#007AFF">{sp.group.trainerPct}% Тренеру</Badge>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800 }}>{sp.total.toLocaleString()}₴</div>
-                  </div>
-                </div>
-                <div style={{ height: 8, background: "#2C2C2E", borderRadius: 10, overflow: "hidden", display: "flex" }}>
-                  <div style={{ width: `${sp.group.trainerPct}%`, background: "#007AFF" }} />
-                  <div style={{ flex: 1, background: "#30D158" }} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
-                  <div><span style={{ color: "#8E8E93", fontSize: 12 }}>ТРЕНЕР</span><div style={{ fontWeight: 700, color: "#007AFF" }}>{sp.trainer.toLocaleString()}₴</div></div>
-                  <div style={{ textAlign: "right" }}><span style={{ color: "#8E8E93", fontSize: 12 }}>СТУДІЯ</span><div style={{ fontWeight: 700, color: "#30D158" }}>{sp.studio.toLocaleString()}₴</div></div>
-                </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 20, marginBottom: 40 }}>
+              <div style={cardSt}>
+                <div style={{ color: "#8E8E93", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Учениць всього</div>
+                <div style={{ fontSize: 42, fontWeight: 800, marginTop: 12 }}>{analytics.totalStudents}</div>
+                <div style={{ color: "#007AFF", fontSize: 14, fontWeight: 600, marginTop: 6 }}>{analytics.activeStudents} активних</div>
               </div>
-            ))}
+              <div style={cardSt}>
+                <div style={{ color: "#8E8E93", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>Каса студії</div>
+                <div style={{ fontSize: 42, fontWeight: 800, marginTop: 12, color: "#30D158" }}>{analytics.totalRev.toLocaleString()}₴</div>
+                <div style={{ color: "#FF453A", fontSize: 14, fontWeight: 600, marginTop: 6 }}>{analytics.unpaid.toLocaleString()}₴ неопл. борги</div>
+              </div>
+              <div style={{ ...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2C1A35)" }}>
+                <div style={{ color: "#E58EED", fontSize: 13, fontWeight: 700, textTransform: "uppercase" }}>LTV (Середній чек)</div>
+                <div style={{ fontSize: 32, fontWeight: 800, marginTop: 12 }}>{analytics.avgLTV.toLocaleString()} ₴</div>
+                <div style={{ color: "#8E8E93", fontSize: 14, marginTop: 6 }}>Конверсія з пробного: {analytics.conversionRate}%</div>
+              </div>
+            </div>
+
+            <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 20 }}>Напрямки</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16 }}>
+              {DIRECTIONS.map(d => (
+                <div key={d.id} style={{ ...cardSt, padding: "20px" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: d.color }}>{d.name}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>{analytics.byDir[d.id]?.students || 0} <span style={{ fontSize: 13, color: "#8E8E93" }}>уч.</span></div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-      </main>
-
-      {/* MODALS (Simplified) */}
-      <Modal open={modal === "addSub"} title="Новий абонемент" onClose={() => setModal(null)}>
-        <Field label="Учениця"><select style={inputSt} id="st_id">{students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-        <Field label="Група"><select style={inputSt} id="gr_id">{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></Field>
-        <Field label="Тип"><select style={inputSt} id="pl_id">{PLAN_TYPES.map(p => <option key={p.id} value={p.id}>{p.name} - {p.price}₴</option>)}</select></Field>
-        <Field label="Дата початку"><input style={inputSt} type="date" defaultValue={today()} id="sd" onClick={e => e.target.showPicker()} /></Field>
-        <button style={{ ...btnP, width: "100%", marginTop: 10 }} onClick={async () => {
-          const d = { studentId: document.getElementById('st_id').value, groupId: document.getElementById('gr_id').value, planType: document.getElementById('pl_id').value, startDate: document.getElementById('sd').value, endDate: addMonth(document.getElementById('sd').value), totalTrainings: PLAN_TYPES.find(p=>p.id===document.getElementById('pl_id').value).trainings, usedTrainings: 0, amount: PLAN_TYPES.find(p=>p.id===document.getElementById('pl_id').value).price, paid: true };
-          const s = await db.insertSub(d); setSubs(p => [s, ...p]); setModal(null);
-        }}>Додати абонемент</button>
-      </Modal>
-
-      <Modal open={modal === "addStudent"} title="Нова учениця" onClose={() => setModal(null)}>
-        <Field label="Ім'я та прізвище"><input style={inputSt} id="st_name" placeholder="Олена Петренко" /></Field>
-        <button style={{ ...btnP, width: "100%", marginTop: 10 }} onClick={async () => {
-          const name = document.getElementById('st_name').value;
-          if(!name) return;
-          const s = await db.insertStudent({ name, first_name: name.split(' ')[0] });
-          setStudents(p => [...p, s]); setModal(null);
-        }}>Створити профіль</button>
-      </Modal>
-
-    </div>
-  );
-}
+        {/* TAB: STUDENTS */}
+        {tab === "students" && (
+          <div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap", background: "#1C1C1E", padding: 16, borderRadius: 20 }}>
+              <input style={{ ...inputSt, flex: 1, minWidth: 250 }} placeholder="Пошук учениці..." value={searchQ} onChange={e => setSearchQ(e
