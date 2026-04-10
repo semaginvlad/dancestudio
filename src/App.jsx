@@ -344,32 +344,51 @@ export default function App() {
   }
 
   // ═══ FORMS ═══
-  function StudentForm({initial,onDone}){
-    const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
-    const [lastName,setLastName]=useState(initial?.lastName||initial?.last_name||"");
-    const [phone,setPhone]=useState(initial?.phone||"");
-    const [telegram,setTelegram]=useState(initial?.telegram||"");
+  function SubForm({initial,onDone}){
+    const [studentId,setStudentId]=useState(initial?.studentId||"");
+    const [groupId,setGroupId]=useState(initial?.groupId||"");
+    const [planType,setPlanType]=useState(initial?.planType||"8pack");
+    const [startDate,setStartDate]=useState(initial?.startDate||today());
+    const [amount,setAmount]=useState(initial?.amount||1500);
+    const [paid,setPaid]=useState(initial?.paid??false);
+    const [payMethod,setPayMethod]=useState(initial?.payMethod||"card");
+    const [discountPct,setDiscountPct]=useState(initial?.discountPct||0);
+    const [discountSource,setDiscountSource]=useState(initial?.discountSource||"studio");
     const [notes,setNotes]=useState(initial?.notes||"");
-    const [msgTpl,setMsgTpl]=useState(initial?.messageTemplate||initial?.message_template||"");
-    const [selGrps,setSelGrps]=useState(()=>initial?.id?studentGrps.filter(sg=>sg.studentId===initial.id).map(sg=>sg.groupId):[]);
-    const toggleGrp=(gid)=>setSelGrps(p=>p.includes(gid)?p.filter(g=>g!==gid):[...p,gid]);
+    const plan=PLAN_TYPES.find(p=>p.id===planType);
+    const totalTrainings=plan?.trainings||8;
+    const endDate=addMonth(startDate);
+    const basePrice=plan?.price||0;
+    
+    useEffect(()=>{if(!initial){const p=PLAN_TYPES.find(p=>p.id===planType);if(p)setAmount(p.price-Math.round(p.price*discountPct/100))}},[planType,discountPct]);
+    
     return(<div>
+      <Field label="Учениця *"><select style={inputSt} value={studentId} onChange={e=>setStudentId(e.target.value)}><option value="">Обрати...</option>{students.sort((a,b)=>a.name.localeCompare(b.name,"uk")).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      <Field label="Група *"><select style={inputSt} value={groupId} onChange={e=>setGroupId(e.target.value)}><option value="">Обрати...</option>{DIRECTIONS.map(d=><optgroup key={d.id} label={d.name}>{groups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</optgroup>)}</select></Field>
+      <Field label="Тип"><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} ({p.trainings}) — {p.price}₴</Pill>)}</div></Field>
+      
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
-        <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
+        {/* Додано виклик календаря (showPicker) при кліку */}
+        <Field label="Початок (натисніть)"><input style={{...inputSt, cursor: "pointer"}} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} /></Field>
+        <Field label="Кінець (авто)"><input style={{...inputSt,opacity:.6, cursor: "not-allowed"}} type="date" value={endDate} readOnly/></Field>
       </div>
-      <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
-      <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
-      <Field label="Групи / напрямки">
-        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {DIRECTIONS.map(d=><div key={d.id}><div style={{fontSize:11,color:d.color,fontWeight:600,marginBottom:2}}>{d.name}</div><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{groups.filter(g=>g.directionId===d.id).map(g=><Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>)}</div></div>)}
+
+      <div style={{background:"#161b22",borderRadius:8,padding:"12px 14px",marginBottom:12,border:"1px solid #21262d"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Field label="Знижка (%)"><input style={{...inputSt,width:80}} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
+          <Field label="За рахунок"><div style={{display:"flex",gap:4}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
         </div>
-      </Field>
-      <Field label="Шаблон повідомлення"><textarea style={{...inputSt,minHeight:50,resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/><div style={{fontSize:10,color:"#8892b0",marginTop:2}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div></Field>
+        {discountPct>0&&<div style={{fontSize:12,color:"#F9A03F",marginTop:6}}>Базова: {basePrice}₴ → -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:"#2ECC71"}}>{basePrice-Math.round(basePrice*discountPct/100)}₴</strong></div>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Field label="Сума (грн)"><input style={inputSt} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
+        <Field label="Оплата"><div style={{display:"flex",gap:6}}>{PAY_METHODS.map(m=><Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>)}</div></Field>
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,color:"#c9d1d9",cursor:"pointer",fontSize:14,marginBottom:8}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)}/> Оплачено</label>
       <Field label="Нотатки"><textarea style={{...inputSt,minHeight:40,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
         <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
-        <button style={{...btnP,opacity:firstName.trim()?1:.4}} onClick={()=>{if(!firstName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[firstName.trim(),lastName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти":"Додати"}</button>
+        <button style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings,usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти":"Додати"}</button>
       </div>
     </div>);
   }
