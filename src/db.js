@@ -2,21 +2,25 @@ import { supabase } from './supabase'
 
 // ─── STUDENTS ───
 export async function fetchStudents() {
-  const { data, error } = await supabase.from('students').select('*').order('name')
+  const { data, error } = await supabase.from('students').select('*').order('last_name, first_name')
   if (error) throw error
-  return data.map(s => ({ ...s, messageTemplate: s.message_template }))
+  return data.map(s => ({ ...s, messageTemplate: s.message_template, firstName: s.first_name, lastName: s.last_name }))
 }
 export async function insertStudent(s) {
+  const fullName = [s.first_name, s.last_name].filter(Boolean).join(' ') || s.name || '';
   const { data, error } = await supabase.from('students').insert({
-    name: s.name, phone: s.phone, telegram: s.telegram, notes: s.notes,
+    name: fullName, first_name: s.first_name || '', last_name: s.last_name || '',
+    phone: s.phone, telegram: s.telegram, notes: s.notes,
     message_template: s.message_template || null,
   }).select().single()
   if (error) throw error
-  return { ...data, messageTemplate: data.message_template }
+  return { ...data, messageTemplate: data.message_template, firstName: data.first_name, lastName: data.last_name }
 }
 export async function updateStudent(id, s) {
   const payload = {}
-  if (s.name !== undefined) payload.name = s.name
+  if (s.first_name !== undefined) { payload.first_name = s.first_name; payload.name = [s.first_name, s.last_name].filter(Boolean).join(' ') }
+  if (s.last_name !== undefined) { payload.last_name = s.last_name; if (!payload.name) payload.name = [s.first_name, s.last_name].filter(Boolean).join(' ') }
+  if (s.name !== undefined && !payload.name) payload.name = s.name
   if (s.phone !== undefined) payload.phone = s.phone
   if (s.telegram !== undefined) payload.telegram = s.telegram
   if (s.notes !== undefined) payload.notes = s.notes
@@ -25,7 +29,7 @@ export async function updateStudent(id, s) {
   if (s.telegram_display_name !== undefined) payload.telegram_display_name = s.telegram_display_name
   const { data, error } = await supabase.from('students').update(payload).eq('id', id).select().single()
   if (error) throw error
-  return { ...data, messageTemplate: data.message_template }
+  return { ...data, messageTemplate: data.message_template, firstName: data.first_name, lastName: data.last_name }
 }
 export async function deleteStudent(id) {
   const { error } = await supabase.from('students').delete().eq('id', id)
