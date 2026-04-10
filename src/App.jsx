@@ -99,6 +99,7 @@ export default function App() {
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [calMonth, setCalMonth] = useState(()=>{const n=new Date();return{y:n.getFullYear(),m:n.getMonth()}});
+  const [expandedDirs, setExpandedDirs] = useState({}); // Стан для акордеона учениць
 
   // ─── LOAD ───
   useEffect(()=>{(async()=>{try{
@@ -513,18 +514,50 @@ export default function App() {
           </div>
         </div>}
 
+        {/* ─── ОНОВЛЕНА ВКЛАДКА УЧЕНИЦЬ (АКОРДЕОН) ─── */}
         {tab==="students"&&<div>
           <input style={{...inputSt,maxWidth:350,marginBottom:14}} placeholder="Пошук..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
-          {studentsByDirection.grouped.map(({direction,students:dStudents})=><div key={direction.id} style={{marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:600,color:direction.color,marginBottom:8,borderBottom:`1px solid ${direction.color}33`,paddingBottom:4}}>{direction.name} ({dStudents.length})</div>
-            {dStudents.map(renderStudentCard)}
-          </div>)}
-          {studentsByDirection.ungrouped.length>0&&<div style={{marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#8892b0",marginBottom:8,borderBottom:"1px solid #21262d",paddingBottom:4}}>Без групи ({studentsByDirection.ungrouped.length})</div>
-            {studentsByDirection.ungrouped.map(renderStudentCard)}
-          </div>}
+          
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {studentsByDirection.grouped.map(({direction,students:dStudents})=>{
+              const isExpanded = expandedDirs[direction.id];
+              return (
+                <div key={direction.id} style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
+                  <button 
+                    onClick={() => setExpandedDirs(p => ({...p, [direction.id]: !p[direction.id]}))}
+                    style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}
+                  >
+                    <div style={{fontSize:15,fontWeight:600,color:direction.color}}>{direction.name} <span style={{color:"#8892b0",fontSize:13,fontWeight:400}}>({dStudents.length})</span></div>
+                    <div style={{color:"#8892b0", fontSize: 12}}>{isExpanded ? "▲" : "▼"}</div>
+                  </button>
+                  {isExpanded && (
+                    <div style={{padding:'12px 18px', background:'#0d1117', borderTop:`1px solid #21262d`, display:'flex', flexDirection:'column', gap:6}}>
+                      {dStudents.map(renderStudentCard)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {studentsByDirection.ungrouped.length>0&&<div style={{border:`1px solid #21262d`, borderRadius: 10, overflow: 'hidden'}}>
+              <button 
+                onClick={() => setExpandedDirs(p => ({...p, 'ungrouped': !p['ungrouped']}))}
+                style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'#161b22', border:'none', cursor:'pointer', textAlign:'left'}}
+              >
+                <div style={{fontSize:15,fontWeight:600,color:'#8892b0'}}>Без групи <span style={{fontSize:13,fontWeight:400}}>({studentsByDirection.ungrouped.length})</span></div>
+                <div style={{color:"#8892b0", fontSize: 12}}>{expandedDirs['ungrouped'] ? "▲" : "▼"}</div>
+              </button>
+              {expandedDirs['ungrouped'] && (
+                <div style={{padding:'12px 18px', background:'#0d1117', borderTop:`1px solid #21262d`, display:'flex', flexDirection:'column', gap:6}}>
+                  {studentsByDirection.ungrouped.map(renderStudentCard)}
+                </div>
+              )}
+            </div>}
+          </div>
+
           {filteredStudents.length===0&&<div style={{color:"#8892b0",padding:40,textAlign:"center"}}>{students.length===0?"Ще немає учениць":"Не знайдено"}</div>}
         </div>}
+        {/* ────────────────────────────────────────── */}
 
         {tab==="subs"&&<div>
           <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
