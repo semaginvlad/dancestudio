@@ -4,39 +4,64 @@ import { supabase } from './supabase'
 export async function fetchStudents() {
   const { data, error } = await supabase.from('students').select('*').order('name')
   if (error) throw error
-  return data
+  return data.map(s => ({ ...s, messageTemplate: s.message_template }))
 }
 export async function insertStudent(s) {
-  const { data, error } = await supabase.from('students').insert(s).select().single()
+  const { data, error } = await supabase.from('students').insert({
+    name: s.name, phone: s.phone, telegram: s.telegram, notes: s.notes,
+    message_template: s.message_template || null,
+  }).select().single()
   if (error) throw error
-  return data
+  return { ...data, messageTemplate: data.message_template }
 }
 export async function updateStudent(id, s) {
-  const { data, error } = await supabase.from('students').update(s).eq('id', id).select().single()
+  const payload = {}
+  if (s.name !== undefined) payload.name = s.name
+  if (s.phone !== undefined) payload.phone = s.phone
+  if (s.telegram !== undefined) payload.telegram = s.telegram
+  if (s.notes !== undefined) payload.notes = s.notes
+  if (s.message_template !== undefined) payload.message_template = s.message_template
+  const { data, error } = await supabase.from('students').update(payload).eq('id', id).select().single()
   if (error) throw error
-  return data
+  return { ...data, messageTemplate: data.message_template }
 }
 export async function deleteStudent(id) {
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw error
 }
 
+// ─── STUDENT GROUPS ───
+export async function fetchStudentGroups() {
+  const { data, error } = await supabase.from('student_groups').select('*')
+  if (error) { console.warn('student_groups:', error.message); return [] }
+  return data.map(sg => ({ id: sg.id, studentId: sg.student_id, groupId: sg.group_id }))
+}
+export async function addStudentGroup(studentId, groupId) {
+  const { data, error } = await supabase.from('student_groups').upsert(
+    { student_id: studentId, group_id: groupId },
+    { onConflict: 'student_id,group_id' }
+  ).select().single()
+  if (error) throw error
+  return { id: data.id, studentId: data.student_id, groupId: data.group_id }
+}
+export async function removeStudentGroup(studentId, groupId) {
+  const { error } = await supabase.from('student_groups').delete()
+    .eq('student_id', studentId).eq('group_id', groupId)
+  if (error) throw error
+}
+
 // ─── GROUPS ───
 export async function fetchGroups() {
-  const { data, error } = await supabase.from('groups').select('*').order('name')
+  const { data, error } = await supabase.from('groups').select('*')
   if (error) throw error
-  return data.map(g => ({
-    ...g,
-    directionId: g.direction_id,
-    trainerPct: g.trainer_pct,
-  }))
+  return data.map(g => ({ ...g, directionId: g.direction_id, trainerPct: g.trainer_pct }))
 }
 export async function updateGroup(id, g) {
-  const { data, error } = await supabase.from('groups').update({
-    name: g.name,
-    schedule: g.schedule,
-    trainer_pct: g.trainerPct,
-  }).eq('id', id).select().single()
+  const payload = {}
+  if (g.name !== undefined) payload.name = g.name
+  if (g.schedule !== undefined) payload.schedule = g.schedule
+  if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
+  const { data, error } = await supabase.from('groups').update(payload).eq('id', id).select().single()
   if (error) throw error
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct }
 }
@@ -45,42 +70,17 @@ export async function updateGroup(id, g) {
 export async function fetchSubs() {
   const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })
   if (error) throw error
-  return data.map(s => ({
-    id: s.id,
-    studentId: s.student_id,
-    groupId: s.group_id,
-    planType: s.plan_type,
-    startDate: s.start_date,
-    endDate: s.end_date,
-    totalTrainings: s.total_trainings,
-    usedTrainings: s.used_trainings,
-    amount: s.amount,
-    basePrice: s.base_price,
-    discountPct: s.discount_pct,
-    discountSource: s.discount_source,
-    paid: s.paid,
-    payMethod: s.pay_method,
-    notificationSent: s.notification_sent,
-    notes: s.notes,
-  }))
+  return data.map(mapSub)
 }
 export async function insertSub(s) {
   const { data, error } = await supabase.from('subscriptions').insert({
-    student_id: s.studentId,
-    group_id: s.groupId,
-    plan_type: s.planType,
-    start_date: s.startDate,
-    end_date: s.endDate,
-    total_trainings: s.totalTrainings,
-    used_trainings: s.usedTrainings || 0,
-    amount: s.amount,
-    base_price: s.basePrice || s.amount,
-    discount_pct: s.discountPct || 0,
-    discount_source: s.discountSource || 'studio',
-    paid: s.paid,
-    pay_method: s.payMethod || 'card',
-    notification_sent: false,
-    notes: s.notes,
+    student_id: s.studentId, group_id: s.groupId, plan_type: s.planType,
+    start_date: s.startDate, end_date: s.endDate,
+    total_trainings: s.totalTrainings, used_trainings: s.usedTrainings || 0,
+    amount: s.amount, base_price: s.basePrice || s.amount,
+    discount_pct: s.discountPct || 0, discount_source: s.discountSource || 'studio',
+    paid: s.paid, pay_method: s.payMethod || 'card',
+    notification_sent: false, notes: s.notes,
   }).select().single()
   if (error) throw error
   return mapSub(data)
@@ -125,15 +125,14 @@ export async function fetchAttendance() {
   const { data, error } = await supabase.from('attendance').select('*')
   if (error) throw error
   return data.map(a => ({
-    id: a.id, subId: a.sub_id, date: a.date, guestName: a.guest_name, guestType: a.guest_type, groupId: a.group_id,
+    id: a.id, subId: a.sub_id, date: a.date,
+    guestName: a.guest_name, guestType: a.guest_type, groupId: a.group_id,
   }))
 }
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
-    sub_id: a.subId || null,
-    date: a.date,
-    guest_name: a.guestName || null,
-    guest_type: a.guestType || null,
+    sub_id: a.subId || null, date: a.date,
+    guest_name: a.guestName || null, guest_type: a.guestType || null,
     group_id: a.groupId || null,
   }).select().single()
   if (error) throw error
@@ -148,7 +147,7 @@ export async function deleteAttendanceBySubAndDate(subId, date) {
   if (error) throw error
 }
 
-// ─── CANCELLED TRAININGS ───
+// ─── CANCELLED ───
 export async function fetchCancelled() {
   const { data, error } = await supabase.from('cancelled_trainings').select('*')
   if (error) throw error
@@ -175,23 +174,12 @@ export async function insertModLog(l) {
   if (error) throw error
 }
 
-// ─── BATCH: increment/decrement used_trainings ───
+// ─── HELPERS ───
 export async function incrementUsed(subId) {
-  const { data, error } = await supabase.rpc('increment_used', { sub_id: subId })
-  // Fallback if RPC not available
-  if (error) {
-    const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-    if (sub) {
-      await supabase.from('subscriptions').update({ used_trainings: (sub.used_trainings || 0) + 1 }).eq('id', subId)
-    }
-  }
+  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
+  if (sub) await supabase.from('subscriptions').update({ used_trainings: (sub.used_trainings || 0) + 1 }).eq('id', subId)
 }
 export async function decrementUsed(subId) {
-  const { data, error } = await supabase.rpc('decrement_used', { sub_id: subId })
-  if (error) {
-    const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-    if (sub) {
-      await supabase.from('subscriptions').update({ used_trainings: Math.max(0, (sub.used_trainings || 0) - 1) }).eq('id', subId)
-    }
-  }
+  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
+  if (sub) await supabase.from('subscriptions').update({ used_trainings: Math.max(0, (sub.used_trainings || 0) - 1) }).eq('id', subId)
 }
