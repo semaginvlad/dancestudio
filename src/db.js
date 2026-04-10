@@ -131,26 +131,40 @@ export async function fetchAttendance() {
   const { data, error } = await supabase.from('attendance').select('*')
   if (error) throw error
   return data.map(a => ({
-    id: a.id, subId: a.sub_id, date: a.date,
-    guestName: a.guest_name, guestType: a.guest_type, groupId: a.group_id,
+    id: a.id,
+    subId: a.sub_id,
+    date: a.date,
+    guestName: a.guest_name,
+    guestType: a.guest_type,
+    groupId: a.group_id,
+    quantity: a.quantity || 1,
+    entryType: a.entry_type || 'subscription',
   }))
 }
+
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
-    sub_id: a.subId || null, date: a.date,
-    guest_name: a.guestName || null, guest_type: a.guestType || null,
+    sub_id: a.subId || null,
+    date: a.date,
+    guest_name: a.guestName || null,
+    guest_type: a.guestType || null,
     group_id: a.groupId || null,
+    quantity: a.quantity || 1,
+    entry_type: a.entryType || 'subscription',
   }).select().single()
+
   if (error) throw error
-  return { id: data.id, subId: data.sub_id, date: data.date, guestName: data.guest_name, guestType: data.guest_type, groupId: data.group_id }
-}
-export async function deleteAttendance(id) {
-  const { error } = await supabase.from('attendance').delete().eq('id', id)
-  if (error) throw error
-}
-export async function deleteAttendanceBySubAndDate(subId, date) {
-  const { error } = await supabase.from('attendance').delete().eq('sub_id', subId).eq('date', date)
-  if (error) throw error
+
+  return {
+    id: data.id,
+    subId: data.sub_id,
+    date: data.date,
+    guestName: data.guest_name,
+    guestType: data.guest_type,
+    groupId: data.group_id,
+    quantity: data.quantity || 1,
+    entryType: data.entry_type || 'subscription',
+  }
 }
 
 // ─── CANCELLED ───
