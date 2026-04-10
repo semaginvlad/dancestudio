@@ -185,6 +185,7 @@ export default function App() {
   const [groups, setGroups] = useState(DEFAULT_GROUPS);
   const [cancelled, setCancelled] = useState([]);
   const [modLog, setModLog] = useState([]);
+  const [studentGrps, setStudentGrps] = useState([]);
   const [tab, setTab] = useState("dashboard");
   const [modal, setModal] = useState(null);
   const [editItem, setEditItem] = useState(null);
@@ -198,20 +199,22 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [st, gr, su, at, ca, ml] = await Promise.all([
+        const [st, gr, su, at, ca, ml, sg] = await Promise.all([
           db.fetchStudents(),
           db.fetchGroups(),
           db.fetchSubs(),
           db.fetchAttendance(),
           db.fetchCancelled(),
           db.fetchModLog(),
+          db.fetchStudentGroups(),
         ]);
-        setStudents(st || []);
+        setStudents((st || []).map(s => ({ ...s, messageTemplate: s.message_template })));
         if (gr?.length) setGroups(gr);
         setSubs(su || []);
         setAttn(at || []);
         setCancelled(ca || []);
         setModLog(ml || []);
+        setStudentGrps(sg || []);
       } catch (e) {
         console.error("Failed to load data:", e);
       }
@@ -296,6 +299,13 @@ export default function App() {
     const name = student?.name?.split(" ")[0] || "Шановна";
     const gName = group?.name || "групу";
     const dName = direction?.name || "";
+    const template = student?.messageTemplate || student?.message_template;
+    if (template) {
+      return template
+        .replace(/\{ім'я\}/g, name)
+        .replace(/\{група\}/g, gName)
+        .replace(/\{напрямок\}/g, dName);
+    }
     return `Привіт, ${name}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
   }
 
@@ -305,15 +315,48 @@ export default function App() {
     const [phone, setPhone] = useState(initial?.phone || "");
     const [telegram, setTelegram] = useState(initial?.telegram || "");
     const [notes, setNotes] = useState(initial?.notes || "");
+    const [msgTemplate, setMsgTemplate] = useState(initial?.message_template || initial?.messageTemplate || "");
+    const [selGroups, setSelGroups] = useState(() => {
+      if (!initial?.id) return [];
+      return studentGrps.filter((sg) => sg.studentId === initial.id).map((sg) => sg.groupId);
+    });
+
+    const toggleGroup = (gid) => {
+      setSelGroups((prev) => prev.includes(gid) ? prev.filter((g) => g !== gid) : [...prev, gid]);
+    };
+
     const doSave = () => {
       if (!name.trim()) return;
-      onDone({ name: name.trim(), phone, telegram, notes });
+      onDone({ name: name.trim(), phone, telegram, notes, message_template: msgTemplate, selectedGroups: selGroups });
     };
     return (<div>
       <Field label="Ім'я *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} placeholder="Олена Петренко" /></Field>
       <Field label="Телефон"><input style={inputSt} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." /></Field>
       <Field label="Telegram"><input style={inputSt} value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="@username" /></Field>
-      <Field label="Нотатки"><textarea style={{ ...inputSt, minHeight: 50, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+
+      <Field label="Групи / напрямки">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {DIRECTIONS.map((d) => (
+            <div key={d.id} style={{ width: "100%", marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: d.color, fontWeight: 600, marginBottom: 2 }}>{d.name}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {groups.filter((g) => g.directionId === d.id).map((g) => (
+                  <Pill key={g.id} active={selGroups.includes(g.id)} color={d.color} onClick={() => toggleGroup(g.id)}>{g.name}</Pill>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Шаблон повідомлення про закінчення абонементу">
+        <textarea style={{ ...inputSt, minHeight: 60, resize: "vertical" }} value={msgTemplate}
+          onChange={(e) => setMsgTemplate(e.target.value)}
+          placeholder="Привіт, {ім'я}! 💃 Нагадуємо, що твій абонемент у групі {група} закінчився. Чекаємо на продовження! ❤️" />
+        <div style={{ fontSize: 10, color: "#8892b0", marginTop: 2 }}>Використовуй {"{ім'я}"}, {"{група}"}, {"{напрямок}"} як змінні</div>
+      </Field>
+
+      <Field label="Нотатки"><textarea style={{ ...inputSt, minHeight: 40, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 14 }}>
         <button style={btnS} onClick={() => setModal(null)}>Скасувати</button>
         <button style={{ ...btnP, opacity: name.trim() ? 1 : .4 }} onClick={doSave}>{initial ? "Зберегти" : "Додати"}</button>
@@ -618,11 +661,46 @@ export default function App() {
 
   // ═══ HANDLERS ═══
   const addStudent = async (d) => {
-    try { const s = await db.insertStudent(d); setStudents((p) => [...p, s]); } catch(e) { alert("Помилка: " + e.message); }
+    try {
+      const { selectedGroups, ...studentData } = d;
+      const s = await db.insertStudent(studentData);
+      setStudents((p) => [...p, s]);
+      // Add group associations
+      if (selectedGroups?.length) {
+        for (const gid of selectedGroups) {
+          const sg = await db.addStudentGroup(s.id, gid);
+          setStudentGrps((p) => [...p, sg]);
+        }
+      }
+    } catch(e) { alert("Помилка: " + e.message); }
     setModal(null);
   };
   const editStudent = async (d) => {
-    try { const s = await db.updateStudent(editItem.id, d); setStudents((p) => p.map((x) => x.id === s.id ? s : x)); } catch(e) { alert("Помилка: " + e.message); }
+    try {
+      const { selectedGroups, ...studentData } = d;
+      const s = await db.updateStudent(editItem.id, studentData);
+      setStudents((p) => p.map((x) => x.id === s.id ? s : x));
+      // Sync group associations
+      if (selectedGroups) {
+        const existing = studentGrps.filter((sg) => sg.studentId === editItem.id);
+        // Remove groups no longer selected
+        for (const sg of existing) {
+          if (!selectedGroups.includes(sg.groupId)) {
+            await db.removeStudentGroup(sg.id);
+          }
+        }
+        // Add new groups
+        const existingGids = existing.map((sg) => sg.groupId);
+        for (const gid of selectedGroups) {
+          if (!existingGids.includes(gid)) {
+            await db.addStudentGroup(editItem.id, gid);
+          }
+        }
+        // Refresh
+        const freshSG = await db.fetchStudentGroups();
+        setStudentGrps(freshSG);
+      }
+    } catch(e) { alert("Помилка: " + e.message); }
     setModal(null); setEditItem(null);
   };
   const deleteStudent = async (id) => {
@@ -967,11 +1045,17 @@ export default function App() {
               {filteredStudents.map((st) => {
                 const stSubs = subsExt.filter((s) => s.studentId === st.id);
                 const active = stSubs.filter((s) => s.status !== "expired");
+                const enrolledGroups = studentGrps.filter((sg) => sg.studentId === st.id);
                 return (
                   <div key={st.id} style={{ ...cardSt, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                     <div style={{ minWidth: 180 }}>
                       <div style={{ color: "#fff", fontWeight: 600, fontSize: 14 }}>{st.name}</div>
                       <div style={{ color: "#8892b0", fontSize: 11 }}>{[st.phone, st.telegram].filter(Boolean).join(" · ") || "—"}</div>
+                      {enrolledGroups.length > 0 && (
+                        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginTop: 3 }}>
+                          {enrolledGroups.map((sg) => { const g = groupMap[sg.groupId]; const d = g ? dirMap[g.directionId] : null; return g ? <span key={sg.id} style={{ fontSize: 9, color: d?.color || "#888", opacity: .7 }}>{g.name}</span> : null; }).filter(Boolean).reduce((prev, curr, i) => i === 0 ? [curr] : [...prev, <span key={`sep-${i}`} style={{ fontSize: 9, color: "#555" }}>·</span>, curr], [])}
+                        </div>
+                      )}
                     </div>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       {active.map((s) => { const g = groupMap[s.groupId]; const d = g ? dirMap[g.directionId] : null; return <Badge key={s.id} color={d?.color || "#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>; })}
