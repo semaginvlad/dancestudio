@@ -16,7 +16,7 @@
     "telegram": "^2.26.22",
     "recharts": "^2.12.7",
     "lucide-react": "^0.447.0",
-    "react-router-dom": "^6.27.0",
+    "react-router-dom": "^6.27.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
