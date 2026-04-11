@@ -367,6 +367,8 @@ export default function App() {
   const [draft, setDraft] = useState({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualType, setManualType] = useState("trial");
 
   useEffect(()=>{(async()=>{try{
     const [st,gr,su,at,ca,sg]=await Promise.all([db.fetchStudents(),db.fetchGroups(),db.fetchSubs(),db.fetchAttendance(),db.fetchCancelled(),db.fetchStudentGroups()]);
