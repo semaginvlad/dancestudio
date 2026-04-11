@@ -152,7 +152,8 @@ safeAction(/sub_(.+)/, async (ctx) => {
     ];
 
     if (!sub.paid) {
-        buttons.splice(1, 0, [{ text: `💰 Внести оплату (${sub.price} грн)`, callback_data: `markpaid_${subId}` }]);
+        // Використовуємо amount замість price
+        buttons.splice(1, 0, [{ text: `💰 Внести оплату (${sub.amount} грн)`, callback_data: `markpaid_${subId}` }]);
     }
     
     buttons.push([{ text: '🔙 Назад до списку', callback_data: `grp_${grpShort}` }]);
@@ -273,11 +274,11 @@ safeAction(/wz_pay_(cash|card|none)_(\d+)_(.+)_(.+)_(.+)/, async (ctx) => {
 
     let pay_method = null;
     let paid = false;
-    let displayMethod = 'Немає';
     
-    if (payMethodStr === 'cash') { pay_method = 'cash'; paid = true; displayMethod = 'Готівка'; }
-    if (payMethodStr === 'card') { pay_method = 'card'; paid = true; displayMethod = 'Картка'; }
+    if (payMethodStr === 'cash') { pay_method = 'cash'; paid = true; }
+    if (payMethodStr === 'card') { pay_method = 'card'; paid = true; }
 
+    // ЗМІНЕНО: Записуємо суму в amount та base_price
     const { error } = await supabase.from('subscriptions').insert({
         student_id: student.id,
         group_id: group.id,
@@ -285,7 +286,8 @@ safeAction(/wz_pay_(cash|card|none)_(\d+)_(.+)_(.+)_(.+)/, async (ctx) => {
         used_trainings: 0,
         start_date: formattedStart,
         end_date: formattedEnd,
-        price: price,
+        amount: price,
+        base_price: price,
         paid: paid,
         pay_method: pay_method 
     });
@@ -420,6 +422,7 @@ safeAction(/debt_(.+)/, async (ctx) => {
     const { data: allGroups } = await supabase.from('groups').select('id');
     const group = allGroups?.find(g => g.id.startsWith(shortGrpId));
 
+    // Використовуємо amount замість price
     const { data: subs } = await supabase.from('subscriptions').select('*, students(name)').eq('group_id', group.id).eq('paid', false);
 
     if (!subs || subs.length === 0) {
@@ -428,7 +431,7 @@ safeAction(/debt_(.+)/, async (ctx) => {
         });
     }
 
-    const text = '💸 **Боржники:**\n\n' + subs.map(s => `- ${s.students?.name || 'Невідомо'} (${s.price} грн)`).join('\n');
+    const text = '💸 **Боржники:**\n\n' + subs.map(s => `- ${s.students?.name || 'Невідомо'} (${s.amount} грн)`).join('\n');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: `grp_${shortGrpId}` }]] } });
 });
 
@@ -443,8 +446,9 @@ safeAction(/stat_(.+)/, async (ctx) => {
     const { data: att } = await supabase.from('attendance').select('quantity').eq('group_id', group.id).eq('date', today);
     const totalVisits = att ? att.reduce((sum, record) => sum + record.quantity, 0) : 0;
 
-    const { data: newSubs } = await supabase.from('subscriptions').select('price').eq('group_id', group.id).gte('created_at', today + 'T00:00:00Z');
-    const totalMoney = newSubs ? newSubs.reduce((sum, sub) => sum + (sub.price || 0), 0) : 0;
+    // Читаємо amount замість price
+    const { data: newSubs } = await supabase.from('subscriptions').select('amount').eq('group_id', group.id).gte('created_at', today + 'T00:00:00Z');
+    const totalMoney = newSubs ? newSubs.reduce((sum, sub) => sum + (sub.amount || 0), 0) : 0;
 
     await ctx.editMessageText(`📊 **Статистика за сьогодні (${today}):**\n\nВідмічено занять: **${totalVisits}**\nНових абонементів на суму: **${totalMoney} грн**`, {
         parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔙 Назад', callback_data: `grp_${shortGrpId}` }]] }
