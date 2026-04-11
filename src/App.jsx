@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
-import * as db from "./db";
+import React, { useState, useEffect, useMemo } from "react";
+import * as db from "./db"; // Переконайся, що файл db.js існує в тій же папці!
 
 // ==========================================
-// 1. КОНСТАНТИ ТА УТИЛІТИ
+// 1. КОНСТАНТИ ТА ДАНІ
 // ==========================================
 const DIRECTIONS = [
   { id: "latina", name: "Latina Solo", color: "#FF3B30" },
@@ -12,7 +12,6 @@ const DIRECTIONS = [
   { id: "kpop", name: "K-pop Cover Dance", color: "#007AFF" },
   { id: "jazzfunk", name: "Jazz Funk", color: "#FF2D55" },
 ];
-const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
 const PLAN_TYPES = [
   { id: "trial", name: "Пробне", trainings: 1, price: 150 },
   { id: "single", name: "Разове", trainings: 1, price: 300 },
@@ -42,7 +41,6 @@ const addMonth = (d) => { const dt = new Date(d+"T12:00:00"); dt.setMonth(dt.get
 const today = () => toLocalISO(new Date());
 const fmt = (d) => { if(!d) return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
 const daysLeft = (ed) => Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
-const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function getSubStatus(sub) {
   if (!sub?.endDate) return "expired";
@@ -57,7 +55,7 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: "#30D158", warning: "#FF9F0A", expired: "#FF453A" };
 
 // ==========================================
-// 2. UI КОМПОНЕНТИ (ПРЕМІУМ ДИЗАЙН)
+// 2. UI КОМПОНЕНТИ
 // ==========================================
 const inputSt = { width:"100%", padding:"14px 18px", background:"#1C1C1E", border:"none", borderRadius:16, color:"#fff", fontSize:15, outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
 const btnP = { padding:"14px 24px", background:"#0A84FF", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit", boxShadow:"0 4px 14px rgba(10, 132, 255, 0.3)" };
@@ -106,7 +104,7 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. КОМПОНЕНТ ВІДВІДУВАНЬ (ЧЕРНЕТКА + ЖУРНАЛ)
+// 3. ВІДВІДУВАННЯ (КОМПОНЕНТ)
 // ==========================================
 function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled }) {
   const [viewMode, setViewMode] = useState("daily");
@@ -419,7 +417,7 @@ function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, stude
 }
 
 // ==========================================
-// 4. ГОЛОВНИЙ ДОДАТОК (УСІ ВЛАДКИ ТА СТЕЙТИ)
+// 4. ГОЛОВНИЙ ДОДАТОК
 // ==========================================
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -437,7 +435,6 @@ export default function App() {
   const [financeDetailItem, setFinanceDetailItem] = useState(null);
   const [searchQ, setSearchQ] = useState("");
   
-  // Фільтри
   const [filterDir, setFilterDir] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -451,14 +448,12 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
-  // ─── ЗАВАНТАЖЕННЯ ───
   useEffect(()=>{(async()=>{try{
     const [st,gr,su,at,ca,sg]=await Promise.all([db.fetchStudents(),db.fetchGroups(),db.fetchSubs(),db.fetchAttendance(),db.fetchCancelled(),db.fetchStudentGroups()]);
     setStudents(st||[]);if(gr?.length)setGroups(gr);setSubs(su||[]);setAttn(at||[]);setCancelled(ca||[]);setStudentGrps(sg||[]);
     try { if (db.fetchWaitlist) { const wl = await db.fetchWaitlist(); setWaitlist(wl || []); } } catch(e) {}
   }catch(e){console.error(e)}setLoading(false)})()},[]);
 
-  // ─── MAPS ТА ОБЧИСЛЕННЯ ───
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
@@ -631,7 +626,7 @@ export default function App() {
     </div>)
   }
 
-  // ─── ХЕНДЛЕРИ ДЛЯ БАЗИ ───
+  // ─── ХЕНДЛЕРИ ───
   const addStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.insertStudent(sd);setStudents(p=>[...p,s]);if(selectedGroups?.length)for(const gid of selectedGroups){const sg=await db.addStudentGroup(s.id,gid);setStudentGrps(p=>[...p,sg])}}catch(e){alert("Помилка: "+e.message)}setModal(null)};
   const editStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.updateStudent(editItem.id,sd);setStudents(p=>p.map(x=>x.id===s.id?s:x));if(selectedGroups){const existing=studentGrps.filter(sg=>sg.studentId===editItem.id);for(const sg of existing){if(!selectedGroups.includes(sg.groupId))await db.removeStudentGroup(editItem.id,sg.groupId)}for(const gid of selectedGroups){if(!existing.some(sg=>sg.groupId===gid))await db.addStudentGroup(editItem.id,gid)}const fresh=await db.fetchStudentGroups();setStudentGrps(fresh)}}catch(e){alert("Помилка: "+e.message)}setModal(null);setEditItem(null)};
   const deleteStudent=async(id)=>{if(!confirm("Видалити ученицю?"))return;try{await db.deleteStudent(id);setStudents(p=>p.filter(s=>s.id!==id));setSubs(p=>p.filter(s=>s.studentId!==id))}catch(e){alert(e.message)}};
