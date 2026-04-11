@@ -2,14 +2,30 @@ import React, { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
 
 // ==========================================
-// 1. КОНСТАНТИ ТА ДАНІ
+// 1. КОНСТАНТИ, ПАЛІТРА ТА ДАНІ
 // ==========================================
+// Палітра зі стайл-гайду
+const theme = {
+  primary: "#5A81FA",       // Синій (головні кнопки)
+  secondary: "#2C3D8F",     // Темно-синій акцент
+  bg: "#F8F9FD",            // Фон додатку
+  card: "#FFFFFF",          // Фон карток
+  input: "#F2F5FF",         // Фон інпутів та вторинних кнопок
+  textMain: "#1F1F1F",      // Головний текст
+  textMuted: "#6A6E83",     // Вторинний текст
+  textLight: "#A8B1CE",     // Світло-сірий текст
+  border: "#EAEEF6",        // Межі
+  success: "#34C759",
+  warning: "#FF9500",
+  danger: "#FF453A"
+};
+
 const DIRECTIONS = [
-  { id: "latina", name: "Latina Solo", color: "#FF3B30" },
-  { id: "bachata", name: "Bachata Lady Style", color: "#FF9F0A" },
+  { id: "latina", name: "Latina Solo", color: "#FF453A" },
+  { id: "bachata", name: "Bachata Lady Style", color: "#FF9500" },
   { id: "heels", name: "High Heels", color: "#AF52DE" },
   { id: "dancehall", name: "Dancehall Female", color: "#34C759" },
-  { id: "kpop", name: "K-pop Cover Dance", color: "#007AFF" },
+  { id: "kpop", name: "K-pop Cover Dance", color: theme.primary },
   { id: "jazzfunk", name: "Jazz Funk", color: "#FF2D55" },
 ];
 const PLAN_TYPES = [
@@ -51,36 +67,25 @@ function getSubStatus(sub) {
   return "active";
 }
 
-// ПОВЕРНУТА ФУНКЦІЯ ДЛЯ СПОВІЩЕНЬ
-function getNotifMsg(sub,student,group,direction){
-  const name=student?.name?.split(" ")[0]||"";
-  const gName=group?.name||"";
-  const dName=direction?.name||"";
-  const tpl=student?.messageTemplate||student?.message_template;
-  if(tpl)return tpl.replace(/\{ім'я\}/g,name).replace(/\{група\}/g,gName).replace(/\{напрямок\}/g,dName);
-  return `Привіт, ${name}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
-}
-
 const STATUS_LABELS = { active: "Активний", warning: "Закінчується", expired: "Протермінований" };
-const STATUS_COLORS = { active: "#30D158", warning: "#FF9F0A", expired: "#FF453A" };
+const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. UI КОМПОНЕНТИ (Вдосконалені інпути)
+// 2. UI КОМПОНЕНТИ (СТИЛЬ ЗІ СТАЙЛ-ГАЙДУ)
 // ==========================================
-// ЗМІНЕНО ФОН ІНПУТІВ НА #2C2C2E + ДОДАНО РАМКУ, ЩОБ ЇХ БУЛО ВИДНО
-const inputSt = { width:"100%", padding:"14px 18px", background:"#2C2C2E", border:"1px solid #3A3A3C", borderRadius:16, color:"#fff", fontSize:15, outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
-const btnP = { padding:"14px 24px", background:"#0A84FF", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit", boxShadow:"0 4px 14px rgba(10, 132, 255, 0.3)" };
-const btnS = { padding:"14px 24px", background:"#2C2C2E", color:"#fff", border:"none", borderRadius:18, fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"inherit" };
-const cardSt = { background:"#1C1C1E", borderRadius:24, padding:"24px", border:"none" };
+const inputSt = { width:"100%", padding:"16px 20px", background:theme.input, border:`1px solid transparent`, borderRadius:16, color:theme.textMain, fontSize:14, fontWeight: 500, outline:"none", boxSizing:"border-box", fontFamily:"inherit", transition:"0.2s" };
+const btnP = { padding:"16px 28px", background:theme.primary, color:"#fff", border:"none", borderRadius:100, fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"inherit", boxShadow:`0 8px 24px ${theme.primary}40` };
+const btnS = { padding:"16px 28px", background:theme.input, color:theme.textMuted, border:"none", borderRadius:100, fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"inherit" };
+const cardSt = { background:theme.card, borderRadius:24, padding:"24px", border:"none", boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)" };
 
 function Modal({open, onClose, title, children, wide}){
   if(!open) return null;
   return(
-    <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,.7)", backdropFilter:"blur(8px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E", borderRadius:32, padding:"32px", width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"auto", border:"1px solid #2C2C2E", boxShadow: "0 20px 60px rgba(0,0,0,0.8)"}}>
+    <div style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, padding:"32px", width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"auto", boxShadow: "0 24px 48px rgba(0,0,0,0.1)"}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24}}>
-          <h3 style={{margin:0, fontSize:22, color:"#fff", fontWeight:700}}>{title}</h3>
-          <button onClick={onClose} style={{background:"#2C2C2E", borderRadius:"50%", width:36, height:36, border:"none", color:"#8E8E93", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center"}}>✕</button>
+          <h3 style={{margin:0, fontSize:22, color:theme.textMain, fontWeight:700}}>{title}</h3>
+          <button onClick={onClose} style={{background:theme.input, borderRadius:"50%", width:40, height:40, border:"none", color:theme.textMuted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize: 18}}>✕</button>
         </div>
         {children}
       </div>
@@ -89,15 +94,15 @@ function Modal({open, onClose, title, children, wide}){
 }
 
 function Field({label, children}){
-  return(<div style={{marginBottom:16}}><label style={{display:"block", fontSize:12, color:"#8E8E93", marginBottom:8, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5}}>{label}</label>{children}</div>);
+  return(<div style={{marginBottom:18}}><label style={{display:"block", fontSize:12, color:theme.textMuted, marginBottom:8, fontWeight:600, letterSpacing:0.5}}>{label}</label>{children}</div>);
 }
 
 function Badge({color, children}){
-  return <span style={{padding:"4px 10px", borderRadius:12, fontSize:12, fontWeight:700, background:`${color}22`, color, whiteSpace:"nowrap"}}>{children}</span>;
+  return <span style={{padding:"6px 12px", borderRadius:100, fontSize:12, fontWeight:600, background:`${color}15`, color, whiteSpace:"nowrap"}}>{children}</span>;
 }
 
 function Pill({active, onClick, children, color}){
-  return <button type="button" onClick={onClick} style={{padding:"8px 16px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||"#0A84FF"):"#2C2C2E", color:active?"#fff":"#8E8E93", border:"none", fontFamily:"inherit"}}>{children}</button>;
+  return <button type="button" onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||theme.primary):theme.input, color:active?"#fff":theme.textMuted, border:"none", fontFamily:"inherit", transition:"all 0.2s"}}>{children}</button>;
 }
 
 function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = false}) {
@@ -134,11 +139,11 @@ function StudentForm({initial, onDone, studentGrps, groups}){
     <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
     <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
     <Field label="Групи / напрямки">
-      <div style={{display:"flex",flexDirection:"column",gap:10, background: "#121212", padding: 16, borderRadius: 16, border: "1px solid #2C2C2E"}}>
-        {DIRECTIONS.map(d=><div key={d.id}><div style={{fontSize:12,color:d.color,fontWeight:700,marginBottom:8}}>{d.name}</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{groups.filter(g=>g.directionId===d.id).map(g=><Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>)}</div></div>)}
+      <div style={{display:"flex",flexDirection:"column",gap:12, background: theme.card, padding: 20, borderRadius: 20, border: `1px solid ${theme.border}`}}>
+        {DIRECTIONS.map(d=><div key={d.id}><div style={{fontSize:13,color:d.color,fontWeight:600,marginBottom:10}}>{d.name}</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{groups.filter(g=>g.directionId===d.id).map(g=><Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>)}</div></div>)}
       </div>
     </Field>
-    <Field label="Шаблон повідомлення"><textarea style={{...inputSt,minHeight:80,resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/><div style={{fontSize:11,color:"#8E8E93",marginTop:6}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div></Field>
+    <Field label="Шаблон повідомлення"><textarea style={{...inputSt,minHeight:80,resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/><div style={{fontSize:12,color:theme.textLight,marginTop:8}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div></Field>
     <Field label="Нотатки"><textarea style={{...inputSt,minHeight:60,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
@@ -169,26 +174,26 @@ function SubForm({initial, onDone, students, groups}){
   return(<div>
     <Field label="Учениця *"><select style={{...inputSt, cursor:"pointer"}} value={studentId} onChange={e=>setStudentId(e.target.value)}><option value="">Оберіть зі списку...</option>{students.sort((a,b)=>a.name.localeCompare(b.name,"uk")).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
     <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
-    <Field label="Тип Абонемента"><div style={{display:"flex",gap:8,flexWrap:"wrap", background: "#121212", padding: 12, borderRadius: 16, border: "1px solid #2C2C2E"}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>)}</div></Field>
+    <Field label="Тип Абонемента"><div style={{display:"flex",gap:8,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}`}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>)}</div></Field>
     
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
       <Field label="Початок (Клікніть для календаря)"><input style={{...inputSt, cursor: "pointer"}} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} /></Field>
-      <Field label="Кінець (Автоматично)"><input style={{...inputSt, opacity:.5, cursor: "not-allowed"}} type="date" value={endDate} readOnly/></Field>
+      <Field label="Кінець (Автоматично)"><input style={{...inputSt, background: theme.bg, color: theme.textLight, cursor: "not-allowed"}} type="date" value={endDate} readOnly/></Field>
     </div>
 
-    <div style={{background:"#121212",borderRadius:20,padding:"20px",marginBottom:16, border: "1px solid #2C2C2E"}}>
+    <div style={{background:theme.card,borderRadius:24,padding:"24px",marginBottom:16, border: `1px solid ${theme.border}`}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <Field label="Знижка (%)"><input style={inputSt} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
-        <Field label="Знижка за рахунок"><div style={{display:"flex",gap:6, background:"#1C1C1E", padding:6, borderRadius:100}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
+        <Field label="Знижка за рахунок"><div style={{display:"flex",gap:6, background:theme.input, padding:6, borderRadius:100}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
       </div>
-      {discountPct>0&&<div style={{fontSize:13,color:"#FF9F0A",marginTop:8, fontWeight: 500}}>Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:"#30D158", fontSize: 16}}>До сплати: {basePrice-Math.round(basePrice*discountPct/100)}₴</strong></div>}
+      {discountPct>0&&<div style={{fontSize:14,color:theme.warning,marginTop:12, fontWeight: 500}}>Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:theme.success, fontSize: 18}}>До сплати: {basePrice-Math.round(basePrice*discountPct/100)}₴</strong></div>}
     </div>
 
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Field label="Сумма до сплати (грн)"><input style={{...inputSt, color: "#30D158", fontWeight: 700, fontSize: 18}} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
+      <Field label="Сумма до сплати (грн)"><input style={{...inputSt, color: theme.success, fontWeight: 700, fontSize: 20}} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
       <Field label="Метод оплати"><div style={{display:"flex",gap:8}}>{PAY_METHODS.map(m=><Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>)}</div></Field>
     </div>
-    <label style={{display:"flex",alignItems:"center",gap:12,color:"#fff",cursor:"pointer",fontSize:16,marginBottom:20, background: "#1C1C1E", padding: "16px 20px", borderRadius: 16}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)} style={{width: 20, height: 20}}/> <strong>Абонемент оплачено</strong></label>
+    <label style={{display:"flex",alignItems:"center",gap:12,color:theme.textMain,cursor:"pointer",fontSize:16, fontWeight:600, marginBottom:24, background: theme.input, padding: "20px 24px", borderRadius: 20}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)} style={{width: 22, height: 22}}/> Оплачено</label>
     <Field label="Нотатки"><textarea style={{...inputSt,minHeight:60,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
@@ -205,13 +210,13 @@ function WaitlistForm({onDone, students, groups}) {
     <Field label="В яку групу чекає? *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button style={btnS} onClick={()=>setModal(null)}>Скасувати</button>
-      <button style={{...btnP, background: "#FF9F0A", opacity:studentId&&groupId?1:.4}} onClick={()=>{if(studentId&&groupId) onDone({studentId, groupId, dateAdded: today()})}}>Додати в резерв</button>
+      <button style={{...btnP, background: theme.warning, opacity:studentId&&groupId?1:.4}} onClick={()=>{if(studentId&&groupId) onDone({studentId, groupId, dateAdded: today()})}}>Додати в резерв</button>
     </div>
   </div>)
 }
 
 // ==========================================
-// 4. ГОЛОВНИЙ ДОДАТОК (ОСНОВНА ЛОГІКА)
+// 4. ГОЛОВНИЙ ДОДАТОК
 // ==========================================
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -229,7 +234,6 @@ export default function App() {
   const [financeDetailItem, setFinanceDetailItem] = useState(null);
   const [searchQ, setSearchQ] = useState("");
   
-  // Фільтри
   const [filterDir, setFilterDir] = useState("all");
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -243,7 +247,6 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
-  // Відвідування (Чернетка та Журнал)
   const [viewMode, setViewMode] = useState("daily");
   const [attnGid, setAttnGid] = useState("");
   const [attnDate, setAttnDate] = useState(today());
@@ -438,7 +441,7 @@ export default function App() {
     }
   };
 
-  // ─── ХЕНДЛЕРИ ДЛЯ БАЗИ ───
+  // ─── ХЕНДЛЕРИ ───
   const addStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.insertStudent(sd);setStudents(p=>[...p,s]);if(selectedGroups?.length)for(const gid of selectedGroups){const sg=await db.addStudentGroup(s.id,gid);setStudentGrps(p=>[...p,sg])}}catch(e){alert("Помилка: "+e.message)}setModal(null)};
   const editStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.updateStudent(editItem.id,sd);setStudents(p=>p.map(x=>x.id===s.id?s:x));if(selectedGroups){const existing=studentGrps.filter(sg=>sg.studentId===editItem.id);for(const sg of existing){if(!selectedGroups.includes(sg.groupId))await db.removeStudentGroup(editItem.id,sg.groupId)}for(const gid of selectedGroups){if(!existing.some(sg=>sg.groupId===gid))await db.addStudentGroup(editItem.id,gid)}const fresh=await db.fetchStudentGroups();setStudentGrps(fresh)}}catch(e){alert("Помилка: "+e.message)}setModal(null);setEditItem(null)};
   const deleteStudent=async(id)=>{if(!confirm("Видалити ученицю?"))return;try{await db.deleteStudent(id);setStudents(p=>p.filter(s=>s.id!==id));setSubs(p=>p.filter(s=>s.studentId!==id))}catch(e){alert(e.message)}};
@@ -449,27 +452,27 @@ export default function App() {
   const addWaitlist=async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}])}}catch(e){console.error(e)}setModal(null)};
   const removeWaitlist=async(id)=>{try{if(db.deleteWaitlist) await db.deleteWaitlist(id);setWaitlist(p=>p.filter(w=>w.id!==id));}catch(e){console.error(e)}};
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#000",color:"#8E8E93",fontFamily:"sans-serif",fontSize:18}}>Завантаження...</div>;
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18, fontWeight: 600}}>Завантаження...</div>;
 
   return (
-    <div style={{minHeight:"100vh", background:"#000", color:"#fff", fontFamily:"'DM Sans',sans-serif", paddingBottom: 100}}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+    <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
-        <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px"}}>Dance Studio.</h1></div>
+        <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12}}><button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button><button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button></div>
       </header>
 
       <nav style={{maxWidth:1200, margin:"0 auto", padding:"0 24px 30px", overflowX:"auto"}}>
-        <div style={{display:"inline-flex", background: "#1C1C1E", borderRadius: 100, padding: 6}}>
+        <div style={{display:"inline-flex", background: theme.card, borderRadius: 100, padding: 6, boxShadow: "0 4px 20px rgba(168, 177, 206, 0.15)"}}>
           {[
-            {id:"dashboard", icon:"📊", label:"Дашборд"},
-            {id:"students", icon:"👩‍🎤", label:"Учениці"},
-            {id:"subs", icon:"🎫", label:"Абонементи"},
-            {id:"attendance", icon:"✅", label:"Відвідування"},
-            {id:"alerts", icon:notifications.filter(n=>!n.notified).length?"🔴":"🔔", label:"Сповіщення"},
-            {id:"finance", icon:"💰", label:"Фінанси"}
-          ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "10px 20px", background: tab===t.id ? "#3A3A3C" : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : "#8E8E93", fontSize: 14, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.icon} {t.label}</button>)}
+            {id:"dashboard", label:"Дашборд"},
+            {id:"students", label:"Учениці"},
+            {id:"subs", label:"Абонементи"},
+            {id:"attendance", label:"Відвідування"},
+            {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
+            {id:"finance", label:"Фінанси"}
+          ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)}
         </div>
       </nav>
 
@@ -477,23 +480,23 @@ export default function App() {
         
         {/* === ДАШБОРД === */}
         {tab==="dashboard" && <div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:30}}>
-            {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:"#0A84FF"},{l:"Абонементів",v:activeSubs.length,s:`${warnSubs.length} закінч.`,c:"#30D158"},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ борги`,c:"#FF9F0A"},{l:"Сповіщення",v:notifications.filter(n=>!n.notified).length,s:"непрочит.",c:"#FF453A"}].map((c,i)=><div key={i} style={{...cardSt, display: "flex", flexDirection: "column", gap: 6}}><div style={{fontSize:13,color:"#8E8E93",textTransform:"uppercase", fontWeight: 700}}>{c.l}</div><div style={{fontSize:36,fontWeight:800,color:c.c}}>{c.v}</div><div style={{fontSize:13,color:"#8E8E93", fontWeight: 600}}>{c.s}</div></div>)}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginBottom:30}}>
+            {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:theme.primary},{l:"Абонементів",v:activeSubs.length,s:`${warnSubs.length} закінч.`,c:theme.success},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ борги`,c:theme.warning},{l:"Сповіщення",v:notifications.filter(n=>!n.notified).length,s:"непрочит.",c:theme.danger}].map((c,i)=><div key={i} style={{...cardSt, display: "flex", flexDirection: "column", gap: 6, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textLight,textTransform:"uppercase", fontWeight: 700}}>{c.l}</div><div style={{fontSize:36,fontWeight:800,color:c.c}}>{c.v}</div><div style={{fontSize:13,color:theme.textMuted, fontWeight: 600}}>{c.s}</div></div>)}
           </div>
-          <h3 style={{color:"#fff",fontSize:20,marginBottom:16, fontWeight: 800}}>Глибока аналітика 🧠</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16,marginBottom:40}}>
-            <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2C1A35)"}}><div style={{fontSize:13,color:"#E58EED",textTransform:"uppercase", fontWeight: 700}}>LTV (Середній чек)</div><div style={{fontSize:32,fontWeight:800,color:"#fff",margin:"8px 0"}}>{analytics.avgLTV.toLocaleString()} ₴</div><div style={{fontSize:13,color:"#8E8E93"}}>З однієї учениці за весь час</div></div>
-            <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #352115)"}}><div style={{fontSize:13,color:"#FF9F0A",textTransform:"uppercase", fontWeight: 700}}>Конверсія з пробного</div><div style={{fontSize:32,fontWeight:800,color:"#fff",margin:"8px 0"}}>{analytics.conversionRate} %</div><div style={{fontSize:13,color:"#8E8E93"}}>Купили повний абонемент</div></div>
+          <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Аналітика</h3>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:40}}>
+            <div style={{...cardSt, background: theme.input, border: "none"}}><div style={{fontSize:13,color:theme.secondary,textTransform:"uppercase", fontWeight: 700}}>LTV (Середній чек)</div><div style={{fontSize:32,fontWeight:800,color:theme.primary,margin:"8px 0"}}>{analytics.avgLTV.toLocaleString()} ₴</div><div style={{fontSize:13,color:theme.textMuted}}>З однієї учениці за весь час</div></div>
+            <div style={{...cardSt, background: "#FFF9F0", border: "none"}}><div style={{fontSize:13,color:theme.warning,textTransform:"uppercase", fontWeight: 700}}>Конверсія з пробного</div><div style={{fontSize:32,fontWeight:800,color:theme.warning,margin:"8px 0"}}>{analytics.conversionRate} %</div><div style={{fontSize:13,color:theme.textMuted}}>Купили повний абонемент</div></div>
           </div>
-          <h3 style={{color:"#fff",fontSize:20,marginBottom:16, fontWeight: 800}}>За напрямками</h3>
+          <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Напрямки</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16}}>
-            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt, padding: "20px"}}><div style={{fontSize:14,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div><div style={{fontSize:28,fontWeight:800,color:"#fff"}}>{data.students} <span style={{fontSize: 14, color: "#8E8E93", fontWeight: 600}}>уч.</span></div></div>})}
+            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt, padding: "20px", border: `1px solid ${theme.border}`}}><div style={{fontSize:14,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain}}>{data.students} <span style={{fontSize: 14, color: theme.textLight, fontWeight: 600}}>уч.</span></div></div>})}
           </div>
         </div>}
 
         {/* === УЧЕНИЦІ === */}
         {tab==="students" && <div>
-          <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",justifyContent:"space-between", background: "#1C1C1E", padding: 16, borderRadius: 24}}>
+          <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",justifyContent:"space-between", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
             <div style={{display: "flex", gap: 12, flexWrap: "wrap", flex: 1}}>
               <input style={{...inputSt,maxWidth:300}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
               <select style={{...inputSt,width:"auto"}} value={stFilterDir} onChange={e=>{setStFilterDir(e.target.value);setStFilterGroup("all")}}>
@@ -502,27 +505,27 @@ export default function App() {
               </select>
               <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
             </div>
-            <button style={{...btnP, background: "#FF9F0A", boxShadow: "none", height: "fit-content"}} onClick={()=>setModal("addWaitlist")}>+ В резерв</button>
+            <button style={{...btnP, background: theme.warning, boxShadow: "none", height: "fit-content"}} onClick={()=>setModal("addWaitlist")}>+ В резерв</button>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:20, marginBottom: 30}}>
             {studentsByDirection.grouped.map(({direction,students:dStudents})=>{
               const isExpanded = expandedDirs[direction.id];
               return (
-                <div key={direction.id} style={{background: "#1C1C1E", borderRadius: 28, overflow: 'hidden'}}>
+                <div key={direction.id} style={{background: theme.card, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
-                    <div style={{fontSize:18,fontWeight:800,color:direction.color}}>{direction.name} <span style={{color:"#8E8E93",fontSize:15,fontWeight:600, marginLeft: 8}}>({dStudents.length})</span></div>
-                    <div style={{color:"#8E8E93", fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({dStudents.length})</span></div>
+                    <div style={{color:theme.textLight, fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
                   {isExpanded && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
                     {dStudents.map(st => {
                       const active=subsExt.filter(s=>s.studentId===st.id && s.status!=="expired");
-                      return <div key={st.id} style={{background: "#2C2C2E", borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
+                      return <div key={st.id} style={{background: theme.bg, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
                         <div style={{minWidth:200}}>
-                          <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{st.name}</div>
-                          <div style={{color:"#8E8E93",fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
+                          <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div>
+                          <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
-                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Редагувати</button><button style={{background:"none",border:"none",color:"#FF453A",fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
+                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Редагувати</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
                       </div>
                     })}
                   </div>)}
@@ -531,18 +534,18 @@ export default function App() {
             })}
           </div>
           {waitlist.length > 0 && (
-            <div style={{background: "linear-gradient(135deg, #1C1C1E, #352115)", borderRadius: 28, overflow: 'hidden'}}>
+            <div style={{background: "#FFF9F0", borderRadius: 28, overflow: 'hidden'}}>
               <div style={{padding:'24px', display: "flex", justifyContent: "space-between"}}>
-                <span style={{fontSize:18,fontWeight:800,color:"#FF9F0A"}}>⏳ Лист очікування ({waitlist.length})</span>
+                <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({waitlist.length})</span>
               </div>
               <div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
                 {waitlist.map(w => {
                   const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
                   if(!st || !gr) return null;
                   return (
-                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#2C2C2E", padding: "20px", borderRadius: 20}}>
-                      <div><div style={{color:"#fff",fontWeight:700,fontSize:16}}>{st.name}</div><div style={{color:"#8E8E93",fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:"#fff"}}>{gr.name}</strong></div></div>
-                      <button style={{...btnS,padding:"10px 16px",fontSize:14,color:"#FF453A", background: "#1C1C1E"}} onClick={()=>db.deleteWaitlist(w.id).then(()=>setWaitlist(p=>p.filter(x=>x.id!==w.id)))}>Видалити</button>
+                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#fff", padding: "20px", borderRadius: 20}}>
+                      <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
+                      <button style={{...btnS,padding:"10px 16px",fontSize:14,color:theme.danger, background: theme.input}} onClick={()=>db.deleteWaitlist(w.id).then(()=>setWaitlist(p=>p.filter(x=>x.id!==w.id)))}>Видалити</button>
                     </div>
                   )
                 })}
@@ -553,7 +556,7 @@ export default function App() {
 
         {/* === АБОНЕМЕНТИ === */}
         {tab==="subs" && <div>
-          <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: "#1C1C1E", padding: 16, borderRadius: 24}}>
+          <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
             <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук за іменем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
               <option value="all">Усі напрямки</option>
@@ -564,23 +567,23 @@ export default function App() {
               <option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option>
             </select>
           </div>
-          {filteredSubs.length===0?<div style={{color:"#8E8E93",padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає абонементів</div>:
+          {filteredSubs.length===0?<div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає абонементів</div>:
           <div style={{display:"flex",flexDirection:"column",gap:20}}>
             {subsGroupedByDir.grouped.filter(d => filterDir === "all" || d.direction.id === filterDir).map(({direction, subs: dSubs}) => {
               const finalSubs = filterGroup !== "all" ? dSubs.filter(s => s.groupId === filterGroup) : dSubs;
               if (finalSubs.length === 0) return null;
               const isExpanded = expandedSubDirs[direction.id];
               return (
-                <div key={direction.id} style={{background: "#1C1C1E", borderRadius: 28, overflow: 'hidden'}}>
+                <div key={direction.id} style={{background: theme.card, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
-                    <div style={{fontSize:18,fontWeight:800,color:direction.color}}>{direction.name} <span style={{color:"#8E8E93",fontSize:15,fontWeight:600, marginLeft: 8}}>({finalSubs.length})</span></div>
-                    <div style={{color:"#8E8E93", fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({finalSubs.length})</span></div>
+                    <div style={{color:theme.textLight, fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
                   {isExpanded && (
                     <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}}>
                       <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
                         <thead>
-                          <tr style={{color: "#8E8E93", textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}>
+                          <tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Група</th>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th>
@@ -593,16 +596,16 @@ export default function App() {
                         <tbody>
                           {finalSubs.map(sub => {
                             const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-                            return <tr key={sub.id} style={{borderTop: "1px solid #2C2C2E"}}>
-                              <td style={{padding: "16px 14px", color: "#fff", fontWeight: 600, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8E8E93", fontWeight: 500}}>{gr?.name}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: "#c9d1d9", fontWeight: 500}}>{planLabel}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: "#fff", fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: "#8E8E93", fontWeight: 500}}> / {sub.totalTrainings}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: "#8E8E93", fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color="#FF453A">Борг</Badge></span>}</td>
+                            return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}>
+                              <td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
+                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td>
+                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td>
+                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td>
+                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
+                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td>
                               <td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}>
                                 <button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,marginRight:16}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
-                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#FF453A"}} onClick={()=>deleteSub(sub.id)}>🗑</button>
+                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:theme.danger}} onClick={()=>deleteSub(sub.id)}>🗑</button>
                               </td>
                             </tr>
                           })}
@@ -618,9 +621,9 @@ export default function App() {
 
         {/* === ВІДВІДУВАННЯ (ТАБЛИЦЯ ТА ЧЕРНЕТКА) === */}
         {tab==="attendance" && <div style={{ maxWidth: viewMode === "journal" ? "100%" : 800 }}>
-          <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: "1px solid #21262d", paddingBottom: 16 }}>
-            <button style={{...btnS, background: viewMode === "daily" ? "#21262d" : "transparent", color: viewMode === "daily" ? "#fff" : "#8E8E93", border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
-            <button style={{...btnS, background: viewMode === "journal" ? "#21262d" : "transparent", color: viewMode === "journal" ? "#fff" : "#8E8E93", border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
+          <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: `1px solid ${theme.border}`, paddingBottom: 16 }}>
+            <button style={{...btnS, background: viewMode === "daily" ? theme.input : "transparent", color: viewMode === "daily" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
+            <button style={{...btnS, background: viewMode === "journal" ? theme.input : "transparent", color: viewMode === "journal" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
           </div>
 
           <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
@@ -632,13 +635,13 @@ export default function App() {
           </div>
 
           {viewMode === "journal" ? (
-            <div style={{ overflowX: "auto", background: "#1C1C1E", borderRadius: 16, border: "1px solid #21262d", padding: 10 }}>
+            <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: 16, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
               <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
                 <thead>
                   <tr>
-                    <th style={{ position: "sticky", left: 0, background: "#1C1C1E", padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: "1px solid #2C2C2E", minWidth: 150 }}>Учениця</th>
+                    <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `1px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
                     {generateDays().map(d => (
-                      <th key={d} style={{ padding: "8px 4px", color: "#8E8E93", fontWeight: 500, minWidth: 36, textAlign: "center", borderBottom: "1px solid #2C2C2E" }}>
+                      <th key={d} style={{ padding: "8px 4px", color: theme.textLight, fontWeight: 600, minWidth: 36, textAlign: "center", borderBottom: `1px solid ${theme.border}` }}>
                         {d.slice(-2)}
                       </th>
                     ))}
@@ -646,8 +649,8 @@ export default function App() {
                 </thead>
                 <tbody>
                   {studsInGroup.map(st => (
-                    <tr key={st.id} style={{ borderBottom: "1px solid #2C2C2E" }}>
-                      <td style={{ position: "sticky", left: 0, background: "#1C1C1E", padding: "10px 16px", fontWeight: 600, color: "#fff", borderRight: "1px solid #2C2C2E", zIndex: 1 }}>
+                    <tr key={st.id} style={{ borderBottom: `1px solid ${theme.bg}` }}>
+                      <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `1px solid ${theme.border}`, zIndex: 1 }}>
                         {st.name}
                       </td>
                       {generateDays().map(d => {
@@ -657,7 +660,7 @@ export default function App() {
                         
                         return (
                           <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
-                            <div style={{ width: 24, height: 24, margin: "0 auto", borderRadius: 6, background: isAttended ? "#30D158" : "#2C2C2E", border: `1px solid ${isAttended ? "#30D158" : "#3A3A3C"}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>
+                            <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>
                               {isAttended ? "✓" : ""}
                             </div>
                           </td>
@@ -670,31 +673,31 @@ export default function App() {
             </div>
           ) : (
             <>
-              {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: "1px solid rgba(255,69,58,0.3)", borderRadius: 16, padding: "12px 16px", marginBottom: 20, color: "#FF453A", fontWeight: 600 }}>❌ Тренування відмінено</div>}
+              {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено</div>}
 
               {studsWithSub.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: "#8892b0", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
                     З абонементом ({studsWithSub.length})
                   </div>
-                  <div style={{ background: "#1C1C1E", borderRadius: 20, overflow: "hidden" }}>
+                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {studsWithSub.map(({sub, student}, i) => {
                       const key = `sub_${sub.id}`;
                       const isMarked = !!draft[key];
                       return (
                       <div key={sub.id} onClick={() => toggleDraft(key)} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? "1px solid #2C2C2E" : "none",
+                        padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none",
                         cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(48, 209, 88, 0.1)" : "transparent", opacity: isCan ? 0.5 : 1
+                        background: isMarked ? "rgba(52, 199, 89, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
                       }}>
                         <div>
-                          <div style={{ color: "#fff", fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: "#8E8E93", fontSize: 13, marginTop: 4 }}>
-                            <span style={{ color: isMarked ? "#30D158" : "#fff", fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
+                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
+                          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
+                            <span style={{ color: isMarked ? theme.success : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
                           </div>
                         </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? "#30D158" : "#3A3A3C"}`, background: isMarked ? "#30D158" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.success : theme.border}`, background: isMarked ? theme.success : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
                           {isMarked && "✓"}
                         </div>
                       </div>
@@ -705,27 +708,27 @@ export default function App() {
 
               {studsWithoutSub.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: "#8892b0", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
                     Без активного абонемента ({studsWithoutSub.length})
                   </div>
-                  <div style={{ background: "#1C1C1E", borderRadius: 20, overflow: "hidden" }}>
+                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {studsWithoutSub.map(({student, sub}, i) => {
                       const key = `guest_${student.name}`;
                       const isMarked = !!draft[key];
                       return (
                       <div key={student.id} onClick={() => toggleDraft(key)} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? "1px solid #2C2C2E" : "none",
+                        padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none",
                         cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(255, 159, 10, 0.1)" : "transparent", opacity: isCan ? 0.5 : 1
+                        background: isMarked ? "rgba(255, 149, 0, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
                       }}>
                         <div>
-                          <div style={{ color: "#fff", fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: isMarked ? "#FF9F0A" : "#FF453A", fontSize: 13, marginTop: 4 }}>
+                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
+                          <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>
                             {isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
                           </div>
                         </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? "#FF9F0A" : "#3A3A3C"}`, background: isMarked ? "#FF9F0A" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
                           {isMarked && "✓"}
                         </div>
                       </div>
@@ -736,22 +739,22 @@ export default function App() {
 
               {manualGuests.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: "#8892b0", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
                     Нові гості ({manualGuests.length})
                   </div>
-                  <div style={{ background: "#1C1C1E", borderRadius: 20, overflow: "hidden" }}>
+                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {manualGuests.map((g, i) => (
                       <div key={g.id} style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? "1px solid #2C2C2E" : "none",
+                        padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none",
                       }}>
                         <div>
-                          <div style={{ color: "#fff", fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
-                          <div style={{ color: g.entryType === "trial" ? "#30D158" : "#FF9F0A", fontSize: 13, marginTop: 4, fontWeight: 500 }}>
+                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
+                          <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>
                             {g.entryType === "trial" ? "Пробне" : "Разове"}
                           </div>
                         </div>
-                        <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: "#FF453A", fontSize: 24, cursor: "pointer" }}>✕</button>
+                        <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: theme.danger, fontSize: 24, cursor: "pointer" }}>✕</button>
                       </div>
                     ))}
                   </div>
@@ -760,23 +763,23 @@ export default function App() {
 
               {isDirty && (
                 <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, width: "calc(100% - 40px)", maxWidth: 400 }}>
-                  <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: "#30D158", padding: "16px", fontSize: 16, borderRadius: 100, boxShadow: "0 10px 30px rgba(48,209,88,0.4)" }}>
+                  <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: theme.success, padding: "18px", fontSize: 16, borderRadius: 100, boxShadow: `0 10px 30px ${theme.success}50` }}>
                     {isSaving ? "Зберігаємо..." : "💾 Зберегти відмітки"}
                   </button>
                 </div>
               )}
 
-              <div style={{ background: "#1C1C1E", borderRadius: 20, padding: "20px" }}>
-                <div style={{ fontSize: 13, color: "#8892b0", marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ background: theme.card, borderRadius: 24, padding: "24px", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+                <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
                   </div>
-                  <div style={{ display: "flex", gap: 6, background: "#2C2C2E", padding: 6, borderRadius: 100 }}>
-                    <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color="#30D158">Пробне</Pill>
-                    <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color="#FF9F0A">Разове</Pill>
+                  <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
+                    <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
+                    <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
                   </div>
-                  <button style={{...btnP, borderRadius: 100, background: "#0A84FF"}} onClick={addManual}>Додати</button>
+                  <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Додати</button>
                 </div>
               </div>
             </>
@@ -785,24 +788,24 @@ export default function App() {
 
         {/* === СПОВІЩЕННЯ === */}
         {tab==="alerts" && <div>
-          {notifications.length===0?<div style={{textAlign:"center",padding:60,color:"#8E8E93", fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
+          {notifications.length===0?<div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {notifications.map(n=>{
               const msg=getNotifMsg(null,n.student,n.group,n.direction);
               const tgUser=n.student?.telegram?.replace("@","");
               const tgLink=tgUser?`https://t.me/${tgUser}?text=${encodeURIComponent(msg)}`:null;
-              return<div key={n.subId} style={{...cardSt, opacity:n.notified?.5:1, borderLeft: `4px solid ${STATUS_COLORS[n.status]}`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+              return<div key={n.subId} style={{...cardSt, opacity:n.notified?.6:1, borderLeft: `4px solid ${STATUS_COLORS[n.status]}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16}}>
                   <div>
                     <div style={{display: "flex", gap: 12, alignItems: "center", marginBottom: 8}}>
-                      <span style={{color:"#fff",fontWeight:800, fontSize: 18}}>{n.student?.name}</span> 
-                      <Badge color={n.type==="expired"?"#FF453A":"#FF9F0A"}>{n.message}</Badge>
-                      {n.notified&&<Badge color="#8E8E93">✅ Відправлено</Badge>}
+                      <span style={{color:theme.textMain,fontWeight:800, fontSize: 18}}>{n.student?.name}</span> 
+                      <Badge color={n.type==="expired"?theme.danger:theme.warning}>{n.message}</Badge>
+                      {n.notified&&<Badge color={theme.textLight}>✅ Відправлено</Badge>}
                     </div>
-                    <div style={{color:"#8E8E93",fontSize:15, fontWeight: 500}}>{n.group?.name}</div>
+                    <div style={{color:theme.textMuted,fontSize:15, fontWeight: 500}}>{n.group?.name}</div>
                   </div>
                   <div style={{display:"flex",gap:10}}>
-                    {tgLink&&<a href={tgLink} target="_blank" rel="noopener noreferrer" onClick={()=>markNotified(n.subId)} style={{padding:"12px 20px",borderRadius:16,background:"#0A84FF22",color:"#0A84FF",fontSize:14,fontWeight: 700, textDecoration:"none"}}>💬 Написати</a>}
+                    {tgLink&&<a href={tgLink} target="_blank" rel="noopener noreferrer" onClick={()=>markNotified(n.subId)} style={{padding:"12px 20px",borderRadius:16,background:`${theme.primary}15`,color:theme.primary,fontSize:14,fontWeight: 700, textDecoration:"none"}}>💬 Написати</a>}
                     {!n.notified&&<button style={{...btnS,padding:"12px 20px",fontSize:14}} onClick={()=>markNotified(n.subId)}>Позначити виконаним</button>}
                   </div>
                 </div>
@@ -825,11 +828,11 @@ export default function App() {
 
           return (
             <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16,marginBottom:30}}>
-                <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #14281D)"}}><div style={{fontSize:13,color:"#30D158",textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Загалом оплачено</div><div style={{fontSize:42,fontWeight:800,color:"#30D158", marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div></div>
-                <div style={{...cardSt, background: "linear-gradient(135deg, #1C1C1E, #2D1516)"}}><div style={{fontSize:13,color:"#FF453A",textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Борги учениць (очікується)</div><div style={{fontSize:42,fontWeight:800,color:"#FF453A", marginTop: 8}}>{analytics.unpaid.toLocaleString()} ₴</div></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
+                <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.success,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Загалом оплачено</div><div style={{fontSize:42,fontWeight:800,color:theme.success, marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div></div>
+                <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.danger,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Борги учениць</div><div style={{fontSize:42,fontWeight:800,color:theme.danger, marginTop: 8}}>{analytics.unpaid.toLocaleString()} ₴</div></div>
               </div>
-              <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: "#1C1C1E", padding: 16, borderRadius: 24}}>
+              <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
                 <div style={{flex: 1, display: "flex", gap: 12, minWidth: 300, flexWrap: "wrap"}}>
                   <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
@@ -839,27 +842,27 @@ export default function App() {
                   <button style={{...btnS, padding: "0 16px", fontSize: 18}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>{finSortOrder === "desc" ? "⬇" : "⬆"}</button>
                 </div>
               </div>
-              <h3 style={{color:"#fff",fontSize:20,marginBottom:20, fontWeight: 800}}>Деталізація по групах ({finData.length})</h3>
-              {finData.length === 0 ? <div style={{color:"#8E8E93",padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає оплат</div> :
-              <div style={{display:"flex",flexDirection:"column",gap:20}}>
+              <h3 style={{color:theme.secondary,fontSize:20,marginBottom:20, fontWeight: 800}}>Деталізація по групах ({finData.length})</h3>
+              {finData.length === 0 ? <div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає оплат</div> :
+              <div style={{display:"flex",flexDirection:"column",gap:24}}>
                 {finData.map(sp => {
                   const dir = dirMap[sp.group.directionId]; const trainerPct = sp.group.trainerPct; const studioPct = 100 - trainerPct;
                   return (
-                    <div key={sp.group.id} style={{background: "#1C1C1E", borderRadius: 28, padding: "24px", display: "flex", flexDirection: "column", gap: 20}}>
+                    <div key={sp.group.id} style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
                       <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
-                        <div><div style={{display: "flex", alignItems: "center", gap: 10, marginBottom: 8}}><span style={{color:"#fff",fontWeight:800, fontSize: 18}}>{sp.group.name}</span><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></div><div style={{fontSize: 14, color: "#8E8E93", fontWeight: 500}}>Оплачених абонементів: <strong style={{color: "#fff"}}>{sp.subs.length}</strong></div></div>
-                        <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div style={{fontSize: 28, fontWeight: 800, color: "#fff", marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
+                        <div><div style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8}}><span style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></div><div style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
+                        <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
                       </div>
-                      <div style={{height: 10, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>
-                        <div style={{width: `${trainerPct}%`, background: "#0A84FF"}} title="Тренер"></div>
-                        <div style={{width: `${studioPct}%`, background: "#30D158"}} title="Студія"></div>
+                      <div style={{height: 12, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>
+                        <div style={{width: `${trainerPct}%`, background: theme.primary}} title="Тренер"></div>
+                        <div style={{width: `${studioPct}%`, background: theme.success}} title="Студія"></div>
                       </div>
-                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12}}>
+                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16}}>
                         <div style={{display: "flex", gap: 40}}>
-                          <div><div style={{fontSize:12,color:"#8E8E93", fontWeight: 700}}>Тренер ({trainerPct}%)</div><div style={{fontSize:20,fontWeight:800,color:"#0A84FF", marginTop: 6}}>{sp.trainer.toLocaleString()} ₴</div></div>
-                          <div><div style={{fontSize:12,color:"#8E8E93", fontWeight: 700}}>Студія ({studioPct}%)</div><div style={{fontSize:20,fontWeight:800,color:"#30D158", marginTop: 6}}>{sp.studio.toLocaleString()} ₴</div></div>
+                          <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Тренер ({trainerPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.primary, marginTop: 6}}>{sp.trainer.toLocaleString()} ₴</div></div>
+                          <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Студія ({studioPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.success, marginTop: 6}}>{sp.studio.toLocaleString()} ₴</div></div>
                         </div>
-                        <button style={{...btnS, padding: "12px 20px", background: "#2C2C2E"}} onClick={() => setFinanceDetailItem(sp)}>🧾 Детальний звіт</button>
+                        <button style={{...btnS, padding: "12px 24px", background: theme.input}} onClick={() => setFinanceDetailItem(sp)}>🧾 Детальний звіт</button>
                       </div>
                     </div>
                   )
@@ -875,13 +878,13 @@ export default function App() {
       <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide>
         {financeDetailItem && (
           <div>
-            <div style={{display: "flex", justifyContent: "space-between", background: "#2C2C2E", padding: "20px 24px", borderRadius: 20, marginBottom: 24}}>
-              <div><div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 700}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 26, fontWeight: 800, color: "#0A84FF", marginTop: 6}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
-              <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: "#8E8E93", textTransform: "uppercase", fontWeight: 700}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 26, fontWeight: 800, color: "#30D158", marginTop: 6}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
+            <div style={{display: "flex", justifyContent: "space-between", background: theme.input, padding: "20px 24px", borderRadius: 20, marginBottom: 24}}>
+              <div><div style={{fontSize: 12, color: theme.textMuted, textTransform: "uppercase", fontWeight: 700}}>Тренеру ({financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 26, fontWeight: 800, color: theme.primary, marginTop: 6}}>{financeDetailItem.trainer.toLocaleString()} ₴</div></div>
+              <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: theme.textMuted, textTransform: "uppercase", fontWeight: 700}}>Студії ({100 - financeDetailItem.group.trainerPct}%)</div><div style={{fontSize: 26, fontWeight: 800, color: theme.success, marginTop: 6}}>{financeDetailItem.studio.toLocaleString()} ₴</div></div>
             </div>
             <table style={{width: "100%", borderCollapse: "collapse", fontSize: 15, textAlign: "left"}}>
-              <thead><tr style={{color: "#8E8E93", borderBottom: "1px solid #3A3A3C"}}><th style={{padding: "16px 0", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 0", fontWeight: 700}}>Тип</th><th style={{padding: "16px 0", fontWeight: 700, textAlign: "right"}}>Оплачено</th><th style={{padding: "16px 0", fontWeight: 700, textAlign: "right", color: "#0A84FF"}}>Частка тренера</th></tr></thead>
-              <tbody>{financeDetailItem.subs.map(sub => (<tr key={sub.id} style={{borderBottom: "1px solid #2C2C2E"}}><td style={{padding: "16px 0", color: "#fff", fontWeight: 600}}>{studentMap[sub.studentId]?.name}</td><td style={{padding: "16px 0", color: "#8E8E93", fontWeight: 500}}>{PLAN_TYPES.find(p=>p.id===sub.planType)?.name}</td><td style={{padding: "16px 0", textAlign: "right", fontWeight: 600}}>{sub.amount} ₴</td><td style={{padding: "16px 0", textAlign: "right", color: "#0A84FF", fontWeight: 800}}>+ {Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100))} ₴</td></tr>))}</tbody>
+              <thead><tr style={{color: theme.textLight, borderBottom: `1px solid ${theme.border}`}}><th style={{padding: "16px 0", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 0", fontWeight: 700}}>Тип</th><th style={{padding: "16px 0", fontWeight: 700, textAlign: "right"}}>Оплачено</th><th style={{padding: "16px 0", fontWeight: 700, textAlign: "right", color: theme.primary}}>Частка тренера</th></tr></thead>
+              <tbody>{financeDetailItem.subs.map(sub => (<tr key={sub.id} style={{borderBottom: `1px solid ${theme.bg}`}}><td style={{padding: "16px 0", color: theme.textMain, fontWeight: 600}}>{studentMap[sub.studentId]?.name}</td><td style={{padding: "16px 0", color: theme.textMuted, fontWeight: 500}}>{PLAN_TYPES.find(p=>p.id===sub.planType)?.name}</td><td style={{padding: "16px 0", textAlign: "right", fontWeight: 600, color: theme.textMain}}>{sub.amount} ₴</td><td style={{padding: "16px 0", textAlign: "right", color: theme.primary, fontWeight: 800}}>+ {Math.round((sub.amount || 0) * (financeDetailItem.group.trainerPct / 100))} ₴</td></tr>))}</tbody>
             </table>
           </div>
         )}
