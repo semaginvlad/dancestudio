@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import AICoach from "./AICoach";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend
@@ -581,7 +582,7 @@ export default function Analytics() {
         )}
 
         {/* AI */}
-        {tab === "ai" && <AIReport data={data} />}
+        {tab === "ai" && <AICoach data={data} />}
       </div>
     </div>
   );
