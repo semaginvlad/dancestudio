@@ -56,6 +56,7 @@ const addMonth = (d) => { const dt = new Date(d+"T12:00:00"); dt.setMonth(dt.get
 const today = () => toLocalISO(new Date());
 const fmt = (d) => { if(!d) return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
 const daysLeft = (ed) => Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function getSubStatus(sub) {
   if (!sub?.endDate) return "expired";
@@ -129,7 +130,355 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ
+// 3. ІЗОЛЬОВАНА ВЛАДКА ВІДВІДУВАНЬ
+// ==========================================
+// Це захищає додаток від падіння, якщо є биті дані.
+const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
+  const [viewMode, setViewMode] = useState("daily");
+  const [gid, setGid] = useState(groups[0]?.id || "");
+  const [date, setDate] = useState(today());
+  const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
+  const [manualName, setManualName] = useState("");
+  const [manualType, setManualType] = useState("trial");
+  
+  const [draft, setDraft] = useState({});
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
+
+  const isCan = cancelled.some(c => c.groupId === gid && c.date === date);
+  const todayAttn = attn.filter(a => a.groupId === gid && a.date === date);
+  const guests = todayAttn.filter(a => a.guestName);
+
+  useEffect(() => {
+    const initialDraft = {};
+    todayAttn.forEach(a => {
+      if (a.subId) initialDraft[`sub_${a.subId}`] = true;
+      if (a.guestName) initialDraft[`guest_${a.guestName}`] = true;
+    });
+    setDraft(initialDraft);
+    setIsDirty(false);
+  }, [gid, date, attn]);
+
+  // Захищені списки
+  const stIdsInGroup = new Set([
+    ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
+    ...subs.filter(s => s.groupId === gid).map(s => s.studentId)
+  ]);
+  
+  const studsInGroup = Array.from(stIdsInGroup)
+    .map(id => studentMap[id])
+    .filter(st => st && st.name) // ТІЛЬКИ існуючі з іменем
+    .sort((a,b) => (a.name || "").localeCompare((b.name || ""), "uk"));
+
+  const studsWithSub = [];
+  const studsWithoutSub = [];
+
+  studsInGroup.forEach(student => {
+    const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
+    const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.endDate) - new Date(a.endDate))[0];
+    if (bestSub && getSubStatus(bestSub) !== "expired") {
+        studsWithSub.push({ student, sub: bestSub });
+    } else {
+        const guestEntry = guests.find(g => g.guestName === student.name);
+        studsWithoutSub.push({ student, sub: bestSub, guestEntry });
+    }
+  });
+
+  const manualGuests = guests.filter(g => !studsWithoutSub.some(s => s.student.name === g.guestName));
+
+  const toggleDraft = (key) => {
+    if (isCan) return;
+    setDraft(p => ({ ...p, [key]: !p[key] }));
+    setIsDirty(true);
+  };
+
+  const saveBatch = async () => {
+    setIsSaving(true);
+    let newAttn = [...attn];
+    let newSubs = [...subs];
+
+    try {
+      for (const {sub} of studsWithSub) {
+        const key = `sub_${sub.id}`;
+        const isDraftMarked = !!draft[key];
+        const dbRecord = todayAttn.find(a => a.subId === sub.id);
+        
+        if (isDraftMarked && !dbRecord) {
+          const a = await db.insertAttendance({ subId: sub.id, date: date, quantity: 1, entryType: "subscription", groupId: gid });
+          if(db.incrementUsed) await db.incrementUsed(sub.id, 1);
+          newAttn.push(a);
+          newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s);
+        } else if (!isDraftMarked && dbRecord) {
+          if(db.deleteAttendanceBySubAndDate) await db.deleteAttendanceBySubAndDate(sub.id, date);
+          if(db.decrementUsed) await db.decrementUsed(sub.id, dbRecord.quantity || 1);
+          newAttn = newAttn.filter(x => x.id !== dbRecord.id);
+          newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s);
+        }
+      }
+
+      for (const {student, guestEntry} of studsWithoutSub) {
+        const key = `guest_${student.name}`;
+        const isDraftMarked = !!draft[key];
+        
+        if (isDraftMarked && !guestEntry) {
+          const a = await db.insertAttendance({ guestName: student.name, guestType: "single", groupId: gid, date: date, quantity: 1, entryType: "single" });
+          newAttn.push(a);
+        } else if (!isDraftMarked && guestEntry) {
+          if(db.deleteAttendance) await db.deleteAttendance(guestEntry.id);
+          newAttn = newAttn.filter(x => x.id !== guestEntry.id);
+        }
+      }
+
+      setAttn(newAttn);
+      setSubs(newSubs);
+      setIsDirty(false);
+    } catch (e) { console.error(e); alert("Помилка збереження"); }
+    setIsSaving(false);
+  };
+
+  const addManual = async () => {
+    if (!manualName.trim()) return;
+    try {
+      const a = await db.insertAttendance({ guestName: manualName.trim(), guestType: manualType, groupId: gid, date: date, quantity: 1, entryType: manualType === "trial" ? "trial" : "single" });
+      setAttn(p => [...p, a]);
+      setDraft(p => ({...p, [`guest_${a.guestName}`]: true}));
+    } catch (e) { console.error(e); }
+    setManualName("");
+  };
+
+  const removeGuest = async(id) => { 
+    try{ if(db.deleteAttendance) await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
+  };
+
+  const generateDays = () => {
+    if (!journalMonth) return [];
+    const parts = journalMonth.split('-');
+    if(parts.length !== 2) return [];
+    const [y, m] = parts;
+    const days = new Date(y, m, 0).getDate();
+    return Array.from({length: days}, (_, i) => `${y}-${m}-${String(i+1).padStart(2,'0')}`);
+  };
+
+  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord, relevantSub) => {
+    if (isCurrentlyAttended && dbRecord) {
+      if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
+      if (relevantSub) {
+         if(db.decrementUsed) await db.decrementUsed(relevantSub.id, dbRecord.quantity || 1);
+         setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
+      }
+      setAttn(p => p.filter(a => a.id !== dbRecord.id));
+    } else {
+      if (relevantSub) {
+        const a = await db.insertAttendance({ subId: relevantSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid });
+        if(db.incrementUsed) await db.incrementUsed(relevantSub.id, 1);
+        setAttn(p => [...p, a]);
+        setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
+      } else {
+        const a = await db.insertAttendance({ guestName: student.name, guestType: "single", groupId: gid, date: cellDate, quantity: 1, entryType: "single" });
+        setAttn(p => [...p, a]);
+      }
+    }
+  };
+
+  const handleCancelTraining = async () => {
+    if (!confirm(`Точно скасувати тренування ${date}? Всі активні абонементи будуть автоматично продовжені на 7 днів.`)) return;
+    try {
+      const newCancel = { id: uid(), groupId: gid, date: date };
+      let insertedC = newCancel;
+      if (db.insertCancelled) insertedC = await db.insertCancelled(newCancel); 
+      setCancelled(p => [...p, insertedC]);
+
+      let newSubs = [...subs];
+      for (const {sub} of studsWithSub) {
+        const currentEnd = new Date(sub.endDate + "T12:00:00");
+        currentEnd.setDate(currentEnd.getDate() + 7);
+        const newEndStr = toLocalISO(currentEnd);
+        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
+        newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
+      }
+      setSubs(newSubs);
+      alert("✅ Тренування скасовано! Абонементи успішно продовжено на 7 днів.");
+    } catch (e) { alert("Помилка: " + e.message); }
+  };
+
+  return (
+    <div style={{ maxWidth: viewMode === "journal" ? "100%" : 800 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: `1px solid ${theme.border}`, paddingBottom: 16, justifyContent: "space-between", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button style={{...btnS, background: viewMode === "daily" ? theme.input : "transparent", color: viewMode === "daily" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
+          <button style={{...btnS, background: viewMode === "journal" ? theme.input : "transparent", color: viewMode === "journal" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
+        </div>
+        {viewMode === "daily" && (
+          <button style={{...btnS, background: "rgba(255,69,58,0.1)", color: theme.danger, border: "none"}} onClick={handleCancelTraining}>❌ Скасувати тренування</button>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <GroupSelect groups={groups} value={gid} onChange={setGid}/>
+        {viewMode === "daily" 
+          ? <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="date" value={date} onChange={e=>setDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
+          : <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
+        }
+      </div>
+
+      {viewMode === "journal" ? (
+        <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: 16, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+          <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `1px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
+                {generateDays().map(d => (
+                  <th key={d} style={{ padding: "8px 4px", color: theme.textLight, fontWeight: 600, minWidth: 36, textAlign: "center", borderBottom: `1px solid ${theme.border}` }}>
+                    {d.slice(-2)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {studsInGroup.map(st => (
+                <tr key={st.id} style={{ borderBottom: `1px solid ${theme.bg}` }}>
+                  <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `1px solid ${theme.border}`, zIndex: 1 }}>
+                    {st.name}
+                  </td>
+                  {generateDays().map(d => {
+                    const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
+                    const isAttended = !!rec;
+                    const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === gid && s.startDate <= d && s.endDate >= d);
+                    
+                    return (
+                      <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
+                        <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>
+                          {isAttended ? "✓" : ""}
+                        </div>
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <>
+          {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено (Абонементи продовжено)</div>}
+
+          {studsWithSub.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                З абонементом ({studsWithSub.length})
+              </div>
+              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+                {studsWithSub.map(({sub, student}, i) => {
+                  const key = `sub_${sub.id}`;
+                  const isMarked = !!draft[key];
+                  return (
+                  <div key={sub.id} onClick={() => toggleDraft(key)} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none",
+                    cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
+                    background: isMarked ? "rgba(52, 199, 89, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
+                  }}>
+                    <div>
+                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
+                      <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
+                        <span style={{ color: isMarked ? theme.success : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
+                      </div>
+                    </div>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.success : theme.border}`, background: isMarked ? theme.success : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
+                      {isMarked && "✓"}
+                    </div>
+                  </div>
+                )})}
+              </div>
+            </div>
+          )}
+
+          {studsWithoutSub.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                Без активного абонемента ({studsWithoutSub.length})
+              </div>
+              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+                {studsWithoutSub.map(({student, sub}, i) => {
+                  const key = `guest_${student.name}`;
+                  const isMarked = !!draft[key];
+                  return (
+                  <div key={student.id} onClick={() => toggleDraft(key)} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none",
+                    cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
+                    background: isMarked ? "rgba(255, 149, 0, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
+                  }}>
+                    <div>
+                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
+                      <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>
+                        {isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
+                      </div>
+                    </div>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
+                      {isMarked && "✓"}
+                    </div>
+                  </div>
+                )})}
+              </div>
+            </div>
+          )}
+
+          {manualGuests.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
+                Нові гості ({manualGuests.length})
+              </div>
+              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+                {manualGuests.map((g, i) => (
+                  <div key={g.id} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none",
+                  }}>
+                    <div>
+                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
+                      <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>
+                        {g.entryType === "trial" ? "Пробне" : "Разове"}
+                      </div>
+                    </div>
+                    <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: theme.danger, fontSize: 24, cursor: "pointer" }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isDirty && (
+            <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, width: "calc(100% - 40px)", maxWidth: 400 }}>
+              <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: theme.success, padding: "18px", fontSize: 16, borderRadius: 100, boxShadow: `0 10px 30px ${theme.success}50` }}>
+                {isSaving ? "Зберігаємо..." : "💾 Зберегти відмітки"}
+              </button>
+            </div>
+          )}
+
+          <div style={{ background: theme.card, borderRadius: 24, padding: "24px", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+            <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
+              </div>
+              <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
+                <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
+                <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
+              </div>
+              <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Додати</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+
+// ==========================================
+// 4. ФОРМИ ІНШИХ СУТНОСТЕЙ
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
@@ -224,7 +573,7 @@ function WaitlistForm({onDone, onCancel, students, groups}) {
 }
 
 // ==========================================
-// 4. ГОЛОВНИЙ ДОДАТОК
+// 5. ГОЛОВНИЙ ДОДАТОК
 // ==========================================
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -255,21 +604,11 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
-  const [viewMode, setViewMode] = useState("daily");
-  const [attnGid, setAttnGid] = useState("");
-  const [attnDate, setAttnDate] = useState(today());
-  const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
-  const [draft, setDraft] = useState({});
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
   useEffect(()=>{(async()=>{try{
     const [st,gr,su,at,ca,sg]=await Promise.all([db.fetchStudents(),db.fetchGroups(),db.fetchSubs(),db.fetchAttendance(),db.fetchCancelled(),db.fetchStudentGroups()]);
     setStudents(st||[]);if(gr?.length)setGroups(gr);setSubs(su||[]);setAttn(at||[]);setCancelled(ca||[]);setStudentGrps(sg||[]);
     try { if (db.fetchWaitlist) { const wl = await db.fetchWaitlist(); setWaitlist(wl || []); } } catch(e) {}
   }catch(e){console.error(e)}setLoading(false)})()},[]);
-
-  useEffect(() => { if (groups.length > 0 && !attnGid) setAttnGid(groups[0].id); }, [groups, attnGid]);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
@@ -375,128 +714,6 @@ export default function App() {
     return {grouped:Object.values(result).filter(d=>d.subs.length>0)};
   },[filteredSubs, groupMap]);
 
-  // ─── ЛОГІКА ВІДВІДУВАНЬ ───
-  const isCan = cancelled.some(c => c.groupId === attnGid && c.date === attnDate);
-  const todayAttn = attn.filter(a => a.groupId === attnGid && a.date === attnDate);
-  const guests = todayAttn.filter(a => a.guestName);
-
-  useEffect(() => {
-    const initialDraft = {};
-    todayAttn.forEach(a => {
-      if (a.subId) initialDraft[`sub_${a.subId}`] = true;
-      if (a.guestName) initialDraft[`guest_${a.guestName}`] = true;
-    });
-    setDraft(initialDraft);
-    setIsDirty(false);
-  }, [attnGid, attnDate, attn]);
-
-  const stIdsInGroup = new Set([...studentGrps.filter(sg => sg.groupId === attnGid).map(sg => sg.studentId), ...subs.filter(s => s.groupId === attnGid).map(s => s.studentId)]);
-  const studsInGroup = Array.from(stIdsInGroup).map(id => studentMap[id]).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, "uk"));
-  const studsWithSub = []; const studsWithoutSub = [];
-
-  studsInGroup.forEach(student => {
-    const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === attnGid);
-    const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.endDate) - new Date(a.endDate))[0];
-    if (bestSub && getSubStatus(bestSub) !== "expired") studsWithSub.push({ student, sub: bestSub });
-    else studsWithoutSub.push({ student, sub: bestSub, guestEntry: guests.find(g => g.guestName === student.name) });
-  });
-
-  const manualGuests = guests.filter(g => !studsWithoutSub.some(s => s.student.name === g.guestName));
-  const toggleDraft = (key) => { if (isCan) return; setDraft(p => ({ ...p, [key]: !p[key] })); setIsDirty(true); };
-
-  const saveBatch = async () => {
-    setIsSaving(true);
-    let newAttn = [...attn]; let newSubs = [...subs];
-    try {
-      for (const {sub} of studsWithSub) {
-        const key = `sub_${sub.id}`; const isDraftMarked = !!draft[key]; const dbRecord = todayAttn.find(a => a.subId === sub.id);
-        if (isDraftMarked && !dbRecord) {
-          const a = await db.insertAttendance({ subId: sub.id, date: attnDate, quantity: 1, entryType: "subscription", groupId: attnGid });
-          await db.incrementUsed(sub.id, 1);
-          newAttn.push(a); newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s);
-        } else if (!isDraftMarked && dbRecord) {
-          await db.deleteAttendanceBySubAndDate(sub.id, attnDate);
-          await db.decrementUsed(sub.id, dbRecord.quantity || 1);
-          newAttn = newAttn.filter(x => x.id !== dbRecord.id);
-          newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s);
-        }
-      }
-      for (const {student, guestEntry} of studsWithoutSub) {
-        const key = `guest_${student.name}`; const isDraftMarked = !!draft[key];
-        if (isDraftMarked && !guestEntry) {
-          const a = await db.insertAttendance({ guestName: student.name, guestType: "single", groupId: attnGid, date: attnDate, quantity: 1, entryType: "single" });
-          newAttn.push(a);
-        } else if (!isDraftMarked && guestEntry) {
-          await db.deleteAttendance(guestEntry.id); newAttn = newAttn.filter(x => x.id !== guestEntry.id);
-        }
-      }
-      setAttn(newAttn); setSubs(newSubs); setIsDirty(false);
-    } catch (e) { console.error(e); alert("Помилка збереження"); }
-    setIsSaving(false);
-  };
-
-  const addManual = async () => {
-    if (!manualName.trim()) return;
-    try {
-      const a = await db.insertAttendance({ guestName: manualName.trim(), guestType: manualType, groupId: attnGid, date: attnDate, quantity: 1, entryType: manualType === "trial" ? "trial" : "single" });
-      setAttn(p => [...p, a]); setDraft(p => ({...p, [`guest_${a.guestName}`]: true}));
-    } catch (e) { console.error(e); }
-    setManualName("");
-  };
-
-  const removeGuest = async(id) => { try{ await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} };
-
-  const generateDays = () => {
-    if (!journalMonth) return [];
-    const [y, m] = journalMonth.split('-');
-    if(!y || !m) return [];
-    const days = new Date(y, m, 0).getDate();
-    return Array.from({length: days}, (_, i) => `${y}-${m}-${String(i+1).padStart(2,'0')}`);
-  };
-
-  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord, relevantSub) => {
-    if (isCurrentlyAttended && dbRecord) {
-      await db.deleteAttendance(dbRecord.id);
-      if (relevantSub) {
-         await db.decrementUsed(relevantSub.id, dbRecord.quantity || 1);
-         setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
-      }
-      setAttn(p => p.filter(a => a.id !== dbRecord.id));
-    } else {
-      if (relevantSub) {
-        const a = await db.insertAttendance({ subId: relevantSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: attnGid });
-        await db.incrementUsed(relevantSub.id, 1);
-        setAttn(p => [...p, a]);
-        setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
-      } else {
-        const a = await db.insertAttendance({ guestName: student.name, guestType: "single", groupId: attnGid, date: cellDate, quantity: 1, entryType: "single" });
-        setAttn(p => [...p, a]);
-      }
-    }
-  };
-
-  const handleCancelTraining = async () => {
-    if (!confirm(`Точно скасувати тренування ${attnDate}? Всі активні абонементи будуть автоматично продовжені на 7 днів.`)) return;
-    try {
-      const newCancel = { id: uid(), groupId: attnGid, date: attnDate };
-      let insertedC = newCancel;
-      if (db.insertCancelled) insertedC = await db.insertCancelled(newCancel); 
-      setCancelled(p => [...p, insertedC]);
-
-      let newSubs = [...subs];
-      for (const {sub} of studsWithSub) {
-        const currentEnd = new Date(sub.endDate + "T12:00:00");
-        currentEnd.setDate(currentEnd.getDate() + 7);
-        const newEndStr = toLocalISO(currentEnd);
-        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
-        newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
-      }
-      setSubs(newSubs);
-      alert("✅ Тренування скасовано! Абонементи успішно продовжено на 7 днів.");
-    } catch (e) { alert("Помилка: " + e.message); }
-  };
-
-  // ─── ХЕНДЛЕРИ ───
   const addStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.insertStudent(sd);setStudents(p=>[...p,s]);if(selectedGroups?.length)for(const gid of selectedGroups){const sg=await db.addStudentGroup(s.id,gid);setStudentGrps(p=>[...p,sg])}}catch(e){alert("Помилка: "+e.message)}setModal(null)};
   const editStudent=async(d)=>{try{const{selectedGroups,...sd}=d;const s=await db.updateStudent(editItem.id,sd);setStudents(p=>p.map(x=>x.id===s.id?s:x));if(selectedGroups){const existing=studentGrps.filter(sg=>sg.studentId===editItem.id);for(const sg of existing){if(!selectedGroups.includes(sg.groupId))await db.removeStudentGroup(editItem.id,sg.groupId)}for(const gid of selectedGroups){if(!existing.some(sg=>sg.groupId===gid))await db.addStudentGroup(editItem.id,gid)}const fresh=await db.fetchStudentGroups();setStudentGrps(fresh)}}catch(e){alert("Помилка: "+e.message)}setModal(null);setEditItem(null)};
   const deleteStudent=async(id)=>{if(!confirm("Видалити ученицю?"))return;try{await db.deleteStudent(id);setStudents(p=>p.filter(s=>s.id!==id));setSubs(p=>p.filter(s=>s.studentId!==id))}catch(e){alert(e.message)}};
@@ -505,7 +722,6 @@ export default function App() {
   const deleteSub=async(id)=>{if(!confirm("Видалити абонемент?"))return;try{await db.deleteSub(id);setAttn(p=>p.filter(a=>a.subId!==id));setSubs(p=>p.filter(s=>s.id!==id))}catch(e){alert(e.message)}};
   const markNotified=async(subId)=>{try{await db.updateSub(subId,{notificationSent:true});setSubs(p=>p.map(s=>s.id===subId?{...s,notificationSent:true}:s))}catch(e){console.error(e)}};
   const addWaitlist=async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}])}}catch(e){console.error(e)}setModal(null)};
-  const removeWaitlist=async(id)=>{try{if(db.deleteWaitlist) await db.deleteWaitlist(id);setWaitlist(p=>p.filter(w=>w.id!==id));}catch(e){console.error(e)}};
 
   if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18, fontWeight: 600}}>Завантаження...</div>;
 
@@ -699,175 +915,8 @@ export default function App() {
         </div>}
 
         {/* === ВІДВІДУВАННЯ === */}
-        {tab==="attendance" && <div style={{ maxWidth: viewMode === "journal" ? "100%" : 800 }}>
-          <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: `1px solid ${theme.border}`, paddingBottom: 16, justifyContent: "space-between", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button style={{...btnS, background: viewMode === "daily" ? theme.input : "transparent", color: viewMode === "daily" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
-              <button style={{...btnS, background: viewMode === "journal" ? theme.input : "transparent", color: viewMode === "journal" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
-            </div>
-            {viewMode === "daily" && (
-              <button style={{...btnS, background: "rgba(255,69,58,0.1)", color: theme.danger, border: "none"}} onClick={handleCancelTraining}>❌ Скасувати тренування</button>
-            )}
-          </div>
-
-          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
-            <GroupSelect groups={groups} value={attnGid} onChange={setAttnGid}/>
-            {viewMode === "daily" 
-              ? <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="date" value={attnDate} onChange={e=>setAttnDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
-              : <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
-            }
-          </div>
-
-          {viewMode === "journal" ? (
-            <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: 16, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-              <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `1px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
-                    {generateDays().map(d => (
-                      <th key={d} style={{ padding: "8px 4px", color: theme.textLight, fontWeight: 600, minWidth: 36, textAlign: "center", borderBottom: `1px solid ${theme.border}` }}>
-                        {d.slice(-2)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {studsInGroup.map(st => (
-                    <tr key={st.id} style={{ borderBottom: `1px solid ${theme.bg}` }}>
-                      <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `1px solid ${theme.border}`, zIndex: 1 }}>
-                        {st.name}
-                      </td>
-                      {generateDays().map(d => {
-                        const rec = attn.find(a => a.groupId === attnGid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
-                        const isAttended = !!rec;
-                        const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === attnGid && s.startDate <= d && s.endDate >= d);
-                        
-                        return (
-                          <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
-                            <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>
-                              {isAttended ? "✓" : ""}
-                            </div>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <>
-              {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено (Абонементи продовжено)</div>}
-
-              {studsWithSub.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    З абонементом ({studsWithSub.length})
-                  </div>
-                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                    {studsWithSub.map(({sub, student}, i) => {
-                      const key = `sub_${sub.id}`;
-                      const isMarked = !!draft[key];
-                      return (
-                      <div key={sub.id} onClick={() => toggleDraft(key)} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                        cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(52, 199, 89, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
-                      }}>
-                        <div>
-                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
-                            <span style={{ color: isMarked ? theme.success : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
-                          </div>
-                        </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.success : theme.border}`, background: isMarked ? theme.success : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                          {isMarked && "✓"}
-                        </div>
-                      </div>
-                    )})}
-                  </div>
-                </div>
-              )}
-
-              {studsWithoutSub.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    Без активного абонемента ({studsWithoutSub.length})
-                  </div>
-                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                    {studsWithoutSub.map(({student, sub}, i) => {
-                      const key = `guest_${student.name}`;
-                      const isMarked = !!draft[key];
-                      return (
-                      <div key={student.id} onClick={() => toggleDraft(key)} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                        cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(255, 149, 0, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
-                      }}>
-                        <div>
-                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>
-                            {isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
-                          </div>
-                        </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                          {isMarked && "✓"}
-                        </div>
-                      </div>
-                    )})}
-                  </div>
-                </div>
-              )}
-
-              {manualGuests.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    Нові гості ({manualGuests.length})
-                  </div>
-                  <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                    {manualGuests.map((g, i) => (
-                      <div key={g.id} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none",
-                      }}>
-                        <div>
-                          <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
-                          <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>
-                            {g.entryType === "trial" ? "Пробне" : "Разове"}
-                          </div>
-                        </div>
-                        <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: theme.danger, fontSize: 24, cursor: "pointer" }}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {isDirty && (
-                <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, width: "calc(100% - 40px)", maxWidth: 400 }}>
-                  <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: theme.success, padding: "18px", fontSize: 16, borderRadius: 100, boxShadow: `0 10px 30px ${theme.success}50` }}>
-                    {isSaving ? "Зберігаємо..." : "💾 Зберегти відмітки"}
-                  </button>
-                </div>
-              )}
-
-              <div style={{ background: theme.card, borderRadius: 24, padding: "24px", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
-                    <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
-                    <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
-                  </div>
-                  <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Додати</button>
-                </div>
-              </div>
-            </>
-          )}
+        {tab==="attendance" && <div>
+          <AttendanceTab groups={groups} subs={subs} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} />
         </div>}
 
         {/* === СПОВІЩЕННЯ === */}
@@ -875,6 +924,7 @@ export default function App() {
           {notifications.length===0?<div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {notifications.map(n=>{
+              if (!n.student) return null;
               const msg=getNotifMsg(null,n.student,n.group,n.direction);
               const tgUser=n.student.telegram?.replace("@","");
               const tgLink=tgUser?`https://t.me/${tgUser}?text=${encodeURIComponent(msg)}`:null;
