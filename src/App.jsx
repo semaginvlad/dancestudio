@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
 import Analytics from "./pages/Analytics"; // Повернув імпорт для Instagram
+import StudioSchedule from "./components/StudioSchedule";
 
 // ==========================================
 // 1. КОНСТАНТИ, ПАЛІТРА ТА ДАНІ
@@ -736,8 +737,13 @@ export default function App() {
           </div>
 
           <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Напрямки</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16,marginBottom:40}}>
             {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt, padding: "20px", border: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 110}}><div><div style={{fontSize:14,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div></div><div style={{fontSize:28,fontWeight:800,color:theme.textMain}}>{data.students} <span style={{fontSize: 14, color: theme.textLight, fontWeight: 600}}>уч.</span></div></div>})}
+          </div>
+
+          <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Розклад залу</h3>
+          <div style={{...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40}}>
+            <StudioSchedule />
           </div>
         </div>}
 
