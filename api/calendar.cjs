@@ -1,6 +1,6 @@
 const { google } = require('googleapis');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
@@ -15,9 +15,8 @@ export default async function handler(req, res) {
 
     const calendar = google.calendar({ version: 'v3', auth });
 
-    // Поточний тиждень — від найближчого понеділка, 2 тижні вперед
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=Нд, 1=Пн...
+    const dayOfWeek = now.getDay();
     const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const monday = new Date(now);
     monday.setDate(now.getDate() + daysToMonday);
@@ -36,7 +35,7 @@ export default async function handler(req, res) {
     });
 
     const events = (response.data.items || [])
-      .filter(ev => ev.start?.dateTime) // тільки події з часом (не весь день)
+      .filter(ev => ev.start?.dateTime)
       .map(ev => ({
         id: ev.id,
         title: ev.summary || '',
@@ -45,7 +44,6 @@ export default async function handler(req, res) {
         description: ev.description || '',
       }));
 
-    // Кеш 15 хв на Vercel Edge
     res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=300');
     res.status(200).json({ events, fetchedAt: new Date().toISOString() });
 
@@ -53,4 +51,4 @@ export default async function handler(req, res) {
     console.error('Calendar API error:', err);
     res.status(500).json({ error: 'Не вдалося отримати події з календаря' });
   }
-}
+};
