@@ -198,35 +198,51 @@ function AIReport({ data }) {
     setLoading(true);
     setReport("");
 
-    const summary = {
-      period: "14 бер — 10 квіт 2026",
-      totalReach: data.daily.охоплення.reduce((s, r) => s + r.value, 0),
-      totalViews: data.daily.перегляди.reduce((s, r) => s + r.value, 0),
-      totalInteractions: data.daily.взаємодії.reduce((s, r) => s + r.value, 0),
-      totalFollowers: data.daily.читачі.reduce((s, r) => s + r.value, 0),
-      postsCount: data.posts.length,
-      storiesCount: data.stories.length,
-      topPost: data.posts.sort((a, b) => n(b["Охоплення"]) - n(a["Охоплення"]))[0],
-    };
+    const sumArr = (arr) => (arr || []).reduce((s, r) => s + r.value, 0);
 
-    const prompt = `Ти — аналітик контент-стратегії для танцювальної студії в Хмельницькому (Instagram @soroka_dancestudio). 
+    const totalReach = sumArr(data.daily.охоплення);
+    const totalViews = sumArr(data.daily.перегляди);
+    const totalInteractions = sumArr(data.daily.взаємодії);
+    const totalFollowers = sumArr(data.daily.читачі);
+    const totalVisits = sumArr(data.daily.відвідування);
 
-Дані за ${summary.period}:
-- Загальне охоплення: ${summary.totalReach.toLocaleString()}
-- Перегляди: ${summary.totalViews.toLocaleString()}
-- Взаємодії: ${summary.totalInteractions.toLocaleString()}
-- Нових читачів: ${summary.totalFollowers}
-- Постів/Reels: ${summary.postsCount}
-- Сторіз: ${summary.storiesCount}
-- Найкращий пост охоплення: ${n(summary.topPost?.["Охоплення"]).toLocaleString()} — "${summary.topPost?.["Опис"]?.slice(0, 60) || "без опису"}"
+    const sortedPosts = [...data.posts].sort((a, b) => n(b["Перегляди"]) - n(a["Перегляди"]));
+    const top5 = sortedPosts.slice(0, 5).map((p, i) =>
+      `${i+1}. ${p["Тип допису"]||"Пост"} | ${n(p["Перегляди"]).toLocaleString()} переглядів | охоплення ${n(p["Охоплення"]).toLocaleString()} | ❤️${n(p["Вподобання"])} 🔖${n(p["Збереження"])} 💬${n(p["Коментарі"])} — "${(p["Опис"]||"").slice(0,70)}"`
+    ).join("\n");
 
-Напиши аналіз українською мовою (тепло, без канцеляриту, як досвідчений SMM-колега):
-1. Загальна картина (2-3 речення)
+    const avgViews = data.posts.length > 0 ? Math.round(data.posts.reduce((s, p) => s + n(p["Перегляди"]), 0) / data.posts.length) : 0;
+    const totalSaves = data.posts.reduce((s, p) => s + n(p["Збереження"]), 0);
+    const totalShares = data.posts.reduce((s, p) => s + n(p["Поширення"]), 0);
+
+    const prompt = `Ти — аналітик контент-стратегії для танцювальної студії в Хмельницькому (Instagram @soroka_dancestudio).
+
+РЕАЛЬНІ ДАНІ за 14 бер — 10 квіт 2026:
+
+Загальна статистика акаунту:
+- Охоплення акаунту: ${totalReach.toLocaleString()}
+- Перегляди акаунту: ${totalViews.toLocaleString()}
+- Взаємодії з контентом: ${totalInteractions.toLocaleString()}
+- Нових підписників: ${totalFollowers}
+- Відвідувань профілю: ${totalVisits.toLocaleString()}
+
+Контент:
+- Постів/Reels опубліковано: ${data.posts.length}
+- Сторіз опубліковано: ${data.stories.length}
+- Середній перегляд поста: ${avgViews.toLocaleString()}
+- Всього збережень постів: ${totalSaves.toLocaleString()}
+- Всього поширень постів: ${totalShares.toLocaleString()}
+
+Топ-5 постів за переглядами:
+${top5}
+
+Напиши аналіз українською (тепло, як досвідчений SMM-колега, спирайся на реальні числа):
+1. Загальна картина
 2. Що спрацювало добре
 3. Що варто покращити
 4. 3 конкретні рекомендації на наступний місяць
 
-Формат: без зайвих заголовків, живий текст з абзацами.`;
+Без зайвих заголовків, живий текст з абзацами.`;
 
     try {
       const res = await fetch("/api/claude", {
