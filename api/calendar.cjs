@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+const { google } = require('googleapis');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
