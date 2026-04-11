@@ -56,7 +56,6 @@ const addMonth = (d) => { const dt = new Date(d+"T12:00:00"); dt.setMonth(dt.get
 const today = () => toLocalISO(new Date());
 const fmt = (d) => { if(!d) return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
 const daysLeft = (ed) => Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
-const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function getSubStatus(sub) {
   if (!sub?.endDate) return "expired";
@@ -260,8 +259,6 @@ export default function App() {
   const [attnGid, setAttnGid] = useState("");
   const [attnDate, setAttnDate] = useState(today());
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
-  const [manualName, setManualName] = useState("");
-  const [manualType, setManualType] = useState("trial");
   const [draft, setDraft] = useState({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -286,8 +283,8 @@ export default function App() {
     const items=[];
     subsExt.filter(s => s.status !== "active").forEach(sub=>{
       const st=studentMap[sub.studentId], gr=groupMap[sub.groupId];
-      if(!st || !gr) return; // Запобіжник 1
-      if(sub.status==="expired" && subs.some(s=>s.studentId===sub.studentId && s.groupId===sub.groupId && getSubStatus(s)!=="expired")) return; // Запобіжник 2
+      if(!st || !gr) return; 
+      if(sub.status==="expired" && subs.some(s=>s.studentId===sub.studentId && s.groupId===sub.groupId && getSubStatus(s)!=="expired")) return; 
       const dir=dirMap[gr.directionId];
       items.push({subId:sub.id, type:sub.status, student:st, group:gr, direction:dir,
         message:sub.status==="expired"?"Абонемент закінчився":(daysLeft(sub.endDate)<=3?`${daysLeft(sub.endDate)} дн.`:`${(sub.totalTrainings||0)-(sub.usedTrainings||0)} трен.`),
@@ -314,10 +311,16 @@ export default function App() {
       }
     });
 
-    // Аналітика поточного місяця
     const currMonth = today().slice(0, 7);
     const currMonthSubs = subs.filter(s => s.startDate?.startsWith(currMonth) || s.created_at?.startsWith(currMonth));
     const currMonthCancelled = cancelled.filter(c => c.date?.startsWith(currMonth)).length;
+
+    const daysInMonth = new Date(parseInt(currMonth.split('-')[0]), parseInt(currMonth.split('-')[1]), 0).getDate();
+    const chartData = Array.from({length: daysInMonth}, (_, i) => {
+      const d = `${currMonth}-${String(i+1).padStart(2,'0')}`;
+      return { day: i+1, count: attn.filter(a => a.date === d).length };
+    });
+    const maxChartVal = Math.max(...chartData.map(d => d.count), 1);
 
     return {
       totalStudents:students.length, activeStudents:new Set(activeSubs.map(s=>s.studentId)).size, 
@@ -331,9 +334,10 @@ export default function App() {
         pack8: currMonthSubs.filter(s => s.planType === "8pack").length,
         pack12: currMonthSubs.filter(s => s.planType === "12pack").length,
         cancelledCount: currMonthCancelled
-      }
+      },
+      chartData, maxChartVal
     };
-  },[students,subs,activeSubs,groups, studentMap, cancelled]);
+  },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
 
   const filteredStudents=useMemo(()=>{
     let r=students;
@@ -371,7 +375,7 @@ export default function App() {
     return {grouped:Object.values(result).filter(d=>d.subs.length>0)};
   },[filteredSubs, groupMap]);
 
-  // ─── ЛОГІКА ВІДВІДУВАНЬ ТА СКАСУВАННЯ ТРЕНУВАНЬ ───
+  // ─── ЛОГІКА ВІДВІДУВАНЬ ───
   const isCan = cancelled.some(c => c.groupId === attnGid && c.date === attnDate);
   const todayAttn = attn.filter(a => a.groupId === attnGid && a.date === attnDate);
   const guests = todayAttn.filter(a => a.guestName);
@@ -442,6 +446,14 @@ export default function App() {
 
   const removeGuest = async(id) => { try{ await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} };
 
+  const generateDays = () => {
+    if (!journalMonth) return [];
+    const [y, m] = journalMonth.split('-');
+    if(!y || !m) return [];
+    const days = new Date(y, m, 0).getDate();
+    return Array.from({length: days}, (_, i) => `${y}-${m}-${String(i+1).padStart(2,'0')}`);
+  };
+
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord, relevantSub) => {
     if (isCurrentlyAttended && dbRecord) {
       await db.deleteAttendance(dbRecord.id);
@@ -463,7 +475,6 @@ export default function App() {
     }
   };
 
-  // ФУНКЦІЯ СКАСУВАННЯ ТРЕНУВАННЯ ТА ПРОДОВЖЕННЯ АБОНЕМЕНТІВ
   const handleCancelTraining = async () => {
     if (!confirm(`Точно скасувати тренування ${attnDate}? Всі активні абонементи будуть автоматично продовжені на 7 днів.`)) return;
     try {
@@ -475,7 +486,7 @@ export default function App() {
       let newSubs = [...subs];
       for (const {sub} of studsWithSub) {
         const currentEnd = new Date(sub.endDate + "T12:00:00");
-        currentEnd.setDate(currentEnd.getDate() + 7); // Продовжуємо на тиждень
+        currentEnd.setDate(currentEnd.getDate() + 7);
         const newEndStr = toLocalISO(currentEnd);
         if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
@@ -529,10 +540,25 @@ export default function App() {
           </div>
 
           <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Цього місяця ({today().slice(0, 7)})</h3>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:40}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:30}}>
             <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Разові та пробні</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.single + analytics.currMonthStats.trial} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div><div style={{fontSize:12,color:theme.textLight}}>Пробних: {analytics.currMonthStats.trial}</div></div>
-            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 4/8/12</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack4 + analytics.currMonthStats.pack8 + analytics.currMonthStats.pack12} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div><div style={{fontSize:12,color:theme.textLight}}>4: {analytics.currMonthStats.pack4} | 8: {analytics.currMonthStats.pack8} | 12: {analytics.currMonthStats.pack12}</div></div>
+            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 4</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack4} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
+            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 8</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack8} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
+            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 12</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack12} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
             <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.danger,textTransform:"uppercase", fontWeight: 700}}>Скасовані тренування</div><div style={{fontSize:28,fontWeight:800,color:theme.danger,margin:"8px 0"}}>{analytics.currMonthStats.cancelledCount} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div><div style={{fontSize:12,color:theme.textLight}}>За поточний місяць</div></div>
+          </div>
+
+          <div style={{...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40}}>
+            <h3 style={{color:theme.secondary,fontSize:18,marginBottom:20, fontWeight: 800}}>Графік відвідуваності ({today().slice(0, 7)})</h3>
+            <div style={{display: 'flex', alignItems: 'flex-end', gap: 4, height: 160, overflowX: 'auto', paddingBottom: 8}}>
+              {analytics.chartData.map(d => (
+                <div key={d.day} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 24}}>
+                  <div style={{fontSize: 10, color: theme.textMuted, marginBottom: 4}}>{d.count > 0 ? d.count : ''}</div>
+                  <div style={{width: '100%', background: d.count > 0 ? theme.primary : theme.border, borderRadius: 4, height: `${(d.count / analytics.maxChartVal) * 100}%`, minHeight: d.count > 0 ? 4 : 0, transition: '0.3s'}}></div>
+                  <div style={{fontSize: 10, color: theme.textLight, marginTop: 4}}>{d.day}</div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Аналітика за весь час</h3>
@@ -679,7 +705,6 @@ export default function App() {
               <button style={{...btnS, background: viewMode === "daily" ? theme.input : "transparent", color: viewMode === "daily" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
               <button style={{...btnS, background: viewMode === "journal" ? theme.input : "transparent", color: viewMode === "journal" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
             </div>
-            {/* КНОПКА СКАСУВАННЯ ТРЕНУВАННЯ */}
             {viewMode === "daily" && (
               <button style={{...btnS, background: "rgba(255,69,58,0.1)", color: theme.danger, border: "none"}} onClick={handleCancelTraining}>❌ Скасувати тренування</button>
             )}
@@ -716,6 +741,7 @@ export default function App() {
                         const rec = attn.find(a => a.groupId === attnGid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
                         const isAttended = !!rec;
                         const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === attnGid && s.startDate <= d && s.endDate >= d);
+                        
                         return (
                           <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
                             <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>
@@ -731,7 +757,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Це тренування скасовано (абонементи продовжено)</div>}
+              {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено (Абонементи продовжено)</div>}
 
               {studsWithSub.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
@@ -849,7 +875,6 @@ export default function App() {
           {notifications.length===0?<div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {notifications.map(n=>{
-              if (!n.student) return null;
               const msg=getNotifMsg(null,n.student,n.group,n.direction);
               const tgUser=n.student.telegram?.replace("@","");
               const tgLink=tgUser?`https://t.me/${tgUser}?text=${encodeURIComponent(msg)}`:null;
