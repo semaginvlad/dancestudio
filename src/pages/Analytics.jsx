@@ -404,7 +404,7 @@ export default function Analytics() {
   }, [data]);
 
   if (!data) return (
-    <div style={{ "--text": "#f1f1f1", "--muted": "#666", "--card": "#111827", "--border": "#1f2937", "--bg": "#0d1117" } as any}>
+    <div style={{ "--text": "#f1f1f1", "--muted": "#666", "--card": "#111827", "--border": "#1f2937", "--bg": "#0d1117" }}>
       <style>{`body{background:#0d1117;} * {box-sizing:border-box;}`}</style>
       <UploadScreen onLoad={setData} />
     </div>
@@ -424,7 +424,7 @@ export default function Analytics() {
       "--border": "#1f2937", "--bg": "#0d1117",
       minHeight: "100vh", background: "var(--bg)", color: "var(--text)",
       fontFamily: "'DM Sans', system-ui, sans-serif",
-    } as any}>
+    }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Mono&display=swap');
         * { box-sizing: border-box; margin: 0; }
