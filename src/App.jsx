@@ -28,6 +28,7 @@ const DIRECTIONS = [
   { id: "kpop", name: "K-pop Cover Dance", color: theme.primary },
   { id: "jazzfunk", name: "Jazz Funk", color: "#FF2D55" },
 ];
+
 const PLAN_TYPES = [
   { id: "trial", name: "Пробне", trainings: 1, price: 150 },
   { id: "single", name: "Разове", trainings: 1, price: 300 },
@@ -35,7 +36,9 @@ const PLAN_TYPES = [
   { id: "8pack", name: "Абонемент 8", trainings: 8, price: 1500 },
   { id: "12pack", name: "Абонемент 12", trainings: 12, price: 1800 },
 ];
+
 const PAY_METHODS = [{ id: "card", name: "💳 Карта" }, { id: "cash", name: "💵 Готівка" }];
+
 const DEFAULT_GROUPS = [
   { id: "lat-base-am", name: "Latin base (ранкова)", directionId: "latina", schedule: [{ day: 2, time: "09:50" }, { day: 4, time: "09:50" }], trainerPct: 50 },
   { id: "lat-base-pm", name: "Latin base (вечірня)", directionId: "latina", schedule: [{ day: 1, time: "16:50" }, { day: 5, time: "16:50" }], trainerPct: 50 },
@@ -131,7 +134,7 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ
+// 3. ФОРМИ (УЧЕНИЦІ, АБОНЕМЕНТИ, РЕЗЕРВ)
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
@@ -141,7 +144,9 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const [notes,setNotes]=useState(initial?.notes||"");
   const [msgTpl,setMsgTpl]=useState(initial?.messageTemplate||initial?.message_template||"");
   const [selGrps,setSelGrps]=useState(()=>initial?.id?studentGrps.filter(sg=>sg.studentId===initial.id).map(sg=>sg.groupId):[]);
+  
   const toggleGrp=(gid)=>setSelGrps(p=>p.includes(gid)?p.filter(g=>g!==gid):[...p,gid]);
+  
   return(<div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
       <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
@@ -175,9 +180,9 @@ function SubForm({initial, onDone, onCancel, students, groups}){
   const [discountSource,setDiscountSource]=useState(initial?.discountSource||"studio");
   const [notes,setNotes]=useState(initial?.notes||"");
   
-  const plan=PLAN_TYPES.find(p=>p.id===planType);
-  const endDate=addMonth(startDate);
-  const basePrice=plan?.price||0;
+  const plan = PLAN_TYPES.find(p=>p.id===planType);
+  const endDate = addMonth(startDate);
+  const basePrice = plan?.price||0;
   
   useEffect(()=>{if(!initial){const p=PLAN_TYPES.find(p=>p.id===planType);if(p)setAmount(p.price-Math.round(p.price*discountPct/100))}},[planType,discountPct]);
   
@@ -207,7 +212,7 @@ function SubForm({initial, onDone, onCancel, students, groups}){
     <Field label="Нотатки"><textarea style={{...inputSt,minHeight:60,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings:plan.trainings,usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти зміни":"Створити абонемент"}</button>
+      <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings:plan?.trainings||8,usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти зміни":"Створити абонемент"}</button>
     </div>
   </div>);
 }
@@ -234,7 +239,6 @@ function AiInsightsTab({ analytics }) {
 
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
-    // ТУТ МОЖНА ПІДКЛЮЧИТИ API CLAUDE!
     setTimeout(() => {
       setAiResponse(`
 ### 🧠 Штучний Інтелект: Аналіз Dance Studio
@@ -582,7 +586,7 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-      
+
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12}}><button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button><button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button></div>
@@ -604,7 +608,7 @@ export default function App() {
       </nav>
 
       <main style={{maxWidth:1200, margin:"0 auto", padding:"0 24px"}}>
-        
+
         {/* === ДАШБОРД === */}
         {tab==="dashboard" && <div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginBottom:30}}>
@@ -613,21 +617,20 @@ export default function App() {
 
           <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Цього місяця ({today().slice(0, 7)})</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:30}}>
-            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Пробні</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.trial} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
-            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Разові</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.single} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
+            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Разові та пробні</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.single + analytics.currMonthStats.trial} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div><div style={{fontSize:12,color:theme.textLight}}>Пробних: {analytics.currMonthStats.trial}</div></div>
             <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 4</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack4} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
             <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 8</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack8} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
             <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textMuted,textTransform:"uppercase", fontWeight: 700}}>Абонементи 12</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain,margin:"8px 0"}}>{analytics.currMonthStats.pack12} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
-            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.danger,textTransform:"uppercase", fontWeight: 700}}>Скасовані тренування</div><div style={{fontSize:28,fontWeight:800,color:theme.danger,margin:"8px 0"}}>{analytics.currMonthStats.cancelledCount} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div></div>
+            <div style={{...cardSt, background: theme.card, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.danger,textTransform:"uppercase", fontWeight: 700}}>Скасовані тренування</div><div style={{fontSize:28,fontWeight:800,color:theme.danger,margin:"8px 0"}}>{analytics.currMonthStats.cancelledCount} <span style={{fontSize:14,color:theme.textLight}}>шт.</span></div><div style={{fontSize:12,color:theme.textLight}}>За поточний місяць</div></div>
           </div>
 
           <div style={{...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40}}>
             <h3 style={{color:theme.secondary,fontSize:18,marginBottom:24, fontWeight: 800}}>Графік відвідуваності ({today().slice(0, 7)})</h3>
             <div style={{display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, overflowX: 'auto', paddingBottom: 8, paddingTop: 20}}>
               {analytics.chartData.map(d => {
-                const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 120, 8) : 4;
+                const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 100, 6) : 4;
                 return (
-                  <div key={d.day} style={{display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', minWidth: 32}}>
+                  <div key={d.day} style={{flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', minWidth: 32}}>
                     <div style={{fontSize: 11, color: theme.textMain, fontWeight: 700, opacity: d.count > 0 ? 1 : 0, marginBottom: 8}}>{d.count}</div>
                     <div style={{width: '100%', background: d.count > 0 ? theme.primary : theme.input, borderRadius: 8, height: `${barHeightPx}px`, transition: 'all 0.3s ease-in-out'}}></div>
                     <div style={{fontSize: 12, color: theme.textMuted, marginTop: 10, fontWeight: 600}}>{d.day}</div>
@@ -783,46 +786,31 @@ export default function App() {
             </div>
             {viewMode === "daily" && <button style={{...btnS, background: "rgba(255,69,58,0.1)", color: theme.danger, border: "none"}} onClick={handleCancelTraining}>❌ Скасувати тренування</button>}
           </div>
-
           <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
             <GroupSelect groups={groups} value={attnGid} onChange={setAttnGid}/>
-            {viewMode === "daily" 
+            {viewMode === "daily"
               ? <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="date" value={attnDate} onChange={e=>setAttnDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
               : <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
             }
           </div>
-
           {viewMode === "journal" ? (
             <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: 16, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
               <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `1px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
-                    {generateDays().map(d => (
-                      <th key={d} style={{ padding: "8px 4px", color: theme.textLight, fontWeight: 600, minWidth: 36, textAlign: "center", borderBottom: `1px solid ${theme.border}` }}>
-                        {d.slice(-2)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `1px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
+                  {generateDays().map(d => <th key={d} style={{ padding: "8px 4px", color: theme.textLight, fontWeight: 600, minWidth: 36, textAlign: "center", borderBottom: `1px solid ${theme.border}` }}>{d.slice(-2)}</th>)}
+                </tr></thead>
                 <tbody>
                   {studsInGroup.map(st => (
                     <tr key={st.id} style={{ borderBottom: `1px solid ${theme.bg}` }}>
-                      <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `1px solid ${theme.border}`, zIndex: 1 }}>
-                        {st.name}
-                      </td>
+                      <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `1px solid ${theme.border}`, zIndex: 1 }}>{st.name}</td>
                       {generateDays().map(d => {
                         const rec = attn.find(a => a.groupId === attnGid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
                         const isAttended = !!rec;
                         const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === attnGid && s.startDate <= d && s.endDate >= d);
-                        
-                        return (
-                          <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
-                            <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>
-                              {isAttended ? "✓" : ""}
-                            </div>
-                          </td>
-                        )
+                        return <td key={d} style={{ textAlign: "center", padding: "4px" }} onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)}>
+                          <div style={{ width: 26, height: 26, margin: "0 auto", borderRadius: 8, background: isAttended ? theme.success : theme.input, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.2s" }}>{isAttended ? "✓" : ""}</div>
+                        </td>
                       })}
                     </tr>
                   ))}
@@ -832,85 +820,49 @@ export default function App() {
           ) : (
             <>
               {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено (Абонементи продовжено)</div>}
-
               {studsWithSub.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    З абонементом ({studsWithSub.length})
-                  </div>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>З абонементом ({studsWithSub.length})</div>
                   <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {studsWithSub.map(({sub, student}, i) => {
-                      const key = `sub_${sub.id}`;
-                      const isMarked = !!draft[key];
-                      return (
-                      <div key={sub.id} onClick={() => toggleDraft(key)} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                        cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(52, 199, 89, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
-                      }}>
+                      const key = `sub_${sub.id}`; const isMarked = !!draft[key];
+                      return <div key={sub.id} onClick={() => toggleDraft(key)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none", cursor: isCan ? "default" : "pointer", background: isMarked ? "rgba(52, 199, 89, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1 }}>
                         <div>
                           <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
-                            <span style={{ color: isMarked ? theme.success : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
-                          </div>
+                          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}><span style={{ color: isMarked ? theme.success : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}</div>
                         </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.success : theme.border}`, background: isMarked ? theme.success : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                          {isMarked && "✓"}
-                        </div>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.success : theme.border}`, background: isMarked ? theme.success : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>{isMarked && "✓"}</div>
                       </div>
-                    )})}
+                    })}
                   </div>
                 </div>
               )}
-
               {studsWithoutSub.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    Без активного абонемента ({studsWithoutSub.length})
-                  </div>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>Без активного абонемента ({studsWithoutSub.length})</div>
                   <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {studsWithoutSub.map(({student, sub}, i) => {
-                      const key = `guest_${student.name}`;
-                      const isMarked = !!draft[key];
-                      return (
-                      <div key={student.id} onClick={() => toggleDraft(key)} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                        cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                        background: isMarked ? "rgba(255, 149, 0, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1
-                      }}>
+                      const key = `guest_${student.name}`; const isMarked = !!draft[key];
+                      return <div key={student.id} onClick={() => toggleDraft(key)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none", cursor: isCan ? "default" : "pointer", background: isMarked ? "rgba(255, 149, 0, 0.08)" : "transparent", opacity: isCan ? 0.5 : 1 }}>
                         <div>
                           <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                          <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>
-                            {isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
-                          </div>
+                          <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>{isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}</div>
                         </div>
-                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                          {isMarked && "✓"}
-                        </div>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>{isMarked && "✓"}</div>
                       </div>
-                    )})}
+                    })}
                   </div>
                 </div>
               )}
-
               {manualGuests.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
-                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                    Нові гості ({manualGuests.length})
-                  </div>
+                  <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>Нові гості ({manualGuests.length})</div>
                   <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                     {manualGuests.map((g, i) => (
-                      <div key={g.id} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none",
-                      }}>
+                      <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none" }}>
                         <div>
                           <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
-                          <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>
-                            {g.entryType === "trial" ? "Пробне" : "Разове"}
-                          </div>
+                          <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{g.entryType === "trial" ? "Пробне" : "Разове"}</div>
                         </div>
                         <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: theme.danger, fontSize: 24, cursor: "pointer" }}>✕</button>
                       </div>
@@ -918,7 +870,6 @@ export default function App() {
                   </div>
                 </div>
               )}
-
               {isDirty && (
                 <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, width: "calc(100% - 40px)", maxWidth: 400 }}>
                   <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: theme.success, padding: "18px", fontSize: 16, borderRadius: 100, boxShadow: `0 10px 30px ${theme.success}50` }}>
@@ -926,13 +877,10 @@ export default function App() {
                   </button>
                 </div>
               )}
-
               <div style={{ background: theme.card, borderRadius: 24, padding: "24px", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
                 <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
-                  </div>
+                  <div style={{ flex: 1, minWidth: 200 }}><input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/></div>
                   <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
                     <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
                     <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
@@ -957,7 +905,7 @@ export default function App() {
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16}}>
                   <div>
                     <div style={{display: "flex", gap: 12, alignItems: "center", marginBottom: 8}}>
-                      <span style={{color:theme.textMain,fontWeight:800, fontSize: 18}}>{n.student.name}</span> 
+                      <span style={{color:theme.textMain,fontWeight:800, fontSize: 18}}>{n.student.name}</span>
                       <Badge color={n.type==="expired"?theme.danger:theme.warning}>{n.message}</Badge>
                       {n.notified&&<Badge color={theme.textLight}>✅ Відправлено</Badge>}
                     </div>
@@ -984,7 +932,6 @@ export default function App() {
             if (valA > valB) return finSortOrder === "asc" ? 1 : -1;
             return 0;
           });
-
           return (
             <div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
@@ -1057,71 +1004,6 @@ export default function App() {
       <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Оформити абонемент"><SubForm onCancel={()=>setModal(null)} onDone={addSub} students={students} groups={groups}/></Modal>
       <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={editSub} students={students} groups={groups}/></Modal>
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={addWaitlist} students={students} groups={groups}/></Modal>
-    </div>
-  );
-}
-
-// ==========================================
-// 4. AI АНАЛІТИКА
-// ==========================================
-function AiInsightsTab({ analytics }) {
-  const [aiResponse, setAiResponse] = useState("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const handleAnalyze = async () => {
-    setIsAnalyzing(true);
-    // ТУТ МОЖНА ПІДКЛЮЧИТИ API CLAUDE!
-    setTimeout(() => {
-      setAiResponse(`
-### 🧠 Штучний Інтелект: Аналіз Dance Studio
-
-**📉 Знайдені просідання та проблеми:**
-* Найнижча відвідуваність спостерігається у групах **K-pop Cover Dance**. Останні 2 тижні заповненість впала на 15%.
-* Конверсія з пробного заняття зараз становить **${analytics.conversionRate}%**. Це нижче норми. Рекомендую запропонувати знижку 10% на абонемент у день пробного заняття.
-* У студії зависли **${analytics.unpaid.toLocaleString()} ₴** боргів.
-
-**💡 Рекомендації для росту:**
-1. Запустіть акцію "Приведи подругу" для ранкових груп Latina, вони заповнені лише на 40%.
-2. Налаштуйте автоматичні нагадування в Telegram за 3 години до тренування для зменшення кількості скасувань.
-
-**📈 Точки росту:**
-Групи **Bachata** показують найвище утримання (LTV) — понад ${analytics.avgLTV.toLocaleString()} ₴ на людину. Рекомендуємо відкрити ще одну групу на вихідних!
-      `);
-      setIsAnalyzing(false);
-    }, 2000);
-  };
-
-  return (
-    <div style={{...cardSt, minHeight: 400, display: "flex", flexDirection: "column"}}>
-      <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 16}}>
-        <div>
-          <h2 style={{margin: 0, fontSize: 24, color: theme.secondary}}>Системний AI Аналітик</h2>
-          <div style={{color: theme.textMuted, marginTop: 8}}>Claude AI проаналізує всі дані студії та знайде точки росту.</div>
-        </div>
-        <button onClick={handleAnalyze} disabled={isAnalyzing} style={{...btnP, display: "flex", alignItems: "center", gap: 8, background: isAnalyzing ? theme.textLight : theme.primary}}>
-          {isAnalyzing ? "⏳ Аналізую базу даних..." : "✨ Згенерувати розумний звіт"}
-        </button>
-      </div>
-
-      {isAnalyzing && (
-        <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16}}>
-          <div style={{width: 40, height: 40, border: `4px solid ${theme.border}`, borderTopColor: theme.primary, borderRadius: "50%", animation: "spin 1s linear infinite"}} />
-          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-          <div style={{color: theme.textMuted, fontWeight: 600}}>Claude вивчає поведінку учениць...</div>
-        </div>
-      )}
-
-      {aiResponse && !isAnalyzing && (
-        <div style={{background: theme.bg, padding: "24px 32px", borderRadius: 20, border: `1px solid ${theme.border}`, fontSize: 15, lineHeight: 1.6, color: theme.textMain, whiteSpace: "pre-line"}}>
-          {aiResponse}
-        </div>
-      )}
-
-      {!aiResponse && !isAnalyzing && (
-        <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center", border: `2px dashed ${theme.border}`, borderRadius: 20, color: theme.textLight, fontWeight: 600}}>
-          Натисніть кнопку вище, щоб розпочати аналіз
-        </div>
-      )}
     </div>
   );
 }
