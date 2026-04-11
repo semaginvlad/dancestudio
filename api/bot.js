@@ -13,7 +13,6 @@ const stateStore = new Map();
 
 const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
 
-// Генератор дат (по Києву), offsetDays = 0 (сьогодні), 1 (завтра)
 const getFormattedDate = (offsetDays = 0) => {
     const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kiev" }));
     d.setDate(d.getDate() + offsetDays);
@@ -257,7 +256,6 @@ safeAction(/wz_pay_(cash|card|none)_(\d+)_(.+)_(.+)_(.+)/, async (ctx) => {
     const group = allGroups?.find(g => g.id.startsWith(grpShort));
     if (!group) throw new Error("Групу не знайдено");
 
-    // Розрахунок дат
     const startDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kiev" }));
     startDate.setDate(startDate.getDate() + dtOffset);
     const endDate = new Date(startDate);
@@ -273,12 +271,13 @@ safeAction(/wz_pay_(cash|card|none)_(\d+)_(.+)_(.+)_(.+)/, async (ctx) => {
     const formattedStart = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
     const formattedEnd = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
 
-    let payment_method = null;
+    let pay_method = null;
     let paid = false;
-    if (payMethodStr === 'cash') { payment_method = 'Готівка'; paid = true; }
-    if (payMethodStr === 'card') { payment_method = 'Картка'; paid = true; }
+    let displayMethod = 'Немає';
+    
+    if (payMethodStr === 'cash') { pay_method = 'cash'; paid = true; displayMethod = 'Готівка'; }
+    if (payMethodStr === 'card') { pay_method = 'card'; paid = true; displayMethod = 'Картка'; }
 
-    // ЯКЩО ТУТ ПОМИЛКА - БОТ ЇЇ ПОКАЖЕ НА ЕКРАНІ
     const { error } = await supabase.from('subscriptions').insert({
         student_id: student.id,
         group_id: group.id,
@@ -288,7 +287,7 @@ safeAction(/wz_pay_(cash|card|none)_(\d+)_(.+)_(.+)_(.+)/, async (ctx) => {
         end_date: formattedEnd,
         price: price,
         paid: paid,
-        payment_method: payment_method 
+        pay_method: pay_method 
     });
 
     if (error) throw new Error(`Помилка БД: ${error.message}`);
@@ -315,26 +314,26 @@ safeAction(/markpaid_(.+)/, async (ctx) => {
 });
 
 safeAction(/payok_(cash|card)_(.+)/, async (ctx) => {
-    const methodStr = ctx.match[1] === 'cash' ? 'Готівка' : 'Картка';
+    const payMethodCode = ctx.match[1]; // 'cash' або 'card'
+    const displayMethod = payMethodCode === 'cash' ? 'Готівка' : 'Картка';
     const subId = ctx.match[2];
 
     const { data: sub } = await supabase.from('subscriptions').select('group_id').eq('id', subId).single();
     if (!sub) throw new Error("Абонемент не знайдено");
 
-    // Записуємо оплату. Якщо payment_method не існує в БД - видасть помилку.
     const { error } = await supabase.from('subscriptions').update({ 
         paid: true,
-        payment_method: methodStr 
+        pay_method: payMethodCode 
     }).eq('id', subId);
 
     if (error) throw new Error(`Помилка БД: ${error.message}`);
 
-    await ctx.answerCbQuery('✅ Оплату успішно внесено!');
+    await ctx.answerCbQuery(`✅ Оплачено (${displayMethod})!`);
     await renderGroupList(ctx, sub.group_id.substring(0, 8));
 });
 
 // ==========================================
-// 6. Відмітки, Додавання, Боржники (старий робочий код)
+// 6. Відмітки, Додавання, Боржники 
 // ==========================================
 safeAction(/mark_(\d+)_(.+)/, async (ctx) => {
     const count = parseInt(ctx.match[1]);
