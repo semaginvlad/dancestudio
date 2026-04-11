@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
-import Analytics from "./pages/Analytics";
+import Analytics from "./pages/Analytics"; // Повернув імпорт для Instagram
 
 // ==========================================
 // 1. КОНСТАНТИ, ПАЛІТРА ТА ДАНІ
@@ -134,11 +134,11 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ (УЧЕНИЦІ, АБОНЕМЕНТИ, РЕЗЕРВ)
+// 3. ФОРМИ
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
-  const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||"");
-  const [lastName,setLastName]=useState(initial?.lastName||initial?.last_name||"");
+  const [firstName,setFirstName]=useState(initial?.firstName||initial?.first_name||initial?.name?.split(' ')[1]||"");
+  const [lastName,setLastName]=useState(initial?.lastName||initial?.last_name||initial?.name?.split(' ')[0]||"");
   const [phone,setPhone]=useState(initial?.phone||"");
   const [telegram,setTelegram]=useState(initial?.telegram||"");
   const [notes,setNotes]=useState(initial?.notes||"");
@@ -149,8 +149,8 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   
   return(<div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
       <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
-      <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
     </div>
     <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
     <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
@@ -163,7 +163,7 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
     <Field label="Нотатки"><textarea style={{...inputSt,minHeight:60,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP,opacity:firstName.trim()?1:.4}} onClick={()=>{if(!firstName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[firstName.trim(),lastName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти зміни":"Додати ученицю"}</button>
+      <button type="button" style={{...btnP,opacity:(firstName.trim() || lastName.trim())?1:.4}} onClick={()=>{if(!firstName.trim() && !lastName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[lastName.trim(),firstName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти зміни":"Додати ученицю"}</button>
     </div>
   </div>);
 }
@@ -212,7 +212,7 @@ function SubForm({initial, onDone, onCancel, students, groups}){
     <Field label="Нотатки"><textarea style={{...inputSt,minHeight:60,resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
     <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
       <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings:plan?.trainings||8,usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти зміни":"Створити абонемент"}</button>
+      <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings:(plan?.trainings||8),usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти зміни":"Створити абонемент"}</button>
     </div>
   </div>);
 }
@@ -231,65 +231,95 @@ function WaitlistForm({onDone, onCancel, students, groups}) {
 }
 
 // ==========================================
-// 4. AI АНАЛІТИКА
+// 4. ПРО АНАЛІТИКА (НОВА ВЛАДКА)
 // ==========================================
-function AiInsightsTab({ analytics }) {
-  const [aiResponse, setAiResponse] = useState("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const handleAnalyze = async () => {
-    setIsAnalyzing(true);
-    setTimeout(() => {
-      setAiResponse(`
-### 🧠 Штучний Інтелект: Аналіз Dance Studio
-
-**📉 Знайдені просідання та проблеми:**
-* Найнижча відвідуваність спостерігається у групах **K-pop Cover Dance**. Останні 2 тижні заповненість впала на 15%.
-* Конверсія з пробного заняття зараз становить **${analytics.conversionRate}%**. Це нижче норми. Рекомендую запропонувати знижку 10% на абонемент у день пробного заняття.
-* У студії зависли **${analytics.unpaid.toLocaleString()} ₴** боргів.
-
-**💡 Рекомендації для росту:**
-1. Запустіть акцію "Приведи подругу" для ранкових груп Latina, вони заповнені лише на 40%.
-2. Налаштуйте автоматичні нагадування в Telegram за 3 години до тренування для зменшення кількості скасувань.
-
-**📈 Точки росту:**
-Групи **Bachata** показують найвище утримання (LTV) — понад ${analytics.avgLTV.toLocaleString()} ₴ на людину. Рекомендуємо відкрити ще одну групу на вихідних!
-      `);
-      setIsAnalyzing(false);
-    }, 2000);
-  };
+function ProAnalyticsTab({ proAnalytics }) {
+  const [ltvPeriod, setLtvPeriod] = useState(1);
+  const topSpenders = proAnalytics.topSpenders[ltvPeriod] || [];
 
   return (
-    <div style={{...cardSt, minHeight: 400, display: "flex", flexDirection: "column"}}>
-      <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 16}}>
-        <div>
-          <h2 style={{margin: 0, fontSize: 24, color: theme.secondary}}>Системний AI Аналітик</h2>
-          <div style={{color: theme.textMuted, marginTop: 8}}>Claude AI проаналізує всі дані студії та знайде точки росту.</div>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
+      
+      {/* Топ по прибутку */}
+      <div style={cardSt}>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12}}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary}}>🏆 Топ клієнтів за прибутком</h3>
+          <div style={{display: 'flex', gap: 6, background: theme.input, padding: 4, borderRadius: 100}}>
+            {[1, 3, 6, 12].map(m => (
+              <button key={m} onClick={() => setLtvPeriod(m)} style={{padding: '6px 16px', borderRadius: 100, border: 'none', background: ltvPeriod === m ? theme.primary : 'transparent', color: ltvPeriod === m ? '#fff' : theme.textMuted, fontWeight: 600, cursor: 'pointer', fontSize: 13, transition: '0.2s'}}>
+                {m} міс.
+              </button>
+            ))}
+          </div>
         </div>
-        <button onClick={handleAnalyze} disabled={isAnalyzing} style={{...btnP, display: "flex", alignItems: "center", gap: 8, background: isAnalyzing ? theme.textLight : theme.primary}}>
-          {isAnalyzing ? "⏳ Аналізую базу даних..." : "✨ Згенерувати розумний звіт"}
-        </button>
+        {topSpenders.length === 0 ? <div style={{color: theme.textLight, padding: 20}}>Немає даних за цей період</div> : (
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {topSpenders.map((item, i) => (
+              <div key={item.student.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: theme.bg, borderRadius: 16}}>
+                <div style={{display: 'flex', gap: 16, alignItems: 'center'}}>
+                  <div style={{width: 32, height: 32, borderRadius: '50%', background: i===0?'#FFD700':i===1?'#C0C0C0':i===2?'#CD7F32':theme.input, color: i<3?'#fff':theme.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14}}>{i+1}</div>
+                  <div style={{fontWeight: 700, color: theme.textMain, fontSize: 16}}>{item.student.name}</div>
+                </div>
+                <div style={{fontWeight: 800, color: theme.success, fontSize: 18}}>{item.total.toLocaleString()} ₴</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {isAnalyzing && (
-        <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16}}>
-          <div style={{width: 40, height: 40, border: `4px solid ${theme.border}`, borderTopColor: theme.primary, borderRadius: "50%", animation: "spin 1s linear infinite"}} />
-          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
-          <div style={{color: theme.textMuted, fontWeight: 600}}>Claude вивчає поведінку учениць...</div>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24}}>
+        
+        {/* Апсейл */}
+        <div style={{...cardSt, border: `2px solid ${theme.warning}40`}}>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.warning, marginBottom: 16}}>📈 Кому вигідно більший абонемент</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>Ці учениці ходять дуже часто, але купують малі абонементи. Запропонуй їм {8} або {12} занять для їхньої ж економії.</div>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {proAnalytics.upsellCandidates.length === 0 ? <div style={{color: theme.textLight}}>Немає кандидатів наразі</div> : 
+              proAnalytics.upsellCandidates.map((item, i) => (
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16}}>
+                  <div style={{fontWeight: 700, color: theme.textMain}}>{item.student.name}</div>
+                  <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{item.reason}</div>
+                  <div style={{marginTop: 10}}><Badge color={theme.warning}>Запропонувати: {item.suggest}</Badge></div>
+                </div>
+              ))
+            }
+          </div>
         </div>
-      )}
 
-      {aiResponse && !isAnalyzing && (
-        <div style={{background: theme.bg, padding: "24px 32px", borderRadius: 20, border: `1px solid ${theme.border}`, fontSize: 15, lineHeight: 1.6, color: theme.textMain, whiteSpace: "pre-line"}}>
-          {aiResponse}
+        {/* Пропуски */}
+        <div style={{...cardSt, border: `2px solid ${theme.danger}40`}}>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>⚠️ Пропустили більше 2-х разів</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>У цих дівчат є активний абонемент, але вони не були на останніх 2-х тренуваннях своєї групи. Напиши їм!</div>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {proAnalytics.missingStudents.length === 0 ? <div style={{color: theme.textLight}}>Усі ходять стабільно!</div> : 
+              proAnalytics.missingStudents.map((item, i) => (
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <div>
+                    <div style={{fontWeight: 700, color: theme.textMain}}>{item.student.name}</div>
+                    <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{item.group.name}</div>
+                  </div>
+                  {item.student.telegram && <a href={`https://t.me/${item.student.telegram.replace('@','')}`} target="_blank" rel="noreferrer" style={{padding: '8px 12px', background: `${theme.danger}15`, color: theme.danger, borderRadius: 10, textDecoration: 'none', fontSize: 12, fontWeight: 700}}>Написати</a>}
+                </div>
+              ))
+            }
+          </div>
         </div>
-      )}
 
-      {!aiResponse && !isAnalyzing && (
-        <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center", border: `2px dashed ${theme.border}`, borderRadius: 20, color: theme.textLight, fontWeight: 600}}>
-          Натисніть кнопку вище, щоб розпочати аналіз
+      </div>
+
+      {/* Топ відвідуваність */}
+      <div style={cardSt}>
+        <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>⭐ Найкраща відвідуваність по групах (за 30 днів)</h3>
+        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16}}>
+          {proAnalytics.bestAttenders.map((item, i) => (
+            <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${theme.primary}`}}>
+              <div style={{fontSize: 13, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
+              <div style={{fontWeight: 800, color: theme.textMain, fontSize: 16}}>{item.student.name}</div>
+              <div style={{fontSize: 14, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -307,7 +337,10 @@ export default function App() {
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
   
-  const [tab, setTab] = useState("dashboard");
+  // Додано збереження поточної вкладки в localStorage
+  const [tab, setTab] = useState(() => localStorage.getItem("danceStudioTab") || "dashboard");
+  useEffect(() => { localStorage.setItem("danceStudioTab", tab); }, [tab]);
+
   const [modal, setModal] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [financeDetailItem, setFinanceDetailItem] = useState(null);
@@ -330,8 +363,6 @@ export default function App() {
   const [attnGid, setAttnGid] = useState("");
   const [attnDate, setAttnDate] = useState(today());
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
-  const [manualName, setManualName] = useState("");
-  const [manualType, setManualType] = useState("trial");
   const [draft, setDraft] = useState({});
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -410,6 +441,64 @@ export default function App() {
       chartData, maxChartVal
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
+
+  // ПРО АНАЛІТИКА
+  const proAnalytics = useMemo(() => {
+    const now = new Date();
+    const last30DaysStr = toLocalISO(new Date(now.getTime() - 30 * 86400000));
+    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
+
+    const getTopSpenders = (months) => {
+      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
+      const limitStr = toLocalISO(dateLimit);
+      const totals = {};
+      subs.forEach(s => { if (s.paid && s.startDate >= limitStr) totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); });
+      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
+    };
+
+    const groupAttnCounts = {};
+    attn.forEach(a => {
+      if (a.date >= last30DaysStr) {
+        const stId = a.subId ? subToSt[a.subId] : null;
+        if (stId) {
+          if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {};
+          groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1;
+        }
+      }
+    });
+    const bestAttenders = groups.map(g => {
+      const counts = groupAttnCounts[g.id] || {};
+      const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null);
+      return { group: g, student: studentMap[bestId], count: counts[bestId] };
+    }).filter(x => x.student);
+
+    const upsellCandidates = [];
+    Object.values(studentMap).forEach(st => {
+      const stAttn = attn.filter(a => a.date >= last30DaysStr && ((a.subId && subToSt[a.subId] === st.id) || a.guestName === st.name)).length;
+      const stSubs = subs.filter(s => s.studentId === st.id).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
+      const latestSub = stSubs[0];
+      if (latestSub) {
+        if (latestSub.planType === '4pack' && stAttn >= 6) upsellCandidates.push({ student: st, suggest: '8 занять', reason: `Відвідала ${stAttn} трен. за останні 30 днів` });
+        else if (latestSub.planType === '8pack' && stAttn >= 10) upsellCandidates.push({ student: st, suggest: '12 занять', reason: `Відвідала ${stAttn} трен. за останні 30 днів` });
+      }
+    });
+
+    const missingStudents = [];
+    groups.forEach(g => {
+      const groupDates = [...new Set(attn.filter(a => a.groupId === g.id).map(a => a.date))].sort().reverse();
+      if (groupDates.length >= 2) {
+        const last2Dates = groupDates.slice(0, 2);
+        const activeInGroup = [...new Set(activeSubs.filter(s => s.groupId === g.id).map(s => s.studentId))];
+        activeInGroup.forEach(stId => {
+          const stAttnDates = attn.filter(a => a.groupId === g.id && a.subId && subToSt[a.subId] === stId).map(a => a.date);
+          const missedBoth = !stAttnDates.includes(last2Dates[0]) && !stAttnDates.includes(last2Dates[1]);
+          if (missedBoth) missingStudents.push({ student: studentMap[stId], group: g });
+        });
+      }
+    });
+
+    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, missingStudents };
+  }, [subs, attn, groups, studentMap, activeSubs]);
 
   const filteredStudents=useMemo(()=>{
     let r=students;
@@ -586,7 +675,7 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-
+      
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12}}><button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button><button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button></div>
@@ -601,8 +690,8 @@ export default function App() {
             {id:"attendance", label:"Відвідування"},
             {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
             {id:"finance", label:"Фінанси"},
-            {id:"analytics", label:"📊 Instagram"},
-            {id:"ai_insights", label:"🧠 AI Аналітика"}
+            {id:"pro_analytics", label:"📈 Про-Аналітика"},
+            {id:"analytics", label:"📊 Instagram"}
           ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)}
         </div>
       </nav>
@@ -626,9 +715,9 @@ export default function App() {
 
           <div style={{...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40}}>
             <h3 style={{color:theme.secondary,fontSize:18,marginBottom:24, fontWeight: 800}}>Графік відвідуваності ({today().slice(0, 7)})</h3>
-            <div style={{display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, overflowX: 'auto', paddingBottom: 8, paddingTop: 20}}>
+            <div style={{display: 'flex', alignItems: 'flex-end', gap: 8, height: 200, overflowX: 'auto', paddingBottom: 8, paddingTop: 20}}>
               {analytics.chartData.map(d => {
-                const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 100, 6) : 4;
+                const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 120, 8) : 4;
                 return (
                   <div key={d.day} style={{flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', minWidth: 32}}>
                     <div style={{fontSize: 11, color: theme.textMain, fontWeight: 700, opacity: d.count > 0 ? 1 : 0, marginBottom: 8}}>{d.count}</div>
@@ -648,9 +737,12 @@ export default function App() {
 
           <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Напрямки</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16}}>
-            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt, padding: "20px", border: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 110}}><div style={{fontSize:14,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div><div style={{fontSize:28,fontWeight:800,color:theme.textMain}}>{data.students} <span style={{fontSize: 14, color: theme.textLight, fontWeight: 600}}>уч.</span></div></div>})}
+            {DIRECTIONS.map(d=>{const data=analytics.byDir[d.id]||{students:0};return<div key={d.id} style={{...cardSt, padding: "20px", border: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 110}}><div><div style={{fontSize:14,fontWeight:700,color:d.color, marginBottom: 8}}>{d.name}</div></div><div style={{fontSize:28,fontWeight:800,color:theme.textMain}}>{data.students} <span style={{fontSize: 14, color: theme.textLight, fontWeight: 600}}>уч.</span></div></div>})}
           </div>
         </div>}
+
+        {/* === ПРО АНАЛІТИКА === */}
+        {tab === "pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
 
         {/* === УЧЕНИЦІ === */}
         {tab==="students" && <div>
@@ -675,12 +767,15 @@ export default function App() {
                     <div style={{color:theme.textLight, fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
                   {isExpanded && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
-                    {dStudents.map(st => {
+                    {dStudents.map((st, index) => {
                       const active=subsExt.filter(s=>s.studentId===st.id && s.status!=="expired");
                       return <div key={st.id} style={{background: theme.bg, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
-                        <div style={{minWidth:200}}>
-                          <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div>
-                          <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
+                        <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
+                          <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
+                          <div>
+                            <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div>
+                            <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
+                          </div>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
                         <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Редагувати</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
@@ -697,12 +792,15 @@ export default function App() {
                 <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({waitlist.length})</span>
               </div>
               <div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
-                {waitlist.map(w => {
+                {waitlist.map((w, i) => {
                   const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
                   if(!st || !gr) return null;
                   return (
                     <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#fff", padding: "20px", borderRadius: 20}}>
-                      <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
+                      <div style={{display: "flex", gap: 16, alignItems: "center"}}>
+                        <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{i + 1}.</div>
+                        <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st.name}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
+                      </div>
                       <button style={{...btnS,padding:"10px 16px",fontSize:14,color:theme.danger, background: theme.input}} onClick={()=>db.deleteWaitlist(w.id).then(()=>setWaitlist(p=>p.filter(x=>x.id!==w.id)))}>Видалити</button>
                     </div>
                   )
@@ -742,6 +840,7 @@ export default function App() {
                       <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
                         <thead>
                           <tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}>
+                            <th style={{padding: "16px 14px", width: 40}}>#</th>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Група</th>
                             <th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th>
@@ -752,9 +851,10 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {finalSubs.map(sub => {
+                          {finalSubs.map((sub, index) => {
                             const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
                             return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}>
+                              <td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td>
                               <td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{st?.name||"?"}</td>
                               <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td>
                               <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td>
@@ -932,6 +1032,7 @@ export default function App() {
             if (valA > valB) return finSortOrder === "asc" ? 1 : -1;
             return 0;
           });
+
           return (
             <div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
@@ -980,7 +1081,7 @@ export default function App() {
 
         {/* === АНАЛІТИКА INSTAGRAM ТА AI === */}
         {tab === "analytics" && <Analytics />}
-        {tab === "ai_insights" && <AiInsightsTab analytics={analytics} />}
+        {tab === "pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
 
       </main>
 
