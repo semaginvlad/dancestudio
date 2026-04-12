@@ -14,11 +14,11 @@ const theme = {
   textMain: "#1F1F1F",
   textMuted: "#6A6E83",
   textLight: "#A8B1CE",
-  border: "#D9E2F2", // Зроблено темнішим для чіткості
+  border: "#D9E2F2",
   success: "#34C759",
   warning: "#FF9500",
   danger: "#FF453A",
-  exhausted: "#A8B1CE" // Сірий колір для вичерпаних абонементів
+  exhausted: "#A8B1CE"
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -156,7 +156,7 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ (УЧЕНИЦІ, АБОНЕМЕНТИ, РЕЗЕРВ)
+// 3. ФОРМИ
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -259,8 +259,10 @@ function WaitlistForm({onDone, onCancel, students, groups}) {
 // ==========================================
 // 4. ВІДВІДУВАННЯ (ТАБЛИЦЯ)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
+  const [viewMode, setViewMode] = useState("journal");
   const [gid, setGid] = useState(groups[0]?.id || "");
+  const [date, setDate] = useState(today());
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
   const [manualName, setManualName] = useState("");
@@ -269,7 +271,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
-  // Захищений список дівчат для цієї групи (і тих, хто вже ходив як гість)
+  // Захищений список дівчат
   const stIdsInGroup = new Set([
     ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId),
@@ -286,12 +288,17 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   const addManual = async () => {
     if (!manualName.trim()) return;
+    const targetDate = viewMode === "daily" ? date : manualDate;
     try {
-      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
+      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: targetDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) db.insertAttendance(a);
     } catch (e) { console.error(e); }
     setManualName("");
+  };
+
+  const removeGuest = async(id) => { 
+    try{ if(db.deleteAttendance) db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
   };
 
   const handlePrevMonth = () => {
@@ -306,28 +313,23 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
     setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   };
 
-  // Розумна функція обчислення рамок абонементів (з обрізкою)
   const getStudentSubRanges = (studentId) => {
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
     return stSubs.map(sub => {
       let effectiveEnd = sub.endDate || "2099-12-31";
       let isExhausted = false;
 
-      // Рахуємо фактично використані тренування саме в цьому абонементі
       const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
-      
       if (subAttns.length >= (sub.totalTrainings || 1)) {
         isExhausted = true;
-        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; // Обрізаємо рамку на даті останнього тренування
+        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; // Обрізаємо на останньому занятті
       } else if (today() > effectiveEnd) {
-        isExhausted = true; // Термін вийшов по даті
+        isExhausted = true;
       }
-
       return { start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted };
     });
   };
 
-  // Генеруємо 3 місяці (Попередній, Поточний, Наступний)
   const generateDays = () => {
     if (!journalMonth) return [];
     const parts = journalMonth.split('-');
@@ -359,7 +361,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   const visibleDays = useMemo(() => generateDays(), [journalMonth, gid, groups, attn]);
 
-  // Розрахунок colspan для красивої шапки місяців
   const monthSpans = useMemo(() => {
     const spans = [];
     let currentMonth = null;
@@ -380,18 +381,11 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     if (isCurrentlyAttended && dbRecord) {
-      // ЗНІМАЄМО ВІДМІТКУ
       setAttn(p => p.filter(a => a.id !== dbRecord.id));
-      if (dbRecord.subId) {
-         setSubs(p => p.map(s => s.id === dbRecord.subId ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
-         if(db.decrementUsed) await db.decrementUsed(dbRecord.subId, dbRecord.quantity || 1);
-      }
-      if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
+      if(db.deleteAttendance) db.deleteAttendance(dbRecord.id);
     } else {
-      // СТАВИМО ВІДМІТКУ
       const newId = uid();
-      
-      // Шукаємо абонемент, в якому ЩЕ Є вільні заняття і який діє по даті
+      // Шукаємо активний абонемент для динамічного ліміту
       const validSub = subs.find(s => 
         s.studentId === student.id && 
         s.groupId === gid && 
@@ -403,36 +397,37 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
       if (validSub && journalGuestMode === "subscription") {
         const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
         setAttn(p => [...p, a]);
-        setSubs(p => p.map(s => s.id === validSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
-        if(db.insertAttendance) await db.insertAttendance(a);
-        if(db.incrementUsed) await db.incrementUsed(validSub.id, 1);
+        if(db.insertAttendance) db.insertAttendance(a);
       } else {
-        // Якщо абонемент вичерпано або обрано ручний режим (Пробне/Разове), ставимо як гостя
-        const forcedType = journalGuestMode === "subscription" ? "single" : journalGuestMode; // Якщо вичерпано, за замовчуванням - Разове
-        const a = { id: newId, guestName: student.name, guestType: forcedType, groupId: gid, date: cellDate, quantity: 1, entryType: forcedType };
-        setAttn(p => [...p, a]);
-        if(db.insertAttendance) await db.insertAttendance(a);
+        if (journalGuestMode === "subscription") {
+          alert("Немає активного абонемента для цієї дати (або вичерпано ліміт занять). Буде позначено як Разове.");
+          const a = { id: newId, guestName: student.name, guestType: "single", groupId: gid, date: cellDate, quantity: 1, entryType: "single" };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) db.insertAttendance(a);
+        } else {
+          const a = { id: newId, guestName: student.name, guestType: journalGuestMode, groupId: gid, date: cellDate, quantity: 1, entryType: journalGuestMode };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) db.insertAttendance(a);
+        }
       }
     }
   };
 
   const handleCancelSpecificDay = async (cancelDate) => {
-    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
+    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть автоматично подовжені на наступне заняття групи.`)) return;
     try {
       const newCancel = { id: uid(), groupId: gid, date: cancelDate };
       let insertedC = newCancel;
       if (db.insertCancelled) insertedC = await db.insertCancelled(newCancel); 
       setCancelled(p => [...p, insertedC]);
 
-      let newSubs = [...subs];
+      let newSubs = [...rawSubs];
       const currentGroup = groups.find(g => g.id === gid);
-      
-      // Продовжуємо ТІЛЬКИ ті абонементи, які були активні в цей день
       const affectedSubs = newSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
       
       for (let sub of affectedSubs) {
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
+        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       setSubs(newSubs);
@@ -450,7 +445,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
             <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handleNextMonth}>{">"}</button>
           </div>
           <div style={{display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, borderLeft: `2px solid ${theme.border}`}}>
-            <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 700}}>КЛІК БЕЗ АБОНЕМЕНТА:</span>
+            <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 700}}>КЛІК В ТАБЛИЦІ:</span>
             <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
             <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
             <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
@@ -502,7 +497,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
-                  // Шукаємо, чи потрапляє цей день у рамки хоча б одного абонементу
                   const activeRange = subRanges.find(r => d >= r.start && d <= r.end);
                   
                   let markBg = theme.input;
@@ -558,6 +552,11 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
           </div>
           <div style={{ flex: 2, minWidth: 200 }}>
             <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище та Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
+          </div>
+          <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
+            <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
+            <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
+            <Pill active={manualType==="subscription"} onClick={()=>setManualType("subscription")} color={theme.primary}>Абонемент</Pill>
           </div>
           <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
         </div>
@@ -694,7 +693,18 @@ export default function App() {
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
-  const subsExt = useMemo(()=>subs.map(s=>({...s,status:getSubStatus(s)})),[subs]);
+
+  // ДИНАМІЧНИЙ ПІДРАХУНОК ВИТРАЧЕНИХ ЗАНЯТЬ НА ОСНОВІ ATTN
+  const subsExt = useMemo(()=>{
+    const usedMap = {};
+    attn.forEach(a => { if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + 1; });
+    return subs.map(s => {
+      const extSub = { ...s, usedTrainings: usedMap[s.id] || 0 };
+      extSub.status = getSubStatus(extSub);
+      return extSub;
+    });
+  },[subs, attn]);
+
   const activeSubs = useMemo(()=>subsExt.filter(s=>s.status!=="expired"),[subsExt]);
   const warnSubs = useMemo(()=>subsExt.filter(s=>s.status==="warning"),[subsExt]);
 
@@ -703,12 +713,12 @@ export default function App() {
     subsExt.filter(s => s.status !== "active").forEach(sub=>{
       const st=studentMap[sub.studentId], gr=groupMap[sub.groupId];
       if(!st || !gr) return; 
-      if(sub.status==="expired" && subs.some(s=>s.studentId===sub.studentId && s.groupId===sub.groupId && getSubStatus(s)!=="expired")) return; 
+      if(sub.status==="expired" && subsExt.some(s=>s.studentId===sub.studentId && s.groupId===sub.groupId && s.status!=="expired")) return; 
       const dir=dirMap[gr.directionId];
       items.push({subId:sub.id, type:sub.status, student:st, group:gr, direction:dir, notified:sub.notificationSent,
         message:sub.status==="expired"?"Абонемент закінчився":(daysLeft(sub.endDate)<=3?`${daysLeft(sub.endDate)} дн.`:`${(sub.totalTrainings||0)-(sub.usedTrainings||0)} трен.`)});
     });return items;
-  },[subsExt, studentMap, groupMap, subs, dirMap]);
+  },[subsExt, studentMap, groupMap, dirMap]);
 
   const alertsByGroup = useMemo(() => {
     const grouped = {};
@@ -879,7 +889,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="attendance" && <AttendanceTab groups={groups} subs={subs} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} />}
+        {tab==="attendance" && <AttendanceTab groups={groups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} />}
         {tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         {tab==="analytics" && <Analytics />}
         
@@ -917,7 +927,7 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
-                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Редагувати</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
+                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
                       </div>
                     })}
                   </div>)}
@@ -1114,10 +1124,6 @@ export default function App() {
             </div>
           )
         })()}
-
-        {/* === АНАЛІТИКА INSTAGRAM ТА AI === */}
-        {tab === "analytics" && <Analytics />}
-
       </main>
 
       {/* МОДАЛКИ */}
