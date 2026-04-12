@@ -14,10 +14,11 @@ const theme = {
   textMain: "#1F1F1F",
   textMuted: "#6A6E83",
   textLight: "#A8B1CE",
-  border: "#EAEEF6",
+  border: "#D9E2F2", // Зроблено темнішим для чіткості
   success: "#34C759",
   warning: "#FF9500",
-  danger: "#FF453A"
+  danger: "#FF453A",
+  exhausted: "#A8B1CE" // Сірий колір для вичерпаних абонементів
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -94,7 +95,7 @@ function getNextTrainingDate(schedule, afterDateStr) {
 function getNotifMsg(sub,student,group,direction){
   if (!student) return "Привіт! Абонемент закінчився.";
   const nameParts = student.name?.split(" ") || [];
-  const name = nameParts.length > 1 ? nameParts[1] : nameParts[0] || ""; // Намагаємось взяти ім'я, а не прізвище
+  const name = nameParts.length > 1 ? nameParts[1] : nameParts[0] || "";
   const gName=group?.name||"";
   const dName=direction?.name||"";
   const tpl=student.messageTemplate||student.message_template;
@@ -155,7 +156,7 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ
+// 3. ФОРМИ (УЧЕНИЦІ, АБОНЕМЕНТИ, РЕЗЕРВ)
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -259,35 +260,16 @@ function WaitlistForm({onDone, onCancel, students, groups}) {
 // 4. ВІДВІДУВАННЯ (ТАБЛИЦЯ)
 // ==========================================
 const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
-  const [viewMode, setViewMode] = useState("journal");
   const [gid, setGid] = useState(groups[0]?.id || "");
-  const [date, setDate] = useState(today());
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
-  const [journalGuestMode, setJournalGuestMode] = useState("single");
+  const [journalGuestMode, setJournalGuestMode] = useState("subscription");
   
-  const [draft, setDraft] = useState({});
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
-  const isCan = cancelled.some(c => c.groupId === gid && c.date === date);
-  const todayAttn = attn.filter(a => a.groupId === gid && a.date === date);
-  const guests = todayAttn.filter(a => a.guestName);
-
-  useEffect(() => {
-    const initialDraft = {};
-    todayAttn.forEach(a => {
-      if (a.subId) initialDraft[`sub_${a.subId}`] = true;
-      if (a.guestName) initialDraft[`guest_${a.guestName}`] = true;
-    });
-    setDraft(initialDraft);
-    setIsDirty(false);
-  }, [gid, date, attn]);
-
+  // Захищений список дівчат для цієї групи (і тих, хто вже ходив як гість)
   const stIdsInGroup = new Set([
     ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId),
@@ -302,88 +284,14 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
     .filter(st => st && st.name)
     .sort((a,b) => (a.name || "").localeCompare((b.name || ""), "uk"));
 
-  const studsWithSub = [];
-  const studsWithoutSub = [];
-
-  studsInGroup.forEach(student => {
-    const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
-    const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.startDate) - new Date(a.startDate))[0];
-    if (bestSub && getSubStatus(bestSub) !== "expired") {
-        studsWithSub.push({ student, sub: bestSub });
-    } else {
-        const guestEntry = guests.find(g => g.guestName === student.name);
-        studsWithoutSub.push({ student, sub: bestSub, guestEntry });
-    }
-  });
-
-  const manualGuests = guests.filter(g => !studsWithoutSub.some(s => s.student.name === g.guestName));
-
-  const toggleDraft = (key) => {
-    if (isCan) return;
-    setDraft(p => ({ ...p, [key]: !p[key] }));
-    setIsDirty(true);
-  };
-
-  const saveBatch = async () => {
-    setIsSaving(true);
-    let newAttn = [...attn];
-    let newSubs = [...subs];
-
-    try {
-      for (const {sub} of studsWithSub) {
-        const key = `sub_${sub.id}`;
-        const isDraftMarked = !!draft[key];
-        const dbRecord = todayAttn.find(a => a.subId === sub.id);
-        
-        if (isDraftMarked && !dbRecord) {
-          const a = { id: uid(), subId: sub.id, date: date, quantity: 1, entryType: "subscription", groupId: gid };
-          if(db.incrementUsed) await db.incrementUsed(sub.id, 1);
-          newAttn.push(a);
-          newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s);
-          if(db.insertAttendance) db.insertAttendance(a);
-        } else if (!isDraftMarked && dbRecord) {
-          if(db.deleteAttendanceBySubAndDate) await db.deleteAttendanceBySubAndDate(sub.id, date);
-          if(db.decrementUsed) await db.decrementUsed(sub.id, dbRecord.quantity || 1);
-          newAttn = newAttn.filter(x => x.id !== dbRecord.id);
-          newSubs = newSubs.map(s => s.id === sub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s);
-        }
-      }
-
-      for (const {student, guestEntry} of studsWithoutSub) {
-        const key = `guest_${student.name}`;
-        const isDraftMarked = !!draft[key];
-        
-        if (isDraftMarked && !guestEntry) {
-          const a = { id: uid(), guestName: student.name, guestType: journalGuestMode, groupId: gid, date: date, quantity: 1, entryType: journalGuestMode };
-          newAttn.push(a);
-          if(db.insertAttendance) db.insertAttendance(a);
-        } else if (!isDraftMarked && guestEntry) {
-          if(db.deleteAttendance) await db.deleteAttendance(guestEntry.id);
-          newAttn = newAttn.filter(x => x.id !== guestEntry.id);
-        }
-      }
-
-      setAttn(newAttn);
-      setSubs(newSubs);
-      setIsDirty(false);
-    } catch (e) { console.error(e); alert("Помилка збереження"); }
-    setIsSaving(false);
-  };
-
   const addManual = async () => {
     if (!manualName.trim()) return;
-    const targetDate = viewMode === "daily" ? date : manualDate;
     try {
-      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: targetDate, quantity: 1, entryType: journalGuestMode };
+      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
-      if (targetDate === date) setDraft(p => ({...p, [`guest_${a.guestName}`]: true}));
       if(db.insertAttendance) db.insertAttendance(a);
     } catch (e) { console.error(e); }
     setManualName("");
-  };
-
-  const removeGuest = async(id) => { 
-    try{ if(db.deleteAttendance) await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
   };
 
   const handlePrevMonth = () => {
@@ -398,21 +306,28 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
     setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   };
 
+  // Розумна функція обчислення рамок абонементів (з обрізкою)
   const getStudentSubRanges = (studentId) => {
-    // Беремо всі абонементи і сортуємо так, щоб нові перекривали старі візуально
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
     return stSubs.map(sub => {
       let effectiveEnd = sub.endDate || "2099-12-31";
-      if ((sub.usedTrainings || 0) >= (sub.totalTrainings || 1)) {
-        const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
-        if (subAttns.length > 0 && subAttns[subAttns.length - 1] < effectiveEnd) {
-           effectiveEnd = subAttns[subAttns.length - 1];
-        }
+      let isExhausted = false;
+
+      // Рахуємо фактично використані тренування саме в цьому абонементі
+      const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
+      
+      if (subAttns.length >= (sub.totalTrainings || 1)) {
+        isExhausted = true;
+        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; // Обрізаємо рамку на даті останнього тренування
+      } else if (today() > effectiveEnd) {
+        isExhausted = true; // Термін вийшов по даті
       }
-      return { start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id };
+
+      return { start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted };
     });
   };
 
+  // Генеруємо 3 місяці (Попередній, Поточний, Наступний)
   const generateDays = () => {
     if (!journalMonth) return [];
     const parts = journalMonth.split('-');
@@ -465,6 +380,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     if (isCurrentlyAttended && dbRecord) {
+      // ЗНІМАЄМО ВІДМІТКУ
       setAttn(p => p.filter(a => a.id !== dbRecord.id));
       if (dbRecord.subId) {
          setSubs(p => p.map(s => s.id === dbRecord.subId ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
@@ -472,29 +388,38 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
       }
       if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
     } else {
+      // СТАВИМО ВІДМІТКУ
       const newId = uid();
-      // Шукаємо абонемент, в якому ЩЕ Є вільні заняття
-      const validSub = subs.find(s => s.studentId === student.id && s.groupId === gid && s.startDate <= cellDate && s.endDate >= cellDate && (s.usedTrainings || 0) < (s.totalTrainings || 1));
       
-      if (validSub) {
+      // Шукаємо абонемент, в якому ЩЕ Є вільні заняття і який діє по даті
+      const validSub = subs.find(s => 
+        s.studentId === student.id && 
+        s.groupId === gid && 
+        s.startDate <= cellDate && 
+        s.endDate >= cellDate && 
+        (s.usedTrainings || 0) < (s.totalTrainings || 1)
+      );
+      
+      if (validSub && journalGuestMode === "subscription") {
         const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
         setAttn(p => [...p, a]);
         setSubs(p => p.map(s => s.id === validSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
         if(db.insertAttendance) await db.insertAttendance(a);
         if(db.incrementUsed) await db.incrementUsed(validSub.id, 1);
       } else {
-        // Якщо абонемент вичерпано або його немає, ставимо як гостя (залежить від обраного типу)
-        const a = { id: newId, guestName: student.name, guestType: journalGuestMode, groupId: gid, date: cellDate, quantity: 1, entryType: journalGuestMode };
+        // Якщо абонемент вичерпано або обрано ручний режим (Пробне/Разове), ставимо як гостя
+        const forcedType = journalGuestMode === "subscription" ? "single" : journalGuestMode; // Якщо вичерпано, за замовчуванням - Разове
+        const a = { id: newId, guestName: student.name, guestType: forcedType, groupId: gid, date: cellDate, quantity: 1, entryType: forcedType };
         setAttn(p => [...p, a]);
         if(db.insertAttendance) await db.insertAttendance(a);
       }
     }
   };
 
-  const handleCancelTraining = async () => {
-    if (!confirm(`Точно скасувати тренування ${date}? Всі активні абонементи будуть автоматично перенесені на наступне тренування групи.`)) return;
+  const handleCancelSpecificDay = async (cancelDate) => {
+    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
     try {
-      const newCancel = { id: uid(), groupId: gid, date: date };
+      const newCancel = { id: uid(), groupId: gid, date: cancelDate };
       let insertedC = newCancel;
       if (db.insertCancelled) insertedC = await db.insertCancelled(newCancel); 
       setCancelled(p => [...p, insertedC]);
@@ -502,238 +427,139 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
       let newSubs = [...subs];
       const currentGroup = groups.find(g => g.id === gid);
       
-      for (const {sub} of studsWithSub) {
+      // Продовжуємо ТІЛЬКИ ті абонементи, які були активні в цей день
+      const affectedSubs = newSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
+      
+      for (let sub of affectedSubs) {
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
         if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       setSubs(newSubs);
-      alert("✅ Тренування скасовано! Терміни дії абонементів автоматично подовжено до наступного тренування.");
     } catch (e) { alert("Помилка: " + e.message); }
   };
 
   return (
-    <div style={{ maxWidth: viewMode === "journal" ? "100%" : 800 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 20, borderBottom: `1px solid ${theme.border}`, paddingBottom: 16, justifyContent: "space-between", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button style={{...btnS, background: viewMode === "journal" ? theme.input : "transparent", color: viewMode === "journal" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("journal")}>🗓 Журнал (Таблиця)</button>
-          <button style={{...btnS, background: viewMode === "daily" ? theme.input : "transparent", color: viewMode === "daily" ? theme.primary : theme.textMuted, border: "none"}} onClick={() => setViewMode("daily")}>📝 Відмітити сьогодні</button>
-        </div>
-        {viewMode === "daily" && (
-          <button style={{...btnS, background: "rgba(255,69,58,0.1)", color: theme.danger, border: "none"}} onClick={handleCancelTraining}>❌ Скасувати тренування</button>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ maxWidth: "100%" }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <GroupSelect groups={groups} value={gid} onChange={setGid}/>
-        {viewMode === "daily" 
-          ? <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="date" value={date} onChange={e=>setDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
-          : <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
-              <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handlePrevMonth}>{"<"}</button>
-                <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
-                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handleNextMonth}>{">"}</button>
-              </div>
-              <div style={{display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, borderLeft: `1px solid ${theme.border}`}}>
-                <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 600}}>КЛІК БЕЗ АБОНЕМЕНТА:</span>
-                <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
-                <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
-              </div>
-            </div>
-        }
+        <div style={{display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap'}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+            <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handlePrevMonth}>{"<"}</button>
+            <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer", textAlign: 'center'}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
+            <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handleNextMonth}>{">"}</button>
+          </div>
+          <div style={{display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, borderLeft: `2px solid ${theme.border}`}}>
+            <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 700}}>КЛІК БЕЗ АБОНЕМЕНТА:</span>
+            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
+            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
+            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
+          </div>
+        </div>
       </div>
 
-      {viewMode === "journal" ? (
-        <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: "20px 0", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-          <table style={{ borderCollapse: "separate", borderSpacing: 0, minWidth: "100%", fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th rowSpan={2} style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", textAlign: "left", zIndex: 3, borderRight: `2px solid ${theme.border}`, minWidth: 180, color: theme.textMuted }}>Учениця</th>
-                {monthSpans.map((m, i) => (
-                  <th key={i} colSpan={m.span} style={{ textAlign: "center", padding: "8px", background: "#E8EEFF", color: theme.secondary, fontWeight: 800, borderRight: i < monthSpans.length - 1 ? "2px solid #fff" : "none", fontSize: 14 }}>
-                    {MONTHS[m.month]}
-                  </th>
-                ))}
-              </tr>
-              <tr>
-                {visibleDays.map((d, index) => {
-                  const dayNum = new Date(d + "T12:00:00").getDay();
-                  const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                  return (
-                  <th key={d} style={{ padding: "8px 2px", background: "#F2F5FF", color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `2px solid #fff` : "none", borderBottom: `2px solid ${theme.border}` }}>
-                    <div style={{fontSize: 10, textTransform: "uppercase", color: theme.textMuted, marginBottom: 2}}>{WEEKDAYS[dayNum]}</div>
-                    <div style={{fontSize: 14}}>{d.slice(-2)}</div>
-                  </th>
-                )})}
-              </tr>
-            </thead>
-            <tbody>
-              {studsInGroup.map((st, i) => {
-                const subRanges = getStudentSubRanges(st.id);
+      <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: "20px 0", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
+        <table style={{ borderCollapse: "separate", borderSpacing: 0, minWidth: "100%", fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th rowSpan={2} style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", textAlign: "left", zIndex: 3, borderRight: `2px solid ${theme.border}`, minWidth: 180, color: theme.textMuted }}>Учениця</th>
+              {monthSpans.map((m, i) => (
+                <th key={i} colSpan={m.span} style={{ textAlign: "center", padding: "8px", background: "#E8EEFF", color: theme.secondary, fontWeight: 800, borderRight: i < monthSpans.length - 1 ? "2px solid #fff" : "none", fontSize: 14 }}>
+                  {MONTHS[m.month]}
+                </th>
+              ))}
+            </tr>
+            <tr>
+              {visibleDays.map((d, index) => {
+                const dayNum = new Date(d + "T12:00:00").getDay();
+                const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
+                const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
+                
                 return (
-                <tr key={st.id}>
-                  <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.bg}`, zIndex: 1, whiteSpace: "nowrap" }}>
-                    <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>{st.name}
-                  </td>
-                  {visibleDays.map((d, index) => {
-                    const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                    const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
-                    const isAttended = !!rec;
-                    
-                    // Шукаємо, чи потрапляє цей день у рамки хоча б одного абонементу
-                    const activeRange = subRanges.find(r => d >= r.start && d <= r.end);
-                    
-                    let markBg = theme.input;
-                    if (isAttended) {
-                      if (rec.entryType === 'trial') markBg = theme.success;
-                      else if (rec.entryType === 'single') markBg = theme.warning;
-                      else markBg = theme.primary;
-                    }
+                <th key={d} style={{ padding: "8px 2px", background: "#F8F9FD", color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `2px solid #fff` : "none", borderBottom: `2px solid ${theme.border}` }}>
+                  <div style={{fontSize: 10, textTransform: "uppercase", color: theme.textMuted, marginBottom: 2}}>{WEEKDAYS[dayNum]}</div>
+                  <div style={{fontSize: 15, fontWeight: 800}}>{d.slice(-2)}</div>
+                  {isDayCancelled ? (
+                    <div style={{color: theme.danger, fontSize: 9, marginTop: 6, fontWeight: 700}}>СКАСОВАНО</div>
+                  ) : (
+                    <div onClick={() => handleCancelSpecificDay(d)} style={{color: theme.danger, fontSize: 10, marginTop: 4, cursor: 'pointer', opacity: 0.5}}>✕ Скас.</div>
+                  )}
+                </th>
+              )})}
+            </tr>
+          </thead>
+          <tbody>
+            {studsInGroup.map((st, i) => {
+              const subRanges = getStudentSubRanges(st.id);
+              return (
+              <tr key={st.id}>
+                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1, whiteSpace: "nowrap" }}>
+                  <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>{st.name}
+                </td>
+                {visibleDays.map((d, index) => {
+                  const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
+                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
+                  const isAttended = !!rec;
+                  const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
+                  
+                  // Шукаємо, чи потрапляє цей день у рамки хоча б одного абонементу
+                  const activeRange = subRanges.find(r => d >= r.start && d <= r.end);
+                  
+                  let markBg = theme.input;
+                  if (isAttended) {
+                    if (rec.entryType === 'trial') markBg = theme.success;
+                    else if (rec.entryType === 'single') markBg = theme.warning;
+                    else markBg = theme.primary;
+                  }
 
-                    let frameStyle = {};
-                    if (activeRange) {
-                      const prevD = visibleDays[index - 1]; 
-                      const nextD = visibleDays[index + 1];
-                      const isPrevIn = prevD && subRanges.some(r => r.id === activeRange.id && prevD >= r.start && prevD <= r.end);
-                      const isNextIn = nextD && subRanges.some(r => r.id === activeRange.id && nextD >= r.start && nextD <= r.end);
-                      frameStyle = {
-                        borderTop: `2px solid ${theme.primary}60`, borderBottom: `2px solid ${theme.primary}60`,
-                        borderLeft: !isPrevIn ? `2px solid ${theme.primary}60` : "none", borderRight: !isNextIn ? `2px solid ${theme.primary}60` : "none",
-                        borderTopLeftRadius: !isPrevIn ? 8 : 0, borderBottomLeftRadius: !isPrevIn ? 8 : 0,
-                        borderTopRightRadius: !isNextIn ? 8 : 0, borderBottomRightRadius: !isNextIn ? 8 : 0,
-                      };
-                    }
+                  let frameStyle = {};
+                  if (activeRange) {
+                    const frameColor = activeRange.isExhausted ? theme.exhausted : theme.primary;
+                    const frameBg = activeRange.isExhausted ? `${theme.exhausted}10` : "transparent";
+                    
+                    const prevD = visibleDays[index - 1]; 
+                    const nextD = visibleDays[index + 1];
+                    const isPrevIn = prevD && subRanges.some(r => r.id === activeRange.id && prevD >= r.start && prevD <= r.end);
+                    const isNextIn = nextD && subRanges.some(r => r.id === activeRange.id && nextD >= r.start && nextD <= r.end);
+                    
+                    frameStyle = {
+                      background: frameBg,
+                      borderTop: `2px solid ${frameColor}60`, borderBottom: `2px solid ${frameColor}60`,
+                      borderLeft: !isPrevIn ? `2px solid ${frameColor}60` : "none", borderRight: !isNextIn ? `2px solid ${frameColor}60` : "none",
+                      borderTopLeftRadius: !isPrevIn ? 8 : 0, borderBottomLeftRadius: !isPrevIn ? 8 : 0,
+                      borderTopRightRadius: !isNextIn ? 8 : 0, borderBottomRightRadius: !isNextIn ? 8 : 0,
+                    };
+                  }
 
-                    return (
-                      <td key={d} style={{ padding: 0, height: 44, borderLeft: isNewMonth && index !== 0 ? `2px solid #D9E2F2` : "none", borderBottom: `1px solid ${theme.bg}` }}>
-                        <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...frameStyle }}>
-                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec, activeRange ? subs.find(s=>s.id===activeRange.id) : null)} style={{ width: 26, height: 26, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, transition: "0.2s" }}>
+                  return (
+                    <td key={d} style={{ padding: 0, height: 48, borderLeft: isNewMonth && index !== 0 ? `2px solid #D9E2F2` : "none", borderBottom: `1px solid ${theme.border}`, background: isDayCancelled ? `${theme.danger}08` : 'transparent' }}>
+                      <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...frameStyle }}>
+                        {!isDayCancelled && (
+                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec)} style={{ width: 28, height: 28, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.1s" }}>
                             {isAttended ? "✓" : ""}
                           </div>
-                        </div>
-                      </td>
-                    )
-                  })}
-                </tr>
-              )})}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <>
-          {isCan && <div style={{ background: "rgba(255,69,58,0.1)", border: `1px solid ${theme.danger}40`, borderRadius: 16, padding: "16px", marginBottom: 20, color: theme.danger, fontWeight: 600 }}>❌ Тренування відмінено (Абонементи продовжено)</div>}
-
-          {studsWithSub.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                З абонементом ({studsWithSub.length})
-              </div>
-              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                {studsWithSub.map(({sub, student}, i) => {
-                  const key = `sub_${sub.id}`;
-                  const isMarked = !!draft[key];
-                  return (
-                  <div key={sub.id} onClick={() => toggleDraft(key)} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "16px 20px", borderBottom: i < studsWithSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                    cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                    background: isMarked ? `${theme.primary}15` : "transparent", opacity: isCan ? 0.5 : 1
-                  }}>
-                    <div>
-                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}><span style={{color: theme.textLight, marginRight: 8, fontSize: 13}}>{i+1}.</span>{student.name}</div>
-                      <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4, paddingLeft: 22 }}>
-                        <span style={{ color: isMarked ? theme.primary : theme.textMain, fontWeight: 700 }}>{sub.usedTrainings}</span> / {sub.totalTrainings} · до {fmt(sub.endDate)}
+                        )}
                       </div>
-                    </div>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.primary : theme.border}`, background: isMarked ? theme.primary : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                      {isMarked && "✓"}
-                    </div>
-                  </div>
-                )})}
-              </div>
-            </div>
-          )}
+                    </td>
+                  )
+                })}
+              </tr>
+            )})}
+          </tbody>
+        </table>
+      </div>
 
-          {studsWithoutSub.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                Без активного абонемента ({studsWithoutSub.length})
-              </div>
-              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                {studsWithoutSub.map(({student, sub}, i) => {
-                  const key = `guest_${student.name}`;
-                  const isMarked = !!draft[key];
-                  return (
-                  <div key={student.id} onClick={() => toggleDraft(key)} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "16px 20px", borderBottom: i < studsWithoutSub.length - 1 ? `1px solid ${theme.border}` : "none",
-                    cursor: isCan ? "default" : "pointer", transition: "background 0.2s",
-                    background: isMarked ? `${theme.warning}15` : "transparent", opacity: isCan ? 0.5 : 1
-                  }}>
-                    <div>
-                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{student.name}</div>
-                      <div style={{ color: isMarked ? theme.warning : theme.danger, fontSize: 13, marginTop: 4, fontWeight: 500 }}>
-                        {isMarked ? "Буде відмічено як разове" : (sub ? "Абонемент закінчився" : "Немає абонемента")}
-                      </div>
-                    </div>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, border: `2px solid ${isMarked ? theme.warning : theme.border}`, background: isMarked ? theme.warning : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: "bold" }}>
-                      {isMarked && "✓"}
-                    </div>
-                  </div>
-                )})}
-              </div>
-            </div>
-          )}
-
-          {manualGuests.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, color: theme.textLight, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, paddingLeft: 4 }}>
-                Нові гості ({manualGuests.length})
-              </div>
-              <div style={{ background: theme.card, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-                {manualGuests.map((g, i) => (
-                  <div key={g.id} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "16px 20px", borderBottom: i < manualGuests.length - 1 ? `1px solid ${theme.border}` : "none",
-                  }}>
-                    <div>
-                      <div style={{ color: theme.textMain, fontSize: 16, fontWeight: 600 }}>{g.guestName}</div>
-                      <div style={{ color: g.entryType === "trial" ? theme.success : theme.warning, fontSize: 13, marginTop: 4, fontWeight: 600 }}>
-                        {g.entryType === "trial" ? "Пробне" : "Разове"}
-                      </div>
-                    </div>
-                    <button onClick={() => removeGuest(g.id)} style={{ background: "none", border: "none", color: theme.danger, fontSize: 24, cursor: "pointer" }}>✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {isDirty && (
-            <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 100, width: "calc(100% - 40px)", maxWidth: 400 }}>
-              <button onClick={saveBatch} disabled={isSaving} style={{ ...btnP, width: "100%", background: theme.success, padding: "18px", fontSize: 16, borderRadius: 100, boxShadow: `0 10px 30px ${theme.success}50` }}>
-                {isSaving ? "Зберігаємо..." : "💾 Зберегти відмітки"}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Форма додавання вручну (доступна в обох режимах) */}
-      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-        <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину вручну</div>
+      {/* Форма додавання вручну */}
+      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
+        <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <input type="date" style={inputSt} value={viewMode === 'daily' ? date : manualDate} onChange={e=> viewMode === 'daily' ? setDate(e.target.value) : setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
+            <input type="date" style={inputSt} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
           </div>
           <div style={{ flex: 2, minWidth: 200 }}>
             <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище та Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
           </div>
-          <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
-            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
-            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
-          </div>
-          <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Додати</button>
+          <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
         </div>
       </div>
     </div>
@@ -1091,7 +917,7 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
-                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
+                        <div style={{display:"flex",gap:8}}><button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Редагувати</button><button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudent(st.id)}>🗑</button></div>
                       </div>
                     })}
                   </div>)}
@@ -1288,6 +1114,9 @@ export default function App() {
             </div>
           )
         })()}
+
+        {/* === АНАЛІТИКА INSTAGRAM ТА AI === */}
+        {tab === "analytics" && <Analytics />}
 
       </main>
 
