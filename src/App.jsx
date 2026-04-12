@@ -14,11 +14,11 @@ const theme = {
   textMain: "#1F1F1F",
   textMuted: "#6A6E83",
   textLight: "#A8B1CE",
-  border: "#D9E2F2",
+  border: "#C7D2E8", // Зробив темнішим для чіткості
   success: "#34C759",
   warning: "#FF9500",
   danger: "#FF453A",
-  exhausted: "#A8B1CE"
+  exhausted: "#A8B1CE" // Сірий для вичерпаних
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -156,7 +156,7 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
 }
 
 // ==========================================
-// 3. ФОРМИ
+// 3. ФОРМИ (Прізвище тепер завжди перше)
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -260,9 +260,7 @@ function WaitlistForm({onDone, onCancel, students, groups}) {
 // 4. ВІДВІДУВАННЯ (ТАБЛИЦЯ)
 // ==========================================
 const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
-  const [viewMode, setViewMode] = useState("journal");
   const [gid, setGid] = useState(groups[0]?.id || "");
-  const [date, setDate] = useState(today());
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
   const [manualName, setManualName] = useState("");
@@ -271,7 +269,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
-  // Захищений список дівчат
   const stIdsInGroup = new Set([
     ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId),
@@ -288,17 +285,12 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   const addManual = async () => {
     if (!manualName.trim()) return;
-    const targetDate = viewMode === "daily" ? date : manualDate;
     try {
-      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: targetDate, quantity: 1, entryType: journalGuestMode };
+      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) db.insertAttendance(a);
     } catch (e) { console.error(e); }
     setManualName("");
-  };
-
-  const removeGuest = async(id) => { 
-    try{ if(db.deleteAttendance) db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
   };
 
   const handlePrevMonth = () => {
@@ -315,19 +307,35 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   const getStudentSubRanges = (studentId) => {
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
-    return stSubs.map(sub => {
+    
+    const ranges = [];
+    let minStartOfNewer = "2099-12-31"; 
+    
+    stSubs.forEach(sub => {
       let effectiveEnd = sub.endDate || "2099-12-31";
       let isExhausted = false;
 
       const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
       if (subAttns.length >= (sub.totalTrainings || 1)) {
         isExhausted = true;
-        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; // Обрізаємо на останньому занятті
+        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; 
       } else if (today() > effectiveEnd) {
         isExhausted = true;
       }
-      return { start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted };
+
+      if (effectiveEnd >= minStartOfNewer) {
+         const d = new Date(minStartOfNewer + "T12:00:00");
+         d.setDate(d.getDate() - 1);
+         effectiveEnd = toLocalISO(d);
+      }
+
+      ranges.push({ start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted });
+      
+      if ((sub.startDate || "2000-01-01") < minStartOfNewer) {
+         minStartOfNewer = sub.startDate || "2000-01-01";
+      }
     });
+    return ranges;
   };
 
   const generateDays = () => {
@@ -385,7 +393,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       if(db.deleteAttendance) db.deleteAttendance(dbRecord.id);
     } else {
       const newId = uid();
-      // Шукаємо активний абонемент для динамічного ліміту
       const validSub = subs.find(s => 
         s.studentId === student.id && 
         s.groupId === gid && 
@@ -427,7 +434,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       
       for (let sub of affectedSubs) {
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr });
+        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       setSubs(newSubs);
@@ -459,7 +466,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
             <tr>
               <th rowSpan={2} style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", textAlign: "left", zIndex: 3, borderRight: `2px solid ${theme.border}`, minWidth: 180, color: theme.textMuted }}>Учениця</th>
               {monthSpans.map((m, i) => (
-                <th key={i} colSpan={m.span} style={{ textAlign: "center", padding: "8px", background: "#E8EEFF", color: theme.secondary, fontWeight: 800, borderRight: i < monthSpans.length - 1 ? "2px solid #fff" : "none", fontSize: 14 }}>
+                <th key={i} colSpan={m.span} style={{ textAlign: "center", padding: "8px", background: "#F2F5FF", color: theme.secondary, fontWeight: 800, borderRight: i < monthSpans.length - 1 ? "4px solid #fff" : "none", fontSize: 14 }}>
                   {MONTHS[m.month]}
                 </th>
               ))}
@@ -471,7 +478,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 
                 return (
-                <th key={d} style={{ padding: "8px 2px", background: "#F8F9FD", color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `2px solid #fff` : "none", borderBottom: `2px solid ${theme.border}` }}>
+                <th key={d} style={{ padding: "8px 2px", background: theme.card, color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `4px solid ${theme.border}` }}>
                   <div style={{fontSize: 10, textTransform: "uppercase", color: theme.textMuted, marginBottom: 2}}>{WEEKDAYS[dayNum]}</div>
                   <div style={{fontSize: 15, fontWeight: 800}}>{d.slice(-2)}</div>
                   {isDayCancelled ? (
@@ -518,18 +525,22 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                     
                     frameStyle = {
                       background: frameBg,
-                      borderTop: `2px solid ${frameColor}60`, borderBottom: `2px solid ${frameColor}60`,
-                      borderLeft: !isPrevIn ? `2px solid ${frameColor}60` : "none", borderRight: !isNextIn ? `2px solid ${frameColor}60` : "none",
-                      borderTopLeftRadius: !isPrevIn ? 8 : 0, borderBottomLeftRadius: !isPrevIn ? 8 : 0,
-                      borderTopRightRadius: !isNextIn ? 8 : 0, borderBottomRightRadius: !isNextIn ? 8 : 0,
+                      borderTop: `2px solid ${frameColor}80`, 
+                      borderBottom: `2px solid ${frameColor}80`,
+                      borderLeft: !isPrevIn ? `2px solid ${frameColor}80` : "none", 
+                      borderRight: !isNextIn ? `2px solid ${frameColor}80` : "none",
+                      borderTopLeftRadius: !isPrevIn ? 8 : 0, 
+                      borderBottomLeftRadius: !isPrevIn ? 8 : 0,
+                      borderTopRightRadius: !isNextIn ? 8 : 0, 
+                      borderBottomRightRadius: !isNextIn ? 8 : 0,
                     };
                   }
 
                   return (
-                    <td key={d} style={{ padding: 0, height: 48, borderLeft: isNewMonth && index !== 0 ? `2px solid #D9E2F2` : "none", borderBottom: `1px solid ${theme.border}`, background: isDayCancelled ? `${theme.danger}08` : 'transparent' }}>
-                      <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...frameStyle }}>
+                    <td key={d} style={{ padding: "4px 0", height: 48, borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `1px solid ${theme.border}`, background: isDayCancelled ? `${theme.danger}08` : 'transparent' }}>
+                      <div style={{ height: 32, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...frameStyle }}>
                         {!isDayCancelled && (
-                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec)} style={{ width: 28, height: 28, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.1s" }}>
+                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec)} style={{ width: 26, height: 26, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, transition: "0.1s" }}>
                             {isAttended ? "✓" : ""}
                           </div>
                         )}
@@ -543,7 +554,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         </table>
       </div>
 
-      {/* Форма додавання вручну */}
       <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
         <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -554,9 +564,9 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
             <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище та Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
           </div>
           <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
-            <Pill active={manualType==="trial"} onClick={()=>setManualType("trial")} color={theme.success}>Пробне</Pill>
-            <Pill active={manualType==="single"} onClick={()=>setManualType("single")} color={theme.warning}>Разове</Pill>
-            <Pill active={manualType==="subscription"} onClick={()=>setManualType("subscription")} color={theme.primary}>Абонемент</Pill>
+            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
+            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
+            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
           </div>
           <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
         </div>
@@ -1124,6 +1134,10 @@ export default function App() {
             </div>
           )
         })()}
+
+        {/* === АНАЛІТИКА INSTAGRAM ТА AI === */}
+        {tab === "analytics" && <Analytics />}
+
       </main>
 
       {/* МОДАЛКИ */}
