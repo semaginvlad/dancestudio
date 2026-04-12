@@ -93,7 +93,8 @@ function getNextTrainingDate(schedule, afterDateStr) {
 
 function getNotifMsg(sub,student,group,direction){
   if (!student) return "Привіт! Абонемент закінчився.";
-  const name=student.name?.split(" ")[1]||student.name?.split(" ")[0]||"";
+  const nameParts = student.name?.split(" ") || [];
+  const name = nameParts.length > 1 ? nameParts[1] : nameParts[0] || ""; // Намагаємось взяти ім'я, а не прізвище
   const gName=group?.name||"";
   const dName=direction?.name||"";
   const tpl=student.messageTemplate||student.message_template;
@@ -287,7 +288,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
     setIsDirty(false);
   }, [gid, date, attn]);
 
-  // Захищений список дівчат для цієї групи (і тих, хто вже ходив як гість)
   const stIdsInGroup = new Set([
     ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId),
@@ -307,7 +307,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   studsInGroup.forEach(student => {
     const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
-    const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.endDate) - new Date(a.endDate))[0];
+    const bestSub = stSubs.find(s => getSubStatus(s) !== "expired") || stSubs.sort((a,b) => new Date(b.startDate) - new Date(a.startDate))[0];
     if (bestSub && getSubStatus(bestSub) !== "expired") {
         studsWithSub.push({ student, sub: bestSub });
     } else {
@@ -386,15 +386,30 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
     try{ if(db.deleteAttendance) await db.deleteAttendance(id); setAttn(p=>p.filter(a=>a.id!==id)); } catch(e){console.error(e)} 
   };
 
+  const handlePrevMonth = () => {
+    const [y, m] = journalMonth.split('-');
+    let d = new Date(y, parseInt(m)-2, 1);
+    setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  };
+
+  const handleNextMonth = () => {
+    const [y, m] = journalMonth.split('-');
+    let d = new Date(y, parseInt(m), 1);
+    setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  };
+
   const getStudentSubRanges = (studentId) => {
-    const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid);
+    // Беремо всі абонементи і сортуємо так, щоб нові перекривали старі візуально
+    const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
     return stSubs.map(sub => {
-      let effectiveEnd = sub.endDate;
+      let effectiveEnd = sub.endDate || "2099-12-31";
       if ((sub.usedTrainings || 0) >= (sub.totalTrainings || 1)) {
         const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
-        if (subAttns.length > 0) effectiveEnd = subAttns[subAttns.length - 1];
+        if (subAttns.length > 0 && subAttns[subAttns.length - 1] < effectiveEnd) {
+           effectiveEnd = subAttns[subAttns.length - 1];
+        }
       }
-      return { start: sub.startDate, end: effectiveEnd, id: sub.id };
+      return { start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id };
     });
   };
 
@@ -429,26 +444,49 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
   const visibleDays = useMemo(() => generateDays(), [journalMonth, gid, groups, attn]);
 
-  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord, relevantSub) => {
+  // Розрахунок colspan для красивої шапки місяців
+  const monthSpans = useMemo(() => {
+    const spans = [];
+    let currentMonth = null;
+    let currentSpan = 0;
+    visibleDays.forEach(d => {
+      const monthNum = parseInt(d.split('-')[1]) - 1;
+      if (currentMonth === monthNum) {
+        currentSpan++;
+      } else {
+        if (currentMonth !== null) spans.push({ month: currentMonth, span: currentSpan });
+        currentMonth = monthNum;
+        currentSpan = 1;
+      }
+    });
+    if (currentMonth !== null) spans.push({ month: currentMonth, span: currentSpan });
+    return spans;
+  }, [visibleDays]);
+
+  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     if (isCurrentlyAttended && dbRecord) {
       setAttn(p => p.filter(a => a.id !== dbRecord.id));
-      if (relevantSub) {
-         setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
-         if(db.decrementUsed) await db.decrementUsed(relevantSub.id, dbRecord.quantity || 1);
+      if (dbRecord.subId) {
+         setSubs(p => p.map(s => s.id === dbRecord.subId ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
+         if(db.decrementUsed) await db.decrementUsed(dbRecord.subId, dbRecord.quantity || 1);
       }
       if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
     } else {
       const newId = uid();
-      if (relevantSub) {
-        const a = { id: newId, subId: relevantSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
-        if(db.incrementUsed) await db.incrementUsed(relevantSub.id, 1);
+      // Шукаємо абонемент, в якому ЩЕ Є вільні заняття
+      const validSub = subs.find(s => s.studentId === student.id && s.groupId === gid && s.startDate <= cellDate && s.endDate >= cellDate && (s.usedTrainings || 0) < (s.totalTrainings || 1));
+      
+      if (validSub) {
+        const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
         setAttn(p => [...p, a]);
-        setSubs(p => p.map(s => s.id === relevantSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
-        if(db.insertAttendance) db.insertAttendance(a);
+        setSubs(p => p.map(s => s.id === validSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
+        if(db.insertAttendance) await db.insertAttendance(a);
+        if(db.incrementUsed) await db.incrementUsed(validSub.id, 1);
       } else {
+        // Якщо абонемент вичерпано або його немає, ставимо як гостя (залежить від обраного типу)
         const a = { id: newId, guestName: student.name, guestType: journalGuestMode, groupId: gid, date: cellDate, quantity: 1, entryType: journalGuestMode };
         setAttn(p => [...p, a]);
-        if(db.insertAttendance) db.insertAttendance(a);
+        if(db.insertAttendance) await db.insertAttendance(a);
       }
     }
   };
@@ -492,9 +530,9 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
           ? <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="date" value={date} onChange={e=>setDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
           : <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
               <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={() => { const [y, m] = journalMonth.split('-'); const d = new Date(y, parseInt(m)-2, 1); setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }}>{"<"}</button>
+                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handlePrevMonth}>{"<"}</button>
                 <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer"}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
-                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={() => { const [y, m] = journalMonth.split('-'); const d = new Date(y, parseInt(m), 1); setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }}>{">"}</button>
+                <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handleNextMonth}>{">"}</button>
               </div>
               <div style={{display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, borderLeft: `1px solid ${theme.border}`}}>
                 <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 600}}>КЛІК БЕЗ АБОНЕМЕНТА:</span>
@@ -506,20 +544,25 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
       </div>
 
       {viewMode === "journal" ? (
-        <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: 16, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-          <table style={{ borderCollapse: "collapse", minWidth: "100%", fontSize: 13 }}>
+        <div style={{ overflowX: "auto", background: theme.card, borderRadius: 24, padding: "20px 0", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+          <table style={{ borderCollapse: "separate", borderSpacing: 0, minWidth: "100%", fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", textAlign: "left", zIndex: 2, borderRight: `2px solid ${theme.border}`, minWidth: 150, color: theme.textMuted }}>Учениця</th>
+                <th rowSpan={2} style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", textAlign: "left", zIndex: 3, borderRight: `2px solid ${theme.border}`, minWidth: 180, color: theme.textMuted }}>Учениця</th>
+                {monthSpans.map((m, i) => (
+                  <th key={i} colSpan={m.span} style={{ textAlign: "center", padding: "8px", background: "#E8EEFF", color: theme.secondary, fontWeight: 800, borderRight: i < monthSpans.length - 1 ? "2px solid #fff" : "none", fontSize: 14 }}>
+                    {MONTHS[m.month]}
+                  </th>
+                ))}
+              </tr>
+              <tr>
                 {visibleDays.map((d, index) => {
                   const dayNum = new Date(d + "T12:00:00").getDay();
-                  const monthNum = parseInt(d.split('-')[1]) - 1;
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
                   return (
-                  <th key={d} style={{ padding: "8px 2px", color: theme.textLight, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `2px solid #D9E2F2` : "none", borderBottom: `2px solid ${theme.border}` }}>
-                    <div style={{fontSize: 10, color: theme.primary, minHeight: 14, fontWeight: 700}}>{isNewMonth ? MONTHS[monthNum] : ''}</div>
+                  <th key={d} style={{ padding: "8px 2px", background: "#F2F5FF", color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `2px solid #fff` : "none", borderBottom: `2px solid ${theme.border}` }}>
                     <div style={{fontSize: 10, textTransform: "uppercase", color: theme.textMuted, marginBottom: 2}}>{WEEKDAYS[dayNum]}</div>
-                    <div style={{fontSize: 14, color: theme.textMain}}>{d.slice(-2)}</div>
+                    <div style={{fontSize: 14}}>{d.slice(-2)}</div>
                   </th>
                 )})}
               </tr>
@@ -529,14 +572,15 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
                 const subRanges = getStudentSubRanges(st.id);
                 return (
                 <tr key={st.id}>
-                  <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.bg}`, zIndex: 1, whiteSpace: "nowrap" }}>
+                  <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 24px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.bg}`, zIndex: 1, whiteSpace: "nowrap" }}>
                     <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>{st.name}
                   </td>
                   {visibleDays.map((d, index) => {
                     const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
                     const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
                     const isAttended = !!rec;
-                    const relevantSub = subs.find(s => s.studentId === st.id && s.groupId === gid && s.startDate <= d && s.endDate >= d);
+                    
+                    // Шукаємо, чи потрапляє цей день у рамки хоча б одного абонементу
                     const activeRange = subRanges.find(r => d >= r.start && d <= r.end);
                     
                     let markBg = theme.input;
@@ -548,9 +592,10 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
 
                     let frameStyle = {};
                     if (activeRange) {
-                      const prevD = visibleDays[index - 1]; const nextD = visibleDays[index + 1];
-                      const isPrevIn = prevD && prevD >= activeRange.start && prevD <= activeRange.end;
-                      const isNextIn = nextD && nextD >= activeRange.start && nextD <= activeRange.end;
+                      const prevD = visibleDays[index - 1]; 
+                      const nextD = visibleDays[index + 1];
+                      const isPrevIn = prevD && subRanges.some(r => r.id === activeRange.id && prevD >= r.start && prevD <= r.end);
+                      const isNextIn = nextD && subRanges.some(r => r.id === activeRange.id && nextD >= r.start && nextD <= r.end);
                       frameStyle = {
                         borderTop: `2px solid ${theme.primary}60`, borderBottom: `2px solid ${theme.primary}60`,
                         borderLeft: !isPrevIn ? `2px solid ${theme.primary}60` : "none", borderRight: !isNextIn ? `2px solid ${theme.primary}60` : "none",
@@ -562,7 +607,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, subs, setSubs,
                     return (
                       <td key={d} style={{ padding: 0, height: 44, borderLeft: isNewMonth && index !== 0 ? `2px solid #D9E2F2` : "none", borderBottom: `1px solid ${theme.bg}` }}>
                         <div style={{ height: '100%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...frameStyle }}>
-                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec, relevantSub)} style={{ width: 26, height: 26, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, transition: "0.2s" }}>
+                          <div onClick={() => toggleJournalCell(st, d, isAttended, rec, activeRange ? subs.find(s=>s.id===activeRange.id) : null)} style={{ width: 26, height: 26, borderRadius: 8, background: markBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, transition: "0.2s" }}>
                             {isAttended ? "✓" : ""}
                           </div>
                         </div>
@@ -1243,6 +1288,7 @@ export default function App() {
             </div>
           )
         })()}
+
       </main>
 
       {/* МОДАЛКИ */}
