@@ -182,7 +182,6 @@ function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = fal
   );
 }
 
-// Кастомний пошук по ученицях для форми абонементів
 function StudentSelectWithSearch({ students, value, onChange, studentGrps, groups }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -344,13 +343,24 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled, customOrders, setCustomOrders }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
   const [journalGuestMode, setJournalGuestMode] = useState("subscription");
+  
+  // НАДІЙНИЙ ЛОКАЛЬНИЙ СТЕЙТ ДЛЯ ПОРЯДКУ
+  const [customOrders, setCustomOrders] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('danceStudioOrders_v3')) || {}; } 
+    catch(e) { return {}; }
+  });
+
+  const saveOrderToStorage = (newOrderMap) => {
+    setCustomOrders(newOrderMap);
+    localStorage.setItem('danceStudioOrders_v3', JSON.stringify(newOrderMap));
+  };
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
@@ -382,18 +392,17 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   const moveStudentDnD = (draggedId, targetId) => {
      if (draggedId === targetId) return;
-     setCustomOrders(prev => {
-        const currentOrder = prev[gid] || baseStudsInGroup.map(s => s.id);
-        const completeOrder = [...new Set([...currentOrder, ...baseStudsInGroup.map(s => s.id)])].filter(id => baseStudsInGroup.some(s => s.id === id));
-        const fromIdx = completeOrder.indexOf(draggedId);
-        const toIdx = completeOrder.indexOf(targetId);
-        if (fromIdx === -1 || toIdx === -1) return prev;
-        
-        const newOrder = [...completeOrder];
-        const [movedItem] = newOrder.splice(fromIdx, 1);
-        newOrder.splice(toIdx, 0, movedItem);
-        return { ...prev, [gid]: newOrder };
-     });
+     const currentOrder = customOrders[gid] || baseStudsInGroup.map(s => s.id);
+     const completeOrder = [...new Set([...currentOrder, ...baseStudsInGroup.map(s => s.id)])].filter(id => baseStudsInGroup.some(s => s.id === id));
+     const fromIdx = completeOrder.indexOf(draggedId);
+     const toIdx = completeOrder.indexOf(targetId);
+     if (fromIdx === -1 || toIdx === -1) return;
+     
+     const newOrder = [...completeOrder];
+     const [movedItem] = newOrder.splice(fromIdx, 1);
+     newOrder.splice(toIdx, 0, movedItem);
+     
+     saveOrderToStorage({ ...customOrders, [gid]: newOrder });
   };
 
   const addManual = async () => {
@@ -402,7 +411,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
-    } catch (e) { alert("Помилка збереження в базу даних! Деталі: " + e.message); }
+    } catch (e) { alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message); }
     setManualName("");
   };
 
@@ -434,7 +443,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         isExhausted = true;
       }
 
-      // Обрізаємо кінець старого абонемента, якщо новий почався раніше
       const nextSub = stSubs[i+1];
       if (nextSub && nextSub.startDate <= effectiveEnd) {
          const d = new Date(nextSub.startDate + "T12:00:00");
@@ -535,7 +543,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   };
 
   const handleCancelSpecificDay = async (cancelDate) => {
-    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть автоматично подовжені на наступне заняття групи.`)) return;
+    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
     try {
       const currentGroup = groups.find(g => g.id === gid);
       const affectedSubs = rawSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
@@ -869,7 +877,6 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -884,6 +891,7 @@ export default function App() {
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
 
+  // ДИНАМІЧНИЙ ПІДРАХУНОК ВИТРАЧЕНИХ ЗАНЯТЬ НА ОСНОВІ ATTN
   const subsExt = useMemo(()=>{
     const usedMap = {};
     attn.forEach(a => { if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + 1; });
@@ -1142,7 +1150,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="attendance" && <AttendanceTab groups={groups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} />}
+        {tab==="attendance" && <AttendanceTab groups={groups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} />}
         {tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         {tab==="analytics" && <Analytics />}
         
