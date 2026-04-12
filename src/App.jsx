@@ -85,11 +85,24 @@ function getNextTrainingDate(schedule, afterDateStr) {
   let d = new Date(afterDateStr + "T12:00:00");
   for (let i = 0; i < 14; i++) {
     d.setDate(d.getDate() + 1);
-    if (targetDays.includes(d.getDay())) {
-      return toLocalISO(d);
-    }
+    if (targetDays.includes(d.getDay())) return toLocalISO(d);
   }
   return afterDateStr;
+}
+
+function getPreviousTrainingDate(schedule, beforeDateStr) {
+  if (!schedule || schedule.length === 0) {
+    const d = new Date(beforeDateStr + "T12:00:00");
+    d.setDate(d.getDate() - 7);
+    return toLocalISO(d);
+  }
+  const targetDays = schedule.map(s => s.day);
+  let d = new Date(beforeDateStr + "T12:00:00");
+  for (let i = 0; i < 14; i++) {
+    d.setDate(d.getDate() - 1);
+    if (targetDays.includes(d.getDay())) return toLocalISO(d);
+  }
+  return beforeDateStr;
 }
 
 function getNotifMsg(sub,student,group,direction){
@@ -315,7 +328,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     });
   }, [baseStudsInGroup, customOrders, gid]);
 
-  // Drag and Drop логіка
   const moveStudentDnD = (draggedId, targetId) => {
      if (draggedId === targetId) return;
      setCustomOrders(prev => {
@@ -370,6 +382,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         isExhausted = true;
       }
 
+      // Обрізаємо кінець старого абонемента, якщо новий почався раніше, щоб не було двох рамок в один день
       const nextSub = stSubs[i+1];
       if (nextSub && nextSub.startDate <= effectiveEnd) {
          const d = new Date(nextSub.startDate + "T12:00:00");
@@ -435,6 +448,10 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     if (isCurrentlyAttended && dbRecord) {
       setAttn(p => p.filter(a => a.id !== dbRecord.id));
+      if (dbRecord.subId) {
+         setSubs(p => p.map(s => s.id === dbRecord.subId ? { ...s, usedTrainings: Math.max(0, (s.usedTrainings || 0) - (dbRecord.quantity || 1)) } : s));
+         if(db.decrementUsed) db.decrementUsed(dbRecord.subId, dbRecord.quantity || 1);
+      }
       if(db.deleteAttendance) db.deleteAttendance(dbRecord.id);
     } else {
       const newId = uid();
@@ -449,7 +466,9 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       if (validSub && journalGuestMode === "subscription") {
         const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
         setAttn(p => [...p, a]);
+        setSubs(p => p.map(s => s.id === validSub.id ? { ...s, usedTrainings: (s.usedTrainings || 0) + 1 } : s));
         if(db.insertAttendance) db.insertAttendance(a);
+        if(db.incrementUsed) db.incrementUsed(validSub.id, 1);
       } else {
         if (journalGuestMode === "subscription") {
           alert("Немає активного абонемента для цієї дати (або вичерпано ліміт занять). Буде позначено як Разове.");
@@ -466,27 +485,23 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   };
 
   const handleCancelSpecificDay = async (cancelDate) => {
-    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть автоматично подовжені на наступне заняття групи.`)) return;
+    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
     try {
       const currentGroup = groups.find(g => g.id === gid);
       const affectedSubs = rawSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
       
-      const originalEnds = {};
       let newSubs = [...rawSubs];
       
       for (let sub of affectedSubs) {
-        originalEnds[sub.id] = sub.endDate; 
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
         if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       
-      const newCancel = { id: uid(), groupId: gid, date: cancelDate, originalEnds };
+      const newCancel = { id: uid(), groupId: gid, date: cancelDate };
       let insertedC = newCancel;
       if (db.insertCancelled) {
         insertedC = await db.insertCancelled(newCancel); 
-      } else {
-        alert("Увага: функція 'insertCancelled' відсутня в db.js! Скасування буде показано, але скинеться після оновлення сторінки.");
       }
       setCancelled(p => [...p, insertedC]);
       setSubs(newSubs);
@@ -494,22 +509,25 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   };
 
   const handleRestoreSpecificDay = async (restoreDate) => {
-    if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до початкових.`)) return;
+    if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до попередніх.`)) return;
     try {
       const targetCancel = cancelled.find(c => c.groupId === gid && c.date === restoreDate);
       if (targetCancel) {
+        const currentGroup = groups.find(g => g.id === gid);
+        const expectedPushedDate = getNextTrainingDate(currentGroup?.schedule, restoreDate);
+        
         let newSubs = [...rawSubs];
-        if (targetCancel.originalEnds) {
-          for (const [subId, origEnd] of Object.entries(targetCancel.originalEnds)) {
-             if(db.updateSub) db.updateSub(subId, { endDate: origEnd });
-             newSubs = newSubs.map(s => s.id === subId ? { ...s, endDate: origEnd } : s);
-          }
-          setSubs(newSubs);
+        const affectedSubs = newSubs.filter(s => s.groupId === gid && s.endDate === expectedPushedDate);
+        
+        for (let sub of affectedSubs) {
+           const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
+           if(db.updateSub) db.updateSub(sub.id, { endDate: revertedEnd });
+           newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: revertedEnd } : s);
         }
+        setSubs(newSubs);
+        
         if (db.deleteCancelled) {
           await db.deleteCancelled(targetCancel.id);
-        } else {
-          alert("Увага: функція 'deleteCancelled' відсутня в db.js! Відновлення буде скинуто після оновлення сторінки.");
         }
         setCancelled(p => p.filter(c => c.id !== targetCancel.id));
       }
@@ -553,17 +571,17 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 
                 return (
-                <th key={d} style={{ padding: "8px 2px", background: isDayCancelled ? "rgba(255, 69, 58, 0.15)" : theme.card, color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `4px solid ${theme.border}`, verticalAlign: "top" }}>
-                  <div style={{display: "flex", flexDirection: "column", justifyContent: "space-between", height: "100%", minHeight: 56}}>
+                <th key={d} style={{ padding: "8px 2px", background: isDayCancelled ? "rgba(255, 69, 58, 0.15)" : theme.card, color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `4px solid ${theme.border}`, verticalAlign: "top", height: 70 }}>
+                  <div style={{display: "flex", flexDirection: "column", justifyContent: "space-between", height: "100%"}}>
                     <div>
                       <div style={{fontSize: 10, textTransform: "uppercase", color: theme.textMuted, marginBottom: 2}}>{WEEKDAYS[dayNum]}</div>
                       <div style={{fontSize: 15, fontWeight: 800}}>{d.slice(-2)}</div>
                     </div>
-                    <div>
+                    <div style={{marginTop: "auto"}}>
                       {isDayCancelled ? (
-                        <div onClick={() => handleRestoreSpecificDay(d)} style={{color: theme.danger, fontSize: 9, marginTop: 4, cursor: 'pointer', fontWeight: 700, padding: "4px 2px", background: `rgba(255,0,0,0.1)`, borderRadius: 6}}>↩ Віднов.</div>
+                        <div onClick={() => handleRestoreSpecificDay(d)} style={{color: theme.danger, fontSize: 9, cursor: 'pointer', fontWeight: 700, padding: "4px 2px", background: `rgba(255,0,0,0.1)`, borderRadius: 6}}>↩ Віднов.</div>
                       ) : (
-                        <div onClick={() => handleCancelSpecificDay(d)} style={{color: theme.danger, fontSize: 10, marginTop: 4, cursor: 'pointer', opacity: 0.5}}>✕ Скас.</div>
+                        <div onClick={() => handleCancelSpecificDay(d)} style={{color: theme.danger, fontSize: 10, cursor: 'pointer', opacity: 0.5}}>✕ Скас.</div>
                       )}
                     </div>
                   </div>
@@ -707,7 +725,8 @@ function ProAnalyticsTab({ proAnalytics }) {
           <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
             {proAnalytics.upsellCandidates.length === 0 ? <div style={{color: theme.textLight}}>Немає кандидатів наразі</div> : 
               proAnalytics.upsellCandidates.map((item, i) => (
-                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16}}>
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
+                  <div style={{fontSize: 12, color: theme.textMuted, marginBottom: 4}}>{item.group.name}</div>
                   <div style={{fontWeight: 700, color: theme.textMain}}>{item.student.name}</div>
                   <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{item.reason}</div>
                   <div style={{marginTop: 10}}><Badge color={theme.warning}>Запропонувати: {item.suggest}</Badge></div>
@@ -718,15 +737,16 @@ function ProAnalyticsTab({ proAnalytics }) {
         </div>
 
         <div style={{...cardSt, border: `2px solid ${theme.danger}40`}}>
-          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>⚠️ Пропустили більше 2-х разів</h3>
-          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>У цих дівчат є активний абонемент, але вони не були на останніх 2-х тренуваннях своєї групи.</div>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>🚨 Ризик втрати клієнта (Не були > 10 днів)</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>У цих дівчат закінчується абонемент (залишилось 0-1 заняття), і вони давно не були. Напиши їм!</div>
           <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-            {proAnalytics.missingStudents.length === 0 ? <div style={{color: theme.textLight}}>Усі ходять стабільно!</div> : 
-              proAnalytics.missingStudents.map((item, i) => (
-                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+            {proAnalytics.churnRisk.length === 0 ? <div style={{color: theme.textLight}}>Усі ходять стабільно!</div> : 
+              proAnalytics.churnRisk.map((item, i) => (
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
                   <div>
+                    <div style={{fontSize: 12, color: theme.textMuted, marginBottom: 4}}>{item.group.name}</div>
                     <div style={{fontWeight: 700, color: theme.textMain}}>{item.student.name}</div>
-                    <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{item.group.name}</div>
+                    <div style={{fontSize: 12, color: theme.danger, marginTop: 4}}>Не була {item.daysSinceLast} днів</div>
                   </div>
                   {item.student.telegram && <a href={`https://t.me/${item.student.telegram.replace('@','')}`} target="_blank" rel="noreferrer" style={{padding: '8px 12px', background: `${theme.danger}15`, color: theme.danger, borderRadius: 10, textDecoration: 'none', fontSize: 12, fontWeight: 700}}>Написати</a>}
                 </div>
@@ -736,16 +756,33 @@ function ProAnalyticsTab({ proAnalytics }) {
         </div>
       </div>
 
-      <div style={cardSt}>
-        <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>⭐ Найкраща відвідуваність по групах (за 30 днів)</h3>
-        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16}}>
-          {proAnalytics.bestAttenders.map((item, i) => (
-            <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${theme.primary}`}}>
-              <div style={{fontSize: 13, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
-              <div style={{fontWeight: 800, color: theme.textMain, fontSize: 16}}>{item.student.name}</div>
-              <div style={{fontSize: 14, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
-            </div>
-          ))}
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24}}>
+        <div style={cardSt}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>🔥 Найпопулярніші дні (за 30 днів)</h3>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+            {proAnalytics.popularDays.map((item, i) => (
+              <div key={i} style={{display: 'flex', alignItems: 'center', gap: 16}}>
+                <div style={{width: 40, fontWeight: 800, color: theme.textMuted}}>{item.day}</div>
+                <div style={{flex: 1, background: theme.input, borderRadius: 8, height: 24, overflow: 'hidden'}}>
+                  <div style={{width: `${(item.count / proAnalytics.popularDays[0].count) * 100}%`, background: theme.primary, height: '100%', borderRadius: 8}}></div>
+                </div>
+                <div style={{fontWeight: 700, color: theme.textMain, width: 30, textAlign: 'right'}}>{item.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={cardSt}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>⭐ Лідери відвідуваності по групах (за 30 днів)</h3>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12}}>
+            {proAnalytics.bestAttenders.map((item, i) => (
+              <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
+                <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
+                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{item.student.name}</div>
+                <div style={{fontSize: 13, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -766,6 +803,11 @@ export default function App() {
   const [waitlist, setWaitlist] = useState([]); 
   
   const [tab, setTab] = useStickyState("dashboard", "danceStudioTab");
+  const [modal, setModal] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [financeDetailItem, setFinanceDetailItem] = useState(null);
+  const [searchQ, setSearchQ] = useState("");
+  
   const [filterDir, setFilterDir] = useStickyState("all", "ds_filterDir");
   const [filterGroup, setFilterGroup] = useStickyState("all", "ds_filterGroup");
   const [filterStatus, setFilterStatus] = useStickyState("all", "ds_filterStatus");
@@ -776,10 +818,6 @@ export default function App() {
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
 
-  const [modal, setModal] = useState(null);
-  const [editItem, setEditItem] = useState(null);
-  const [financeDetailItem, setFinanceDetailItem] = useState(null);
-  const [searchQ, setSearchQ] = useState("");
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
@@ -793,7 +831,6 @@ export default function App() {
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
 
-  // ДИНАМІЧНИЙ ПІДРАХУНОК ВИТРАЧЕНИХ ЗАНЯТЬ НА ОСНОВІ ATTN
   const subsExt = useMemo(()=>{
     const usedMap = {};
     attn.forEach(a => { if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + 1; });
@@ -849,9 +886,15 @@ export default function App() {
     });
 
     const currMonth = today().slice(0, 7);
+    const prevMonthDate = new Date(); prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+    const prevMonth = toLocalISO(prevMonthDate).slice(0, 7);
+
     const currMonthSubs = subs.filter(s => s.startDate?.startsWith(currMonth) || s.created_at?.startsWith(currMonth));
     const currMonthAttn = attn.filter(a => a.date?.startsWith(currMonth));
     const currMonthCancelled = new Set(cancelled.filter(c => c.date?.startsWith(currMonth)).map(c => c.date + c.groupId)).size;
+
+    const currMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(currMonth) || s.startDate?.startsWith(currMonth))).reduce((a,s)=>a+(s.amount||0),0);
+    const prevMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(prevMonth) || s.startDate?.startsWith(prevMonth))).reduce((a,s)=>a+(s.amount||0),0);
 
     const daysInMonth = new Date(parseInt(currMonth.split('-')[0]), parseInt(currMonth.split('-')[1]), 0).getDate();
     const chartData = Array.from({length: daysInMonth}, (_, i) => {
@@ -865,7 +908,7 @@ export default function App() {
 
     return {
       totalStudents:students.length, activeStudents:new Set(activeSubs.map(s=>s.studentId)).size, 
-      totalRev, unpaid, byDir, splits, 
+      totalRev, unpaid, byDir, splits, currMonthRev, prevMonthRev,
       avgLTV: usersWithPurchases > 0 ? Math.round(totalLTV / usersWithPurchases) : 0, 
       conversionRate: trialUsers > 0 ? Math.round((convertedUsers / trialUsers) * 100) : 0,
       currMonthStats: { trial: trialCount, single: singleCount, pack4: currMonthSubs.filter(s => s.planType === "4pack").length, pack8: currMonthSubs.filter(s => s.planType === "8pack").length, pack12: currMonthSubs.filter(s => s.planType === "12pack").length, cancelledCount: currMonthCancelled },
@@ -877,34 +920,59 @@ export default function App() {
     const now = new Date();
     const last30DaysStr = toLocalISO(new Date(now.getTime() - 30 * 86400000));
     const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
+    
     const getTopSpenders = (months) => {
       const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
       const totals = {};
       subs.forEach(s => { if (s.paid && s.startDate >= toLocalISO(dateLimit)) totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); });
       return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
     };
+
     const groupAttnCounts = {};
     attn.forEach(a => { if (a.date >= last30DaysStr) { const stId = a.subId ? subToSt[a.subId] : null; if (stId) { if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; } } });
-    const bestAttenders = groups.map(g => { const counts = groupAttnCounts[g.id] || {}; const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); return { group: g, student: studentMap[bestId], count: counts[bestId] }; }).filter(x => x.student);
+    
+    const bestAttenders = groups.map(g => { 
+        const counts = groupAttnCounts[g.id] || {}; 
+        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
+        const dir = dirMap[g.directionId];
+        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
+    }).filter(x => x.student);
+
     const upsellCandidates = [];
-    Object.values(studentMap).forEach(st => {
-      const stAttn = attn.filter(a => a.date >= last30DaysStr && ((a.subId && subToSt[a.subId] === st.id) || a.guestName === st.name)).length;
-      const latestSub = subs.filter(s => s.studentId === st.id).sort((a,b) => new Date(b.startDate) - new Date(a.startDate))[0];
-      if (latestSub) { if (latestSub.planType === '4pack' && stAttn >= 6) upsellCandidates.push({ student: st, suggest: '8 занять', reason: `Відвідала ${stAttn} трен. за 30 днів` }); else if (latestSub.planType === '8pack' && stAttn >= 10) upsellCandidates.push({ student: st, suggest: '12 занять', reason: `Відвідала ${stAttn} трен. за 30 днів` }); }
-    });
-    const missingStudents = [];
-    groups.forEach(g => {
-      const groupDates = [...new Set(attn.filter(a => a.groupId === g.id).map(a => a.date))].sort().reverse();
-      if (groupDates.length >= 2) {
-        const last2Dates = groupDates.slice(0, 2);
-        [...new Set(activeSubs.filter(s => s.groupId === g.id).map(s => s.studentId))].forEach(stId => {
-          const stAttnDates = attn.filter(a => a.groupId === g.id && a.subId && subToSt[a.subId] === stId).map(a => a.date);
-          if (!stAttnDates.includes(last2Dates[0]) && !stAttnDates.includes(last2Dates[1])) missingStudents.push({ student: studentMap[stId], group: g });
-        });
+    const churnRisk = [];
+    
+    activeSubs.forEach(sub => {
+      const st = studentMap[sub.studentId];
+      const gr = groupMap[sub.groupId];
+      const dir = dirMap[gr?.directionId];
+      if(!st || !gr) return;
+      
+      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id).map(a => a.date).sort();
+      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
+      const lastAttnDate = stAttnDates.length > 0 ? stAttnDates[stAttnDates.length - 1] : sub.startDate;
+      const daysSinceLast = Math.floor((new Date() - new Date(lastAttnDate + "T12:00:00")) / 86400000);
+
+      // Upsell (ходить часто)
+      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
+      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
+      
+      // Churn (не ходить і абон закінчується)
+      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
+      const dl = daysLeft(sub.endDate);
+      if ((trainingsLeft <= 1 || dl <= 3) && daysSinceLast >= 10) {
+          churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
       }
     });
-    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, missingStudents };
-  }, [subs, attn, groups, studentMap, activeSubs]);
+
+    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+    attn.filter(a => a.date >= last30DaysStr).forEach(a => {
+        const d = new Date(a.date + "T12:00:00").getDay();
+        dayCounts[d]++;
+    });
+    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
+
+    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
+  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>s.name.toLowerCase().includes(searchQ.toLowerCase()));
@@ -975,7 +1043,7 @@ export default function App() {
         {tab==="dashboard" && (
           <div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginBottom:30}}>
-              {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:theme.primary},{l:"Абонементів",v:activeSubs.length,s:`${notifications.length} сповіщ.`,c:theme.success},{l:"Дохід",v:`${analytics.totalRev.toLocaleString()}₴`,s:`${analytics.unpaid.toLocaleString()}₴ борги`,c:theme.warning}].map((c,i)=><div key={i} style={{...cardSt, display: "flex", flexDirection: "column", gap: 6, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textLight,textTransform:"uppercase", fontWeight: 700}}>{c.l}</div><div style={{fontSize:36,fontWeight:800,color:c.c}}>{c.v}</div><div style={{fontSize:13,color:theme.textMuted, fontWeight: 600}}>{c.s}</div></div>)}
+              {[{l:"Учениць",v:analytics.totalStudents,s:`${analytics.activeStudents} активних`,c:theme.primary},{l:"Абонементів",v:activeSubs.length,s:`${notifications.length} сповіщ.`,c:theme.success},{l:"Дохід (Цього міс.)",v:`${analytics.currMonthRev.toLocaleString()}₴`,s:`Минулий: ${analytics.prevMonthRev.toLocaleString()}₴`,c:theme.warning}].map((c,i)=><div key={i} style={{...cardSt, display: "flex", flexDirection: "column", gap: 6, border: `1px solid ${theme.border}`}}><div style={{fontSize:13,color:theme.textLight,textTransform:"uppercase", fontWeight: 700}}>{c.l}</div><div style={{fontSize:36,fontWeight:800,color:c.c}}>{c.v}</div><div style={{fontSize:13,color:theme.textMuted, fontWeight: 600}}>{c.s}</div></div>)}
             </div>
             
             <h3 style={{color:theme.secondary,fontSize:20,marginBottom:16, fontWeight: 800}}>Цього місяця ({today().slice(0, 7)})</h3>
