@@ -851,7 +851,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
       <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
         <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ flex: 1, minWidth: 150 }}>
             <input type="date" style={inputSt} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
           </div>
@@ -1029,6 +1029,7 @@ export default function App() {
     });
 
     return () => subscription?.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadAllData = async () => {
@@ -1331,16 +1332,16 @@ export default function App() {
           {activeSubs.length === 0 ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
             <div style={{display: "flex", flexDirection: "column", gap: 12}}>
               {activeSubs.map((s, i) => {
-                 const st = studentMap[s.studentId];
-                 const gr = groupMap[s.groupId];
-                 const planName = PLAN_TYPES.find(p=>p.id===s.planType)?.name;
+                 const st = studentMap[s?.studentId];
+                 const gr = groupMap[s?.groupId];
+                 const planName = PLAN_TYPES.find(p=>p.id===s?.planType)?.name;
                  return (
                    <div key={i} style={{padding: 16, background: theme.bg, borderRadius: 16, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
                      <div>
                        <div style={{fontWeight: 700, color: theme.textMain}}>{getDisplayName(st)}</div>
                        <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{gr?.name || "Невідома група"}</div>
                      </div>
-                     <Badge color={theme.success}>{planName}</Badge>
+                     <Badge color={theme.success}>{planName || "Абонемент"}</Badge>
                    </div>
                  );
               })}
@@ -1355,14 +1356,29 @@ export default function App() {
         {(!items || items.length === 0) ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
             {items.map((item, i) => {
-               const st = item.studentId ? studentMap[item.studentId] : (item.subId ? studentMap[subs.find(s=>s.id===item.subId)?.studentId] : Object.values(studentMap).find(s => s.name === item.guestName));
-               const gr = groupMap[item.groupId];
-               const dateStr = item.startDate || item.date;
+               // Безпечний пошук учня, щоб уникнути помилки
+               let st = null;
+               if (item?.studentId) {
+                 st = studentMap[item.studentId];
+               } else if (item?.subId) {
+                 const foundSub = subs.find(s => s.id === item.subId);
+                 if (foundSub) st = studentMap[foundSub.studentId];
+               } else if (item?.guestName) {
+                 st = Object.values(studentMap).find(s => s.name === item.guestName);
+               }
+
+               const gr = groupMap[item?.groupId];
+               const dateStr = item?.startDate || item?.date || "Невідома дата";
+
                return (
                  <div key={i} style={{padding: 16, background: theme.bg, borderRadius: 16, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
                    <div>
-                     <div style={{fontWeight: 700, color: theme.textMain}}>{getDisplayName(st || {name: item.guestName})}</div>
-                     <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{gr?.name || "Невідома група"}</div>
+                     <div style={{fontWeight: 700, color: theme.textMain}}>
+                       {getDisplayName(st || {name: item?.guestName || "Невідомо"})}
+                     </div>
+                     <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>
+                       {gr?.name || "Невідома група"}
+                     </div>
                    </div>
                    <Badge color={theme.primary}>{fmt(dateStr)}</Badge>
                  </div>
@@ -1374,22 +1390,18 @@ export default function App() {
     );
   };
 
- return (
+  return (
     <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
-          /* Зменшуємо ширину колонки з іменами */
           th:first-child, td:first-child { 
             min-width: 120px !important; 
             padding: 8px !important; 
             font-size: 11px !important; 
           }
-          /* Зменшуємо всі комірки таблиці */
           th, td { padding: 4px !important; }
-          /* Вирівнюємо верхні кнопки */
           header { padding: 16px !important; flex-direction: column; gap: 12px; align-items: flex-start !important; }
-          /* Форма знизу (Відмітити) стає вертикальною */
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
           .bottom-form input { width: 100% !important; }
         }
