@@ -155,7 +155,11 @@ export async function deleteAttendanceBySubAndDate(subId, date) {
 export async function fetchCancelled() {
   const { data, error } = await supabase.from('cancelled_trainings').select('*')
   if (error) throw error
-  return data.map(c => ({ id: c.id, groupId: c.group_id, date: c.date, originalEnds: c.reason ? JSON.parse(c.reason) : null }))
+  return data.map(c => {
+    let parsed = null;
+    try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch(e) {}
+    return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
+  })
 }
 
 export async function insertCancelled(c) {
