@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import * as db from "./db";
+import { supabase } from "./supabase"; // Додано прямий імпорт для надійної авторизації
 import Analytics from "./pages/Analytics";
 
 // ==========================================
@@ -910,18 +911,18 @@ export default function App() {
   const isAdmin = user && adminEmails.includes(user.email);
 
   useEffect(() => {
-    db.getSessionUser().then(currUser => {
-      setUser(currUser);
-      if (currUser) loadAllData();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+      if (session?.user) loadAllData();
       else setLoading(false);
     });
 
-    const subscription = db.onAuthChange((currUser) => {
-      setUser(currUser);
-      if (!currUser) setLoading(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      if (!session?.user) setLoading(false);
     });
 
-    return () => subscription?.unsubscribe && subscription.unsubscribe();
+    return () => subscription?.unsubscribe();
   }, []);
 
   const loadAllData = async () => {
@@ -951,8 +952,9 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const u = await db.signIn(authEmail, authPass);
-      setUser(u);
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPass });
+      if (error) throw error;
+      setUser(data.user);
       loadAllData();
     } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
   };
@@ -1056,80 +1058,6 @@ export default function App() {
       currMonthDetails, chartData, maxChartVal
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
-
-  const proAnalytics = useMemo(() => {
-    const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
-    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
-    
-    const getTopSpenders = (months) => {
-      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
-      const totals = {};
-      subs.forEach(s => { if (s.paid && s.startDate >= toLocalISO(dateLimit)) totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); });
-      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
-    };
-
-    const groupAttnCounts = {};
-    attn.forEach(a => { if (a.date >= last30DaysStr) { const stId = a.subId ? subToSt[a.subId] : null; if (stId) { if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; } } });
-    
-    const bestAttenders = groups.map(g => { 
-        const counts = groupAttnCounts[g.id] || {}; 
-        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
-        const dir = dirMap[g.directionId];
-        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
-    }).filter(x => x.student);
-
-    const latestAttnByStudent = {};
-    attn.forEach(a => {
-        let stId = null;
-        if (a.subId) stId = subToSt[a.subId];
-        else if (a.guestName) {
-            const s = Object.values(studentMap).find(x => x.name === a.guestName);
-            if (s) stId = s.id;
-        }
-        if (stId) {
-            if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
-                latestAttnByStudent[stId] = a.date;
-            }
-        }
-    });
-
-    const upsellCandidates = [];
-    const churnRisk = [];
-    
-    activeSubs.forEach(sub => {
-      const st = studentMap[sub.studentId];
-      const gr = groupMap[sub.groupId];
-      const dir = dirMap[gr?.directionId];
-      if(!st || !gr) return;
-      
-      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id).map(a => a.date).sort();
-      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
-
-      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
-      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
-      
-      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
-      const dl = daysLeft(sub.endDate);
-      
-      if (trainingsLeft <= 1 || dl <= 3) {
-          const lastDate = latestAttnByStudent[st.id] || sub.startDate;
-          const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
-
-          if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
-              churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
-          }
-      }
-    });
-
-    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
-    attn.filter(a => a.date >= last30DaysStr).forEach(a => {
-        const d = new Date(a.date + "T12:00:00").getDay();
-        dayCounts[d]++;
-    });
-    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
-
-    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
-  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
@@ -1261,7 +1189,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <><button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button><button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button></>}
-          <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => db.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
+          <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
       </header>
 
@@ -1555,6 +1483,9 @@ export default function App() {
             </div>
           )
         })()}
+
+        {/* === АНАЛІТИКА INSTAGRAM === */}
+        {isAdmin && tab === "analytics" && <Analytics />}
 
       </main>
 
