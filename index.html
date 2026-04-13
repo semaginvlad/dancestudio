@@ -2,26 +2,76 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
+    
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
-    <title>Dance Studio Manager</title>
+    <title>Dance Studio</title>
     
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { 
-        font-family: 'DM Sans', -apple-system, sans-serif; 
-        background: #0d1117; 
-        color: #c9d1d9; 
+      
+      /* Глобальний захист від вилізання за екран по горизонталі */
+      html, body { 
+        background: #F8F9FD; 
+        color: #1F1F1F; 
+        width: 100vw;
+        overflow-x: hidden; 
+        -webkit-tap-highlight-color: transparent;
       }
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #0d1117; }
-      ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+      
+      #root {
+        width: 100%;
+        overflow-x: hidden;
+      }
+
+      /* =========================================================
+         МОБІЛЬНА АДАПТАЦІЯ (працює БЕЗ змін у App.jsx)
+         ========================================================= */
+      @media (max-width: 768px) {
+        
+        /* 1. Відступ зверху для iPhone (щоб не залазило під годинник/батарею) */
+        header {
+          padding-top: max(30px, env(safe-area-inset-top)) !important;
+          flex-direction: column !important;
+          align-items: flex-start !important;
+          gap: 16px !important;
+        }
+        
+        /* 2. Відступи по боках екрану */
+        header, nav, main { 
+          padding-left: 16px !important; 
+          padding-right: 16px !important; 
+        }
+        
+        /* 3. Зменшення таблиці відвідування */
+        th, td {
+          padding: 8px 4px !important;
+          font-size: 11px !important;
+        }
+        th:first-child, td:first-child {
+          min-width: 130px !important; /* Учениця влазить краще */
+        }
+
+        /* 4. Нижня форма "Додати людину" стає стовпчиком, а не лізе вбік */
+        main > div > div:last-child > div:nth-child(2) {
+          flex-direction: column !important;
+          align-items: stretch !important;
+        }
+        main > div > div:last-child > div:nth-child(2) > div {
+          width: 100% !important;
+          min-width: 100% !important;
+        }
+        
+        /* 5. Рятуємо Safari від авто-наближення при кліку на поля */
+        input, select, textarea {
+          font-size: 16px !important; 
+        }
+      }
     </style>
   </head>
   <body>
