@@ -368,7 +368,13 @@ export default function Analytics() {
   const [data, setData] = useState(() => {
     try {
       const cached = localStorage.getItem("ds_ig_analytics");
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Захист від битого кешу: якщо дані неповні - ігноруємо
+        if (parsed && parsed.posts && parsed.daily) {
+          return parsed;
+        }
+      }
     } catch(e) {}
     return null;
   });
@@ -385,15 +391,15 @@ export default function Analytics() {
   const [tab, setTab] = useState("overview");
 
   const totals = useMemo(() => {
-    if (!data) return {};
+    if (!data || !data.daily) return {};
     return {
-      охоплення: data.daily.охоплення?.reduce((s, r) => s + r.value, 0) || 0,
-      перегляди: data.daily.перегляди?.reduce((s, r) => s + r.value, 0) || 0,
-      взаємодії: data.daily.взаємодії?.reduce((s, r) => s + r.value, 0) || 0,
-      відвідування: data.daily.відвідування?.reduce((s, r) => s + r.value, 0) || 0,
-      читачі: data.daily.читачі?.reduce((s, r) => s + r.value, 0) || 0,
-      постів: data.posts.length,
-      сторіз: data.stories.length,
+      охоплення: data.daily.охоплення?.reduce((s, r) => s + (r.value || 0), 0) || 0,
+      перегляди: data.daily.перегляди?.reduce((s, r) => s + (r.value || 0), 0) || 0,
+      взаємодії: data.daily.взаємодії?.reduce((s, r) => s + (r.value || 0), 0) || 0,
+      відвідування: data.daily.відвідування?.reduce((s, r) => s + (r.value || 0), 0) || 0,
+      читачі: data.daily.читачі?.reduce((s, r) => s + (r.value || 0), 0) || 0,
+      постів: data.posts?.length || 0,
+      сторіз: data.stories?.length || 0,
     };
   }, [data]);
 
@@ -406,8 +412,8 @@ export default function Analytics() {
 
   const tabs = [
     { id: "overview", label: "Огляд" },
-    { id: "posts", label: `Пости (${data.posts.length})` },
-    { id: "stories", label: `Сторіз (${data.stories.length})` },
+    { id: "posts", label: `Пости (${data.posts?.length || 0})` },
+    { id: "stories", label: `Сторіз (${data.stories?.length || 0})` },
     { id: "weekly", label: "Тижні" },
     { id: "ai", label: "✦ AI-аналіз" },
   ];
@@ -473,7 +479,7 @@ export default function Analytics() {
               {["охоплення", "перегляди", "взаємодії", "відвідування"].map(key => (
                 <div key={key} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px 20px" }}>
                   <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 14 }}>{key}</div>
-                  <DailyChart data={data.daily[key]} metric={key} />
+                  <DailyChart data={data.daily?.[key] || []} metric={key} />
                 </div>
               ))}
             </div>
@@ -486,14 +492,14 @@ export default function Analytics() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
               <MetricCard label="ER%" value={
                 totals.охоплення > 0
-                  ? +((data.posts.reduce((s, r) => s + n(r["Вподобання"]) + n(r["Коментарі"]) + n(r["Збереження"]), 0) / totals.охоплення) * 100).toFixed(1)
+                  ? +(((data.posts || []).reduce((s, r) => s + n(r["Вподобання"]) + n(r["Коментарі"]) + n(r["Збереження"]), 0) / totals.охоплення) * 100).toFixed(1)
                   : 0
               } sub="середній engagement rate" accent />
-              <MetricCard label="Охоплення" value={data.posts.reduce((s, r) => s + n(r["Охоплення"]), 0)} sub="сума по всіх постах" />
-              <MetricCard label="Збережень" value={data.posts.reduce((s, r) => s + n(r["Збереження"]), 0)} sub="найцінніша взаємодія" />
+              <MetricCard label="Охоплення" value={(data.posts || []).reduce((s, r) => s + n(r["Охоплення"]), 0)} sub="сума по всіх постах" />
+              <MetricCard label="Збережень" value={(data.posts || []).reduce((s, r) => s + n(r["Збереження"]), 0)} sub="найцінніша взаємодія" />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
-              {data.posts
+              {(data.posts || [])
                 .sort((a, b) => n(b["Охоплення"]) - n(a["Охоплення"]))
                 .map((row, i) => <PostCard key={i} row={row} type="post" />)}
             </div>
@@ -504,12 +510,12 @@ export default function Analytics() {
         {tab === "stories" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-              <MetricCard label="Охоплення" value={data.stories.reduce((s, r) => s + n(r["Охоплення"]), 0)} sub="сума по всіх сторіз" />
-              <MetricCard label="Відповіді" value={data.stories.reduce((s, r) => s + n(r["Відповіді"]), 0)} sub="прямі повідомлення" accent />
-              <MetricCard label="Перегляди" value={data.stories.reduce((s, r) => s + n(r["Перегляди"]), 0)} sub="загальна кількість" />
+              <MetricCard label="Охоплення" value={(data.stories || []).reduce((s, r) => s + n(r["Охоплення"]), 0)} sub="сума по всіх сторіз" />
+              <MetricCard label="Відповіді" value={(data.stories || []).reduce((s, r) => s + n(r["Відповіді"]), 0)} sub="прямі повідомлення" accent />
+              <MetricCard label="Перегляди" value={(data.stories || []).reduce((s, r) => s + n(r["Перегляди"]), 0)} sub="загальна кількість" />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
-              {data.stories
+              {(data.stories || [])
                 .sort((a, b) => n(b["Охоплення"]) - n(a["Охоплення"]))
                 .map((row, i) => <PostCard key={i} row={row} type="story" />)}
             </div>
@@ -522,7 +528,7 @@ export default function Analytics() {
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "20px 24px" }}>
               <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Охоплення по тижнях</div>
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={groupByWeek(data.daily.охоплення || [])} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <BarChart data={groupByWeek(data.daily?.охоплення || [])} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                   <XAxis dataKey="week" tick={{ fontSize: 11, fill: "#666" }} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: "#666" }} tickLine={false} axisLine={false} tickFormatter={fmt} />
@@ -543,7 +549,7 @@ export default function Analytics() {
                 <div key={key} style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16, padding: "18px 20px" }}>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>{label}</div>
                   <ResponsiveContainer width="100%" height={160}>
-                    <BarChart data={groupByWeek(data.daily[key] || [])} margin={{ top: 0, right: 5, left: -20, bottom: 0 }}>
+                    <BarChart data={groupByWeek(data.daily?.[key] || [])} margin={{ top: 0, right: 5, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                       <XAxis dataKey="week" tick={{ fontSize: 9, fill: "#666" }} tickLine={false} />
                       <YAxis tick={{ fontSize: 9, fill: "#666" }} tickLine={false} axisLine={false} tickFormatter={fmt} />
