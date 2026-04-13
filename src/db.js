@@ -448,3 +448,12 @@ export async function deleteWaitlist(id) {
     throw error;
   }
 }
+export const deleteCancelled = async (id) => {
+  const { error } = await supabase.from('cancelled_trainings').delete().eq('id', id);
+  if (error) throw error;
+};
+
+export const deleteStudent = async (id) => {
+  const { error } = await supabase.from('students').delete().eq('id', id);
+  if (error) throw error;
+};
