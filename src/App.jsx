@@ -458,7 +458,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         isExhausted = true;
       }
 
-      // Обрізаємо кінець старого абонемента, якщо новий почався раніше
       const nextSub = stSubs[i+1];
       if (nextSub && nextSub.startDate && nextSub.startDate <= effectiveEnd) {
          const d = new Date(nextSub.startDate + "T12:00:00");
@@ -907,15 +906,22 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
-  const adminEmails = ["semagin.vlad@gmail.com"]; // <--- ТВОЯ АДМІНСЬКА ПОШТА ТУТ
+  const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
 
   useEffect(() => {
-    db.getCurrentUser().then(currUser => {
+    db.getSessionUser().then(currUser => {
       setUser(currUser);
       if (currUser) loadAllData();
       else setLoading(false);
     });
+
+    const subscription = db.onAuthChange((currUser) => {
+      setUser(currUser);
+      if (!currUser) setLoading(false);
+    });
+
+    return () => subscription?.unsubscribe && subscription.unsubscribe();
   }, []);
 
   const loadAllData = async () => {
@@ -947,7 +953,7 @@ export default function App() {
     try {
       const u = await db.signIn(authEmail, authPass);
       setUser(u);
-      window.location.reload();
+      loadAllData();
     } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
   };
 
@@ -1549,9 +1555,6 @@ export default function App() {
             </div>
           )
         })()}
-
-        {/* === АНАЛІТИКА INSTAGRAM === */}
-        {isAdmin && tab === "analytics" && <Analytics />}
 
       </main>
 
