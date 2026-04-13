@@ -13,7 +13,7 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       
-      /* 1. ЗАЛІЗОБЕТОННА ЗАБОРОНА СТОРІНЦІ "ЇЗДИТИ" */
+      /* ЗАЛІЗОБЕТОННА ЗАБОРОНА СТОРІНЦІ "ЇЗДИТИ" */
       html, body { 
         background: #F8F9FD; 
         color: #1F1F1F; 
@@ -29,15 +29,13 @@
         overflow-x: hidden !important;
       }
 
-      /* 2. МОБІЛЬНІ НАЛАШТУВАННЯ (працюють тільки на телефонах) */
+      /* МОБІЛЬНІ НАЛАШТУВАННЯ */
       @media (max-width: 768px) {
         
-        /* ЗМЕНШУЄМО МАСШТАБ ДОДАТКУ ЩЕ БІЛЬШЕ (тепер 70% від оригіналу) */
         body {
-          zoom: 0.70; 
+          zoom: 0.70; /* Зменшений масштаб */
         }
 
-        /* Захист від наїжджання на верхній "чубчик" та годинник iPhone */
         header {
           padding-top: max(40px, env(safe-area-inset-top)) !important;
           flex-direction: column !important;
@@ -45,30 +43,34 @@
           gap: 12px !important;
         }
         
-        /* Жорстко обмежуємо всі поля вводу і випадаючі списки, щоб не розтягували екран */
         input, select, textarea {
           min-width: 0 !important;
           max-width: 100% !important;
           width: 100% !important;
-          font-size: 16px !important; /* Це важливо, щоб Safari сам не зумив при кліку */
+          font-size: 16px !important; 
         }
 
-        /* Змушуємо всі горизонтальні блоки з фільтрами ставати вертикально */
         main > div > div[style*="display: flex"] {
           flex-direction: column !important;
           align-items: stretch !important;
         }
 
-        /* Робимо колонку з іменами вужчою і дозволяємо перенос тексту на два рядки */
+        /* 🟢 ФІКС КОЛОНКИ З ІМЕНАМИ */
         th:first-child, td:first-child {
-          min-width: 100px !important;
-          max-width: 110px !important;
-          white-space: pre-wrap !important;
-          padding: 10px 8px !important;
-          font-size: 12px !important;
+          min-width: 160px !important; /* Розширили колонку */
+          max-width: 160px !important;
+          padding: 10px 12px !important;
+          font-size: 13px !important;
+          white-space: normal !important; /* Дозволяємо перенос тексту */
+          word-wrap: break-word !important; /* Акуратний розрив, якщо ім'я задовге */
         }
 
-        /* Зменшуємо кнопки в меню навігації */
+        /* Внутрішній блок теж має вміти переноситися */
+        td:first-child > div {
+          white-space: normal !important;
+          flex-wrap: wrap !important;
+        }
+
         nav button {
           padding: 10px 16px !important;
           font-size: 13px !important;
