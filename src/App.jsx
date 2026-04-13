@@ -66,14 +66,12 @@ const fmt = (d) => { if(!d) return "—"; const dt=new Date(d+"T12:00:00"); retu
 const daysLeft = (ed) => Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
-// Розумне форматування імені: Прізвище Ім'я
 function getDisplayName(st) {
   if (!st) return "Невідомо";
-  if (st.last_name || st.first_name) {
-     return `${st.last_name || ''} ${st.first_name || ''}`.trim();
-  }
-  if (st.name) return st.name;
-  return "Без імені";
+  const l = st.lastName || st.last_name || "";
+  const f = st.firstName || st.first_name || "";
+  if (l || f) return `${l} ${f}`.trim();
+  return st.name || "Без імені";
 }
 
 function getSubStatus(sub) {
@@ -117,12 +115,12 @@ function getPreviousTrainingDate(schedule, beforeDateStr) {
 
 function getNotifMsg(sub,student,group,direction){
   if (!student) return "Привіт! Абонемент закінчився.";
-  const name = student.first_name || student.name?.split(" ")[0] || ""; 
+  const fName = student.firstName || student.first_name || student.name?.split(" ")[1] || student.name?.split(" ")[0] || ""; 
   const gName=group?.name||"";
   const dName=direction?.name||"";
   const tpl=student.messageTemplate||student.message_template;
-  if(tpl)return tpl.replace(/\{ім'я\}/g,name).replace(/\{група\}/g,gName).replace(/\{напрямок\}/g,dName);
-  return `Привіт, ${name}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
+  if(tpl)return tpl.replace(/\{ім'я\}/g,fName).replace(/\{група\}/g,gName).replace(/\{напрямок\}/g,dName);
+  return `Привіт, ${fName}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
 }
 
 const STATUS_LABELS = { active: "Активний", warning: "Закінчується", expired: "Протермінований" };
@@ -249,8 +247,8 @@ function StudentSelectWithSearch({ students, value, onChange, studentGrps, group
 // ==========================================
 function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   const nameParts = initial?.name ? initial.name.split(' ') : [];
-  const initialFirstName = initial?.first_name || (initial?.last_name ? "" : initial?.name) || "";
-  const initialLastName = initial?.last_name || "";
+  const initialFirstName = initial?.first_name || nameParts[1] || "";
+  const initialLastName = initial?.last_name || nameParts[0] || "";
 
   const [firstName,setFirstName]=useState(initialFirstName);
   const [lastName,setLastName]=useState(initialLastName);
@@ -408,7 +406,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
-    } catch (e) { console.warn("Помилка БД:", e); }
+    } catch (e) { alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message); }
     setManualName("");
   };
 
@@ -536,7 +534,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         }
       }
     } catch (e) {
-      console.warn("DB Error:", e);
+      alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message);
     }
   };
 
@@ -552,15 +550,18 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       for (let sub of affectedSubs) {
         originalEnds[sub.id] = sub.endDate; 
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr }).catch(e=>console.warn(e));
+        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       
       const newCancel = { id: uid(), groupId: gid, date: cancelDate, originalEnds };
-      setCancelled(p => [...p, newCancel]);
+      let insertedC = newCancel;
+      if (db.insertCancelled) {
+        insertedC = await db.insertCancelled(newCancel); 
+      }
+      setCancelled(p => [...p, insertedC]);
       setSubs(newSubs);
-      if (db.insertCancelled) db.insertCancelled(newCancel).catch(e=>console.warn(e)); 
-    } catch (e) { console.warn(e); }
+    } catch (e) { alert("❌ Помилка скасування: " + e.message); }
   };
 
   const handleRestoreSpecificDay = async (restoreDate) => {
@@ -569,17 +570,31 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       const targetCancel = cancelled.find(c => c.groupId === gid && c.date === restoreDate);
       if (targetCancel) {
         let newSubs = [...rawSubs];
+        
+        // Зворотній відлік дати (математичне відновлення)
         if (targetCancel.originalEnds) {
           for (const [subId, origEnd] of Object.entries(targetCancel.originalEnds)) {
-             if(db.updateSub) db.updateSub(subId, { endDate: origEnd }).catch(e=>console.warn(e));
+             if(db.updateSub) await db.updateSub(subId, { endDate: origEnd });
              newSubs = newSubs.map(s => s.id === subId ? { ...s, endDate: origEnd } : s);
           }
-          setSubs(newSubs);
+        } else {
+          // Якщо originalEnds немає, робимо відкат назад через getPreviousTrainingDate
+          const currentGroup = groups.find(g => g.id === gid);
+          const expectedPushedDate = getNextTrainingDate(currentGroup?.schedule, restoreDate);
+          const affectedSubs = newSubs.filter(s => s.groupId === gid && s.endDate === expectedPushedDate);
+          
+          for (let sub of affectedSubs) {
+             const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
+             if(db.updateSub) await db.updateSub(sub.id, { endDate: revertedEnd });
+             newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: revertedEnd } : s);
+          }
         }
+        
+        setSubs(newSubs);
         setCancelled(p => p.filter(c => c.id !== targetCancel.id));
-        if (db.deleteCancelled) db.deleteCancelled(targetCancel.id).catch(e=>console.warn(e));
+        if (db.deleteCancelled) await db.deleteCancelled(targetCancel.id);
       }
-    } catch (e) { console.warn(e); }
+    } catch (e) { alert("❌ Помилка відновлення: " + e.message); }
   };
 
   return (
@@ -737,7 +752,111 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 });
 
 // ==========================================
-// 6. ГОЛОВНИЙ ДОДАТОК
+// 6. ПРО АНАЛІТИКА
+// ==========================================
+function ProAnalyticsTab({ proAnalytics }) {
+  const [ltvPeriod, setLtvPeriod] = useState(1);
+  const topSpenders = proAnalytics.topSpenders[ltvPeriod] || [];
+
+  return (
+    <div style={{display: 'flex', flexDirection: 'column', gap: 24}}>
+      <div style={cardSt}>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12}}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary}}>🏆 Топ клієнтів за прибутком</h3>
+          <div style={{display: 'flex', gap: 6, background: theme.input, padding: 4, borderRadius: 100}}>
+            {[1, 3, 6, 12].map(m => (
+              <button key={m} onClick={() => setLtvPeriod(m)} style={{padding: '6px 16px', borderRadius: 100, border: 'none', background: ltvPeriod === m ? theme.primary : 'transparent', color: ltvPeriod === m ? '#fff' : theme.textMuted, fontWeight: 600, cursor: 'pointer', fontSize: 13, transition: '0.2s'}}>{m} міс.</button>
+            ))}
+          </div>
+        </div>
+        {topSpenders.length === 0 ? <div style={{color: theme.textLight, padding: 20}}>Немає даних за цей період</div> : (
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {topSpenders.map((item, i) => (
+              <div key={item.student.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: theme.bg, borderRadius: 16}}>
+                <div style={{display: 'flex', gap: 16, alignItems: 'center'}}>
+                  <div style={{width: 32, height: 32, borderRadius: '50%', background: i===0?'#FFD700':i===1?'#C0C0C0':i===2?'#CD7F32':theme.input, color: i<3?'#fff':theme.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14}}>{i+1}</div>
+                  <div style={{fontWeight: 700, color: theme.textMain, fontSize: 16}}>{getDisplayName(item.student)}</div>
+                </div>
+                <div style={{fontWeight: 800, color: theme.success, fontSize: 18}}>{item.total.toLocaleString()} ₴</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24}}>
+        <div style={{...cardSt, border: `2px solid ${theme.warning}40`}}>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.warning, marginBottom: 16}}>📈 Кому вигідно більший абонемент</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>Ці учениці ходять дуже часто, але купують малі абонементи. Запропонуй їм {8} або {12} занять.</div>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {proAnalytics.upsellCandidates.length === 0 ? <div style={{color: theme.textLight}}>Немає кандидатів наразі</div> : 
+              proAnalytics.upsellCandidates.map((item, i) => (
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
+                  <div style={{fontSize: 12, color: theme.textMuted, marginBottom: 4}}>{item.group.name}</div>
+                  <div style={{fontWeight: 700, color: theme.textMain}}>{getDisplayName(item.student)}</div>
+                  <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{item.reason}</div>
+                  <div style={{marginTop: 10}}><Badge color={theme.warning}>Запропонувати: {item.suggest}</Badge></div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        <div style={{...cardSt, border: `2px solid ${theme.danger}40`}}>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>🚨 Ризик втрати (Не були &gt; 10 днів)</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>Закінчується абонемент (залишилось 0-1 заняття), і вони давно не були. Напиши їм!</div>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+            {proAnalytics.churnRisk.length === 0 ? <div style={{color: theme.textLight}}>Усі ходять стабільно!</div> : 
+              proAnalytics.churnRisk.map((item, i) => (
+                <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
+                  <div>
+                    <div style={{fontSize: 12, color: theme.textMuted, marginBottom: 4}}>{item.group.name}</div>
+                    <div style={{fontWeight: 700, color: theme.textMain}}>{getDisplayName(item.student)}</div>
+                    <div style={{fontSize: 12, color: theme.danger, marginTop: 4}}>Не була {item.daysSinceLast} днів</div>
+                  </div>
+                  {item.student.telegram && <a href={`https://t.me/${item.student.telegram.replace('@','')}`} target="_blank" rel="noreferrer" style={{padding: '8px 12px', background: `${theme.danger}15`, color: theme.danger, borderRadius: 10, textDecoration: 'none', fontSize: 12, fontWeight: 700}}>Написати</a>}
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24}}>
+        <div style={cardSt}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>🔥 Найпопулярніші дні (за 30 днів)</h3>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+            {proAnalytics.popularDays.map((item, i) => (
+              <div key={i} style={{display: 'flex', alignItems: 'center', gap: 16}}>
+                <div style={{width: 40, fontWeight: 800, color: theme.textMuted}}>{item.day}</div>
+                <div style={{flex: 1, background: theme.input, borderRadius: 8, height: 24, overflow: 'hidden'}}>
+                  <div style={{width: `${(item.count / (proAnalytics.popularDays[0]?.count || 1)) * 100}%`, background: theme.primary, height: '100%', borderRadius: 8}}></div>
+                </div>
+                <div style={{fontWeight: 700, color: theme.textMain, width: 30, textAlign: 'right'}}>{item.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={cardSt}>
+          <h3 style={{margin: 0, fontSize: 20, color: theme.secondary, marginBottom: 20}}>⭐ Лідери відвідуваності по групах (за 30 днів)</h3>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12}}>
+            {proAnalytics.bestAttenders.map((item, i) => (
+              <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
+                <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
+                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{getDisplayName(item.student)}</div>
+                <div style={{fontSize: 13, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 7. ГОЛОВНИЙ ДОДАТОК
 // ==========================================
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -870,6 +989,81 @@ export default function App() {
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
 
+  const proAnalytics = useMemo(() => {
+    const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
+    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
+    
+    const getTopSpenders = (months) => {
+      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
+      const totals = {};
+      subs.forEach(s => { if (s.paid && s.startDate >= toLocalISO(dateLimit)) totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); });
+      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
+    };
+
+    const groupAttnCounts = {};
+    attn.forEach(a => { if (a.date >= last30DaysStr) { const stId = a.subId ? subToSt[a.subId] : null; if (stId) { if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; } } });
+    
+    const bestAttenders = groups.map(g => { 
+        const counts = groupAttnCounts[g.id] || {}; 
+        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
+        const dir = dirMap[g.directionId];
+        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
+    }).filter(x => x.student);
+
+    // ЗМІНЕНО: Тепер ми знаходимо ОСТАННІЙ ВІЗИТ УЧЕНИЦІ в принципі (в будь-яку групу)
+    const latestAttnByStudent = {};
+    attn.forEach(a => {
+        let stId = null;
+        if (a.subId) stId = subToSt[a.subId];
+        else if (a.guestName) {
+            const s = Object.values(studentMap).find(x => x.name === a.guestName);
+            if (s) stId = s.id;
+        }
+        if (stId) {
+            if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
+                latestAttnByStudent[stId] = a.date;
+            }
+        }
+    });
+
+    const upsellCandidates = [];
+    const churnRisk = [];
+    
+    activeSubs.forEach(sub => {
+      const st = studentMap[sub.studentId];
+      const gr = groupMap[sub.groupId];
+      const dir = dirMap[gr?.directionId];
+      if(!st || !gr) return;
+      
+      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id).map(a => a.date).sort();
+      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
+
+      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
+      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
+      
+      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
+      const dl = daysLeft(sub.endDate);
+      
+      if (trainingsLeft <= 1 || dl <= 3) {
+          const lastDate = latestAttnByStudent[st.id] || sub.startDate;
+          const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
+
+          if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
+              churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
+          }
+      }
+    });
+
+    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+    attn.filter(a => a.date >= last30DaysStr).forEach(a => {
+        const d = new Date(a.date + "T12:00:00").getDay();
+        dayCounts[d]++;
+    });
+    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
+
+    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
+  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
+
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
     if(stFilterDir !== "all") r = r.filter(st => studentGrps.some(sg => sg.studentId === st.id && groupMap[sg.groupId]?.directionId === stFilterDir));
@@ -906,7 +1100,7 @@ export default function App() {
       setStudents(p=>p.filter(s=>s.id!==id));
       setStudentGrps(p=>p.filter(sg=>sg.studentId!==id));
       if(db.deleteStudent) await db.deleteStudent(id);
-    } catch(e) { console.warn(e); }
+    } catch(e) { console.warn("Помилка видалення учениці:", e); }
   };
 
   const deleteSubAction = async(id) => {
@@ -915,7 +1109,7 @@ export default function App() {
       setAttn(p=>p.filter(a=>a.subId!==id));
       setSubs(p=>p.filter(s=>s.id!==id));
       if(db.deleteSub) await db.deleteSub(id);
-    } catch(e) { console.warn(e); }
+    } catch(e) { console.warn("Помилка видалення абонемента:", e); }
   };
 
   const DashCard = ({ title, value, subtitle, onClick, color }) => (
@@ -928,13 +1122,41 @@ export default function App() {
 
   const renderDashModal = () => {
     if (!dashModal) return null;
-    const items = analytics.currMonthDetails[dashModal.type];
+    const items = analytics.currMonthDetails[dashModal.type] || [];
+    
+    // Активні абонементи (клік на цифру "Абонементів" вгорі)
+    if (dashModal.type === 'activeSubs') {
+      return (
+        <Modal open={true} onClose={()=>setDashModal(null)} title={dashModal.title}>
+          {activeSubs.length === 0 ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
+            <div style={{display: "flex", flexDirection: "column", gap: 12}}>
+              {activeSubs.map((s, i) => {
+                 const st = studentMap[s.studentId];
+                 const gr = groupMap[s.groupId];
+                 const planName = PLAN_TYPES.find(p=>p.id===s.planType)?.name;
+                 return (
+                   <div key={i} style={{padding: 16, background: theme.bg, borderRadius: 16, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                     <div>
+                       <div style={{fontWeight: 700, color: theme.textMain}}>{getDisplayName(st)}</div>
+                       <div style={{fontSize: 13, color: theme.textMuted, marginTop: 4}}>{gr?.name || "Невідома група"}</div>
+                     </div>
+                     <Badge color={theme.success}>{planName}</Badge>
+                   </div>
+                 );
+              })}
+            </div>
+          )}
+        </Modal>
+      );
+    }
+
     return (
       <Modal open={true} onClose={()=>setDashModal(null)} title={dashModal.title}>
         {(!items || items.length === 0) ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
             {items.map((item, i) => {
-               const st = studentMap[item.studentId] || Object.values(studentMap).find(s => s.name === item.guestName);
+               // Для відвідувань є subId/guestName, для підписок - studentId
+               const st = item.studentId ? studentMap[item.studentId] : (item.subId ? studentMap[subs.find(s=>s.id===item.subId)?.studentId] : Object.values(studentMap).find(s => s.name === item.guestName));
                const gr = groupMap[item.groupId];
                const dateStr = item.startDate || item.date;
                return (
@@ -980,7 +1202,7 @@ export default function App() {
           <div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginBottom:30}}>
               <DashCard title="Учениць" value={analytics.totalStudents} subtitle={`${analytics.activeStudents} активних`} color={theme.primary} />
-              <DashCard title="Абонементів" value={activeSubs.length} subtitle={`${notifications.length} сповіщ.`} color={theme.success} />
+              <DashCard title="Абонементів" value={activeSubs.length} subtitle={`${notifications.length} сповіщ.`} color={theme.success} onClick={()=>setDashModal({type:'activeSubs', title:'Всі активні абонементи'})} />
               <DashCard title="Дохід (Цього міс.)" value={`${analytics.currMonthRev.toLocaleString()}₴`} subtitle={`Минулий: ${analytics.prevMonthRev.toLocaleString()}₴`} color={theme.warning} />
             </div>
             
@@ -1247,7 +1469,6 @@ export default function App() {
             </div>
           )
         })()}
-
       </main>
 
       {/* МОДАЛКИ */}
