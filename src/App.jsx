@@ -1377,7 +1377,23 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-      
+      <style>{`
+        @media (max-width: 768px) {
+          /* Зменшуємо ширину колонки з іменами */
+          th:first-child, td:first-child { 
+            min-width: 120px !important; 
+            padding: 8px !important; 
+            font-size: 11px !important; 
+          }
+          /* Зменшуємо всі комірки таблиці */
+          th, td { padding: 4px !important; }
+          /* Вирівнюємо верхні кнопки */
+          header { padding: 16px !important; flex-direction: column; gap: 12px; align-items: flex-start !important; }
+          /* Форма знизу (Відмітити) стає вертикальною */
+          .bottom-form { flex-direction: column !important; align-items: stretch !important; }
+          .bottom-form input { width: 100% !important; }
+        }
+      `}</style>
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
