@@ -59,11 +59,17 @@ const DEFAULT_GROUPS = [
   { id: "dance1", name: "Dancehall Female", directionId: "dancehall", schedule: [{ day: 2, time: "17:00" }, { day: 4, time: "17:00" }], trainerPct: 50 },
 ];
 
-const toLocalISO = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+const toLocalISO = (dt) => {
+  if (isNaN(dt.getTime())) return "2000-01-01"; // Захист від битих дат
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+};
 const addMonth = (d) => { const dt = new Date(d+"T12:00:00"); dt.setMonth(dt.getMonth()+1); return toLocalISO(dt); };
 const today = () => toLocalISO(new Date());
-const fmt = (d) => { if(!d) return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
-const daysLeft = (ed) => Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
+const fmt = (d) => { if(!d || d === "2000-01-01") return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
+const daysLeft = (ed) => {
+  if (!ed || ed === "2000-01-01") return 0;
+  return Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
+};
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function getDisplayName(st) {
@@ -84,8 +90,8 @@ function getSubStatus(sub) {
 }
 
 function getNextTrainingDate(schedule, afterDateStr) {
-  if (!schedule || schedule.length === 0) {
-    const d = new Date(afterDateStr + "T12:00:00");
+  if (!schedule || schedule.length === 0 || !afterDateStr) {
+    const d = new Date((afterDateStr || today()) + "T12:00:00");
     d.setDate(d.getDate() + 7);
     return toLocalISO(d);
   }
@@ -99,8 +105,8 @@ function getNextTrainingDate(schedule, afterDateStr) {
 }
 
 function getPreviousTrainingDate(schedule, beforeDateStr) {
-  if (!schedule || schedule.length === 0) {
-    const d = new Date(beforeDateStr + "T12:00:00");
+  if (!schedule || schedule.length === 0 || !beforeDateStr) {
+    const d = new Date((beforeDateStr || today()) + "T12:00:00");
     d.setDate(d.getDate() - 7);
     return toLocalISO(d);
   }
@@ -127,7 +133,7 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. БРОНЕБІЙНИЙ ХУК ДЛЯ ЛОКАЛЬНОЇ ПАМ'ЯТІ
+// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ
 // ==========================================
 function useStickyState(defaultValue, key) {
   const [value, setValue] = useState(() => {
@@ -137,7 +143,7 @@ function useStickyState(defaultValue, key) {
         try {
           return JSON.parse(stickyValue);
         } catch (e) {
-          return stickyValue; // Якщо це звичайний рядок (старий формат)
+          return stickyValue; 
         }
       }
       return defaultValue;
@@ -279,8 +285,8 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   
   return(<div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
       <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
-      <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
     </div>
     <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
     <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
@@ -367,13 +373,15 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled, customOrders, setCustomOrders }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
   const [journalGuestMode, setJournalGuestMode] = useState("subscription");
+  
+  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v3");
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
@@ -456,7 +464,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       }
 
       const nextSub = stSubs[i+1];
-      if (nextSub && nextSub.startDate <= effectiveEnd) {
+      if (nextSub && nextSub.startDate && nextSub.startDate <= effectiveEnd) {
          const d = new Date(nextSub.startDate + "T12:00:00");
          d.setDate(d.getDate() - 1);
          const newEnd = toLocalISO(d);
@@ -550,7 +558,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         }
       }
     } catch (e) {
-      console.warn("DB Error", e);
+      alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message);
     }
   };
 
@@ -898,11 +906,39 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
-  useEffect(()=>{(async()=>{try{
-    const [st,gr,su,at,ca,sg]=await Promise.all([db.fetchStudents(),db.fetchGroups(),db.fetchSubs(),db.fetchAttendance(),db.fetchCancelled(),db.fetchStudentGroups()]);
-    setStudents(st||[]);if(gr?.length)setGroups(gr);setSubs(su||[]);setAttn(at||[]);setCancelled(ca||[]);setStudentGrps(sg||[]);
-    try { if (db.fetchWaitlist) { const wl = await db.fetchWaitlist(); setWaitlist(wl || []); } } catch(e) {}
-  }catch(e){console.warn("DB Initial load error", e)}setLoading(false)})()},[]);
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        // Захисний фетч: якщо одна таблиця впаде, інші все одно завантажаться
+        const safeFetch = async (fn) => { try { return await fn(); } catch (e) { console.error("Fetch err:", e); return null; } };
+        
+        const [st, gr, su, at, ca, sg] = await Promise.all([
+          safeFetch(db.fetchStudents),
+          safeFetch(db.fetchGroups),
+          safeFetch(db.fetchSubs),
+          safeFetch(db.fetchAttendance),
+          safeFetch(db.fetchCancelled),
+          safeFetch(db.fetchStudentGroups)
+        ]);
+
+        if (st) setStudents(st);
+        if (gr?.length) setGroups(gr);
+        if (su) setSubs(su);
+        if (at) setAttn(at);
+        if (ca) setCancelled(ca);
+        if (sg) setStudentGrps(sg);
+
+        const wl = await safeFetch(db.fetchWaitlist);
+        if (wl) setWaitlist(wl);
+
+      } catch (e) {
+        console.error("Global load error", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
