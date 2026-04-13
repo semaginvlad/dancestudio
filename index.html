@@ -13,27 +13,27 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       
-      /* ЗАЛІЗОБЕТОННА ЗАБОРОНА СТОРІНЦІ "ЇЗДИТИ" */
       html, body { 
         background: #F8F9FD; 
         color: #1F1F1F; 
         width: 100%;
-        max-width: 100vw;
         overflow-x: hidden !important; 
         position: relative;
       }
       
       #root {
         width: 100%;
-        max-width: 100vw;
         overflow-x: hidden !important;
       }
 
-      /* МОБІЛЬНІ НАЛАШТУВАННЯ */
+      /* МОБІЛЬНА АДАПТАЦІЯ */
       @media (max-width: 768px) {
         
-        body {
-          zoom: 0.70; /* Зменшений масштаб */
+        /* 🟢 ГОЛОВНИЙ ФІКС ПОРОЖНЬОГО МІСЦЯ: 
+           Якщо масштаб 0.75 (75%), то ширина має бути 133.33% щоб заповнити екран */
+        html, body {
+          zoom: 0.75; 
+          width: 133.33% !important; 
         }
 
         header {
@@ -55,17 +55,16 @@
           align-items: stretch !important;
         }
 
-        /* 🟢 ФІКС КОЛОНКИ З ІМЕНАМИ */
+        /* Колонка з іменами: тепер має достатньо місця */
         th:first-child, td:first-child {
-          min-width: 160px !important; /* Розширили колонку */
-          max-width: 160px !important;
+          min-width: 150px !important;
+          max-width: 150px !important;
           padding: 10px 12px !important;
           font-size: 13px !important;
-          white-space: normal !important; /* Дозволяємо перенос тексту */
-          word-wrap: break-word !important; /* Акуратний розрив, якщо ім'я задовге */
+          white-space: normal !important; 
+          word-wrap: break-word !important; 
         }
 
-        /* Внутрішній блок теж має вміти переноситися */
         td:first-child > div {
           white-space: normal !important;
           flex-wrap: wrap !important;
