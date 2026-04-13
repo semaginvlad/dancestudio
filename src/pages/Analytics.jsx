@@ -1,8 +1,8 @@
-import { useState, useCallback, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import AICoach from "./AICoach";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Legend
+  ResponsiveContainer, CartesianGrid
 } from "recharts";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -10,7 +10,6 @@ import {
 function parseUTF16CSV(buffer) {
   const text = new TextDecoder("utf-16le").decode(buffer);
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
-  // skip "sep=," line and title line, take data from line 3+
   const dataLines = lines.slice(3);
   return dataLines.map((l) => {
     const parts = l.split(",").map((v) => v.replace(/^"|"$/g, "").trim());
@@ -45,7 +44,6 @@ function parseCSVLine(line) {
 }
 
 function detectFileType(buffer) {
-  // UTF-16 files start with BOM FF FE
   const arr = new Uint8Array(buffer.slice(0, 4));
   if (arr[0] === 0xFF && arr[1] === 0xFE) return "utf16";
   return "utf8";
@@ -68,16 +66,6 @@ function groupByWeek(rows) {
     weeks[key].value += r.value;
   });
   return Object.values(weeks).sort((a, b) => a.week.localeCompare(b.week));
-}
-
-function groupByMonth(rows) {
-  const months = {};
-  rows.forEach((r) => {
-    const key = r.date?.slice(0, 7);
-    if (!months[key]) months[key] = { month: key, value: 0 };
-    months[key].value += r.value;
-  });
-  return Object.values(months).sort((a, b) => a.month.localeCompare(b.month));
 }
 
 // ── MetricCard ──────────────────────────────────────────────────────────────
@@ -155,6 +143,7 @@ function PostCard({ row, type }) {
   const caption = row["Опис"]?.slice(0, 80) || "(без підпису)";
   const date = row["Час публікації"]?.slice(0, 10) || row["Дата"]?.slice(0, 10) || "";
   const link = row["Постійне посилання"];
+  const thumb = row["Мініатюра"];
 
   return (
     <div style={{
@@ -170,7 +159,16 @@ function PostCard({ row, type }) {
         }}>{isStory ? "Сторіз" : row["Тип допису"] || "Пост"}</span>
         <span style={{ fontSize: 11, color: "var(--muted)" }}>{date}</span>
       </div>
-      <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, lineHeight: 1.4 }}>{caption}{row["Опис"]?.length > 80 ? "…" : ""}</p>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 4, marginBottom: 4 }}>
+        {thumb && (
+          <img src={thumb} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, background: "#333" }} />
+        )}
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: 0, lineHeight: 1.4, flex: 1 }}>
+          {caption}{row["Опис"]?.length > 80 ? "…" : ""}
+        </p>
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
         {metrics.map(([label, val]) => (
           <div key={label} style={{ textAlign: "center" }}>
@@ -183,118 +181,6 @@ function PostCard({ row, type }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 8 }}>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>ER: <strong style={{ color: parseFloat(er) >= 3 ? "#4ade80" : "#fb923c" }}>{er}%</strong></span>
           {link && <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#a78bfa", textDecoration: "none" }}>↗ відкрити</a>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── AI Report ───────────────────────────────────────────────────────────────
-
-function AIReport({ data }) {
-  const [report, setReport] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function generate() {
-    setLoading(true);
-    setReport("");
-
-    const sumArr = (arr) => (arr || []).reduce((s, r) => s + r.value, 0);
-
-    const totalReach = sumArr(data.daily.охоплення);
-    const totalViews = sumArr(data.daily.перегляди);
-    const totalInteractions = sumArr(data.daily.взаємодії);
-    const totalFollowers = sumArr(data.daily.читачі);
-    const totalVisits = sumArr(data.daily.відвідування);
-
-    const sortedPosts = [...data.posts].sort((a, b) => n(b["Перегляди"]) - n(a["Перегляди"]));
-    const top5 = sortedPosts.slice(0, 5).map((p, i) =>
-      `${i+1}. ${p["Тип допису"]||"Пост"} | ${n(p["Перегляди"]).toLocaleString()} переглядів | охоплення ${n(p["Охоплення"]).toLocaleString()} | ❤️${n(p["Вподобання"])} 🔖${n(p["Збереження"])} 💬${n(p["Коментарі"])} — "${(p["Опис"]||"").slice(0,70)}"`
-    ).join("\n");
-
-    const avgViews = data.posts.length > 0 ? Math.round(data.posts.reduce((s, p) => s + n(p["Перегляди"]), 0) / data.posts.length) : 0;
-    const totalSaves = data.posts.reduce((s, p) => s + n(p["Збереження"]), 0);
-    const totalShares = data.posts.reduce((s, p) => s + n(p["Поширення"]), 0);
-
-    const prompt = `Ти — аналітик контент-стратегії для танцювальної студії в Хмельницькому (Instagram @soroka_dancestudio).
-
-РЕАЛЬНІ ДАНІ за 14 бер — 10 квіт 2026:
-
-Загальна статистика акаунту:
-- Охоплення акаунту: ${totalReach.toLocaleString()}
-- Перегляди акаунту: ${totalViews.toLocaleString()}
-- Взаємодії з контентом: ${totalInteractions.toLocaleString()}
-- Нових підписників: ${totalFollowers}
-- Відвідувань профілю: ${totalVisits.toLocaleString()}
-
-Контент:
-- Постів/Reels опубліковано: ${data.posts.length}
-- Сторіз опубліковано: ${data.stories.length}
-- Середній перегляд поста: ${avgViews.toLocaleString()}
-- Всього збережень постів: ${totalSaves.toLocaleString()}
-- Всього поширень постів: ${totalShares.toLocaleString()}
-
-Топ-5 постів за переглядами:
-${top5}
-
-Напиши аналіз українською (тепло, як досвідчений SMM-колега, спирайся на реальні числа):
-1. Загальна картина
-2. Що спрацювало добре
-3. Що варто покращити
-4. 3 конкретні рекомендації на наступний місяць
-
-Без зайвих заголовків, живий текст з абзацами.`;
-
-    try {
-      const res = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const json = await res.json();
-      setReport(json.content?.[0]?.text || "Помилка отримання відповіді");
-    } catch (e) {
-      setReport("Помилка: " + e.message);
-    }
-    setLoading(false);
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: 20, color: "var(--text)" }}>AI-аналіз від Claude</h3>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted)" }}>Аналіз контент-стратегії за завантажений період</p>
-        </div>
-        <button onClick={generate} disabled={loading} style={{
-          background: loading ? "var(--border)" : "linear-gradient(135deg, #7c3aed, #e040fb)",
-          color: "#fff", border: "none", borderRadius: 12, padding: "12px 24px",
-          fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer",
-          transition: "opacity .2s",
-        }}>
-          {loading ? "Аналізую…" : "✦ Згенерувати аналіз"}
-        </button>
-      </div>
-      {report && (
-        <div style={{
-          background: "var(--card)", border: "1px solid #7c3aed44",
-          borderRadius: 16, padding: "24px 28px",
-          fontSize: 15, lineHeight: 1.8, color: "var(--text)",
-          whiteSpace: "pre-wrap",
-        }}>
-          {report}
-        </div>
-      )}
-      {!report && !loading && (
-        <div style={{
-          background: "var(--card)", border: "1px solid var(--border)",
-          borderRadius: 16, padding: "48px", textAlign: "center", color: "var(--muted)", fontSize: 14,
-        }}>
-          Натисни кнопку вище — Claude проаналізує твої дані і дасть конкретні поради
         </div>
       )}
     </div>
@@ -347,6 +233,7 @@ function UploadScreen({ onLoad }) {
         "ID допису": m.id,
         "Тип допису": m.media_type === "REELS" || m.media_type === "VIDEO" ? "Instagram Reels" : m.media_type === "CAROUSEL_ALBUM" ? "Альбом" : "Зображення",
         "Опис": m.caption || "",
+        "Мініатюра": m.thumbnail_url || m.media_url || "",
         "Час публікації": m.timestamp?.slice(0, 16).replace("T", " ") || "",
         "Постійне посилання": m.permalink || "",
         "Перегляди": m.impressions || m.plays || 0,
@@ -361,6 +248,7 @@ function UploadScreen({ onLoad }) {
         "ID допису": m.id,
         "Тип допису": "STORY",
         "Опис": m.caption || "",
+        "Мініатюра": m.thumbnail_url || m.media_url || "",
         "Час публікації": m.timestamp?.slice(0, 16).replace("T", " ") || "",
         "Постійне посилання": m.permalink || "",
         "Перегляди": m.impressions || 0,
@@ -477,7 +365,23 @@ function UploadScreen({ onLoad }) {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function Analytics() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(() => {
+    try {
+      const cached = localStorage.getItem("ds_ig_analytics");
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return null;
+  });
+
+  const handleSetData = (newData) => {
+    setData(newData);
+    if (newData) {
+      localStorage.setItem("ds_ig_analytics", JSON.stringify(newData));
+    } else {
+      localStorage.removeItem("ds_ig_analytics");
+    }
+  };
+
   const [tab, setTab] = useState("overview");
 
   const totals = useMemo(() => {
@@ -493,19 +397,10 @@ export default function Analytics() {
     };
   }, [data]);
 
-  const weeklyData = useMemo(() => {
-    if (!data?.daily?.охоплення) return [];
-    return groupByWeek(data.daily.охоплення).map(w => ({
-      week: w.week.slice(5),
-      охоплення: w.value,
-      перегляди: groupByWeek(data.daily.перегляди || [])[0]?.value || 0,
-    }));
-  }, [data]);
-
   if (!data) return (
     <div style={{ "--text": "#f1f1f1", "--muted": "#666", "--card": "#111827", "--border": "#1f2937", "--bg": "#0d1117" }}>
       <style>{`body{background:#0d1117;} * {box-sizing:border-box;}`}</style>
-      <UploadScreen onLoad={setData} />
+      <UploadScreen onLoad={handleSetData} />
     </div>
   );
 
@@ -541,9 +436,8 @@ export default function Analytics() {
             </span>
             {" "}— аналітика
           </h1>
-          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>14 бер — 10 квіт 2026</p>
         </div>
-        <button onClick={() => setData(null)} style={{
+        <button onClick={() => handleSetData(null)} style={{
           background: "none", border: "1px solid var(--border)", color: "var(--muted)",
           borderRadius: 8, padding: "6px 14px", fontSize: 12, cursor: "pointer",
         }}>↩ Оновити дані</button>
