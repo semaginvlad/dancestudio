@@ -332,6 +332,59 @@ function DailyChart({ data, metric }) {
 
 function UploadScreen({ onLoad }) {
   const [dragging, setDragging] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+
+  async function syncFromAPI() {
+    setSyncing(true);
+    setSyncError("");
+    try {
+      const res = await fetch("/api/instagram");
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+
+      const posts = (json.media || []).filter(m => m.media_type !== "STORY").map(m => ({
+        "ID допису": m.id,
+        "Тип допису": m.media_type === "REELS" || m.media_type === "VIDEO" ? "Instagram Reels" : m.media_type === "CAROUSEL_ALBUM" ? "Альбом" : "Зображення",
+        "Опис": m.caption || "",
+        "Час публікації": m.timestamp?.slice(0, 16).replace("T", " ") || "",
+        "Постійне посилання": m.permalink || "",
+        "Перегляди": m.impressions || m.plays || 0,
+        "Охоплення": m.reach || 0,
+        "Вподобання": m.likes || 0,
+        "Коментарі": m.comments || 0,
+        "Збереження": m.saved || 0,
+        "Поширення": m.shares || 0,
+      }));
+
+      const stories = (json.media || []).filter(m => m.media_type === "STORY").map(m => ({
+        "ID допису": m.id,
+        "Тип допису": "STORY",
+        "Опис": m.caption || "",
+        "Час публікації": m.timestamp?.slice(0, 16).replace("T", " ") || "",
+        "Постійне посилання": m.permalink || "",
+        "Перегляди": m.impressions || 0,
+        "Охоплення": m.reach || 0,
+        "Відповіді": m.replies || 0,
+        "Навігація": m.taps_forward || 0,
+        "Відвідування профілю": 0,
+      }));
+
+      const daily = {
+        охоплення: json.daily?.reach || [],
+        перегляди: json.daily?.impressions || [],
+        відвідування: json.daily?.profile_views || [],
+        читачі: json.daily?.follower_count || [],
+        взаємодії: [],
+        кліки: json.daily?.website_clicks || [],
+      };
+
+      onLoad({ posts, stories, daily, account: json.account });
+    } catch (e) {
+      setSyncError("Помилка: " + e.message);
+    }
+    setSyncing(false);
+  }
 
   async function processFiles(files) {
     const result = { posts: [], stories: [], daily: {} };
@@ -361,31 +414,60 @@ function UploadScreen({ onLoad }) {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
+      <div style={{ maxWidth: 560, width: "100%", textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
         <h2 style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", margin: "0 0 8px" }}>
           Аналітика Instagram
         </h2>
-        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 32, lineHeight: 1.6 }}>
-          Завантаж CSV файли з Meta Business Suite.<br />
-          Підтримуються: Охоплення, Перегляди, Взаємодії,<br />
-          Відвідування, Читачі, та файли контенту.
+        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28, lineHeight: 1.6 }}>
+          Оберіть спосіб завантаження даних
         </p>
+
+        {/* API Sync */}
+        <div style={{
+          background: "linear-gradient(135deg, #1a0533, #0d1117)",
+          border: "1px solid #7c3aed44", borderRadius: 20, padding: "28px 32px", marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>⚡</div>
+          <div style={{ fontSize: 16, color: "var(--text)", fontWeight: 700, marginBottom: 6 }}>
+            Синхронізація з Instagram API
+          </div>
+          <div style={{ fontSize: 13, color: "#666", marginBottom: 20, lineHeight: 1.5 }}>
+            Автоматично підтягує останні 50 постів і метрики акаунту за 30 днів
+          </div>
+          <button onClick={syncFromAPI} disabled={syncing} style={{
+            background: syncing ? "#333" : "linear-gradient(135deg, #7c3aed, #e040fb)",
+            color: "#fff", border: "none", borderRadius: 12, padding: "12px 32px",
+            fontSize: 14, fontWeight: 700, cursor: syncing ? "wait" : "pointer",
+          }}>
+            {syncing ? "Завантажую..." : "✦ Підключити Instagram"}
+          </button>
+          {syncError && <div style={{ fontSize: 12, color: "#f87171", marginTop: 12 }}>{syncError}</div>}
+        </div>
+
+        {/* Divider */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "16px 0" }}>
+          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>або</span>
+          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+
+        {/* CSV Upload */}
         <label
           onDragOver={e => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={e => { e.preventDefault(); setDragging(false); processFiles([...e.dataTransfer.files]); }}
           style={{
             display: "block", border: `2px dashed ${dragging ? "#e040fb" : "var(--border)"}`,
-            borderRadius: 20, padding: "48px 32px", cursor: "pointer",
+            borderRadius: 20, padding: "32px", cursor: "pointer",
             background: dragging ? "#e040fb08" : "var(--card)",
             transition: "all .2s",
           }}>
           <input type="file" multiple accept=".csv" style={{ display: "none" }}
             onChange={e => processFiles([...e.target.files])} />
-          <div style={{ fontSize: 32, marginBottom: 12 }}>☁️</div>
-          <div style={{ fontSize: 15, color: "var(--text)", fontWeight: 600 }}>Перетягни файли або клікни</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>До 8 CSV файлів одночасно</div>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>☁️</div>
+          <div style={{ fontSize: 14, color: "var(--text)", fontWeight: 600 }}>Завантажити CSV вручну</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>з Meta Business Suite</div>
         </label>
       </div>
     </div>
