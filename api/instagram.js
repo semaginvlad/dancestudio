@@ -30,29 +30,25 @@ export default async function handler(req, res) {
       `/${ACCOUNT_ID}?fields=name,username,followers_count,media_count&access_token=${TOKEN}`
     );
 
-    // Fetch media with all available basic fields
+    // Витягуємо базові дані (вони доступні ЗАВЖДИ, навіть для старих постів)
     const mediaList = await ig(
       `/${ACCOUNT_ID}/media?fields=id,media_type,caption,thumbnail_url,media_url,permalink,timestamp,like_count,comments_count&limit=50&access_token=${TOKEN}`
     );
 
     const media = await Promise.all((mediaList.data || []).map(async (item) => {
-      const type = item.media_type; // VIDEO, IMAGE, CAROUSEL_ALBUM, STORY
+      const type = item.media_type;
 
       let ins = {};
 
+      // Спроба отримати глибокі Insights
       if (type === "STORY") {
         ins = await getInsights(item.id, "reach,impressions,exits,replies,taps_forward,taps_back");
       } else if (type === "VIDEO") {
-        // Try VIDEO metrics — Instagram uses video_views not plays for older videos
         ins = await getInsights(item.id, "impressions,reach,saved,shares,video_views,total_interactions");
-        // If that failed, try alternative
         if (ins._error) {
           ins = await getInsights(item.id, "impressions,reach,saved,shares");
         }
-      } else if (type === "CAROUSEL_ALBUM") {
-        ins = await getInsights(item.id, "impressions,reach,saved,shares,total_interactions");
       } else {
-        // IMAGE
         ins = await getInsights(item.id, "impressions,reach,saved,shares,total_interactions");
       }
 
@@ -63,10 +59,10 @@ export default async function handler(req, res) {
         thumbnail_url: item.thumbnail_url || item.media_url || "",
         permalink: item.permalink || "",
         timestamp: item.timestamp || "",
-        // Basic fields (may be 0 if hidden)
+        // Гарантовано забираємо лайки та коменти з базового запиту
         likes: item.like_count || 0,
         comments: item.comments_count || 0,
-        // Insights
+        // Insights (можуть бути 0 для старих постів)
         impressions: ins.impressions || 0,
         reach: ins.reach || 0,
         saved: ins.saved || 0,
@@ -81,7 +77,6 @@ export default async function handler(req, res) {
       };
     }));
 
-    // Daily account insights
     const until = Math.floor(Date.now() / 1000);
     const since = until - 30 * 86400;
     let daily = {};
@@ -100,19 +95,10 @@ export default async function handler(req, res) {
       daily._error = e.message;
     }
 
-    // Check first item's insights error for debugging
-    const firstError = media[0]?._insightsError;
-
     res.status(200).json({
       account,
       media,
-      daily,
-      debug: {
-        mediaCount: media.length,
-        firstInsightsError: firstError,
-        firstItemLikes: media[0]?.likes,
-        firstItemReach: media[0]?.reach,
-      }
+      daily
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
