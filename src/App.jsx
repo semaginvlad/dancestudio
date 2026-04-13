@@ -23,7 +23,10 @@ const theme = {
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
-const MONTHS = ["Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень", "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"];
+const MONTHS = [
+  "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень", 
+  "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"
+];
 
 const DIRECTIONS = [
   { id: "latina", name: "Latina Solo", color: "#FF453A" },
@@ -42,7 +45,10 @@ const PLAN_TYPES = [
   { id: "12pack", name: "Абонемент 12", trainings: 12, price: 1800 },
 ];
 
-const PAY_METHODS = [{ id: "card", name: "💳 Карта" }, { id: "cash", name: "💵 Готівка" }];
+const PAY_METHODS = [
+  { id: "card", name: "💳 Карта" }, 
+  { id: "cash", name: "💵 Готівка" }
+];
 
 const DEFAULT_GROUPS = [
   { id: "lat-base-am", name: "Latin base (ранкова)", directionId: "latina", schedule: [{ day: 2, time: "09:50" }, { day: 4, time: "09:50" }], trainerPct: 50 },
@@ -64,14 +70,27 @@ const toLocalISO = (dt) => {
   if (isNaN(dt.getTime())) return "2000-01-01"; 
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 };
-const addMonth = (d) => { const dt = new Date(d+"T12:00:00"); dt.setMonth(dt.getMonth()+1); return toLocalISO(dt); };
+
+const addMonth = (d) => { 
+  const dt = new Date(d+"T12:00:00"); 
+  dt.setMonth(dt.getMonth()+1); 
+  return toLocalISO(dt); 
+};
+
 const today = () => toLocalISO(new Date());
-const fmt = (d) => { if(!d || d === "2000-01-01") return "—"; const dt=new Date(d+"T12:00:00"); return dt.toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}); };
+
+const fmt = (d) => { 
+  if(!d || d === "2000-01-01") return "—"; 
+  const dt = new Date(d+"T12:00:00"); 
+  return dt.toLocaleDateString("uk-UA", {day:"2-digit", month:"2-digit"}); 
+};
+
 const daysLeft = (ed) => {
   if (!ed || ed === "2000-01-01") return 0;
-  return Math.ceil((new Date(ed+"T23:59:59")-new Date())/86400000);
+  return Math.ceil((new Date(ed+"T23:59:59") - new Date()) / 86400000);
 };
-const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 
 function getDisplayName(st) {
   if (!st) return "Невідомо";
@@ -120,13 +139,13 @@ function getPreviousTrainingDate(schedule, beforeDateStr) {
   return beforeDateStr;
 }
 
-function getNotifMsg(sub,student,group,direction){
+function getNotifMsg(sub, student, group, direction){
   if (!student) return "Привіт! Абонемент закінчився.";
   const fName = student.firstName || student.first_name || student.name?.split(" ")[1] || student.name?.split(" ")[0] || ""; 
-  const gName=group?.name||"";
-  const dName=direction?.name||"";
-  const tpl=student.messageTemplate||student.message_template;
-  if(tpl)return tpl.replace(/\{ім'я\}/g,fName).replace(/\{група\}/g,gName).replace(/\{напрямок\}/g,dName);
+  const gName = group?.name || "";
+  const dName = direction?.name || "";
+  const tpl = student.messageTemplate || student.message_template;
+  if(tpl) return tpl.replace(/\{ім'я\}/g, fName).replace(/\{група\}/g, gName).replace(/\{напрямок\}/g, dName);
   return `Привіт, ${fName}! 💃\nНагадуємо, що твій абонемент у групі ${gName} (${dName}) закінчився.\nЧекаємо на продовження! ❤️`;
 }
 
@@ -185,7 +204,12 @@ function Modal({open, onClose, title, children, wide}){
 }
 
 function Field({label, children}){
-  return(<div style={{marginBottom:18}}><label style={{display:"block", fontSize:12, color:theme.textMuted, marginBottom:8, fontWeight:600, letterSpacing:0.5}}>{label}</label>{children}</div>);
+  return(
+    <div style={{marginBottom:18}}>
+      <label style={{display:"block", fontSize:12, color:theme.textMuted, marginBottom:8, fontWeight:600, letterSpacing:0.5}}>{label}</label>
+      {children}
+    </div>
+  );
 }
 
 function Badge({color, children}){
@@ -281,25 +305,51 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   
   const toggleGrp=(gid)=>setSelGrps(p=>p.includes(gid)?p.filter(g=>g!==gid):[...p,gid]);
   
-  return(<div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
-      <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
-    </div>
-    <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
-    <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
-    <Field label="Групи / напрямки">
-      <div style={{display:"flex",flexDirection:"column",gap:12, background: theme.card, padding: 20, borderRadius: 20, border: `1px solid ${theme.border}`}}>
-        {DIRECTIONS.map(d=><div key={d.id}><div style={{fontSize:13,color:d.color,fontWeight:600,marginBottom:10}}>{d.name}</div><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{groups.filter(g=>g.directionId===d.id).map(g=><Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>)}</div></div>)}
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
+        <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
       </div>
-    </Field>
-    <Field label="Шаблон повідомлення"><textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 80, resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/><div style={{fontSize:12,color:theme.textLight,marginTop:8}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div></Field>
-    <Field label="Нотатки"><textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
-    <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
-      <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP,opacity:(firstName.trim() || lastName.trim())?1:.4}} onClick={()=>{if(!firstName.trim() && !lastName.trim())return;onDone({first_name:firstName.trim(),last_name:lastName.trim(),name:[lastName.trim(),firstName.trim()].filter(Boolean).join(' '),phone,telegram,notes,message_template:msgTpl,selectedGroups:selGrps})}}>{initial?"Зберегти зміни":"Додати ученицю"}</button>
+      <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
+      <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
+      <Field label="Групи / напрямки">
+        <div style={{display:"flex",flexDirection:"column",gap:12, background: theme.card, padding: 20, borderRadius: 20, border: `1px solid ${theme.border}`}}>
+          {DIRECTIONS.map(d=>(
+            <div key={d.id}>
+              <div style={{fontSize:13,color:d.color,fontWeight:600,marginBottom:10}}>{d.name}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {groups.filter(g=>g.directionId===d.id).map(g=>(
+                  <Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={()=>toggleGrp(g.id)}>{g.name}</Pill>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Field>
+      <Field label="Шаблон повідомлення">
+        <textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 80, resize:"vertical"}} value={msgTpl} onChange={e=>setMsgTpl(e.target.value)} placeholder="Привіт, {ім'я}! Абонемент у {група} ({напрямок}) закінчився..."/>
+        <div style={{fontSize:12,color:theme.textLight,marginTop:8}}>Змінні: {"{ім'я}"}, {"{група}"}, {"{напрямок}"}</div>
+      </Field>
+      <Field label="Нотатки">
+        <textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/>
+      </Field>
+      <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
+        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
+        <button type="button" style={{...btnP,opacity:(firstName.trim() || lastName.trim())?1:.4}} onClick={()=>{
+          if(!firstName.trim() && !lastName.trim()) return;
+          onDone({
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            name: [lastName.trim(), firstName.trim()].filter(Boolean).join(' '),
+            phone, telegram, notes, message_template: msgTpl, selectedGroups: selGrps
+          });
+        }}>
+          {initial ? "Зберегти зміни" : "Додати ученицю"}
+        </button>
+      </div>
     </div>
-  </div>);
+  );
 }
 
 function SubForm({initial, onDone, onCancel, students, groups, studentGrps}){
@@ -318,54 +368,110 @@ function SubForm({initial, onDone, onCancel, students, groups, studentGrps}){
   const endDate = addMonth(startDate);
   const basePrice = plan?.price||0;
   
-  useEffect(()=>{if(!initial){const p=PLAN_TYPES.find(p=>p.id===planType);if(p)setAmount(p.price-Math.round(p.price*discountPct/100))}},[planType,discountPct]);
+  useEffect(()=>{
+    if(!initial){
+      const p = PLAN_TYPES.find(p=>p.id===planType);
+      if(p) setAmount(p.price - Math.round(p.price * discountPct / 100));
+    }
+  },[planType, discountPct, initial]);
   
-  return(<div>
-    <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
-    <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
-    <Field label="Тип Абонемента"><div style={{display:"flex",gap:8,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}`}}>{PLAN_TYPES.map(p=><Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>)}</div></Field>
-    
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Field label="Початок (Клікніть для календаря)"><input style={{...inputSt, cursor: "pointer", height: "52px"}} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} /></Field>
-      <Field label="Кінець (Автоматично)">
-        <div style={{...inputSt, background: theme.bg, color: theme.textLight, cursor: "not-allowed", display: "flex", alignItems: "center", height: "52px"}}>
-          {fmt(endDate)}
+  return(
+    <div>
+      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+      <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="Тип Абонемента">
+        <div style={{display:"flex",gap:8,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}`}}>
+          {PLAN_TYPES.map(p=>(
+            <Pill key={p.id} active={planType===p.id} onClick={()=>setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>
+          ))}
         </div>
       </Field>
-    </div>
-
-    <div style={{background:theme.card,borderRadius:24,padding:"24px",marginBottom:16, border: `1px solid ${theme.border}`}}>
+      
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <Field label="Знижка (%)"><input style={inputSt} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/></Field>
-        <Field label="Знижка за рахунок"><div style={{display:"flex",gap:6, background:theme.input, padding:6, borderRadius:100}}><Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill><Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill><Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill></div></Field>
+        <Field label="Початок (Клікніть для календаря)">
+          <input style={{...inputSt, cursor: "pointer", height: "52px"}} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
+        </Field>
+        <Field label="Кінець (Автоматично)">
+          <div style={{...inputSt, background: theme.bg, color: theme.textLight, cursor: "not-allowed", display: "flex", alignItems: "center", height: "52px"}}>
+            {fmt(endDate)}
+          </div>
+        </Field>
       </div>
-      {discountPct>0&&<div style={{fontSize:14,color:theme.warning,marginTop:12, fontWeight: 500}}>Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:theme.success, fontSize: 18}}>До сплати: {basePrice-Math.round(basePrice*discountPct/100)}₴</strong></div>}
-    </div>
 
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Field label="Сумма до сплати (грн)"><input style={{...inputSt, color: theme.success, fontWeight: 700, fontSize: 20}} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/></Field>
-      <Field label="Метод оплати"><div style={{display:"flex",gap:8}}>{PAY_METHODS.map(m=><Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>)}</div></Field>
+      <div style={{background:theme.card,borderRadius:24,padding:"24px",marginBottom:16, border: `1px solid ${theme.border}`}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          <Field label="Знижка (%)">
+            <input style={inputSt} type="number" min={0} max={100} value={discountPct} onChange={e=>setDiscountPct(Math.min(100,Math.max(0,+e.target.value)))}/>
+          </Field>
+          <Field label="Знижка за рахунок">
+            <div style={{display:"flex",gap:6, background:theme.input, padding:6, borderRadius:100}}>
+              <Pill active={discountSource==="studio"} onClick={()=>setDiscountSource("studio")}>Студії</Pill>
+              <Pill active={discountSource==="trainer"} onClick={()=>setDiscountSource("trainer")}>Тренера</Pill>
+              <Pill active={discountSource==="split"} onClick={()=>setDiscountSource("split")}>50/50</Pill>
+            </div>
+          </Field>
+        </div>
+        {discountPct > 0 && (
+          <div style={{fontSize:14,color:theme.warning,marginTop:12, fontWeight: 500}}>
+            Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice*discountPct/100)}₴ → <strong style={{color:theme.success, fontSize: 18}}>До сплати: {basePrice-Math.round(basePrice*discountPct/100)}₴</strong>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <Field label="Сумма до сплати (грн)">
+          <input style={{...inputSt, color: theme.success, fontWeight: 700, fontSize: 20}} type="number" min={0} value={amount} onChange={e=>setAmount(+e.target.value)}/>
+        </Field>
+        <Field label="Метод оплати">
+          <div style={{display:"flex",gap:8}}>
+            {PAY_METHODS.map(m=>(
+              <Pill key={m.id} active={payMethod===m.id} onClick={()=>setPayMethod(m.id)}>{m.name}</Pill>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:12,color:theme.textMain,cursor:"pointer",fontSize:16, fontWeight:600, marginBottom:24, background: theme.input, padding: "20px 24px", borderRadius: 20}}>
+        <input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)} style={{width: 22, height: 22}}/> 
+        Оплачено
+      </label>
+      <Field label="Нотатки">
+        <textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/>
+      </Field>
+      <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
+        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
+        <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{
+          if(!studentId||!groupId) return;
+          onDone({
+            studentId, groupId, planType, startDate, endDate, 
+            totalTrainings:(plan?.trainings||8), usedTrainings:initial?.usedTrainings||0, 
+            amount, paid, payMethod, discountPct, discountSource, basePrice, notes, 
+            notificationSent:initial?.notificationSent||false
+          });
+        }}>
+          {initial ? "Зберегти зміни" : "Створити абонемент"}
+        </button>
+      </div>
     </div>
-    <label style={{display:"flex",alignItems:"center",gap:12,color:theme.textMain,cursor:"pointer",fontSize:16, fontWeight:600, marginBottom:24, background: theme.input, padding: "20px 24px", borderRadius: 20}}><input type="checkbox" checked={paid} onChange={e=>setPaid(e.target.checked)} style={{width: 22, height: 22}}/> Оплачено</label>
-    <Field label="Нотатки"><textarea style={{...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize:"vertical"}} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
-    <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
-      <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP,opacity:studentId&&groupId?1:.4}} onClick={()=>{if(!studentId||!groupId)return;onDone({studentId,groupId,planType,startDate,endDate,totalTrainings:(plan?.trainings||8),usedTrainings:initial?.usedTrainings||0,amount,paid,payMethod,discountPct,discountSource,basePrice,notes,notificationSent:initial?.notificationSent||false})}}>{initial?"Зберегти зміни":"Створити абонемент"}</button>
-    </div>
-  </div>);
+  );
 }
 
 function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
   const [studentId, setStudentId] = useState("");
   const [groupId, setGroupId] = useState("");
-  return (<div>
-    <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
-    <Field label="В яку групу чекає? *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
-    <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
-      <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-      <button type="button" style={{...btnP, background: theme.warning, opacity:studentId&&groupId?1:.4}} onClick={()=>{if(studentId&&groupId) onDone({studentId, groupId, dateAdded: today()})}}>Додати в резерв</button>
+  return (
+    <div>
+      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+      <Field label="В яку групу чекає? *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:24}}>
+        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
+        <button type="button" style={{...btnP, background: theme.warning, opacity:studentId&&groupId?1:.4}} onClick={()=>{
+          if(studentId && groupId) onDone({studentId, groupId, dateAdded: today()})
+        }}>
+          Додати в резерв
+        </button>
+      </div>
     </div>
-  </div>)
+  )
 }
 
 // ==========================================
@@ -955,7 +1061,7 @@ export default function App() {
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPass });
       if (error) throw error;
       setUser(data.user);
-      loadAllData();
+      window.location.reload(); 
     } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
   };
 
@@ -1066,12 +1172,24 @@ export default function App() {
     const getTopSpenders = (months) => {
       const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
       const totals = {};
-      subs.forEach(s => { if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); });
+      subs.forEach(s => { 
+        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
+          totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
+        }
+      });
       return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
     };
 
     const groupAttnCounts = {};
-    attn.forEach(a => { if (a.date >= last30DaysStr) { const stId = a.subId ? subToSt[a.subId] : null; if (stId) { if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; } } });
+    attn.forEach(a => { 
+      if (a.date && a.date >= last30DaysStr) { 
+        const stId = a.subId ? subToSt[a.subId] : null; 
+        if (stId) { 
+          if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; 
+          groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; 
+        } 
+      } 
+    });
     
     const bestAttenders = groups.map(g => { 
         const counts = groupAttnCounts[g.id] || {}; 
@@ -1088,7 +1206,7 @@ export default function App() {
             const s = Object.values(studentMap).find(x => x.name === a.guestName);
             if (s) stId = s.id;
         }
-        if (stId) {
+        if (stId && a.date) {
             if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
                 latestAttnByStudent[stId] = a.date;
             }
@@ -1104,7 +1222,7 @@ export default function App() {
       const dir = dirMap[gr?.directionId];
       if(!st || !gr) return;
       
-      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id).map(a => a.date).sort();
+      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id && a.date).map(a => a.date).sort();
       const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
 
       if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
@@ -1115,17 +1233,17 @@ export default function App() {
       
       if (trainingsLeft <= 1 || dl <= 3) {
           const lastDate = latestAttnByStudent[st.id] || sub.startDate;
-          if (!lastDate) return;
-          const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
-
-          if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
-              churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
+          if (lastDate && lastDate !== "2000-01-01") {
+            const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
+            if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
+                churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
+            }
           }
       }
     });
 
     const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
-    attn.filter(a => a.date >= last30DaysStr).forEach(a => {
+    attn.filter(a => a.date && a.date >= last30DaysStr).forEach(a => {
         const d = new Date(a.date + "T12:00:00").getDay();
         if (!isNaN(d)) dayCounts[d]++;
     });
