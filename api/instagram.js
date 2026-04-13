@@ -30,7 +30,6 @@ export default async function handler(req, res) {
       `/${ACCOUNT_ID}?fields=name,username,followers_count,media_count&access_token=${TOKEN}`
     );
 
-    // Витягуємо базові дані (вони доступні ЗАВЖДИ, навіть для старих постів)
     const mediaList = await ig(
       `/${ACCOUNT_ID}/media?fields=id,media_type,caption,thumbnail_url,media_url,permalink,timestamp,like_count,comments_count&limit=50&access_token=${TOKEN}`
     );
@@ -40,16 +39,16 @@ export default async function handler(req, res) {
 
       let ins = {};
 
-      // Спроба отримати глибокі Insights
       if (type === "STORY") {
-        ins = await getInsights(item.id, "reach,impressions,exits,replies,taps_forward,taps_back");
-      } else if (type === "VIDEO") {
-        ins = await getInsights(item.id, "impressions,reach,saved,shares,video_views,total_interactions");
-        if (ins._error) {
-          ins = await getInsights(item.id, "impressions,reach,saved,shares");
-        }
+        // Stories metrics
+        ins = await getInsights(item.id, "reach,exits,replies,taps_forward,taps_back");
       } else {
-        ins = await getInsights(item.id, "impressions,reach,saved,shares,total_interactions");
+        // All other types (VIDEO/REELS/IMAGE/CAROUSEL) — use v22+ compatible metrics
+        ins = await getInsights(item.id, "reach,saved,shares,likes,comments,total_interactions");
+        if (ins._error) {
+          // fallback — try minimal set
+          ins = await getInsights(item.id, "reach,saved,shares");
+        }
       }
 
       return {
@@ -59,15 +58,13 @@ export default async function handler(req, res) {
         thumbnail_url: item.thumbnail_url || item.media_url || "",
         permalink: item.permalink || "",
         timestamp: item.timestamp || "",
-        // Гарантовано забираємо лайки та коменти з базового запиту
-        likes: item.like_count || 0,
-        comments: item.comments_count || 0,
-        // Insights (можуть бути 0 для старих постів)
-        impressions: ins.impressions || 0,
+        likes: ins.likes ?? item.like_count ?? 0,
+        comments: ins.comments ?? item.comments_count ?? 0,
         reach: ins.reach || 0,
+        impressions: ins.reach || 0, // reach = best proxy for impressions now
         saved: ins.saved || 0,
         shares: ins.shares || 0,
-        plays: ins.video_views || ins.plays || 0,
+        plays: 0,
         exits: ins.exits || 0,
         replies: ins.replies || 0,
         taps_forward: ins.taps_forward || 0,
@@ -77,13 +74,14 @@ export default async function handler(req, res) {
       };
     }));
 
+    // Daily account insights
     const until = Math.floor(Date.now() / 1000);
     const since = until - 30 * 86400;
     let daily = {};
 
     try {
       const dailyIns = await ig(
-        `/${ACCOUNT_ID}/insights?metric=reach,impressions,profile_views,website_clicks&period=day&since=${since}&until=${until}&access_token=${TOKEN}`
+        `/${ACCOUNT_ID}/insights?metric=reach,profile_views,website_clicks&period=day&since=${since}&until=${until}&access_token=${TOKEN}`
       );
       (dailyIns.data || []).forEach(m => {
         daily[m.name] = (m.values || []).map(v => ({
@@ -92,14 +90,26 @@ export default async function handler(req, res) {
         }));
       });
     } catch (e) {
-      daily._error = e.message;
+      daily._accountError = e.message;
     }
 
-    res.status(200).json({
-      account,
-      media,
-      daily
-    });
+    // Follower count
+    try {
+      const fc = await ig(
+        `/${ACCOUNT_ID}/insights?metric=follower_count&period=day&since=${since}&until=${until}&access_token=${TOKEN}`
+      );
+      const fcData = fc.data?.find(m => m.name === "follower_count");
+      if (fcData) {
+        daily.follower_count = (fcData.values || []).map(v => ({
+          date: v.end_time?.slice(0, 10) || "",
+          value: v.value || 0,
+        }));
+      }
+    } catch (e) {
+      // follower_count might not be available
+    }
+
+    res.status(200).json({ account, media, daily });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
