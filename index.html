@@ -6,22 +6,74 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
-    <title>Dance Studio Manager</title>
-    
+    <title>Dance Studio</title>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { 
-        font-family: 'DM Sans', -apple-system, sans-serif; 
-        background: #0d1117; 
-        color: #c9d1d9; 
+      
+      /* 1. ЗАЛІЗОБЕТОННА ЗАБОРОНА СТОРІНЦІ "ЇЗДИТИ" */
+      html, body { 
+        background: #F8F9FD; 
+        color: #1F1F1F; 
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden !important; 
+        position: relative;
       }
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #0d1117; }
-      ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+      
+      #root {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden !important;
+      }
+
+      /* 2. МОБІЛЬНІ НАЛАШТУВАННЯ (працюють тільки на телефонах) */
+      @media (max-width: 768px) {
+        
+        /* ЗМЕНШУЄМО МАСШТАБ ДОДАТКУ НА 15% (робимо дрібнішим і акуратнішим) */
+        body {
+          zoom: 0.85; 
+        }
+
+        /* Захист від наїжджання на верхній "чубчик" та годинник iPhone */
+        header {
+          padding-top: max(40px, env(safe-area-inset-top)) !important;
+          flex-direction: column !important;
+          align-items: flex-start !important;
+          gap: 12px !important;
+        }
+        
+        /* Жорстко обмежуємо всі поля вводу і випадаючі списки, щоб не розтягували екран */
+        input, select, textarea {
+          min-width: 0 !important;
+          max-width: 100% !important;
+          width: 100% !important;
+          font-size: 16px !important; /* Це важливо, щоб Safari сам не зумив при кліку */
+        }
+
+        /* Змушуємо всі горизонтальні блоки з фільтрами ставати вертикально */
+        main > div > div[style*="display: flex"] {
+          flex-direction: column !important;
+          align-items: stretch !important;
+        }
+
+        /* Робимо колонку з іменами вужчою і дозволяємо перенос тексту на два рядки */
+        th:first-child, td:first-child {
+          min-width: 100px !important;
+          max-width: 110px !important;
+          white-space: pre-wrap !important;
+          padding: 10px 8px !important;
+          font-size: 12px !important;
+        }
+
+        /* Зменшуємо кнопки в меню навігації */
+        nav button {
+          padding: 10px 16px !important;
+          font-size: 13px !important;
+        }
+      }
     </style>
   </head>
   <body>
