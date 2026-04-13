@@ -127,16 +127,33 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ
+// 2. БРОНЕБІЙНИЙ ХУК ДЛЯ ЛОКАЛЬНОЇ ПАМ'ЯТІ
 // ==========================================
 function useStickyState(defaultValue, key) {
   const [value, setValue] = useState(() => {
-    const stickyValue = window.localStorage.getItem(key);
-    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+    try {
+      const stickyValue = window.localStorage.getItem(key);
+      if (stickyValue !== null) {
+        try {
+          return JSON.parse(stickyValue);
+        } catch (e) {
+          return stickyValue; // Якщо це звичайний рядок (старий формат)
+        }
+      }
+      return defaultValue;
+    } catch (err) {
+      return defaultValue;
+    }
   });
+
   useEffect(() => {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+      console.warn("Failed to save to localStorage", err);
+    }
   }, [key, value]);
+
   return [value, setValue];
 }
 
@@ -262,8 +279,8 @@ function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
   
   return(<div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
       <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="Олена"/></Field>
+      <Field label="Прізвище"><input style={inputSt} value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Петренко"/></Field>
     </div>
     <Field label="Телефон"><input style={inputSt} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+380..."/></Field>
     <Field label="Telegram"><input style={inputSt} value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="@username"/></Field>
@@ -371,7 +388,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   
   const baseStudsInGroup = Array.from(stIdsInGroup)
     .map(id => studentMap[id])
-    .filter(st => st && st.name)
+    .filter(st => st && getDisplayName(st) !== "Невідомо")
     .sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b), "uk"));
 
   const studsInGroup = useMemo(() => {
@@ -406,7 +423,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
-    } catch (e) { alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message); }
+    } catch (e) { console.warn("DB Error", e); }
     setManualName("");
   };
 
@@ -438,7 +455,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         isExhausted = true;
       }
 
-      // Обрізаємо кінець старого абонемента, якщо новий почався раніше
       const nextSub = stSubs[i+1];
       if (nextSub && nextSub.startDate <= effectiveEnd) {
          const d = new Date(nextSub.startDate + "T12:00:00");
@@ -534,7 +550,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         }
       }
     } catch (e) {
-      alert("❌ Помилка збереження в базу даних! Оновіть сторінку. Деталі: " + e.message);
+      console.warn("DB Error", e);
     }
   };
 
@@ -550,18 +566,15 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       for (let sub of affectedSubs) {
         originalEnds[sub.id] = sub.endDate; 
         const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-        if(db.updateSub) await db.updateSub(sub.id, { endDate: newEndStr });
+        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr }).catch(e=>console.warn(e));
         newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
       }
       
       const newCancel = { id: uid(), groupId: gid, date: cancelDate, originalEnds };
-      let insertedC = newCancel;
-      if (db.insertCancelled) {
-        insertedC = await db.insertCancelled(newCancel); 
-      }
-      setCancelled(p => [...p, insertedC]);
+      setCancelled(p => [...p, newCancel]);
       setSubs(newSubs);
-    } catch (e) { alert("❌ Помилка скасування: " + e.message); }
+      if (db.insertCancelled) db.insertCancelled(newCancel).catch(e=>console.warn(e)); 
+    } catch (e) { console.warn(e); }
   };
 
   const handleRestoreSpecificDay = async (restoreDate) => {
@@ -571,30 +584,27 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       if (targetCancel) {
         let newSubs = [...rawSubs];
         
-        // Зворотній відлік дати (математичне відновлення)
-        if (targetCancel.originalEnds) {
+        if (targetCancel.originalEnds && Object.keys(targetCancel.originalEnds).length > 0) {
           for (const [subId, origEnd] of Object.entries(targetCancel.originalEnds)) {
-             if(db.updateSub) await db.updateSub(subId, { endDate: origEnd });
+             if(db.updateSub) db.updateSub(subId, { endDate: origEnd }).catch(e=>console.warn(e));
              newSubs = newSubs.map(s => s.id === subId ? { ...s, endDate: origEnd } : s);
           }
         } else {
-          // Якщо originalEnds немає, робимо відкат назад через getPreviousTrainingDate
           const currentGroup = groups.find(g => g.id === gid);
           const expectedPushedDate = getNextTrainingDate(currentGroup?.schedule, restoreDate);
           const affectedSubs = newSubs.filter(s => s.groupId === gid && s.endDate === expectedPushedDate);
-          
           for (let sub of affectedSubs) {
              const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
-             if(db.updateSub) await db.updateSub(sub.id, { endDate: revertedEnd });
+             if(db.updateSub) db.updateSub(sub.id, { endDate: revertedEnd }).catch(e=>console.warn(e));
              newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: revertedEnd } : s);
           }
         }
         
         setSubs(newSubs);
         setCancelled(p => p.filter(c => c.id !== targetCancel.id));
-        if (db.deleteCancelled) await db.deleteCancelled(targetCancel.id);
+        if (db.deleteCancelled) db.deleteCancelled(targetCancel.id).catch(e=>console.warn(e));
       }
-    } catch (e) { alert("❌ Помилка відновлення: " + e.message); }
+    } catch (e) { console.warn(e); }
   };
 
   return (
@@ -803,8 +813,8 @@ function ProAnalyticsTab({ proAnalytics }) {
         </div>
 
         <div style={{...cardSt, border: `2px solid ${theme.danger}40`}}>
-          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>🚨 Ризик втрати (Не були &gt; 10 днів)</h3>
-          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>Закінчується абонемент (залишилось 0-1 заняття), і вони давно не були. Напиши їм!</div>
+          <h3 style={{margin: 0, fontSize: 18, color: theme.danger, marginBottom: 16}}>🚨 Ризик втрати клієнта (Не були &gt; 10 днів)</h3>
+          <div style={{fontSize: 13, color: theme.textMuted, marginBottom: 20}}>У цих дівчат закінчується абонемент (залишилось 0-1 заняття), і вони давно не були. Напиши їм!</div>
           <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
             {proAnalytics.churnRisk.length === 0 ? <div style={{color: theme.textLight}}>Усі ходять стабільно!</div> : 
               proAnalytics.churnRisk.map((item, i) => (
@@ -930,7 +940,7 @@ export default function App() {
        if(!grouped[n.group.id]) grouped[n.group.id] = { group: n.group, dir: n.direction, items: [] };
        grouped[n.group.id].items.push(n);
     });
-    return Object.values(grouped).sort((a,b) => a.group.name.localeCompare(b.group.name));
+    return Object.values(grouped).sort((a,b) => (a.group?.name||"").localeCompare(b.group?.name||""));
   }, [notifications]);
 
   const analytics = useMemo(()=>{
@@ -1010,7 +1020,6 @@ export default function App() {
         return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
     }).filter(x => x.student);
 
-    // ЗМІНЕНО: Тепер ми знаходимо ОСТАННІЙ ВІЗИТ УЧЕНИЦІ в принципі (в будь-яку групу)
     const latestAttnByStudent = {};
     attn.forEach(a => {
         let stId = null;
@@ -1124,7 +1133,6 @@ export default function App() {
     if (!dashModal) return null;
     const items = analytics.currMonthDetails[dashModal.type] || [];
     
-    // Активні абонементи (клік на цифру "Абонементів" вгорі)
     if (dashModal.type === 'activeSubs') {
       return (
         <Modal open={true} onClose={()=>setDashModal(null)} title={dashModal.title}>
@@ -1155,7 +1163,6 @@ export default function App() {
         {(!items || items.length === 0) ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
             {items.map((item, i) => {
-               // Для відвідувань є subId/guestName, для підписок - studentId
                const st = item.studentId ? studentMap[item.studentId] : (item.subId ? studentMap[subs.find(s=>s.id===item.subId)?.studentId] : Object.values(studentMap).find(s => s.name === item.guestName));
                const gr = groupMap[item.groupId];
                const dateStr = item.startDate || item.date;
@@ -1469,6 +1476,7 @@ export default function App() {
             </div>
           )
         })()}
+
       </main>
 
       {/* МОДАЛКИ */}
