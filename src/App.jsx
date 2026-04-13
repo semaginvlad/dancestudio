@@ -45,10 +45,7 @@ const PLAN_TYPES = [
   { id: "12pack", name: "Абонемент 12", trainings: 12, price: 1800 },
 ];
 
-const PAY_METHODS = [
-  { id: "card", name: "💳 Карта" }, 
-  { id: "cash", name: "💵 Готівка" }
-];
+const PAY_METHODS = [{ id: "card", name: "💳 Карта" }, { id: "cash", name: "💵 Готівка" }];
 
 const DEFAULT_GROUPS = [
   { id: "lat-base-am", name: "Latin base (ранкова)", directionId: "latina", schedule: [{ day: 2, time: "09:50" }, { day: 4, time: "09:50" }], trainerPct: 50 },
@@ -1029,7 +1026,6 @@ export default function App() {
     });
 
     return () => subscription?.unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadAllData = async () => {
@@ -1356,7 +1352,6 @@ export default function App() {
         {(!items || items.length === 0) ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
             {items.map((item, i) => {
-               // Безпечний пошук учня, щоб уникнути помилки
                let st = null;
                if (item?.studentId) {
                  st = studentMap[item.studentId];
