@@ -477,7 +477,7 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, studentGrps, cancelled, setCancelled, customOrders, setCustomOrders }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   
@@ -493,8 +493,12 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   ]);
   
   const guests = useMemo(() => {
-     return [...new Set(attn.filter(a => a.groupId === gid && a.guestName && !Object.values(studentMap).find(s => s.name === a.guestName)).map(a => a.guestName))]
-        .map(gName => ({ id: `guest_${gName}`, name: gName, isGuest: true }));
+     return [...new Set(attn.filter(a => {
+         if (a.groupId !== gid || !a.guestName) return false;
+         const gName = a.guestName.trim().toLowerCase();
+         return !Object.values(studentMap).some(s => getDisplayName(s).toLowerCase() === gName || (s.name || "").toLowerCase() === gName);
+     }).map(a => a.guestName.trim()))]
+     .map(gName => ({ id: `guest_${gName}`, name: gName, isGuest: true }));
   }, [attn, gid, studentMap]);
 
   const combinedStuds = useMemo(() => {
@@ -529,12 +533,42 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   };
 
   const addManual = async () => {
-    if (!manualName.trim()) return;
+    const name = manualName.trim();
+    if (!name) return;
     try {
+      let st = students.find(s => getDisplayName(s).toLowerCase() === name.toLowerCase() || (s.name || "").toLowerCase() === name.toLowerCase());
+      
+      if (!st) {
+        const nameParts = name.split(' ');
+        const newStPayload = { 
+          name: name, 
+          first_name: nameParts.slice(1).join(' ') || '', 
+          last_name: nameParts[0] || '' 
+        };
+        let createdSt = { id: uid(), ...newStPayload };
+        if (db.insertStudent) {
+          try {
+            const res = await db.insertStudent(newStPayload);
+            if (res) createdSt = res;
+          } catch(e) {}
+        }
+        setStudents(p => [...p, createdSt]);
+        st = createdSt;
+      }
+
+      if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
+        const newSg = { id: uid(), studentId: st.id, groupId: gid };
+        setStudentGrps(p => [...p, newSg]);
+        if (db.insertStudentGroup) {
+            try { await db.insertStudentGroup(newSg); } catch(e) {}
+        }
+      }
+
       const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
-      const a = { id: uid(), guestName: manualName.trim(), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
+      const a = { id: uid(), guestName: st.name, guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
+
     } catch (e) { console.warn("DB Error", e); }
     setManualName("");
   };
@@ -788,7 +822,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 </td>
                 {visibleDays.map((d, index) => {
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : a.guestName === st.name));
+                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
@@ -843,13 +877,14 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
               </tr>
             )})}
             
+            {/* Підрахунок присутніх */}
             <tr>
-              <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, zIndex: 1 }}>Всього присутніх:</td>
+              <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, borderBottom: `none`, zIndex: 1, whiteSpace: "nowrap" }}>Всього присутніх:</td>
               {visibleDays.map((d, index) => {
                 const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
                 const count = attn.filter(a => a.groupId === gid && a.date === d).length;
                 return (
-                  <td key={d} style={{ padding: "8px 2px", fontWeight: 800, color: count > 0 ? theme.primary : theme.textLight, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", background: theme.bg }}>
+                  <td key={d} style={{ padding: "8px 2px", fontWeight: 800, color: count > 0 ? theme.primary : theme.textLight, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `none`, background: theme.bg }}>
                     {count > 0 ? count : "-"}
                   </td>
                 )
@@ -859,7 +894,27 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         </table>
       </div>
 
-      <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
+        <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
+        <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ flex: 1, minWidth: 150 }}>
+            <input type="date" style={inputSt} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
+          </div>
+          <div style={{ flex: 2, minWidth: 200 }}>
+            <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
+          </div>
+          <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
+            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
+            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
+            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
+            <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
+          </div>
+          <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
+        </div>
+      </div>
+
+      {/* Вертикальний список абонементів */}
+      <div style={{ marginTop: 24, background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
         {studsInGroup.map((st, i) => {
            const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
            const activeSub = activeRanges.length > 0 ? subs.find(s => s.id === activeRanges[activeRanges.length-1].id) : null;
@@ -885,37 +940,18 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
            }
 
            return (
-              <div key={st.id} style={{ background: theme.card, borderRadius: 16, padding: "16px", border: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    <span style={{ color: theme.textLight, fontSize: 13, fontWeight: 700 }}>{i + 1}.</span>
-                    <div>
-                       <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 15 }}>{getDisplayName(st)}</div>
-                       {detailText && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>{detailText}</div>}
-                    </div>
+              <div key={st.id} style={{ padding: "16px 24px", borderBottom: i < studsInGroup.length - 1 ? `1px solid ${theme.bg}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", background: st.isGuest ? "#FFF9F0" : "transparent", flexWrap: "wrap", gap: 12 }}>
+                 <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    <span style={{ color: theme.textLight, fontSize: 14, fontWeight: 700, minWidth: 24 }}>{i + 1}.</span>
+                    <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 15 }}>{getDisplayName(st)}</div>
                  </div>
-                 <Badge color={badgeColor}>{badgeText}</Badge>
+                 <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                    {detailText && <span style={{ fontSize: 13, color: theme.textMuted, fontWeight: 500 }}>{detailText}</span>}
+                    <Badge color={badgeColor}>{badgeText}</Badge>
+                 </div>
               </div>
            );
         })}
-      </div>
-
-      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
-        <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
-        <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ flex: 1, minWidth: 150 }}>
-            <input type="date" style={inputSt} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
-          </div>
-          <div style={{ flex: 2, minWidth: 200 }}>
-            <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
-          </div>
-          <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
-            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
-            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
-            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
-            <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
-          </div>
-          <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
-        </div>
       </div>
     </div>
   );
@@ -1058,7 +1094,7 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v4");
+  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v5");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -1458,6 +1494,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+          {/* ФІКС: Кнопка абонемента тепер доступна і для тренерів */}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -1517,7 +1554,7 @@ export default function App() {
           </div>
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} studentGrps={studentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} />}
+        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} />}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         
@@ -1656,7 +1693,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* ФІКС 6: === СПОВІЩЕННЯ === (Більш компактні, кольорові, інформативні) */}
+        {/* === СПОВІЩЕННЯ === (Більш компактні та кольорові) */}
         {isAdmin && tab==="alerts" && <div>
           {alertsByGroup.length === 0 ? <div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div>
