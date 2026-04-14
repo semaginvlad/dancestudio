@@ -1029,7 +1029,6 @@ export default function App() {
     });
 
     return () => subscription?.unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadAllData = async () => {
@@ -1356,7 +1355,6 @@ export default function App() {
         {(!items || items.length === 0) ? <div style={{color: theme.textLight, textAlign: "center", padding: 40}}>Немає даних</div> : (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
             {items.map((item, i) => {
-               // Безпечний пошук учня, щоб уникнути помилки
                let st = null;
                if (item?.studentId) {
                  st = studentMap[item.studentId];
@@ -1409,7 +1407,8 @@ export default function App() {
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
-          {isAdmin && <><button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button><button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button></>}
+          {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+          <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
       </header>
