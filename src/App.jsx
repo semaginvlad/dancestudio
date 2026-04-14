@@ -487,36 +487,39 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
+  // ФІКС 2: Додаємо гостей (ті, хто введені вручну) до загального списку
   const stIdsInGroup = new Set([
     ...studentGrps.filter(sg => sg.groupId === gid).map(sg => sg.studentId),
-    ...subs.filter(s => s.groupId === gid).map(s => s.studentId),
-    ...attn.filter(a => a.groupId === gid && a.guestName).map(a => {
-      const matchedSt = Object.values(studentMap).find(s => s.name === a.guestName);
-      return matchedSt ? matchedSt.id : null;
-    }).filter(Boolean)
+    ...subs.filter(s => s.groupId === gid).map(s => s.studentId)
   ]);
   
-  const baseStudsInGroup = Array.from(stIdsInGroup)
-    .map(id => studentMap[id])
-    .filter(st => st && getDisplayName(st) !== "Невідомо")
-    .sort((a,b) => getDisplayName(a).localeCompare(getDisplayName(b), "uk"));
+  const guests = useMemo(() => {
+     return [...new Set(attn.filter(a => a.groupId === gid && a.guestName && !Object.values(studentMap).find(s => s.name === a.guestName)).map(a => a.guestName))]
+        .map(gName => ({ id: `guest_${gName}`, name: gName, isGuest: true }));
+  }, [attn, gid, studentMap]);
+
+  const combinedStuds = useMemo(() => {
+     const dbStuds = Array.from(stIdsInGroup).map(id => studentMap[id]).filter(st => st && getDisplayName(st) !== "Невідомо");
+     return [...dbStuds, ...guests];
+  }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
+    // ФІКС 1: Новий ключ збереження V4, щоб скинути старі баги кешу
     const orderArr = customOrders[gid] || [];
-    return [...baseStudsInGroup].sort((a, b) => {
+    return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
        const idxB = orderArr.indexOf(b.id);
        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
        if (idxA !== -1) return -1;
        if (idxB !== -1) return 1;
-       return 0; 
+       return getDisplayName(a).localeCompare(getDisplayName(b), "uk"); 
     });
-  }, [baseStudsInGroup, customOrders, gid]);
+  }, [combinedStuds, customOrders, gid]);
 
   const moveStudentDnD = (draggedId, targetId) => {
      if (draggedId === targetId) return;
-     const currentOrder = customOrders[gid] || baseStudsInGroup.map(s => s.id);
-     const completeOrder = [...new Set([...currentOrder, ...baseStudsInGroup.map(s => s.id)])].filter(id => baseStudsInGroup.some(s => s.id === id));
+     const currentOrder = customOrders[gid] || combinedStuds.map(s => s.id);
+     const completeOrder = [...new Set([...currentOrder, ...combinedStuds.map(s => s.id)])].filter(id => combinedStuds.some(s => s.id === id));
      const fromIdx = completeOrder.indexOf(draggedId);
      const toIdx = completeOrder.indexOf(targetId);
      if (fromIdx === -1 || toIdx === -1) return;
@@ -530,7 +533,8 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   const addManual = async () => {
     if (!manualName.trim()) return;
     try {
-      const a = { id: uid(), guestName: manualName.trim(), guestType: journalGuestMode, groupId: gid, date: manualDate, quantity: 1, entryType: journalGuestMode };
+      const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
+      const a = { id: uid(), guestName: manualName.trim(), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
     } catch (e) { console.warn("DB Error", e); }
@@ -550,6 +554,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   };
 
   const getStudentSubRanges = (studentId) => {
+    if (!studentId || String(studentId).startsWith("guest_")) return [];
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     const ranges = [];
     for (let i = 0; i < stSubs.length; i++) {
@@ -634,26 +639,27 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
       } else {
         const newId = uid();
-        const validSub = subs.find(s => 
+        const validSub = !student.isGuest ? subs.find(s => 
           s.studentId === student.id && 
           s.groupId === gid && 
           s.startDate <= cellDate && 
           s.endDate >= cellDate && 
           (s.usedTrainings || 0) < (s.totalTrainings || 1)
-        );
+        ) : null;
         
         if (validSub && journalGuestMode === "subscription") {
           const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
           setAttn(p => [...p, a]);
           if(db.insertAttendance) await db.insertAttendance(a);
         } else {
-          if (journalGuestMode === "subscription") {
+          if (journalGuestMode === "subscription" && !student.isGuest) {
             alert("Немає активного абонемента для цієї дати (або вичерпано ліміт занять). Буде позначено як Разове.");
             const a = { id: newId, guestName: student.name, guestType: "single", groupId: gid, date: cellDate, quantity: 1, entryType: "single" };
             setAttn(p => [...p, a]);
             if(db.insertAttendance) await db.insertAttendance(a);
           } else {
-            const a = { id: newId, guestName: student.name, guestType: journalGuestMode, groupId: gid, date: cellDate, quantity: 1, entryType: journalGuestMode };
+            const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
+            const a = { id: newId, guestName: student.name, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
             setAttn(p => [...p, a]);
             if(db.insertAttendance) await db.insertAttendance(a);
           }
@@ -726,13 +732,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
             <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handlePrevMonth}>{"<"}</button>
             <input style={{...inputSt, width: "auto", minWidth: 160, cursor: "pointer", textAlign: 'center'}} type="month" value={journalMonth} onChange={e=>setJournalMonth(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()}/>
             <button style={{...btnS, padding: "14px 18px", borderRadius: 12}} onClick={handleNextMonth}>{">"}</button>
-          </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, borderLeft: `2px solid ${theme.border}`}}>
-            <span style={{fontSize: 12, color: theme.textMuted, fontWeight: 700}}>КЛІК В ТАБЛИЦІ:</span>
-            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
-            <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
-            <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
-            <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
           </div>
         </div>
       </div>
@@ -845,8 +844,63 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 })}
               </tr>
             )})}
+            
+            {/* ФІКС 3: Рядок із загальною сумою присутніх */}
+            <tr>
+              <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, zIndex: 1 }}>Всього присутніх:</td>
+              {visibleDays.map((d, index) => {
+                const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
+                const count = attn.filter(a => a.groupId === gid && a.date === d).length;
+                return (
+                  <td key={d} style={{ padding: "8px 2px", fontWeight: 800, color: count > 0 ? theme.primary : theme.textLight, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", background: theme.bg }}>
+                    {count > 0 ? count : "-"}
+                  </td>
+                )
+              })}
+            </tr>
           </tbody>
         </table>
+      </div>
+
+      {/* ФІКС 5: Дублювання списку учениць під таблицею */}
+      <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+        {studsInGroup.map((st, i) => {
+           const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
+           const activeSub = activeRanges.length > 0 ? subs.find(s => s.id === activeRanges[activeRanges.length-1].id) : null;
+           
+           let badgeColor = theme.textLight;
+           let badgeText = "Без абонемента";
+           let detailText = "";
+           
+           if (activeSub) {
+              const planName = PLAN_TYPES.find(p => p.id === activeSub.planType)?.name || "Абонемент";
+              badgeColor = theme.success;
+              badgeText = planName;
+              detailText = `${activeSub.usedTrainings || 0} / ${activeSub.totalTrainings || 0} (до ${fmt(activeSub.endDate)})`;
+           } else if (st.isGuest) {
+              badgeColor = theme.warning;
+              badgeText = "Гість";
+           } else {
+              const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
+              if (recentAttn && recentAttn.entryType) {
+                 badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
+                 badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
+              }
+           }
+
+           return (
+              <div key={st.id} style={{ background: theme.card, borderRadius: 16, padding: "16px", border: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    <span style={{ color: theme.textLight, fontSize: 13, fontWeight: 700 }}>{i + 1}.</span>
+                    <div>
+                       <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 15 }}>{getDisplayName(st)}</div>
+                       {detailText && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>{detailText}</div>}
+                    </div>
+                 </div>
+                 <Badge color={badgeColor}>{badgeText}</Badge>
+              </div>
+           );
+        })}
       </div>
 
       <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
@@ -1008,7 +1062,7 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v3");
+  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v4");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -1407,6 +1461,7 @@ export default function App() {
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
+          {/* ФІКС 7: Кнопка Абонемент тепер завжди доступна */}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
@@ -1606,7 +1661,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* === СПОВІЩЕННЯ === */}
+        {/* ФІКС 6: === СПОВІЩЕННЯ === (Більш компактні, кольорові, інформативні) */}
         {isAdmin && tab==="alerts" && <div>
           {alertsByGroup.length === 0 ? <div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div>
@@ -1616,25 +1671,32 @@ export default function App() {
                   <h3 style={{margin: 0, color: theme.secondary, fontSize: 18}}>{g.group.name}</h3>
                   <Badge color={g.dir?.color || theme.primary}>{g.dir?.name}</Badge>
                 </div>
-                <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 16}}>
+                <div style={{display: "flex", flexDirection: "column", gap: 10}}>
                   {g.items.map(n => {
                     const msg=getNotifMsg(null,n.student,n.group,n.direction);
                     const tgUser=n.student.telegram?.replace("@","");
                     const tgLink=tgUser?`https://t.me/${tgUser}?text=${encodeURIComponent(msg)}`:null;
+                    
+                    const isExpired = n.type === "expired";
+                    const rowBg = isExpired ? `${theme.danger}10` : `${theme.warning}10`;
+                    const borderColor = isExpired ? theme.danger : theme.warning;
+                    const icon = isExpired ? "🔴" : "⏳";
+
                     return (
-                      <div key={n.subId} style={{...cardSt, opacity:n.notified?.6:1, borderLeft: `4px solid ${STATUS_COLORS[n.status]}`}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:16}}>
+                      <div key={n.subId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: rowBg, borderLeft: `4px solid ${borderColor}`, borderRadius: 12, padding: "12px 16px", flexWrap: "wrap", gap: 12, opacity: n.notified ? 0.6 : 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <span style={{ fontSize: 18 }}>{icon}</span>
                           <div>
-                            <div style={{display: "flex", gap: 12, alignItems: "center", marginBottom: 8}}>
-                              <span style={{color:theme.textMain,fontWeight:800, fontSize: 18}}>{getDisplayName(n.student)}</span> 
-                              <Badge color={n.type==="expired"?theme.danger:theme.warning}>{n.message}</Badge>
-                              {n.notified&&<Badge color={theme.textLight}>✅ Відправлено</Badge>}
+                            <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 15 }}>
+                              {getDisplayName(n.student)}
+                              {n.notified && <span style={{ marginLeft: 8, fontSize: 11, background: "#fff", padding: "2px 6px", borderRadius: 4, color: theme.textLight }}>✅ Відправлено</span>}
                             </div>
-                            <div style={{color:theme.textMuted,fontSize:14, fontWeight: 500}}>{n.student.phone || 'Немає номеру'}</div>
+                            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>{n.student.phone || 'Немає номеру'}</div>
                           </div>
-                          <div style={{display:"flex",gap:10, flexWrap: 'wrap', justifyContent: 'flex-end'}}>
-                            {tgLink&&<a href={tgLink} target="_blank" rel="noopener noreferrer" onClick={()=>{}} style={{padding:"10px 16px",borderRadius:12,background:`${theme.primary}15`,color:theme.primary,fontSize:13,fontWeight: 700, textDecoration:"none"}}>💬 Написати</a>}
-                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ fontWeight: 800, color: borderColor, fontSize: 14 }}>{n.message}</div>
+                          {tgLink && <a href={tgLink} target="_blank" rel="noopener noreferrer" style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", color: theme.primary, fontSize: 13, fontWeight: 700, textDecoration: "none", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>💬 Написати</a>}
                         </div>
                       </div>
                     )
@@ -1729,7 +1791,7 @@ export default function App() {
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d);setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
       <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Оформити абонемент"><SubForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}]);}setModal(null);}catch(e){console.warn(e);setWaitlist(p=>[...p,{...d, id:uid()}]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
     </div>
   );
