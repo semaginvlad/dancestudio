@@ -525,7 +525,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
   });
 }, [combinedStuds, customOrders, gid]);
-  }, [combinedStuds, customOrders, gid]);
+
 // ФІКС ПОРЯДКУ 1: окрема функція, яка зберігає порядок і в пам'ять, і в Supabase
 const updateOrder = async (newOrder) => {
   setCustomOrders(prev => ({ ...prev, [gid]: newOrder }));
