@@ -528,12 +528,18 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
 // ФІКС ПОРЯДКУ 1: окрема функція, яка зберігає порядок і в пам'ять, і в Supabase
 const updateOrder = async (newOrder) => {
-  setCustomOrders(prev => ({ ...prev, [gid]: newOrder }));
+  const visibleIds = combinedStuds.map(s => s.id);
+
+  const normalizedOrder = [
+    ...new Set([...newOrder, ...visibleIds])
+  ].filter(id => visibleIds.includes(id));
+
+  setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
   const { error } = await supabase
     .from('custom_orders')
     .upsert(
-      { group_id: gid, student_ids: newOrder },
+      { group_id: gid, student_ids: normalizedOrder },
       { onConflict: 'group_id' }
     );
 
