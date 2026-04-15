@@ -508,16 +508,23 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      return [...dbStuds, ...guests];
   }, [stIdsInGroup, studentMap, guests]);
 
-  const studsInGroup = useMemo(() => {
-    const orderArr = customOrders[gid] || [];
-    return [...combinedStuds].sort((a, b) => {
-       const idxA = orderArr.indexOf(a.id);
-       const idxB = orderArr.indexOf(b.id);
-       if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-       if (idxA !== -1) return -1;
-       if (idxB !== -1) return 1;
-       return getDisplayName(a).localeCompare(getDisplayName(b), "uk"); 
-    });
+ const studsInGroup = useMemo(() => {
+  const orderArr = customOrders[gid] || [];
+  const visibleIds = combinedStuds.map(s => s.id);
+
+  const normalizedOrder = orderArr.filter(id => visibleIds.includes(id));
+
+  return [...combinedStuds].sort((a, b) => {
+    const idxA = normalizedOrder.indexOf(a.id);
+    const idxB = normalizedOrder.indexOf(b.id);
+
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+
+    return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
+  });
+}, [combinedStuds, customOrders, gid]);
   }, [combinedStuds, customOrders, gid]);
 // ФІКС ПОРЯДКУ 1: окрема функція, яка зберігає порядок і в пам'ять, і в Supabase
 const updateOrder = async (newOrder) => {
@@ -536,33 +543,35 @@ const updateOrder = async (newOrder) => {
 };
   // ФІКС ПОРЯДКУ 2: Ручне переміщення стрілочками
   const moveManual = (studentId, dir) => {
-    const currentOrder = customOrders[gid] || combinedStuds.map(s => s.id);
-    const completeOrder = [...new Set([...currentOrder, ...combinedStuds.map(s => s.id)])].filter(id => combinedStuds.some(s => s.id === id));
-    const idx = completeOrder.indexOf(studentId);
+    const currentOrder = studsInGroup.map(s => s.id);
+    const idx = currentOrder.indexOf(studentId);
     if (idx === -1) return;
-    
-    const newOrder = [...completeOrder];
+
+    const newOrder = [...currentOrder];
+
     if (dir === -1 && idx > 0) { // Вгору
-        [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-        updateOrder(newOrder);
-    } else if (dir === 1 && idx < completeOrder.length - 1) { // Вниз
-        [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
-        updateOrder(newOrder);
+      [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+      updateOrder(newOrder);
+    } else if (dir === 1 && idx < newOrder.length - 1) { // Вниз
+      [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
+      updateOrder(newOrder);
     }
   };
 
   const moveStudentDnD = (draggedId, targetId) => {
-     if (draggedId === targetId) return;
-     const currentOrder = customOrders[gid] || combinedStuds.map(s => s.id);
-     const completeOrder = [...new Set([...currentOrder, ...combinedStuds.map(s => s.id)])].filter(id => combinedStuds.some(s => s.id === id));
-     const fromIdx = completeOrder.indexOf(draggedId);
-     const toIdx = completeOrder.indexOf(targetId);
-     if (fromIdx === -1 || toIdx === -1) return;
-     
-     const newOrder = [...completeOrder];
-     const [movedItem] = newOrder.splice(fromIdx, 1);
-     newOrder.splice(toIdx, 0, movedItem);
-     updateOrder(newOrder);
+    if (draggedId === targetId) return;
+
+    const currentOrder = studsInGroup.map(s => s.id);
+    const fromIdx = currentOrder.indexOf(draggedId);
+    const toIdx = currentOrder.indexOf(targetId);
+
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const newOrder = [...currentOrder];
+    const [movedItem] = newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, movedItem);
+
+    updateOrder(newOrder);
   };
 
   const addManual = async () => {
