@@ -19,7 +19,8 @@ const theme = {
   success: "#34C759",
   warning: "#FF9500",
   danger: "#FF453A",
-  exhausted: "#A8B1CE"
+  exhausted: "#A8B1CE",
+  archive: "#E2E8F0"
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -246,7 +247,7 @@ function StudentSelectWithSearch({ students, value, onChange, studentGrps, group
     filtered.forEach(s => {
        const sg = studentGrps.find(x => x.studentId === s.id);
        const g = sg ? groups.find(x => x.id === sg.groupId) : null;
-       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи";
+       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи / Архів";
        if(!res[dirName]) res[dirName] = [];
        res[dirName].push(s);
     });
@@ -475,9 +476,9 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 }
 
 // ==========================================
-// 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP)
+// 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP + АНАЛІТИКА)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub, warnedStudents, setWarnedStudents }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   const [actionMenuSt, setActionMenuSt] = useState(null);
@@ -508,6 +509,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
+    // ВІЧНИЙ КЛЮЧ: Порядок більше ніколи не зіб'ється
     const orderArr = customOrders[gid] || [];
     return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
@@ -574,17 +576,26 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     setManualName("");
   };
 
+  // ФІКС АРХІВУВАННЯ: Прибираємо з журналу групи, але залишаємо в базі (вкладка Учениці)
   const removeStudentFromJournal = async (st) => {
-    if(!confirm(`Видалити історію та прибрати ${getDisplayName(st)} з цього журналу?`)) return;
+    if(!confirm(`Відкріпити ${getDisplayName(st)} від цієї групи? Її історія залишиться, але вона не відображатиметься в журналі.`)) return;
     
-    const toDelAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || (a.subId && subs.find(s=>s.id===a.subId)?.studentId === st.id)));
-    const toDelIds = toDelAttn.map(a => a.id);
-    
-    setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
-    if(db.deleteAttendance) toDelIds.forEach(id => db.deleteAttendance(id).catch(e=>console.log(e)));
-    
+    // Видаляємо всі відмітки в цій групі для цієї учениці (якщо треба, щоб вона не світилась в минулих місяцях. Якщо треба тільки відкріпити - просто прибираємо з studentGrps)
     if(!st.isGuest) {
        setStudentGrps(p => p.filter(sg => !(sg.studentId === st.id && sg.groupId === gid)));
+       // Закриваємо активний абонемент в цій групі, якщо є
+       const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
+       if (activeSub) {
+          const newEnd = today();
+          if(db.updateSub) db.updateSub(activeSub.id, { endDate: newEnd }).catch(e=>console.warn(e));
+          setSubs(p => p.map(s => s.id === activeSub.id ? { ...s, endDate: newEnd } : s));
+       }
+    } else {
+       // Якщо це гість (без профілю), просто стираємо його відмітки в цій групі
+       const toDelAttn = attn.filter(a => a.groupId === gid && a.guestName === st.name);
+       const toDelIds = toDelAttn.map(a => a.id);
+       setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
+       if(db.deleteAttendance) toDelIds.forEach(id => db.deleteAttendance(id).catch(e=>console.log(e)));
     }
     setActionMenuSt(null);
   };
@@ -700,7 +711,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           setAttn(p => [...p, a]);
           if(db.insertAttendance) await db.insertAttendance(a);
         } else {
-          // Якщо немає абонемента, автоматично ставимо "Разове" (можна змінити на Пробне вручну)
+          // Автоматично ставимо "Разове", якщо немає абонемента
           const gType = "single";
           const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
           setAttn(p => [...p, a]);
@@ -765,6 +776,51 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     } catch (e) { console.warn("Restore Error:", e); }
   };
 
+  // --- ЛОГІКА АНАЛІТИКИ ГРУПИ (Права колонка) ---
+  const groupAnalytics = useMemo(() => {
+     const monthAttn = attn.filter(a => a.groupId === gid && a.date && a.date.startsWith(journalMonth));
+     const attnCounts = {};
+     const dateCounts = {};
+     
+     monthAttn.forEach(a => {
+        const stId = a.subId ? subs.find(s=>s.id===a.subId)?.studentId : a.guestName;
+        if (stId) attnCounts[stId] = (attnCounts[stId] || 0) + 1;
+        dateCounts[a.date] = (dateCounts[a.date] || 0) + 1;
+     });
+     
+     const bestAttenderId = Object.keys(attnCounts).sort((a,b) => attnCounts[b] - attnCounts[a])[0];
+     const bestAttenderName = bestAttenderId ? (studentMap[bestAttenderId] ? getDisplayName(studentMap[bestAttenderId]) : bestAttenderId) : "Немає";
+     const bestAttenderCount = bestAttenderId ? attnCounts[bestAttenderId] : 0;
+
+     const bestDate = Object.keys(dateCounts).sort((a,b) => dateCounts[b] - dateCounts[a])[0];
+     const bestDateCount = bestDate ? dateCounts[bestDate] : 0;
+
+     const spendCounts = {};
+     subs.filter(s => s.groupId === gid && s.paid).forEach(s => {
+        spendCounts[s.studentId] = (spendCounts[s.studentId] || 0) + (s.amount || 0);
+     });
+     const topSpenderId = Object.keys(spendCounts).sort((a,b) => spendCounts[b] - spendCounts[a])[0];
+     const topSpenderName = topSpenderId ? getDisplayName(studentMap[topSpenderId]) : "Немає";
+     const topSpenderAmount = topSpenderId ? spendCounts[topSpenderId] : 0;
+
+     const churn = [];
+     const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
+     const activeInGroup = subs.filter(s => s.groupId === gid && getSubStatus(s) !== "expired");
+     
+     activeInGroup.forEach(sub => {
+        const st = studentMap[sub.studentId];
+        if(!st) return;
+        const stAttns = attn.filter(a => a.groupId === gid && a.subId === sub.id).map(a => a.date).sort();
+        const lastDate = stAttns.length > 0 ? stAttns[stAttns.length - 1] : sub.startDate;
+        if (lastDate && lastDate !== "2000-01-01") {
+           const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
+           if (daysSinceLast >= 10) churn.push({ student: st, sub, daysSinceLast });
+        }
+     });
+
+     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length };
+  }, [attn, subs, gid, journalMonth, studentMap]);
+
   return (
     <div style={{ maxWidth: "100%" }}>
       {actionMenuSt && (
@@ -775,7 +831,8 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 {!actionMenuSt.isGuest && (
                    <button style={btnP} onClick={() => { onActionAddSub(actionMenuSt.id, gid); setActionMenuSt(null); }}>💳 Оформити абонемент</button>
                 )}
-                <button style={{...btnP, background: theme.danger}} onClick={() => removeStudentFromJournal(actionMenuSt)}>🗑 Прибрати з журналу</button>
+                {/* Кнопка Відкріпити (Архівувати) */}
+                <button style={{...btnP, background: theme.warning}} onClick={() => removeStudentFromJournal(actionMenuSt)}>Відкріпити від групи (В Архів)</button>
                 <button style={btnS} onClick={()=>setActionMenuSt(null)}>Скасувати</button>
              </div>
           </div>
@@ -924,63 +981,121 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       </div>
 
       {/* Форма додавання одразу під таблицею */}
-      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
-        <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
+      <div style={{ background: theme.card, borderRadius: 24, padding: "20px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
         <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ flex: 1, minWidth: 150 }}>
-            <input type="date" style={inputSt} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
+          <div style={{ fontWeight: 700, color: theme.textMain, marginRight: 8, fontSize: 14 }}>+ Додати в журнал</div>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <input type="date" style={{...inputSt, padding: "12px 16px"}} value={manualDate} onChange={e=>setManualDate(e.target.value)} onClick={(e) => e.target.showPicker && e.target.showPicker()} />
           </div>
           <div style={{ flex: 2, minWidth: 200 }}>
-            <input style={inputSt} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
+            <input style={{...inputSt, padding: "12px 16px"}} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
           </div>
           <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
             <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
             <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
             <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
           </div>
-          <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
+          <button style={{...btnP, borderRadius: 100, background: theme.primary, padding: "12px 24px"}} onClick={addManual}>Відмітити</button>
         </div>
       </div>
 
-      {/* Вертикальний список абонементів */}
-      <div style={{ marginTop: 24, background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
-        {studsInGroup.map((st, i) => {
-           const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
-           const activeSub = activeRanges.length > 0 ? subs.find(s => s.id === activeRanges[activeRanges.length-1].id) : null;
-           
-           let badgeColor = theme.textLight;
-           let badgeText = "Без абонемента";
-           let detailText = "";
-           
-           if (activeSub) {
-              const planName = PLAN_TYPES.find(p => p.id === activeSub.planType)?.name || "Абонемент";
-              badgeColor = theme.success;
-              badgeText = planName;
-              detailText = `${activeSub.usedTrainings || 0} / ${activeSub.totalTrainings || 0} (до ${fmt(activeSub.endDate)})`;
-           } else if (st.isGuest) {
-              badgeColor = theme.warning;
-              badgeText = "Гість";
-           } else {
-              const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
-              if (recentAttn && recentAttn.entryType) {
-                 badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
-                 badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
-              }
-           }
+      {/* НОВИЙ БЛОК: Списки (зліва) + Аналітика групи (справа) */}
+      <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap', marginTop: 24 }}>
+        
+        {/* Вертикальний список абонементів (ВУЗЬКА ЛІВА КОЛОНКА) */}
+        <div style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+          <div style={{ padding: "16px 24px", background: theme.bg, fontWeight: 800, color: theme.secondary, borderBottom: `1px solid ${theme.border}` }}>Стан абонементів</div>
+          {studsInGroup.map((st, i) => {
+             const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
+             const activeSub = activeRanges.length > 0 ? subs.find(s => s.id === activeRanges[activeRanges.length-1].id) : null;
+             
+             let badgeColor = theme.textLight;
+             let badgeText = "Без абонемента";
+             let detailText = "";
+             
+             if (activeSub) {
+                const planName = PLAN_TYPES.find(p => p.id === activeSub.planType)?.name || "Абонемент";
+                badgeColor = theme.success;
+                badgeText = planName;
+                detailText = `${activeSub.usedTrainings || 0} / ${activeSub.totalTrainings || 0} (до ${fmt(activeSub.endDate)})`;
+             } else if (st.isGuest) {
+                badgeColor = theme.warning;
+                badgeText = "Гість";
+             } else {
+                const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
+                if (recentAttn && recentAttn.entryType) {
+                   badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
+                   badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
+                }
+             }
 
-           return (
-              <div key={st.id} style={{ padding: "16px 24px", borderBottom: i < studsInGroup.length - 1 ? `1px solid ${theme.bg}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", background: st.isGuest ? "#FFF9F0" : "transparent", flexWrap: "wrap", gap: 12 }}>
-                 <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                    <span style={{ color: theme.textLight, fontSize: 14, fontWeight: 700, minWidth: 24 }}>{i + 1}.</span>
-                    <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 15 }}>{getDisplayName(st)}</div>
-                 </div>
-                 <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                    {detailText && <span style={{ fontSize: 13, color: theme.textMuted, fontWeight: 500 }}>{detailText}</span>}
-                    <Badge color={badgeColor}>{badgeText}</Badge>
-                 </div>
-              </div>
-           );
-        })}
+             return (
+                <div key={st.id} style={{ padding: "16px 20px", borderBottom: i < studsInGroup.length - 1 ? `1px solid ${theme.bg}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", background: st.isGuest ? "#FFF9F0" : "transparent", flexWrap: "wrap", gap: 12 }}>
+                   <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <span style={{ color: theme.textLight, fontSize: 13, fontWeight: 700, minWidth: 20 }}>{i + 1}.</span>
+                      <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 14 }}>{getDisplayName(st)}</div>
+                   </div>
+                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      <Badge color={badgeColor}>{badgeText}</Badge>
+                      {detailText && <span style={{ fontSize: 11, color: theme.textMuted, fontWeight: 500 }}>{detailText}</span>}
+                   </div>
+                </div>
+             );
+          })}
+        </div>
+
+        {/* АНАЛІТИКА ГРУПИ (ПРАВА КОЛОНКА) */}
+        <div style={{ flex: "2 1 500px" }}>
+           <h3 style={{marginTop: 0, marginBottom: 16, fontSize: 20, fontWeight: 800, color: theme.secondary}}>📊 Аналітика групи (За обраний місяць)</h3>
+           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+               <div style={{...cardSt, padding: 20}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Найкраща відвідуваність</div>
+                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestAttenderName}</div>
+                 <div style={{fontSize: 13, color: theme.primary, fontWeight: 600, marginTop: 4}}>{groupAnalytics.bestAttenderCount} занять</div>
+               </div>
+               <div style={{...cardSt, padding: 20}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Топ покупець абонементів</div>
+                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.topSpenderName}</div>
+                 <div style={{fontSize: 13, color: theme.success, fontWeight: 600, marginTop: 4}}>{groupAnalytics.topSpenderAmount} ₴</div>
+               </div>
+               <div style={{...cardSt, padding: 20}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Піковий день</div>
+                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestDate ? fmt(groupAnalytics.bestDate) : "—"}</div>
+                 <div style={{fontSize: 13, color: theme.warning, fontWeight: 600, marginTop: 4}}>{groupAnalytics.bestDateCount} присутніх</div>
+               </div>
+               <div style={{...cardSt, padding: 20}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Всього відвідувань</div>
+                 <div style={{fontSize: 24, fontWeight: 800, color: theme.primary, marginTop: 4}}>{groupAnalytics.totalMonthAttn}</div>
+               </div>
+           </div>
+
+           {/* БЛОК РИЗИКІВ */}
+           {groupAnalytics.churn.length > 0 && (
+             <div style={{marginTop: 24, background: theme.card, borderRadius: 24, padding: 24, border: `2px solid ${theme.danger}40`}}>
+                <h4 style={{margin: "0 0 16px 0", color: theme.danger, fontSize: 16}}>🚨 Давно не були, але мають абонемент</h4>
+                <div style={{display: "flex", flexDirection: "column", gap: 12}}>
+                  {groupAnalytics.churn.map((item, i) => {
+                    const tgUser = item.student.telegram?.replace("@","");
+                    const tgLink = tgUser ? `https://t.me/${tgUser}` : null;
+                    return (
+                      <div key={i} style={{display: "flex", justifyContent: "space-between", alignItems: "center", background: theme.bg, padding: 12, borderRadius: 12, opacity: warnedStudents[item.sub.id] ? 0.6 : 1}}>
+                        <div>
+                          <div style={{fontWeight: 700, color: theme.textMain, fontSize: 14}}>{getDisplayName(item.student)}</div>
+                          <div style={{fontSize: 12, color: theme.danger, marginTop: 4, fontWeight: 600}}>Не була {item.daysSinceLast} днів</div>
+                        </div>
+                        <div style={{display: "flex", gap: 8}}>
+                          {tgLink && <a href={tgLink} target="_blank" rel="noopener noreferrer" style={{padding: "8px 12px", background: "#fff", color: theme.primary, borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none"}}>Написати</a>}
+                          <button onClick={() => setWarnedStudents(p => ({...p, [item.sub.id]: !p[item.sub.id]}))} style={{padding: "8px 12px", background: warnedStudents[item.sub.id] ? theme.success : theme.input, color: warnedStudents[item.sub.id] ? "#fff" : theme.textMuted, border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer"}}>
+                            {warnedStudents[item.sub.id] ? "✅ Сповіщено" : "Сповістити"}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+             </div>
+           )}
+        </div>
       </div>
     </div>
   );
@@ -1125,7 +1240,10 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v6");
+  // ВІЧНИЙ КЛЮЧ
+  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_permanent");
+  // КЛЮЧ ДЛЯ РИЗИКІВ
+  const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -1282,93 +1400,6 @@ export default function App() {
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
 
-  const proAnalytics = useMemo(() => {
-    const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
-    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
-    
-    const getTopSpenders = (months) => {
-      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
-      const totals = {};
-      subs.forEach(s => { 
-        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
-          totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
-        }
-      });
-      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
-    };
-
-    const groupAttnCounts = {};
-    attn.forEach(a => { 
-      if (a.date && a.date >= last30DaysStr) { 
-        const stId = a.subId ? subToSt[a.subId] : null; 
-        if (stId) { 
-          if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; 
-          groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; 
-        } 
-      } 
-    });
-    
-    const bestAttenders = groups.map(g => { 
-        const counts = groupAttnCounts[g.id] || {}; 
-        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
-        const dir = dirMap[g.directionId];
-        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
-    }).filter(x => x.student);
-
-    const latestAttnByStudent = {};
-    attn.forEach(a => {
-        let stId = null;
-        if (a.subId) stId = subToSt[a.subId];
-        else if (a.guestName) {
-            const s = Object.values(studentMap).find(x => x.name === a.guestName);
-            if (s) stId = s.id;
-        }
-        if (stId && a.date) {
-            if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
-                latestAttnByStudent[stId] = a.date;
-            }
-        }
-    });
-
-    const upsellCandidates = [];
-    const churnRisk = [];
-    
-    activeSubs.forEach(sub => {
-      const st = studentMap[sub.studentId];
-      const gr = groupMap[sub.groupId];
-      const dir = dirMap[gr?.directionId];
-      if(!st || !gr) return;
-      
-      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id && a.date).map(a => a.date).sort();
-      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
-
-      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
-      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
-      
-      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
-      const dl = daysLeft(sub.endDate);
-      
-      if (trainingsLeft <= 1 || dl <= 3) {
-          const lastDate = latestAttnByStudent[st.id] || sub.startDate;
-          if (lastDate && lastDate !== "2000-01-01") {
-            const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
-            if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
-                churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
-            }
-          }
-      }
-    });
-
-    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
-    attn.filter(a => a.date && a.date >= last30DaysStr).forEach(a => {
-        const d = new Date(a.date + "T12:00:00").getDay();
-        if (!isNaN(d)) dayCounts[d]++;
-    });
-    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
-
-    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
-  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
-
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
     if(stFilterDir !== "all") r = r.filter(st => studentGrps.some(sg => sg.studentId === st.id && groupMap[sg.groupId]?.directionId === stFilterDir));
@@ -1376,11 +1407,43 @@ export default function App() {
     return r.sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b),"uk"));
   },[students, searchQ, stFilterDir, stFilterGroup, studentGrps, groupMap]);
 
-  const studentsByDirection=useMemo(()=>{
-    const result={}; DIRECTIONS.forEach(d=>{result[d.id]={direction:d,students:[]}});
-    filteredStudents.forEach(st=>{ const sgs=studentGrps.filter(sg=>sg.studentId===st.id); const dirs=new Set(); sgs.forEach(sg=>{const g=groupMap[sg.groupId]; if(g)dirs.add(g.directionId)}); dirs.forEach(did=>{if(result[did])result[did].students.push(st)}); });
-    return{grouped:Object.values(result).filter(d=>d.students.length>0)};
-  },[filteredStudents,studentGrps,groupMap]);
+  // ФІКС АРХІВУ: Розділяємо активних учениць і неактивних
+  const studentsByDirection = useMemo(() => {
+    const result = {}; 
+    DIRECTIONS.forEach(d => { result[d.id] = { direction: d, students: [] }; });
+    const inactive = [];
+
+    filteredStudents.forEach(st => { 
+      const sgs = studentGrps.filter(sg => sg.studentId === st.id); 
+      // Якщо немає жодної групи і немає жодного активного абонемента - це архів
+      const hasActiveSub = activeSubs.some(s => s.studentId === st.id);
+      
+      if (sgs.length === 0 && !hasActiveSub) {
+        inactive.push(st);
+        return;
+      }
+      
+      const dirs = new Set(); 
+      sgs.forEach(sg => {
+        const g = groupMap[sg.groupId]; 
+        if (g) dirs.add(g.directionId);
+      }); 
+      // Якщо має абонемент, але не прив'язана до групи, кидаємо в першу ліпшу або залишаємо
+      if (dirs.size === 0 && hasActiveSub) {
+        const firstSubDir = groupMap[activeSubs.find(s => s.studentId === st.id).groupId]?.directionId;
+        if(firstSubDir) dirs.add(firstSubDir);
+      }
+      
+      dirs.forEach(did => {
+        if (result[did]) result[did].students.push(st);
+      }); 
+    });
+    
+    return { 
+      grouped: Object.values(result).filter(d => d.students.length > 0),
+      inactive 
+    };
+  }, [filteredStudents, studentGrps, groupMap, activeSubs]);
 
   const filteredSubs=useMemo(()=>{
     let r=subsExt;
@@ -1536,7 +1599,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
-          {/* Кнопка доступна для всіх */}
+          {/* ФІКС: Кнопка абонемента тепер доступна і для тренерів */}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -1596,7 +1659,7 @@ export default function App() {
           </div>
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} />}
+        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} />}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         
@@ -1643,6 +1706,34 @@ export default function App() {
                 </div>
               );
             })}
+            
+            {/* ФІКС АРХІВУ: Виводимо неактивних учениць */}
+            {studentsByDirection.inactive.length > 0 && (
+              <div style={{background: theme.archive, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
+                  <button onClick={() => setExpandedDirs(p => ({...p, 'archive': !p['archive']}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
+                    <div style={{fontSize:18,fontWeight:700,color: theme.textMuted}}>🗄️ Архів / Неактивні <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({studentsByDirection.inactive.length})</span></div>
+                    <div style={{color:theme.textLight, fontSize: 16}}>{expandedDirs['archive'] ? "▲" : "▼"}</div>
+                  </button>
+                  {expandedDirs['archive'] && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
+                    {studentsByDirection.inactive.map((st, index) => (
+                      <div key={st.id} style={{background: "#fff", borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
+                        <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
+                          <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
+                          <div>
+                            <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div>
+                            <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
+                          </div>
+                        </div>
+                        <Badge color={theme.textLight}>Немає активних груп</Badge>
+                        <div style={{display:"flex",gap:8}}>
+                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:theme.bg}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Відновити</button>
+                          <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>)}
+              </div>
+            )}
           </div>
           {waitlist.length > 0 && (
             <div style={{background: "#FFF9F0", borderRadius: 28, overflow: 'hidden'}}>
@@ -1806,7 +1897,7 @@ export default function App() {
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
                 </div>
                 <div style={{display: "flex", gap: 12, flexWrap: "wrap"}}>
-                  <select style={{...inputSt, width: "auto"}} value={finSortBy} onChange={e=>setFinSortBy(e.target.value)}><option value="total">За доходом</option><option value="trainer">За ЗП тренера</option><option value="studio">За доходом studio</option><option value="name">За назвою</option></select>
+                  <select style={{...inputSt, width: "auto"}} value={finSortBy} onChange={e=>setFinSortBy(e.target.value)}><option value="total">За доходом</option><option value="trainer">За ЗП тренера</option><option value="studio">За доходом студії</option><option value="name">За назвою</option></select>
                   <button style={{...btnS, padding: "0 16px", fontSize: 18}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>{finSortOrder === "desc" ? "⬇" : "⬆"}</button>
                 </div>
               </div>
@@ -1864,7 +1955,7 @@ export default function App() {
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
       
-      {/* ФІКС 1: Синхронізація при зміні імені учениці */}
+      {/* ФІКС: Синхронізація при зміні імені учениці */}
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
       <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
