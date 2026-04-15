@@ -508,15 +508,23 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      return [...dbStuds, ...guests];
   }, [stIdsInGroup, studentMap, guests]);
 
- const studsInGroup = useMemo(() => {
-  const orderArr = customOrders[gid] || [];
-  const visibleIds = combinedStuds.map(s => s.id);
+const studsInGroup = useMemo(() => {
+  const orderArr = (customOrders[gid] || []).filter(id => typeof id === "string" && !id.startsWith("guest_"));
+  const visibleStudentIds = combinedStuds
+    .filter(s => !String(s.id).startsWith("guest_"))
+    .map(s => s.id);
 
-  const normalizedOrder = orderArr.filter(id => visibleIds.includes(id));
+  const normalizedOrder = orderArr.filter(id => visibleStudentIds.includes(id));
 
   return [...combinedStuds].sort((a, b) => {
-    const idxA = normalizedOrder.indexOf(a.id);
-    const idxB = normalizedOrder.indexOf(b.id);
+    const aIsGuest = String(a.id).startsWith("guest_");
+    const bIsGuest = String(b.id).startsWith("guest_");
+
+    if (aIsGuest && !bIsGuest) return 1;
+    if (!aIsGuest && bIsGuest) return -1;
+
+    const idxA = aIsGuest ? -1 : normalizedOrder.indexOf(a.id);
+    const idxB = bIsGuest ? -1 : normalizedOrder.indexOf(b.id);
 
     if (idxA !== -1 && idxB !== -1) return idxA - idxB;
     if (idxA !== -1) return -1;
@@ -527,11 +535,12 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 }, [combinedStuds, customOrders, gid]);
 
 const updateOrder = async (newOrder) => {
-  const visibleIds = combinedStuds.map(s => s.id);
+  const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
+  const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string");
 
   const normalizedOrder = [
-    ...new Set([...newOrder, ...visibleIds])
-  ].filter(id => visibleIds.includes(id));
+    ...new Set([...persistedIds, ...validIds])
+  ].filter(id => validIds.includes(id));
 
   setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
