@@ -476,7 +476,7 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 }
 
 // ==========================================
-// 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP + АНАЛІТИКА)
+// 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З АНАЛІТИКОЮ ТА СТРІЛОЧКАМИ)
 // ==========================================
 const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub, warnedStudents, setWarnedStudents }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
@@ -509,8 +509,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
-    // ЗАВАНТАЖУЄМО ПОРЯДОК: Тепер він підтягується з того самого customOrders, 
-    // який оновлюється з бази даних Supabase у головному компоненті App!
     const orderArr = customOrders[gid] || [];
     return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
@@ -521,6 +519,30 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
        return getDisplayName(a).localeCompare(getDisplayName(b), "uk"); 
     });
   }, [combinedStuds, customOrders, gid]);
+
+  // ФІКС ПОРЯДКУ 1: Окрема функція, яка зберігає порядок і в пам'ять і в Supabase
+  const updateOrder = (newOrder) => {
+    setCustomOrders(prev => ({ ...prev, [gid]: newOrder }));
+    supabase.from('custom_orders').upsert({ group_id: gid, student_ids: newOrder })
+      .catch(e => console.error("Order save error:", e));
+  };
+
+  // ФІКС ПОРЯДКУ 2: Ручне переміщення стрілочками
+  const moveManual = (studentId, dir) => {
+    const currentOrder = customOrders[gid] || combinedStuds.map(s => s.id);
+    const completeOrder = [...new Set([...currentOrder, ...combinedStuds.map(s => s.id)])].filter(id => combinedStuds.some(s => s.id === id));
+    const idx = completeOrder.indexOf(studentId);
+    if (idx === -1) return;
+    
+    const newOrder = [...completeOrder];
+    if (dir === -1 && idx > 0) { // Вгору
+        [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+        updateOrder(newOrder);
+    } else if (dir === 1 && idx < completeOrder.length - 1) { // Вниз
+        [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
+        updateOrder(newOrder);
+    }
+  };
 
   const moveStudentDnD = (draggedId, targetId) => {
      if (draggedId === targetId) return;
@@ -533,13 +555,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      const newOrder = [...completeOrder];
      const [movedItem] = newOrder.splice(fromIdx, 1);
      newOrder.splice(toIdx, 0, movedItem);
-     
-     // 🚀 СИНХРОНІЗАЦІЯ ПОРЯДКУ В БАЗУ ДАНИХ (Більше ніколи не зіб'ється!)
-     const updatedOrders = { ...customOrders, [gid]: newOrder };
-     setCustomOrders(updatedOrders);
-     
-     supabase.from('custom_orders').upsert({ group_id: gid, student_ids: newOrder })
-       .catch(e => console.error("Order save error:", e));
+     updateOrder(newOrder);
   };
 
   const addManual = async () => {
@@ -900,10 +916,14 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                   onDrop={(e) => { e.preventDefault(); const draggedId = e.dataTransfer.getData("text/plain"); if (draggedId) moveStudentDnD(draggedId, st.id); }}
               >
-                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 8px 10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1 }}>
+                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 8px 10px 8px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1 }}>
                   <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
                     <div style={{display: "flex", alignItems: "center", overflow: "hidden"}}>
-                      <div style={{color: theme.textLight, marginRight: 12, fontSize: 14, cursor: "grab", userSelect: "none"}}>☰</div>
+                      {/* ФІКС ПОРЯДКУ 2: КНОПКИ ВГОРУ/ВНИЗ */}
+                      <div style={{display: "flex", flexDirection: "column", gap: 0, marginRight: 8, background: theme.input, borderRadius: 6, overflow: "hidden"}}>
+                        <button onClick={() => moveManual(st.id, -1)} style={{background: "none", border: "none", color: theme.textMuted, fontSize: 10, padding: "4px 8px", cursor: "pointer"}}>▲</button>
+                        <button onClick={() => moveManual(st.id, 1)} style={{background: "none", border: "none", color: theme.textMuted, fontSize: 10, padding: "4px 8px", cursor: "pointer"}}>▼</button>
+                      </div>
                       <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>
                       <span style={{whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"}}>{getDisplayName(st)}</span>
                     </div>
@@ -1288,10 +1308,13 @@ export default function App() {
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
       
-      if (ord) {
-         const ordMap = {};
-         ord.forEach(o => ordMap[o.group_id] = o.student_ids);
-         setCustomOrders(ordMap);
+      // ФІКС 1: БЕЗПЕЧНЕ ЗАВАНТАЖЕННЯ. Якщо база пуста, ми не затираємо дані порожнім об'єктом.
+      if (ord && ord.length > 0) {
+         setCustomOrders(prev => {
+            const ordMap = { ...prev };
+            ord.forEach(o => ordMap[o.group_id] = o.student_ids);
+            return ordMap;
+         });
       }
     } catch (e) {
       console.error("Global load error", e);
@@ -1483,7 +1506,7 @@ export default function App() {
   }
 
   const deleteStudentAction = async(id) => {
-    if(!confirm("Видалити ученицю? Її дані зникнуть зі списків.")) return;
+    if(!confirm("Видалити ученицю назавжди? Її дані зникнуть звідусіль.")) return;
     try {
       const st = students.find(s=>s.id===id);
       const names = [st?.name, getDisplayName(st)].filter(Boolean);
@@ -1712,6 +1735,7 @@ export default function App() {
               );
             })}
             
+            {/* АРХІВ / НЕАКТИВНІ УЧЕНИЦІ */}
             {studentsByDirection.inactive.length > 0 && (
               <div style={{background: theme.archive, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedDirs(p => ({...p, 'archive': !p['archive']}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
