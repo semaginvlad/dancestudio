@@ -526,7 +526,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   });
 }, [combinedStuds, customOrders, gid]);
 
-// ФІКС ПОРЯДКУ 1: окрема функція, яка зберігає порядок і в пам'ять, і в Supabase
 const updateOrder = async (newOrder) => {
   const visibleIds = combinedStuds.map(s => s.id);
 
@@ -547,40 +546,38 @@ const updateOrder = async (newOrder) => {
     console.error('Order save error:', error);
   }
 };
-  // ФІКС ПОРЯДКУ 2: Ручне переміщення стрілочками
-  const moveManual = (studentId, dir) => {
-    const currentOrder = studsInGroup.map(s => s.id);
-    const idx = currentOrder.indexOf(studentId);
-    if (idx === -1) return;
 
-    const newOrder = [...currentOrder];
+const moveManual = (studentId, dir) => {
+  const currentOrder = studsInGroup.map(s => s.id);
+  const idx = currentOrder.indexOf(studentId);
+  if (idx === -1) return;
 
-    if (dir === -1 && idx > 0) { // Вгору
-      [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-      updateOrder(newOrder);
-    } else if (dir === 1 && idx < newOrder.length - 1) { // Вниз
-      [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
-      updateOrder(newOrder);
-    }
-  };
+  const newOrder = [...currentOrder];
 
-  const moveStudentDnD = (draggedId, targetId) => {
-    if (draggedId === targetId) return;
-
-    const currentOrder = studsInGroup.map(s => s.id);
-    const fromIdx = currentOrder.indexOf(draggedId);
-    const toIdx = currentOrder.indexOf(targetId);
-
-    if (fromIdx === -1 || toIdx === -1) return;
-
-    const newOrder = [...currentOrder];
-    const [movedItem] = newOrder.splice(fromIdx, 1);
-    newOrder.splice(toIdx, 0, movedItem);
-
+  if (dir === -1 && idx > 0) {
+    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
     updateOrder(newOrder);
-  };
+  } else if (dir === 1 && idx < newOrder.length - 1) {
+    [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
+    updateOrder(newOrder);
+  }
+};
 
-  const addManual = async () => {
+const moveStudentDnD = (draggedId, targetId) => {
+  if (draggedId === targetId) return;
+
+  const currentOrder = studsInGroup.map(s => s.id);
+  const fromIdx = currentOrder.indexOf(draggedId);
+  const toIdx = currentOrder.indexOf(targetId);
+
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const newOrder = [...currentOrder];
+  const [movedItem] = newOrder.splice(fromIdx, 1);
+  newOrder.splice(toIdx, 0, movedItem);
+
+  updateOrder(newOrder);
+};
     const name = manualName.trim();
     if (!name) return;
     try {
