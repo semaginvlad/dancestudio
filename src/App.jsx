@@ -578,6 +578,7 @@ const moveStudentDnD = (draggedId, targetId) => {
 
   updateOrder(newOrder);
 };
+const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
     try {
