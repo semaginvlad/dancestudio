@@ -519,14 +519,21 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
        return getDisplayName(a).localeCompare(getDisplayName(b), "uk"); 
     });
   }, [combinedStuds, customOrders, gid]);
+// ФІКС ПОРЯДКУ 1: окрема функція, яка зберігає порядок і в пам'ять, і в Supabase
+const updateOrder = async (newOrder) => {
+  setCustomOrders(prev => ({ ...prev, [gid]: newOrder }));
 
-  // ФІКС ПОРЯДКУ 1: Окрема функція, яка зберігає порядок і в пам'ять і в Supabase
-  const updateOrder = (newOrder) => {
-    setCustomOrders(prev => ({ ...prev, [gid]: newOrder }));
-    supabase.from('custom_orders').upsert({ group_id: gid, student_ids: newOrder })
-      .catch(e => console.error("Order save error:", e));
-  };
+  const { error } = await supabase
+    .from('custom_orders')
+    .upsert(
+      { group_id: gid, student_ids: newOrder },
+      { onConflict: 'group_id' }
+    );
 
+  if (error) {
+    console.error('Order save error:', error);
+  }
+};
   // ФІКС ПОРЯДКУ 2: Ручне переміщення стрілочками
   const moveManual = (studentId, dir) => {
     const currentOrder = customOrders[gid] || combinedStuds.map(s => s.id);
