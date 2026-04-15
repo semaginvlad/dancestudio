@@ -369,7 +369,7 @@ function SubForm({initial, onDone, onCancel, students, groups, studentGrps}){
   const basePrice = plan?.price||0;
   
   useEffect(()=>{
-    if(!initial){
+    if(!initial || initial.planType === undefined){
       const p = PLAN_TYPES.find(p=>p.id===planType);
       if(p) setAmount(p.price - Math.round(p.price * discountPct / 100));
     }
@@ -448,7 +448,7 @@ function SubForm({initial, onDone, onCancel, students, groups, studentGrps}){
             notificationSent:initial?.notificationSent||false
           });
         }}>
-          {initial ? "Зберегти зміни" : "Створити абонемент"}
+          {initial?.id ? "Зберегти зміни" : "Створити абонемент"}
         </button>
       </div>
     </div>
@@ -477,13 +477,14 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З DRAG & DROP)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
+  const [actionMenuSt, setActionMenuSt] = useState(null);
   
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
-  const [journalGuestMode, setJournalGuestMode] = useState("subscription");
+  const [journalGuestMode, setJournalGuestMode] = useState("single");
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
@@ -492,7 +493,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId)
   ]);
   
-  // ФІКС "ПРИВИДІВ": Відображати гостей тільки якщо вони не знайдені в базі і мають збережене ім'я
   const guests = useMemo(() => {
      return [...new Set(attn.filter(a => {
          if (a.groupId !== gid || !a.guestName) return false;
@@ -508,7 +508,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
-    // Змінений ключ (v5), щоб гарантовано скинути старий кеш сортування
     const orderArr = customOrders[gid] || [];
     return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
@@ -534,7 +533,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      setCustomOrders({ ...customOrders, [gid]: newOrder });
   };
 
-  // ФІКС ДОДАВАННЯ УЧЕНИЦІ ТРЕНЕРАМИ: Якщо її немає - вона створюється в базі.
   const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
@@ -574,6 +572,21 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
     } catch (e) { console.warn("DB Error", e); }
     setManualName("");
+  };
+
+  const removeStudentFromJournal = async (st) => {
+    if(!confirm(`Видалити історію та прибрати ${getDisplayName(st)} з цього журналу?`)) return;
+    
+    const toDelAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || (a.subId && subs.find(s=>s.id===a.subId)?.studentId === st.id)));
+    const toDelIds = toDelAttn.map(a => a.id);
+    
+    setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
+    if(db.deleteAttendance) toDelIds.forEach(id => db.deleteAttendance(id).catch(e=>console.log(e)));
+    
+    if(!st.isGuest) {
+       setStudentGrps(p => p.filter(sg => !(sg.studentId === st.id && sg.groupId === gid)));
+    }
+    setActionMenuSt(null);
   };
 
   const handlePrevMonth = () => {
@@ -682,22 +695,16 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           (s.usedTrainings || 0) < (s.totalTrainings || 1)
         ) : null;
         
-        if (validSub && journalGuestMode === "subscription") {
+        if (validSub) {
           const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
           setAttn(p => [...p, a]);
           if(db.insertAttendance) await db.insertAttendance(a);
         } else {
-          if (journalGuestMode === "subscription" && !student.isGuest) {
-            alert("Немає активного абонемента для цієї дати (або вичерпано ліміт занять). Буде позначено як Разове.");
-            const a = { id: newId, guestName: student.name, guestType: "single", groupId: gid, date: cellDate, quantity: 1, entryType: "single" };
-            setAttn(p => [...p, a]);
-            if(db.insertAttendance) await db.insertAttendance(a);
-          } else {
-            const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
-            const a = { id: newId, guestName: student.name, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
-            setAttn(p => [...p, a]);
-            if(db.insertAttendance) await db.insertAttendance(a);
-          }
+          // Якщо немає абонемента, автоматично ставимо "Разове" (можна змінити на Пробне вручну)
+          const gType = "single";
+          const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) await db.insertAttendance(a);
         }
       }
     } catch (e) {
@@ -760,6 +767,21 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   return (
     <div style={{ maxWidth: "100%" }}>
+      {actionMenuSt && (
+        <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex: 1000, display:"flex", alignItems:"center", justifyContent:"center", padding: 20}} onClick={()=>setActionMenuSt(null)}>
+          <div style={{background: theme.card, borderRadius: 24, padding: 24, width: "100%", maxWidth: 320}} onClick={e=>e.stopPropagation()}>
+             <h3 style={{marginTop: 0, marginBottom: 16, color: theme.textMain}}>{getDisplayName(actionMenuSt)}</h3>
+             <div style={{display: "flex", flexDirection: "column", gap: 12}}>
+                {!actionMenuSt.isGuest && (
+                   <button style={btnP} onClick={() => { onActionAddSub(actionMenuSt.id, gid); setActionMenuSt(null); }}>💳 Оформити абонемент</button>
+                )}
+                <button style={{...btnP, background: theme.danger}} onClick={() => removeStudentFromJournal(actionMenuSt)}>🗑 Прибрати з журналу</button>
+                <button style={btnS} onClick={()=>setActionMenuSt(null)}>Скасувати</button>
+             </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <GroupSelect groups={groups} value={gid} onChange={setGid}/>
         <div style={{display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap'}}>
@@ -817,10 +839,14 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                   onDrop={(e) => { e.preventDefault(); const draggedId = e.dataTransfer.getData("text/plain"); if (draggedId) moveStudentDnD(draggedId, st.id); }}
               >
-                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1, whiteSpace: "nowrap" }}>
-                  <div style={{display: "flex", alignItems: "center"}}>
-                    <div style={{color: theme.textLight, marginRight: 12, fontSize: 14, cursor: "grab", userSelect: "none"}}>☰</div>
-                    <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>{getDisplayName(st)}
+                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 8px 10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1 }}>
+                  <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
+                    <div style={{display: "flex", alignItems: "center", overflow: "hidden"}}>
+                      <div style={{color: theme.textLight, marginRight: 12, fontSize: 14, cursor: "grab", userSelect: "none"}}>☰</div>
+                      <span style={{color: theme.textLight, marginRight: 8, fontSize: 12}}>{i+1}.</span>
+                      <span style={{whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"}}>{getDisplayName(st)}</span>
+                    </div>
+                    <button onClick={() => setActionMenuSt(st)} style={{background: "none", border: "none", color: theme.textLight, fontSize: 18, padding: "0 8px", cursor: "pointer", marginLeft: 4}}>⋮</button>
                   </div>
                 </td>
                 {visibleDays.map((d, index) => {
@@ -910,7 +936,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
             <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
             <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
-            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
             <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
           </div>
           <button style={{...btnP, borderRadius: 100, background: theme.primary}} onClick={addManual}>Відмітити</button>
@@ -1089,6 +1114,8 @@ export default function App() {
   const [dashModal, setDashModal] = useState(null);
   const [searchQ, setSearchQ] = useState("");
   
+  const [prefillSub, setPrefillSub] = useState(null);
+
   const [filterDir, setFilterDir] = useStickyState("all", "ds_filterDir");
   const [filterGroup, setFilterGroup] = useStickyState("all", "ds_filterGroup");
   const [filterStatus, setFilterStatus] = useStickyState("all", "ds_filterStatus");
@@ -1098,7 +1125,7 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v5");
+  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_v6");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -1385,6 +1412,7 @@ export default function App() {
     );
   }
 
+  // ФІКС 1: Синхронізація при видаленні учениці (стирає всі дані і відмітки)
   const deleteStudentAction = async(id) => {
     if(!confirm("Видалити ученицю? Її дані зникнуть зі списків.")) return;
     try {
@@ -1392,7 +1420,6 @@ export default function App() {
       const names = [st?.name, getDisplayName(st)].filter(Boolean);
       const subsToDel = subs.filter(s=>s.studentId===id).map(s=>s.id);
       
-      // СИНХРОНІЗАЦІЯ: видаляємо всі відмітки відвідування пов'язані з нею
       setAttn(p=>p.filter(a => {
         if(a.subId && subsToDel.includes(a.subId)) return false;
         if(a.guestName && names.includes(a.guestName)) return false;
@@ -1569,7 +1596,7 @@ export default function App() {
           </div>
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} />}
+        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} />}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         
@@ -1779,7 +1806,7 @@ export default function App() {
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
                 </div>
                 <div style={{display: "flex", gap: 12, flexWrap: "wrap"}}>
-                  <select style={{...inputSt, width: "auto"}} value={finSortBy} onChange={e=>setFinSortBy(e.target.value)}><option value="total">За доходом</option><option value="trainer">За ЗП тренера</option><option value="studio">За доходом студії</option><option value="name">За назвою</option></select>
+                  <select style={{...inputSt, width: "auto"}} value={finSortBy} onChange={e=>setFinSortBy(e.target.value)}><option value="total">За доходом</option><option value="trainer">За ЗП тренера</option><option value="studio">За доходом studio</option><option value="name">За назвою</option></select>
                   <button style={{...btnS, padding: "0 16px", fontSize: 18}} onClick={()=>setFinSortOrder(p=>p==="desc"?"asc":"desc")}>{finSortOrder === "desc" ? "⬇" : "⬆"}</button>
                 </div>
               </div>
@@ -1836,8 +1863,11 @@ export default function App() {
         )}
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
+      
+      {/* ФІКС 1: Синхронізація при зміні імені учениці */}
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
-      <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Оформити абонемент"><SubForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      
+      <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}]);}setModal(null);}catch(e){console.warn(e);setWaitlist(p=>[...p,{...d, id:uid()}]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
     </div>
