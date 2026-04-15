@@ -154,7 +154,7 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ
+// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ (Тільки для UI налаштувань)
 // ==========================================
 function useStickyState(defaultValue, key) {
   const [value, setValue] = useState(() => {
@@ -509,7 +509,8 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
-    // ВІЧНИЙ КЛЮЧ: Порядок більше ніколи не зіб'ється
+    // ЗАВАНТАЖУЄМО ПОРЯДОК: Тепер він підтягується з того самого customOrders, 
+    // який оновлюється з бази даних Supabase у головному компоненті App!
     const orderArr = customOrders[gid] || [];
     return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
@@ -532,7 +533,13 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      const newOrder = [...completeOrder];
      const [movedItem] = newOrder.splice(fromIdx, 1);
      newOrder.splice(toIdx, 0, movedItem);
-     setCustomOrders({ ...customOrders, [gid]: newOrder });
+     
+     // 🚀 СИНХРОНІЗАЦІЯ ПОРЯДКУ В БАЗУ ДАНИХ (Більше ніколи не зіб'ється!)
+     const updatedOrders = { ...customOrders, [gid]: newOrder };
+     setCustomOrders(updatedOrders);
+     
+     supabase.from('custom_orders').upsert({ group_id: gid, student_ids: newOrder })
+       .catch(e => console.error("Order save error:", e));
   };
 
   const addManual = async () => {
@@ -576,14 +583,15 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     setManualName("");
   };
 
-  // ФІКС АРХІВУВАННЯ: Прибираємо з журналу групи, але залишаємо в базі (вкладка Учениці)
   const removeStudentFromJournal = async (st) => {
     if(!confirm(`Відкріпити ${getDisplayName(st)} від цієї групи? Її історія залишиться, але вона не відображатиметься в журналі.`)) return;
     
-    // Видаляємо всі відмітки в цій групі для цієї учениці (якщо треба, щоб вона не світилась в минулих місяцях. Якщо треба тільки відкріпити - просто прибираємо з studentGrps)
     if(!st.isGuest) {
-       setStudentGrps(p => p.filter(sg => !(sg.studentId === st.id && sg.groupId === gid)));
-       // Закриваємо активний абонемент в цій групі, якщо є
+       const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
+       if (toDelSg) {
+         setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
+         if (db.deleteStudentGroup) await db.deleteStudentGroup(toDelSg.id).catch(e=>console.log(e));
+       }
        const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
        if (activeSub) {
           const newEnd = today();
@@ -591,7 +599,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           setSubs(p => p.map(s => s.id === activeSub.id ? { ...s, endDate: newEnd } : s));
        }
     } else {
-       // Якщо це гість (без профілю), просто стираємо його відмітки в цій групі
        const toDelAttn = attn.filter(a => a.groupId === gid && a.guestName === st.name);
        const toDelIds = toDelAttn.map(a => a.id);
        setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
@@ -711,7 +718,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           setAttn(p => [...p, a]);
           if(db.insertAttendance) await db.insertAttendance(a);
         } else {
-          // Автоматично ставимо "Разове", якщо немає абонемента
           const gType = "single";
           const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
           setAttn(p => [...p, a]);
@@ -776,7 +782,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     } catch (e) { console.warn("Restore Error:", e); }
   };
 
-  // --- ЛОГІКА АНАЛІТИКИ ГРУПИ (Права колонка) ---
   const groupAnalytics = useMemo(() => {
      const monthAttn = attn.filter(a => a.groupId === gid && a.date && a.date.startsWith(journalMonth));
      const attnCounts = {};
@@ -831,7 +836,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                 {!actionMenuSt.isGuest && (
                    <button style={btnP} onClick={() => { onActionAddSub(actionMenuSt.id, gid); setActionMenuSt(null); }}>💳 Оформити абонемент</button>
                 )}
-                {/* Кнопка Відкріпити (Архівувати) */}
                 <button style={{...btnP, background: theme.warning}} onClick={() => removeStudentFromJournal(actionMenuSt)}>Відкріпити від групи (В Архів)</button>
                 <button style={btnS} onClick={()=>setActionMenuSt(null)}>Скасувати</button>
              </div>
@@ -963,7 +967,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
               </tr>
             )})}
             
-            {/* Підрахунок присутніх */}
             <tr>
               <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, borderBottom: `none`, zIndex: 1, whiteSpace: "nowrap" }}>Всього присутніх:</td>
               {visibleDays.map((d, index) => {
@@ -980,7 +983,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         </table>
       </div>
 
-      {/* Форма додавання одразу під таблицею */}
       <div style={{ background: theme.card, borderRadius: 24, padding: "20px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
         <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ fontWeight: 700, color: theme.textMain, marginRight: 8, fontSize: 14 }}>+ Додати в журнал</div>
@@ -999,10 +1001,8 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         </div>
       </div>
 
-      {/* НОВИЙ БЛОК: Списки (зліва) + Аналітика групи (справа) */}
       <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap', marginTop: 24 }}>
         
-        {/* Вертикальний список абонементів (ВУЗЬКА ЛІВА КОЛОНКА) */}
         <div style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
           <div style={{ padding: "16px 24px", background: theme.bg, fontWeight: 800, color: theme.secondary, borderBottom: `1px solid ${theme.border}` }}>Стан абонементів</div>
           {studsInGroup.map((st, i) => {
@@ -1044,7 +1044,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           })}
         </div>
 
-        {/* АНАЛІТИКА ГРУПИ (ПРАВА КОЛОНКА) */}
         <div style={{ flex: "2 1 500px" }}>
            <h3 style={{marginTop: 0, marginBottom: 16, fontSize: 20, fontWeight: 800, color: theme.secondary}}>📊 Аналітика групи (За обраний місяць)</h3>
            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
@@ -1069,7 +1068,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                </div>
            </div>
 
-           {/* БЛОК РИЗИКІВ */}
            {groupAnalytics.churn.length > 0 && (
              <div style={{marginTop: 24, background: theme.card, borderRadius: 24, padding: 24, border: `2px solid ${theme.danger}40`}}>
                 <h4 style={{margin: "0 0 16px 0", color: theme.danger, fontSize: 16}}>🚨 Давно не були, але мають абонемент</h4>
@@ -1240,9 +1238,7 @@ export default function App() {
   const [finFilterGroup, setFinFilterGroup] = useStickyState("all", "ds_finFilterGroup");
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
-  // ВІЧНИЙ КЛЮЧ
-  const [customOrders, setCustomOrders] = useStickyState({}, "ds_customOrders_permanent");
-  // КЛЮЧ ДЛЯ РИЗИКІВ
+  const [customOrders, setCustomOrders] = useState({});
   const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
 
   const [expandedDirs, setExpandedDirs] = useState({});
@@ -1270,10 +1266,18 @@ export default function App() {
     setLoading(true);
     try {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
-      const [st, gr, su, at, ca, sg, wl] = await Promise.all([
+      
+      const fetchCustomOrders = async () => {
+        try {
+          const { data } = await supabase.from('custom_orders').select('*');
+          return data;
+        } catch(e) { return null; }
+      };
+
+      const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist)
+        safeFetch(db.fetchWaitlist), fetchCustomOrders()
       ]);
 
       if (st) setStudents(st);
@@ -1283,6 +1287,12 @@ export default function App() {
       if (ca) setCancelled(ca);
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
+      
+      if (ord) {
+         const ordMap = {};
+         ord.forEach(o => ordMap[o.group_id] = o.student_ids);
+         setCustomOrders(ordMap);
+      }
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -1407,7 +1417,6 @@ export default function App() {
     return r.sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b),"uk"));
   },[students, searchQ, stFilterDir, stFilterGroup, studentGrps, groupMap]);
 
-  // ФІКС АРХІВУ: Розділяємо активних учениць і неактивних
   const studentsByDirection = useMemo(() => {
     const result = {}; 
     DIRECTIONS.forEach(d => { result[d.id] = { direction: d, students: [] }; });
@@ -1415,7 +1424,6 @@ export default function App() {
 
     filteredStudents.forEach(st => { 
       const sgs = studentGrps.filter(sg => sg.studentId === st.id); 
-      // Якщо немає жодної групи і немає жодного активного абонемента - це архів
       const hasActiveSub = activeSubs.some(s => s.studentId === st.id);
       
       if (sgs.length === 0 && !hasActiveSub) {
@@ -1428,7 +1436,6 @@ export default function App() {
         const g = groupMap[sg.groupId]; 
         if (g) dirs.add(g.directionId);
       }); 
-      // Якщо має абонемент, але не прив'язана до групи, кидаємо в першу ліпшу або залишаємо
       if (dirs.size === 0 && hasActiveSub) {
         const firstSubDir = groupMap[activeSubs.find(s => s.studentId === st.id).groupId]?.directionId;
         if(firstSubDir) dirs.add(firstSubDir);
@@ -1475,7 +1482,6 @@ export default function App() {
     );
   }
 
-  // ФІКС 1: Синхронізація при видаленні учениці (стирає всі дані і відмітки)
   const deleteStudentAction = async(id) => {
     if(!confirm("Видалити ученицю? Її дані зникнуть зі списків.")) return;
     try {
@@ -1599,7 +1605,6 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
-          {/* ФІКС: Кнопка абонемента тепер доступна і для тренерів */}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -1707,7 +1712,6 @@ export default function App() {
               );
             })}
             
-            {/* ФІКС АРХІВУ: Виводимо неактивних учениць */}
             {studentsByDirection.inactive.length > 0 && (
               <div style={{background: theme.archive, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedDirs(p => ({...p, 'archive': !p['archive']}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
@@ -1826,7 +1830,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* СПОВІЩЕННЯ: Оновлений компактний дизайн */}
+        {/* === СПОВІЩЕННЯ === */}
         {isAdmin && tab==="alerts" && <div>
           {alertsByGroup.length === 0 ? <div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div>
@@ -1955,7 +1959,6 @@ export default function App() {
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
       
-      {/* ФІКС: Синхронізація при зміні імені учениці */}
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
       <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
