@@ -535,16 +535,20 @@ const updateOrder = async (newOrder) => {
 
   setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('custom_orders')
     .upsert(
       { group_id: gid, student_ids: normalizedOrder },
       { onConflict: 'group_id' }
-    );
+    )
+    .select();
 
   if (error) {
     console.error('Order save error:', error);
+    return;
   }
+
+  console.log('Order saved:', gid, normalizedOrder, data);
 };
 
 const moveManual = (studentId, dir) => {
@@ -603,11 +607,16 @@ const addManual = async () => {
       }
 
       if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
-        const newSg = { id: uid(), studentId: st.id, groupId: gid };
-        setStudentGrps(p => [...p, newSg]);
-        if (db.insertStudentGroup) {
-            try { await db.insertStudentGroup(newSg); } catch(e) {}
+        let newSg = { id: uid(), studentId: st.id, groupId: gid };
+        if (db.addStudentGroup) {
+          try {
+            const savedSg = await db.addStudentGroup(st.id, gid);
+            if (savedSg) newSg = savedSg;
+          } catch (e) {
+            console.error('addStudentGroup error:', e);
+          }
         }
+        setStudentGrps(p => [...p, newSg]);
       }
 
       const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
@@ -626,7 +635,7 @@ const addManual = async () => {
        const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
        if (toDelSg) {
          setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
-         if (db.deleteStudentGroup) await db.deleteStudentGroup(toDelSg.id).catch(e=>console.log(e));
+         if (db.removeStudentGroup) await db.removeStudentGroup(toDelSg.studentId, toDelSg.groupId).catch(e => console.log(e));
        }
        const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
        if (activeSub) {
@@ -1308,10 +1317,13 @@ export default function App() {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
       
       const fetchCustomOrders = async () => {
-        try {
-          const { data } = await supabase.from('custom_orders').select('*');
-          return data;
-        } catch(e) { return null; }
+        const { data, error } = await supabase.from('custom_orders').select('*');
+        if (error) {
+          console.error('Fetch custom_orders error:', error);
+          return null;
+        }
+        console.log('Loaded custom_orders:', data);
+        return data;
       };
 
       const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
