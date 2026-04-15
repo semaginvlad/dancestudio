@@ -48,21 +48,30 @@
           font-size: 16px !important; 
         }
 
+        /* Згортаємо горизонтальні блоки в колонки */
         main > div > div[style*="display: flex"] {
           flex-direction: column !important;
           align-items: stretch !important;
         }
 
-        /* 🟢 ФІКС ІМЕН: Жорстка заборона на перенос тексту */
+        /* 🟢 ФІКС ОБРІЗАНОГО СПИСКУ АБОНЕМЕНТІВ: 
+           Скидаємо жорстку висоту, яку браузер брав із flex-basis, 
+           щоб список міг тягнутися вниз на всі 100% свого вмісту */
+        main > div > div[style*="display: flex"] > div {
+          flex-basis: auto !important;
+          max-width: 100% !important;
+        }
+
+        /* Фікс колонки з іменами в таблиці */
         th:first-child, td:first-child {
-          min-width: 160px !important; /* Трохи розширили колонку */
+          min-width: 160px !important; 
           padding: 10px 12px !important;
           font-size: 13px !important;
-          white-space: nowrap !important; /* Текст тільки в один рядок */
+          white-space: nowrap !important; 
         }
 
         td:first-child > div {
-          white-space: nowrap !important; /* Текст тільки в один рядок */
+          white-space: nowrap !important;
           flex-wrap: nowrap !important;
         }
 
