@@ -492,6 +492,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
     ...subs.filter(s => s.groupId === gid).map(s => s.studentId)
   ]);
   
+  // ФІКС "ПРИВИДІВ": Відображати гостей тільки якщо вони не знайдені в базі і мають збережене ім'я
   const guests = useMemo(() => {
      return [...new Set(attn.filter(a => {
          if (a.groupId !== gid || !a.guestName) return false;
@@ -507,6 +508,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
   }, [stIdsInGroup, studentMap, guests]);
 
   const studsInGroup = useMemo(() => {
+    // Змінений ключ (v5), щоб гарантовано скинути старий кеш сортування
     const orderArr = customOrders[gid] || [];
     return [...combinedStuds].sort((a, b) => {
        const idxA = orderArr.indexOf(a.id);
@@ -532,6 +534,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      setCustomOrders({ ...customOrders, [gid]: newOrder });
   };
 
+  // ФІКС ДОДАВАННЯ УЧЕНИЦІ ТРЕНЕРАМИ: Якщо її немає - вона створюється в базі.
   const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
@@ -565,7 +568,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
       }
 
       const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
-      const a = { id: uid(), guestName: st.name, guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
+      const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
       setAttn(p => [...p, a]);
       if(db.insertAttendance) await db.insertAttendance(a);
 
@@ -894,6 +897,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         </table>
       </div>
 
+      {/* Форма додавання одразу під таблицею */}
       <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginTop: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)", border: `1px solid ${theme.border}` }}>
         <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16, fontWeight: 600 }}>+ Додати нову людину на конкретну дату</div>
         <div className="bottom-form" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -1384,6 +1388,17 @@ export default function App() {
   const deleteStudentAction = async(id) => {
     if(!confirm("Видалити ученицю? Її дані зникнуть зі списків.")) return;
     try {
+      const st = students.find(s=>s.id===id);
+      const names = [st?.name, getDisplayName(st)].filter(Boolean);
+      const subsToDel = subs.filter(s=>s.studentId===id).map(s=>s.id);
+      
+      // СИНХРОНІЗАЦІЯ: видаляємо всі відмітки відвідування пов'язані з нею
+      setAttn(p=>p.filter(a => {
+        if(a.subId && subsToDel.includes(a.subId)) return false;
+        if(a.guestName && names.includes(a.guestName)) return false;
+        return true;
+      }));
+      setSubs(p=>p.filter(s=>s.studentId!==id));
       setStudents(p=>p.filter(s=>s.id!==id));
       setStudentGrps(p=>p.filter(sg=>sg.studentId!==id));
       if(db.deleteStudent) await db.deleteStudent(id);
@@ -1494,7 +1509,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
-          {/* ФІКС: Кнопка абонемента тепер доступна і для тренерів */}
+          {/* Кнопка доступна для всіх */}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -1693,7 +1708,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* === СПОВІЩЕННЯ === (Більш компактні та кольорові) */}
+        {/* СПОВІЩЕННЯ: Оновлений компактний дизайн */}
         {isAdmin && tab==="alerts" && <div>
           {alertsByGroup.length === 0 ? <div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div>
@@ -1821,7 +1836,7 @@ export default function App() {
         )}
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d);setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       <Modal open={modal==="addSub"} onClose={()=>setModal(null)} title="Оформити абонемент"><SubForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}]);}setModal(null);}catch(e){console.warn(e);setWaitlist(p=>[...p,{...d, id:uid()}]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
