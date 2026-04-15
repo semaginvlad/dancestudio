@@ -154,7 +154,7 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ (Тільки для UI налаштувань)
+// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ
 // ==========================================
 function useStickyState(defaultValue, key) {
   const [value, setValue] = useState(() => {
@@ -556,8 +556,6 @@ const updateOrder = async (newOrder) => {
     console.error('Order save error:', error);
     return;
   }
-
-  console.log('Order saved:', gid, normalizedOrder, data);
 };
 
 const moveManual = (studentId, dir) => {
@@ -591,6 +589,7 @@ const moveStudentDnD = (draggedId, targetId) => {
 
   updateOrder(newOrder);
 };
+
 const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
@@ -847,12 +846,18 @@ const addManual = async () => {
         dateCounts[a.date] = (dateCounts[a.date] || 0) + 1;
      });
      
-     const bestAttenderId = Object.keys(attnCounts).sort((a,b) => attnCounts[b] - attnCounts[a])[0];
-     const bestAttenderName = bestAttenderId ? (studentMap[bestAttenderId] ? getDisplayName(studentMap[bestAttenderId]) : bestAttenderId) : "Немає";
-     const bestAttenderCount = bestAttenderId ? attnCounts[bestAttenderId] : 0;
+     // ФІКС: Кілька учениць з найкращою відвідуваністю
+     const maxAttnCount = Object.values(attnCounts).length > 0 ? Math.max(...Object.values(attnCounts)) : 0;
+     const bestAttenderIds = Object.keys(attnCounts).filter(id => attnCounts[id] === maxAttnCount && maxAttnCount > 0);
+     const bestAttenderName = bestAttenderIds.length > 0 ? bestAttenderIds.map(id => studentMap[id] ? getDisplayName(studentMap[id]) : id).join(", ") : "Немає";
+     const bestAttenderCount = maxAttnCount;
 
      const bestDate = Object.keys(dateCounts).sort((a,b) => dateCounts[b] - dateCounts[a])[0];
      const bestDateCount = bestDate ? dateCounts[bestDate] : 0;
+
+     // ФІКС: Середня відвідуваність
+     const activeDaysCount = Object.keys(dateCounts).length;
+     const avgAttendance = activeDaysCount > 0 ? (monthAttn.length / activeDaysCount).toFixed(1) : 0;
 
      const spendCounts = {};
      subs.filter(s => s.groupId === gid && s.paid).forEach(s => {
@@ -861,6 +866,9 @@ const addManual = async () => {
      const topSpenderId = Object.keys(spendCounts).sort((a,b) => spendCounts[b] - spendCounts[a])[0];
      const topSpenderName = topSpenderId ? getDisplayName(studentMap[topSpenderId]) : "Немає";
      const topSpenderAmount = topSpenderId ? spendCounts[topSpenderId] : 0;
+
+     // ФІКС: Скільки абонементів закінчуються найближчі 7 днів
+     const expiringSubs = subs.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
 
      const churn = [];
      const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
@@ -877,7 +885,7 @@ const addManual = async () => {
         }
      });
 
-     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length };
+     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs };
   }, [attn, subs, gid, journalMonth, studentMap]);
 
   return (
@@ -954,10 +962,9 @@ const addManual = async () => {
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                   onDrop={(e) => { e.preventDefault(); const draggedId = e.dataTransfer.getData("text/plain"); if (draggedId) moveStudentDnD(draggedId, st.id); }}
               >
-                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 8px 10px 8px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1 }}>
+                <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 8px 10px 16px", fontWeight: 600, color: theme.textMain, borderRight: `2px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, zIndex: 1 }}>
                   <div style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
                     <div style={{display: "flex", alignItems: "center", overflow: "hidden"}}>
-                      {/* ФІКС ПОРЯДКУ 2: КНОПКИ ВГОРУ/ВНИЗ */}
                       <div style={{display: "flex", flexDirection: "column", gap: 0, marginRight: 8, background: theme.input, borderRadius: 6, overflow: "hidden"}}>
                         <button onClick={() => moveManual(st.id, -1)} style={{background: "none", border: "none", color: theme.textMuted, fontSize: 10, padding: "4px 8px", cursor: "pointer"}}>▲</button>
                         <button onClick={() => moveManual(st.id, 1)} style={{background: "none", border: "none", color: theme.textMuted, fontSize: 10, padding: "4px 8px", cursor: "pointer"}}>▼</button>
@@ -1059,9 +1066,9 @@ const addManual = async () => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap', marginTop: 24 }}>
+      <div className="split-container" style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap', marginTop: 24 }}>
         
-        <div style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
+        <div className="split-left" style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
           <div style={{ padding: "16px 24px", background: theme.bg, fontWeight: 800, color: theme.secondary, borderBottom: `1px solid ${theme.border}` }}>Стан абонементів</div>
           {studsInGroup.map((st, i) => {
              const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
@@ -1102,27 +1109,36 @@ const addManual = async () => {
           })}
         </div>
 
-        <div style={{ flex: "2 1 500px" }}>
+        <div className="split-right" style={{ flex: "2 1 500px" }}>
            <h3 style={{marginTop: 0, marginBottom: 16, fontSize: 20, fontWeight: 800, color: theme.secondary}}>📊 Аналітика групи (За обраний місяць)</h3>
-           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
                <div style={{...cardSt, padding: 20}}>
                  <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Найкраща відвідуваність</div>
-                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestAttenderName}</div>
+                 <div style={{fontSize: 15, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestAttenderName}</div>
                  <div style={{fontSize: 13, color: theme.primary, fontWeight: 600, marginTop: 4}}>{groupAnalytics.bestAttenderCount} занять</div>
                </div>
                <div style={{...cardSt, padding: 20}}>
-                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Топ покупець абонементів</div>
-                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.topSpenderName}</div>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Топ покупець</div>
+                 <div style={{fontSize: 15, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.topSpenderName}</div>
                  <div style={{fontSize: 13, color: theme.success, fontWeight: 600, marginTop: 4}}>{groupAnalytics.topSpenderAmount} ₴</div>
                </div>
                <div style={{...cardSt, padding: 20}}>
                  <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Піковий день</div>
-                 <div style={{fontSize: 16, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestDate ? fmt(groupAnalytics.bestDate) : "—"}</div>
+                 <div style={{fontSize: 15, fontWeight: 800, color: theme.textMain, marginTop: 8}}>{groupAnalytics.bestDate ? fmt(groupAnalytics.bestDate) : "—"}</div>
                  <div style={{fontSize: 13, color: theme.warning, fontWeight: 600, marginTop: 4}}>{groupAnalytics.bestDateCount} присутніх</div>
                </div>
                <div style={{...cardSt, padding: 20}}>
                  <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Всього відвідувань</div>
                  <div style={{fontSize: 24, fontWeight: 800, color: theme.primary, marginTop: 4}}>{groupAnalytics.totalMonthAttn}</div>
+               </div>
+               {/* НОВІ ПАНЕЛІ */}
+               <div style={{...cardSt, padding: 20}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Середня присутність</div>
+                 <div style={{fontSize: 24, fontWeight: 800, color: theme.success, marginTop: 4}}>{groupAnalytics.avgAttendance} <span style={{fontSize:13, fontWeight:600}}>люд./трен.</span></div>
+               </div>
+               <div style={{...cardSt, padding: 20, border: groupAnalytics.expiringSubs > 0 ? `2px solid ${theme.warning}` : "none"}}>
+                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Закінчуються (&lt;7 дн.)</div>
+                 <div style={{fontSize: 24, fontWeight: 800, color: groupAnalytics.expiringSubs > 0 ? theme.warning : theme.textMain, marginTop: 4}}>{groupAnalytics.expiringSubs} <span style={{fontSize:13, fontWeight:600}}>абонементів</span></div>
                </div>
            </div>
 
@@ -1162,6 +1178,9 @@ const addManual = async () => {
 // ==========================================
 function ProAnalyticsTab({ proAnalytics }) {
   const [ltvPeriod, setLtvPeriod] = useState(1);
+  
+  if (!proAnalytics) return <div style={{padding: 40, textAlign: "center", color: theme.textMuted}}>Завантаження аналітики...</div>;
+  
   const topSpenders = proAnalytics.topSpenders[ltvPeriod] || [];
 
   return (
@@ -1326,13 +1345,11 @@ export default function App() {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
       
       const fetchCustomOrders = async () => {
-        const { data, error } = await supabase.from('custom_orders').select('*');
-        if (error) {
-          console.error('Fetch custom_orders error:', error);
-          return null;
-        }
-        console.log('Loaded custom_orders:', data);
-        return data;
+        try {
+          const { data, error } = await supabase.from('custom_orders').select('*');
+          if (error) console.error("Fetch orders error:", error);
+          return data || [];
+        } catch(e) { return []; }
       };
 
       const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
@@ -1349,7 +1366,6 @@ export default function App() {
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
       
-      // ФІКС 1: БЕЗПЕЧНЕ ЗАВАНТАЖЕННЯ. Якщо база пуста, ми не затираємо дані порожнім об'єктом.
       if (ord && ord.length > 0) {
          setCustomOrders(prev => {
             const ordMap = { ...prev };
@@ -1473,6 +1489,94 @@ export default function App() {
       currMonthDetails, chartData, maxChartVal
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
+
+  // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
+  const proAnalytics = useMemo(() => {
+    const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
+    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
+    
+    const getTopSpenders = (months) => {
+      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
+      const totals = {};
+      subs.forEach(s => { 
+        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
+          totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
+        }
+      });
+      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
+    };
+
+    const groupAttnCounts = {};
+    attn.forEach(a => { 
+      if (a.date && a.date >= last30DaysStr) { 
+        const stId = a.subId ? subToSt[a.subId] : null; 
+        if (stId) { 
+          if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; 
+          groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; 
+        } 
+      } 
+    });
+    
+    const bestAttenders = groups.map(g => { 
+        const counts = groupAttnCounts[g.id] || {}; 
+        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
+        const dir = dirMap[g.directionId] || {}; // Запобігає падінню
+        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
+    }).filter(x => x.student && x.group);
+
+    const latestAttnByStudent = {};
+    attn.forEach(a => {
+        let stId = null;
+        if (a.subId) stId = subToSt[a.subId];
+        else if (a.guestName) {
+            const s = Object.values(studentMap).find(x => x.name === a.guestName);
+            if (s) stId = s.id;
+        }
+        if (stId && a.date) {
+            if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
+                latestAttnByStudent[stId] = a.date;
+            }
+        }
+    });
+
+    const upsellCandidates = [];
+    const churnRisk = [];
+    
+    activeSubs.forEach(sub => {
+      const st = studentMap[sub.studentId];
+      const gr = groupMap[sub.groupId];
+      if(!st || !gr) return;
+      const dir = dirMap[gr.directionId] || {}; // Запобігає падінню
+      
+      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id && a.date).map(a => a.date).sort();
+      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
+
+      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
+      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
+      
+      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
+      const dl = daysLeft(sub.endDate);
+      
+      if (trainingsLeft <= 1 || dl <= 3) {
+          const lastDate = latestAttnByStudent[st.id] || sub.startDate;
+          if (lastDate && lastDate !== "2000-01-01") {
+            const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
+            if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
+                churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
+            }
+          }
+      }
+    });
+
+    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+    attn.filter(a => a.date && a.date >= last30DaysStr).forEach(a => {
+        const d = new Date(a.date + "T12:00:00").getDay();
+        if (!isNaN(d)) dayCounts[d]++;
+    });
+    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
+
+    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
+  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
@@ -1655,7 +1759,7 @@ export default function App() {
       <style>{`
         @media (max-width: 768px) {
           th:first-child, td:first-child { 
-            min-width: 120px !important; 
+            min-width: 140px !important; 
             padding: 8px !important; 
             font-size: 11px !important; 
           }
@@ -1663,6 +1767,12 @@ export default function App() {
           header { padding: 16px !important; flex-direction: column; gap: 12px; align-items: flex-start !important; }
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
           .bottom-form input { width: 100% !important; }
+          .split-container { flex-direction: column !important; }
+          .split-left, .split-right {
+             flex: 1 1 auto !important;
+             max-width: 100% !important;
+             width: 100% !important;
+          }
         }
       `}</style>
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
@@ -1776,7 +1886,6 @@ export default function App() {
               );
             })}
             
-            {/* АРХІВ / НЕАКТИВНІ УЧЕНИЦІ */}
             {studentsByDirection.inactive.length > 0 && (
               <div style={{background: theme.archive, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedDirs(p => ({...p, 'archive': !p['archive']}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
