@@ -19,8 +19,7 @@ const theme = {
   success: "#34C759",
   warning: "#FF9500",
   danger: "#FF453A",
-  exhausted: "#A8B1CE",
-  archive: "#E2E8F0"
+  exhausted: "#A8B1CE"
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -154,7 +153,7 @@ const STATUS_LABELS = { active: "Активний", warning: "Закінчуєт
 const STATUS_COLORS = { active: theme.success, warning: theme.warning, expired: theme.danger };
 
 // ==========================================
-// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ (Тільки для UI налаштувань)
+// 2. ХУК ДЛЯ ЗБЕРЕЖЕННЯ В ЛОКАЛЬНІЙ ПАМ'ЯТІ
 // ==========================================
 function useStickyState(defaultValue, key) {
   const [value, setValue] = useState(() => {
@@ -247,7 +246,7 @@ function StudentSelectWithSearch({ students, value, onChange, studentGrps, group
     filtered.forEach(s => {
        const sg = studentGrps.find(x => x.studentId === s.id);
        const g = sg ? groups.find(x => x.id === sg.groupId) : null;
-       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи / Архів";
+       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи";
        if(!res[dirName]) res[dirName] = [];
        res[dirName].push(s);
     });
@@ -478,7 +477,7 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З АНАЛІТИКОЮ ТА СТРІЛОЧКАМИ)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub, warnedStudents, setWarnedStudents }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, warnedStudents, setWarnedStudents, onActionAddSub }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   const [actionMenuSt, setActionMenuSt] = useState(null);
@@ -508,89 +507,89 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      return [...dbStuds, ...guests];
   }, [stIdsInGroup, studentMap, guests]);
 
-const studsInGroup = useMemo(() => {
-  const orderArr = (customOrders[gid] || []).filter(id => typeof id === "string" && !id.startsWith("guest_"));
-  const visibleStudentIds = combinedStuds
-    .filter(s => !String(s.id).startsWith("guest_"))
-    .map(s => s.id);
+  const studsInGroup = useMemo(() => {
+    const orderArr = (customOrders[gid] || []).filter(id => typeof id === "string" && !id.startsWith("guest_"));
+    const visibleStudentIds = combinedStuds
+      .filter(s => !String(s.id).startsWith("guest_"))
+      .map(s => s.id);
 
-  const normalizedOrder = orderArr.filter(id => visibleStudentIds.includes(id));
+    const normalizedOrder = orderArr.filter(id => visibleStudentIds.includes(id));
 
-  return [...combinedStuds].sort((a, b) => {
-    const aIsGuest = String(a.id).startsWith("guest_");
-    const bIsGuest = String(b.id).startsWith("guest_");
+    return [...combinedStuds].sort((a, b) => {
+      const aIsGuest = String(a.id).startsWith("guest_");
+      const bIsGuest = String(b.id).startsWith("guest_");
 
-    if (aIsGuest && !bIsGuest) return 1;
-    if (!aIsGuest && bIsGuest) return -1;
+      if (aIsGuest && !bIsGuest) return 1;
+      if (!aIsGuest && bIsGuest) return -1;
 
-    const idxA = aIsGuest ? -1 : normalizedOrder.indexOf(a.id);
-    const idxB = bIsGuest ? -1 : normalizedOrder.indexOf(b.id);
+      const idxA = aIsGuest ? -1 : normalizedOrder.indexOf(a.id);
+      const idxB = bIsGuest ? -1 : normalizedOrder.indexOf(b.id);
 
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-    if (idxA !== -1) return -1;
-    if (idxB !== -1) return 1;
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
 
-    return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
-  });
-}, [combinedStuds, customOrders, gid]);
+      return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
+    });
+  }, [combinedStuds, customOrders, gid]);
 
-const updateOrder = async (newOrder) => {
-  const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
-  const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string");
+  const updateOrder = async (newOrder) => {
+    const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
+    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string");
 
-  const normalizedOrder = [
-    ...new Set([...persistedIds, ...validIds])
-  ].filter(id => validIds.includes(id));
+    const normalizedOrder = [
+      ...new Set([...persistedIds, ...validIds])
+    ].filter(id => validIds.includes(id));
 
-  setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
+    setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
-  const { data, error } = await supabase
-    .from('custom_orders')
-    .upsert(
-      { group_id: gid, student_ids: normalizedOrder },
-      { onConflict: 'group_id' }
-    )
-    .select();
+    const { data, error } = await supabase
+      .from('custom_orders')
+      .upsert(
+        { group_id: gid, student_ids: normalizedOrder },
+        { onConflict: 'group_id' }
+      )
+      .select();
 
-  if (error) {
-    console.error('Order save error:', error);
-    return;
-  }
-};
+    if (error) {
+      console.error('Order save error:', error);
+      return;
+    }
+  };
 
-const moveManual = (studentId, dir) => {
-  const currentOrder = studsInGroup.map(s => s.id);
-  const idx = currentOrder.indexOf(studentId);
-  if (idx === -1) return;
+  const moveManual = (studentId, dir) => {
+    const currentOrder = studsInGroup.map(s => s.id);
+    const idx = currentOrder.indexOf(studentId);
+    if (idx === -1) return;
 
-  const newOrder = [...currentOrder];
+    const newOrder = [...currentOrder];
 
-  if (dir === -1 && idx > 0) {
-    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+    if (dir === -1 && idx > 0) {
+      [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+      updateOrder(newOrder);
+    } else if (dir === 1 && idx < newOrder.length - 1) {
+      [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
+      updateOrder(newOrder);
+    }
+  };
+
+  const moveStudentDnD = (draggedId, targetId) => {
+    if (draggedId === targetId) return;
+
+    const currentOrder = studsInGroup.map(s => s.id);
+    const fromIdx = currentOrder.indexOf(draggedId);
+    const toIdx = currentOrder.indexOf(targetId);
+
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const newOrder = [...currentOrder];
+    const [movedItem] = newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, movedItem);
+
     updateOrder(newOrder);
-  } else if (dir === 1 && idx < newOrder.length - 1) {
-    [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
-    updateOrder(newOrder);
-  }
-};
+  };
 
-const moveStudentDnD = (draggedId, targetId) => {
-  if (draggedId === targetId) return;
-
-  const currentOrder = studsInGroup.map(s => s.id);
-  const fromIdx = currentOrder.indexOf(draggedId);
-  const toIdx = currentOrder.indexOf(targetId);
-
-  if (fromIdx === -1 || toIdx === -1) return;
-
-  const newOrder = [...currentOrder];
-  const [movedItem] = newOrder.splice(fromIdx, 1);
-  newOrder.splice(toIdx, 0, movedItem);
-
-  updateOrder(newOrder);
-};
-
-const addManual = async () => {
+  const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
     try {
@@ -620,9 +619,7 @@ const addManual = async () => {
           try {
             const savedSg = await db.addStudentGroup(st.id, gid);
             if (savedSg) newSg = savedSg;
-          } catch (e) {
-            console.error('addStudentGroup error:', e);
-          }
+          } catch (e) {}
         }
         setStudentGrps(p => [...p, newSg]);
       }
@@ -630,7 +627,7 @@ const addManual = async () => {
       const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
       const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
       
-      setAttn(p => [...p, a]);
+      setAttn(p => [...p, a]); // Оптимістично додаємо
       if(db.insertAttendance) {
          db.insertAttendance(a).then(realRecord => {
              if (realRecord && realRecord.id) {
@@ -881,6 +878,7 @@ const addManual = async () => {
      const topSpenderAmount = topSpenderId ? spendCounts[topSpenderId] : 0;
 
      const expiringSubs = subsExt.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
+     const activeSubsCount = subsExt.filter(s => s.groupId === gid && getSubStatus(s) === "active").length;
 
      const churn = [];
      const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
@@ -897,7 +895,7 @@ const addManual = async () => {
         }
      });
 
-     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs };
+     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs, activeSubsCount };
   }, [attn, subs, subsExt, gid, journalMonth, studentMap]);
 
   return (
@@ -1044,7 +1042,6 @@ const addManual = async () => {
               </tr>
             )})}
             
-            {/* ФІКС 3: Підрахунок ТІЛЬКИ видимих галочок на екрані */}
             <tr>
               <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, borderBottom: `none`, zIndex: 1, whiteSpace: "nowrap" }}>Всього присутніх:</td>
               {visibleDays.map((d, index) => {
@@ -1328,7 +1325,7 @@ function ProAnalyticsTab({ proAnalytics }) {
             {proAnalytics.bestAttenders.map((item, i) => (
               <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
-                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{getDisplayName(item.student)}</div>
+                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{item.names}</div>
                 <div style={{fontSize: 13, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
               </div>
             ))}
@@ -1548,6 +1545,95 @@ export default function App() {
       currMonthDetails, chartData, maxChartVal
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
+
+  const proAnalytics = useMemo(() => {
+    const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
+    const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
+    
+    const getTopSpenders = (months) => {
+      const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
+      const totals = {};
+      subs.forEach(s => { 
+        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
+          totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
+        }
+      });
+      return Object.entries(totals).map(([id, total]) => ({ student: studentMap[id], total })).filter(x => x.student).sort((a,b) => b.total - a.total).slice(0, 5);
+    };
+
+    const groupAttnCounts = {};
+    attn.forEach(a => { 
+      if (a.date && a.date >= last30DaysStr) { 
+        const stId = a.subId ? subToSt[a.subId] : null; 
+        if (stId) { 
+          if (!groupAttnCounts[a.groupId]) groupAttnCounts[a.groupId] = {}; 
+          groupAttnCounts[a.groupId][stId] = (groupAttnCounts[a.groupId][stId] || 0) + 1; 
+        } 
+      } 
+    });
+    
+    const bestAttenders = groups.map(g => { 
+        const counts = groupAttnCounts[g.id] || {}; 
+        const maxC = Object.values(counts).length > 0 ? Math.max(...Object.values(counts)) : 0;
+        const bestIds = Object.keys(counts).filter(id => counts[id] === maxC && maxC > 0);
+        const bestNames = bestIds.map(id => studentMap[id] ? getDisplayName(studentMap[id]) : "Невідомо").join(", ");
+        const dir = dirMap[g.directionId] || {};
+        return { group: {...g, direction: dir}, names: bestNames, count: maxC }; 
+    }).filter(x => x.count > 0);
+
+    const latestAttnByStudent = {};
+    attn.forEach(a => {
+        let stId = null;
+        if (a.subId) stId = subToSt[a.subId];
+        else if (a.guestName) {
+            const s = Object.values(studentMap).find(x => x.name === a.guestName);
+            if (s) stId = s.id;
+        }
+        if (stId && a.date) {
+            if (!latestAttnByStudent[stId] || a.date > latestAttnByStudent[stId]) {
+                latestAttnByStudent[stId] = a.date;
+            }
+        }
+    });
+
+    const upsellCandidates = [];
+    const churnRisk = [];
+    
+    activeSubs.forEach(sub => {
+      const st = studentMap[sub.studentId];
+      const gr = groupMap[sub.groupId];
+      if(!st || !gr) return;
+      const dir = dirMap[gr.directionId] || {}; 
+      
+      const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id && a.date).map(a => a.date).sort();
+      const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
+
+      if (sub.planType === '4pack' && stAttn30Days >= 6) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '8 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` }); 
+      else if (sub.planType === '8pack' && stAttn30Days >= 10) upsellCandidates.push({ student: st, group: {...gr, direction: dir}, suggest: '12 занять', reason: `У цій групі: ${stAttn30Days} трен. за 30 днів` });
+      
+      const trainingsLeft = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
+      const dl = daysLeft(sub.endDate);
+      
+      if (trainingsLeft <= 1 || dl <= 3) {
+          const lastDate = latestAttnByStudent[st.id] || sub.startDate;
+          if (lastDate && lastDate !== "2000-01-01") {
+            const daysSinceLast = Math.floor((new Date() - new Date(lastDate + "T12:00:00")) / 86400000);
+            if (daysSinceLast >= 10 && !churnRisk.some(c => c.student.id === st.id)) {
+                churnRisk.push({ student: st, group: {...gr, direction: dir}, daysSinceLast });
+            }
+          }
+      }
+    });
+
+    const dayCounts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+    attn.filter(a => a.date && a.date >= last30DaysStr).forEach(a => {
+        const d = new Date(a.date + "T12:00:00").getDay();
+        if (!isNaN(d)) dayCounts[d]++;
+    });
+    const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
+
+    return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
+  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
