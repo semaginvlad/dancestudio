@@ -92,13 +92,26 @@ export default function App() {
     try {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
       
-      const fetchCustomOrders = async () => {
-        try {
-          const { data, error } = await supabase.from('custom_orders').select('*');
-          if (error) console.error("Fetch orders error:", error);
-          return data || [];
-        } catch(e) { return []; }
-      };
+     const fetchCustomOrders = async () => {
+  try {
+    const { data, error } = await supabase
+      .from("custom_orders")
+      .select("group_id, student_ids");
+
+    if (error) {
+      console.error("Fetch orders error:", error);
+      return {};
+    }
+
+    return (data || []).reduce((acc, row) => {
+      acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
+      return acc;
+    }, {});
+  } catch (e) {
+    console.error("Fetch orders exception:", e);
+    return {};
+  }
+};
 
       const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
