@@ -8,6 +8,7 @@ import {
   PLAN_TYPES,
   STATUS_COLORS,
   STATUS_LABELS,
+  WEEKDAYS,
   btnP,
   btnS,
   cardSt,
