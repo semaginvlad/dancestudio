@@ -1,76 +1,57 @@
-import React from "react";
-import {
-  DIRECTIONS,
-  PLAN_TYPES,
-  cardSt,
-  theme,
-} from "../shared/constants";
-import { fmt, getDisplayName, today } from "../shared/utils";
+import React, { useMemo, useState } from "react";
 import { Badge, Modal } from "./UI";
+import { DIRECTIONS, PLAN_TYPES, cardSt, theme } from "../shared/constants";
+import { fmt, getDisplayName, today } from "../shared/utils";
 
-const DashCard = ({ title, value, subtitle, onClick, color }) => (
-  <div
-    onClick={onClick}
-    style={{
-      ...cardSt,
-      display: "flex",
-      flexDirection: "column",
-      gap: 6,
-      border: `1px solid ${theme.border}`,
-      cursor: onClick ? "pointer" : "default",
-      transition: "0.2s",
-    }}
-    onMouseOver={(e) =>
-      onClick &&
-      ((e.currentTarget.style.transform = "translateY(-2px)"),
-      (e.currentTarget.style.boxShadow = `0 12px 30px ${theme.border}`))
-    }
-    onMouseOut={(e) =>
-      onClick &&
-      ((e.currentTarget.style.transform = "none"),
-      (e.currentTarget.style.boxShadow = "none"))
-    }
-  >
+function DashCard({ title, value, subtitle, onClick, color }) {
+  return (
     <div
+      onClick={onClick}
       style={{
-        fontSize: 13,
-        color: theme.textLight,
-        textTransform: "uppercase",
-        fontWeight: 700,
+        ...cardSt,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        border: `1px solid ${theme.border}`,
+        cursor: onClick ? "pointer" : "default",
+        transition: "0.2s",
       }}
+      onMouseOver={(e) =>
+        onClick &&
+        ((e.currentTarget.style.transform = "translateY(-2px)"),
+        (e.currentTarget.style.boxShadow = `0 12px 30px ${theme.border}`))
+      }
+      onMouseOut={(e) =>
+        onClick &&
+        ((e.currentTarget.style.transform = "none"),
+        (e.currentTarget.style.boxShadow = "none"))
+      }
     >
-      {title}
+      <div style={{ fontSize: 13, color: theme.textLight, textTransform: "uppercase", fontWeight: 700 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 36, fontWeight: 800, color: color || theme.textMain }}>{value}</div>
+      <div style={{ fontSize: 13, color: theme.textMuted, fontWeight: 600 }}>{subtitle}</div>
     </div>
-    <div style={{ fontSize: 36, fontWeight: 800, color: color || theme.textMain }}>
-      {value}
-    </div>
-    <div style={{ fontSize: 13, color: theme.textMuted, fontWeight: 600 }}>
-      {subtitle}
-    </div>
-  </div>
-);
+  );
+}
 
-export default function DashboardTab({
-  analytics,
-  activeSubs,
-  notifications,
-  dashModal,
-  setDashModal,
-  studentMap,
-  groupMap,
-  subs,
-}) {
+export default function DashboardTab({ analytics, activeSubs, subs, studentMap, groupMap }) {
+  const [dashModal, setDashModal] = useState(null);
+
+  const modalItems = useMemo(() => {
+    if (!dashModal) return [];
+    return analytics.currMonthDetails[dashModal.type] || [];
+  }, [dashModal, analytics]);
+
   const renderDashModal = () => {
     if (!dashModal) return null;
-    const items = analytics.currMonthDetails[dashModal.type] || [];
 
     if (dashModal.type === "activeSubs") {
       return (
         <Modal open={true} onClose={() => setDashModal(null)} title={dashModal.title}>
           {activeSubs.length === 0 ? (
-            <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>
-              Немає даних
-            </div>
+            <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>Немає даних</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {activeSubs.map((s, i) => {
@@ -90,9 +71,7 @@ export default function DashboardTab({
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 700, color: theme.textMain }}>
-                        {getDisplayName(st)}
-                      </div>
+                      <div style={{ fontWeight: 700, color: theme.textMain }}>{getDisplayName(st)}</div>
                       <div style={{ fontSize: 13, color: theme.textMuted, marginTop: 4 }}>
                         {gr?.name || "Невідома група"}
                       </div>
@@ -109,13 +88,11 @@ export default function DashboardTab({
 
     return (
       <Modal open={true} onClose={() => setDashModal(null)} title={dashModal.title}>
-        {!items || items.length === 0 ? (
-          <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>
-            Немає даних
-          </div>
+        {!modalItems || modalItems.length === 0 ? (
+          <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>Немає даних</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {items.map((item, i) => {
+            {modalItems.map((item, i) => {
               let st = null;
               if (item?.studentId) {
                 st = studentMap[item.studentId];
@@ -179,11 +156,9 @@ export default function DashboardTab({
           <DashCard
             title="Абонементів"
             value={activeSubs.length}
-            subtitle={`${notifications.length} сповіщ.`}
+            subtitle={`${analytics.currMonthStats.cancelledCount} скасувань`}
             color={theme.success}
-            onClick={() =>
-              setDashModal({ type: "activeSubs", title: "Всі активні абонементи" })
-            }
+            onClick={() => setDashModal({ type: "activeSubs", title: "Всі активні абонементи" })}
           />
           <DashCard
             title="Дохід (Цього міс.)"
@@ -193,14 +168,7 @@ export default function DashboardTab({
           />
         </div>
 
-        <h3
-          style={{
-            color: theme.secondary,
-            fontSize: 20,
-            marginBottom: 16,
-            fontWeight: 800,
-          }}
-        >
+        <h3 style={{ color: theme.secondary, fontSize: 20, marginBottom: 16, fontWeight: 800 }}>
           Цього місяця ({today().slice(0, 7)})
         </h3>
         <div
@@ -211,50 +179,16 @@ export default function DashboardTab({
             marginBottom: 30,
           }}
         >
-          <DashCard
-            onClick={() => setDashModal({ type: "trial", title: "Пробні тренування" })}
-            title="Пробні"
-            value={analytics.currMonthStats.trial}
-          />
-          <DashCard
-            onClick={() => setDashModal({ type: "single", title: "Разові тренування" })}
-            title="Разові"
-            value={analytics.currMonthStats.single}
-          />
-          <DashCard
-            onClick={() => setDashModal({ type: "pack4", title: "Абонементи 4" })}
-            title="Абонементи 4"
-            value={analytics.currMonthStats.pack4}
-          />
-          <DashCard
-            onClick={() => setDashModal({ type: "pack8", title: "Абонементи 8" })}
-            title="Абонементи 8"
-            value={analytics.currMonthStats.pack8}
-          />
-          <DashCard
-            onClick={() => setDashModal({ type: "pack12", title: "Абонементи 12" })}
-            title="Абонементи 12"
-            value={analytics.currMonthStats.pack12}
-          />
-          <DashCard
-            onClick={() =>
-              setDashModal({ type: "unpaidAttn", title: "Боргові тренування" })
-            }
-            title="Боргові трен."
-            value={analytics.currMonthStats.unpaidAttn}
-            color={theme.danger}
-          />
+          <DashCard onClick={() => setDashModal({ type: "trial", title: "Пробні тренування" })} title="Пробні" value={analytics.currMonthStats.trial} />
+          <DashCard onClick={() => setDashModal({ type: "single", title: "Разові тренування" })} title="Разові" value={analytics.currMonthStats.single} />
+          <DashCard onClick={() => setDashModal({ type: "pack4", title: "Абонементи 4" })} title="Абонементи 4" value={analytics.currMonthStats.pack4} />
+          <DashCard onClick={() => setDashModal({ type: "pack8", title: "Абонементи 8" })} title="Абонементи 8" value={analytics.currMonthStats.pack8} />
+          <DashCard onClick={() => setDashModal({ type: "pack12", title: "Абонементи 12" })} title="Абонементи 12" value={analytics.currMonthStats.pack12} />
+          <DashCard onClick={() => setDashModal({ type: "unpaidAttn", title: "Боргові тренування" })} title="Боргові трен." value={analytics.currMonthStats.unpaidAttn} color={theme.danger} />
         </div>
 
         <div style={{ ...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40 }}>
-          <h3
-            style={{
-              color: theme.secondary,
-              fontSize: 18,
-              marginBottom: 24,
-              fontWeight: 800,
-            }}
-          >
+          <h3 style={{ color: theme.secondary, fontSize: 18, marginBottom: 24, fontWeight: 800 }}>
             Графік відвідуваності
           </h3>
           <div
@@ -270,8 +204,7 @@ export default function DashboardTab({
             }}
           >
             {analytics.chartData.map((d) => {
-              const barHeightPx =
-                d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 120, 8) : 4;
+              const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 120, 8) : 4;
               return (
                 <div
                   key={d.day}
@@ -284,15 +217,7 @@ export default function DashboardTab({
                     minWidth: 32,
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: theme.textMain,
-                      fontWeight: 800,
-                      opacity: d.count > 0 ? 1 : 0,
-                      marginBottom: 4,
-                    }}
-                  >
+                  <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 800, opacity: d.count > 0 ? 1 : 0, marginBottom: 4 }}>
                     {d.count}
                   </div>
                   <div
@@ -304,39 +229,17 @@ export default function DashboardTab({
                       transition: "all 0.3s",
                     }}
                   />
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: theme.textMuted,
-                      marginTop: 10,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {d.day}
-                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 10, fontWeight: 600 }}>{d.day}</div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        <h3
-          style={{
-            color: theme.secondary,
-            fontSize: 20,
-            marginBottom: 16,
-            fontWeight: 800,
-          }}
-        >
+        <h3 style={{ color: theme.secondary, fontSize: 20, marginBottom: 16, fontWeight: 800 }}>
           За напрямками
         </h3>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
-            gap: 16,
-          }}
-        >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 16 }}>
           {DIRECTIONS.map((d) => (
             <div
               key={d.id}
@@ -351,15 +254,11 @@ export default function DashboardTab({
               }}
             >
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: d.color, marginBottom: 8 }}>
-                  {d.name}
-                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: d.color, marginBottom: 8 }}>{d.name}</div>
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, color: theme.textMain }}>
                 {analytics.byDir[d.id]?.students || 0}{" "}
-                <span style={{ fontSize: 14, color: theme.textLight, fontWeight: 600 }}>
-                  уч.
-                </span>
+                <span style={{ fontSize: 14, color: theme.textLight, fontWeight: 600 }}>уч.</span>
               </div>
             </div>
           ))}
