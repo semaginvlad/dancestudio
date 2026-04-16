@@ -384,7 +384,73 @@ const handleCancelSpecificDay = async (cancelDate) => {
   }
 };
 
-  const groupAnalytics = useMemo(() => {
+  
+
+const handleRestoreSpecificDay = async (restoreDate) => {
+  if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до початкових.`)) return;
+
+  try {
+    const matchingCancels = cancelled.filter(
+      c => c.groupId === gid && c.date === restoreDate
+    );
+
+    if (matchingCancels.length === 0) return;
+
+    const targetCancel = matchingCancels[matchingCancels.length - 1];
+    const originalEnds = targetCancel.originalEnds || {};
+
+    let newSubs = [...rawSubs];
+    const currentGroup = groups.find(g => g.id === gid);
+
+    if (Object.keys(originalEnds).length > 0) {
+      for (const [subId, origEnd] of Object.entries(originalEnds)) {
+        if (db.updateSub) {
+          await db.updateSub(subId, { endDate: origEnd });
+        }
+
+        newSubs = newSubs.map(s =>
+          s.id === subId ? { ...s, endDate: origEnd } : s
+        );
+      }
+    } else {
+      const affectedSubs = newSubs.filter(
+        s => s.groupId === gid && s.endDate >= restoreDate
+      );
+
+      for (const sub of affectedSubs) {
+        const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
+
+        if (db.updateSub) {
+          await db.updateSub(sub.id, { endDate: revertedEnd });
+        }
+
+        newSubs = newSubs.map(s =>
+          s.id === sub.id ? { ...s, endDate: revertedEnd } : s
+        );
+      }
+    }
+
+    setSubs(newSubs);
+
+    setCancelled(prev =>
+      prev.filter(c => !(c.groupId === gid && c.date === restoreDate))
+    );
+
+    if (db.deleteCancelled) {
+      for (const item of matchingCancels) {
+        try {
+          await db.deleteCancelled(item.id);
+        } catch (e) {
+          console.warn("deleteCancelled error:", e);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Restore Error:", e);
+  }
+};
+
+const groupAnalytics = useMemo(() => {
      const monthAttn = attn.filter(a => a.groupId === gid && a.date && a.date.startsWith(journalMonth));
      const attnCounts = {};
      const dateCounts = {};
