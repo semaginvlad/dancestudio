@@ -329,58 +329,60 @@ const addManual = async () => {
     }
   };
 
-  const handleCancelSpecificDay = async (cancelDate) => {
-    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
-    try {
-      const currentGroup = groups.find(g => g.id === gid);
-      const affectedSubs = rawSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
-      
-      const originalEnds = {};
-      let newSubs = [...rawSubs];
-      
-      for (let sub of affectedSubs) {
-        originalEnds[sub.id] = sub.endDate; 
-        const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr }).catch(e=>console.warn(e));
-        newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
+const handleCancelSpecificDay = async (cancelDate) => {
+  if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
+
+  try {
+    const currentGroup = groups.find(g => g.id === gid);
+    const affectedSubs = rawSubs.filter(
+      s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate
+    );
+
+    const originalEnds = {};
+    let newSubs = [...rawSubs];
+
+    for (const sub of affectedSubs) {
+      originalEnds[sub.id] = sub.endDate;
+      const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
+
+      if (db.updateSub) {
+        await db.updateSub(sub.id, { endDate: newEndStr });
       }
-      
-      const newCancel = { id: uid(), groupId: gid, date: cancelDate, originalEnds };
-      setCancelled(p => [...p, newCancel]);
-      setSubs(newSubs);
-      if (db.insertCancelled) db.insertCancelled(newCancel).catch(e=>console.warn(e)); 
-    } catch (e) { console.warn(e); }
-  };
 
-  const handleRestoreSpecificDay = async (restoreDate) => {
-    if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до початкових.`)) return;
-    try {
-      const targetCancel = cancelled.find(c => c.groupId === gid && c.date === restoreDate);
-      if (!targetCancel) return;
+      newSubs = newSubs.map(s =>
+        s.id === sub.id ? { ...s, endDate: newEndStr } : s
+      );
+    }
 
-      let newSubs = [...rawSubs];
-      const currentGroup = groups.find(g => g.id === gid);
+    const cancelPayload = {
+      groupId: gid,
+      date: cancelDate,
+      originalEnds,
+    };
 
-      if (targetCancel.originalEnds && Object.keys(targetCancel.originalEnds).length > 0) {
-        for (const [subId, origEnd] of Object.entries(targetCancel.originalEnds)) {
-           if(db.updateSub) db.updateSub(subId, { endDate: origEnd }).catch(e=>console.warn(e));
-           newSubs = newSubs.map(s => s.id === subId ? { ...s, endDate: origEnd } : s);
-        }
-      } else {
-        const affectedSubs = newSubs.filter(s => s.groupId === gid && s.endDate >= restoreDate);
-        for (let sub of affectedSubs) {
-           const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
-           if(db.updateSub) db.updateSub(sub.id, { endDate: revertedEnd }).catch(e=>console.warn(e));
-           newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: revertedEnd } : s);
-        }
+    let savedCancel = { id: uid(), ...cancelPayload };
+
+    if (db.insertCancelled) {
+      try {
+        const inserted = await db.insertCancelled(cancelPayload);
+        if (inserted) savedCancel = inserted;
+      } catch (e) {
+        console.warn("insertCancelled error:", e);
       }
-      
-      setSubs(newSubs);
-      setCancelled(p => p.filter(c => c.id !== targetCancel.id));
-      if (db.deleteCancelled) db.deleteCancelled(targetCancel.id).catch(e=>console.warn(e));
-      
-    } catch (e) { console.warn("Restore Error:", e); }
-  };
+    }
+
+    setSubs(newSubs);
+
+    setCancelled(prev => {
+      const withoutSameDate = prev.filter(
+        c => !(c.groupId === gid && c.date === cancelDate)
+      );
+      return [...withoutSameDate, savedCancel];
+    });
+  } catch (e) {
+    console.warn("Cancel Error:", e);
+  }
+};
 
   const groupAnalytics = useMemo(() => {
      const monthAttn = attn.filter(a => a.groupId === gid && a.date && a.date.startsWith(journalMonth));
