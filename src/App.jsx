@@ -19,7 +19,8 @@ const theme = {
   success: "#34C759",
   warning: "#FF9500",
   danger: "#FF453A",
-  exhausted: "#A8B1CE"
+  exhausted: "#A8B1CE",
+  archive: "#E2E8F0"
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -246,7 +247,7 @@ function StudentSelectWithSearch({ students, value, onChange, studentGrps, group
     filtered.forEach(s => {
        const sg = studentGrps.find(x => x.studentId === s.id);
        const g = sg ? groups.find(x => x.id === sg.groupId) : null;
-       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи";
+       const dirName = g ? (DIRECTIONS.find(d => d.id === g.directionId)?.name || "Інше") : "Без групи / Архів";
        if(!res[dirName]) res[dirName] = [];
        res[dirName].push(s);
     });
@@ -477,7 +478,7 @@ function WaitlistForm({onDone, onCancel, students, groups, studentGrps}) {
 // ==========================================
 // 5. ВІДВІДУВАННЯ (ТАБЛИЦЯ З АНАЛІТИКОЮ ТА СТРІЛОЧКАМИ)
 // ==========================================
-const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, warnedStudents, setWarnedStudents, onActionAddSub }) {
+const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs, setSubs, attn, setAttn, studentMap, students, setStudents, studentGrps, setStudentGrps, cancelled, setCancelled, customOrders, setCustomOrders, onActionAddSub, warnedStudents, setWarnedStudents }) {
   const [gid, setGid] = useStickyState("", "ds_attnGid");
   const [journalMonth, setJournalMonth] = useState(today().slice(0, 7));
   const [actionMenuSt, setActionMenuSt] = useState(null);
@@ -507,112 +508,89 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      return [...dbStuds, ...guests];
   }, [stIdsInGroup, studentMap, guests]);
 
-  const studsInGroup = useMemo(() => {
-    const orderArr = (customOrders[gid] || []).filter(id => typeof id === "string" && !id.startsWith("guest_"));
-    const visibleStudentIds = combinedStuds
-      .filter(s => !String(s.id).startsWith("guest_"))
-      .map(s => s.id);
+const studsInGroup = useMemo(() => {
+  const orderArr = (customOrders[gid] || []).filter(id => typeof id === "string" && !id.startsWith("guest_"));
+  const visibleStudentIds = combinedStuds
+    .filter(s => !String(s.id).startsWith("guest_"))
+    .map(s => s.id);
 
-    const normalizedOrder = orderArr.filter(id => visibleStudentIds.includes(id));
+  const normalizedOrder = orderArr.filter(id => visibleStudentIds.includes(id));
 
-    return [...combinedStuds].sort((a, b) => {
-      const aIsGuest = String(a.id).startsWith("guest_");
-      const bIsGuest = String(b.id).startsWith("guest_");
+  return [...combinedStuds].sort((a, b) => {
+    const aIsGuest = String(a.id).startsWith("guest_");
+    const bIsGuest = String(b.id).startsWith("guest_");
 
-      if (aIsGuest && !bIsGuest) return 1;
-      if (!aIsGuest && bIsGuest) return -1;
+    if (aIsGuest && !bIsGuest) return 1;
+    if (!aIsGuest && bIsGuest) return -1;
 
-      const idxA = aIsGuest ? -1 : normalizedOrder.indexOf(a.id);
-      const idxB = bIsGuest ? -1 : normalizedOrder.indexOf(b.id);
+    const idxA = aIsGuest ? -1 : normalizedOrder.indexOf(a.id);
+    const idxB = bIsGuest ? -1 : normalizedOrder.indexOf(b.id);
 
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      if (idxA !== -1) return -1;
-      if (idxB !== -1) return 1;
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
 
-      return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
-    });
-  }, [combinedStuds, customOrders, gid]);
+    return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
+  });
+}, [combinedStuds, customOrders, gid]);
 
-  const updateOrder = async (newOrder) => {
-    const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
-    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string" && !String(id).startsWith("guest_"));
+const updateOrder = async (newOrder) => {
+  const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
+  const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string");
 
-    const normalizedOrder = [
-      ...new Set([...persistedIds, ...validIds])
-    ].filter(id => validIds.includes(id));
+  const normalizedOrder = [
+    ...new Set([...persistedIds, ...validIds])
+  ].filter(id => validIds.includes(id));
 
-    setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
+  setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
-    const { error } = await supabase
-      .from('custom_orders')
-      .upsert(
-        { group_id: gid, student_ids: normalizedOrder },
-        { onConflict: 'group_id' }
-      );
+  const { data, error } = await supabase
+    .from('custom_orders')
+    .upsert(
+      { group_id: gid, student_ids: normalizedOrder },
+      { onConflict: 'group_id' }
+    )
+    .select();
 
-    if (error) {
-      console.error('Order save error:', error);
-    }
-  };
+  if (error) {
+    console.error('Order save error:', error);
+    return;
+  }
+};
 
-  useEffect(() => {
-    if (!gid) return;
+const moveManual = (studentId, dir) => {
+  const currentOrder = studsInGroup.map(s => s.id);
+  const idx = currentOrder.indexOf(studentId);
+  if (idx === -1) return;
 
-    const currentOrder = Array.isArray(customOrders[gid]) ? customOrders[gid] : [];
-    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string" && !String(id).startsWith("guest_"));
+  const newOrder = [...currentOrder];
 
-    const cleanedOrder = [
-      ...new Set([
-        ...currentOrder.filter(id => typeof id === "string" && !id.startsWith("guest_") && validIds.includes(id)),
-        ...validIds,
-      ]),
-    ].filter(id => validIds.includes(id));
-
-    if (JSON.stringify(currentOrder) === JSON.stringify(cleanedOrder)) return;
-
-    setCustomOrders(prev => ({ ...prev, [gid]: cleanedOrder }));
-
-    supabase
-      .from('custom_orders')
-      .upsert({ group_id: gid, student_ids: cleanedOrder }, { onConflict: 'group_id' })
-      .then(({ error }) => {
-        if (error) console.error('Auto-clean custom order error:', error);
-      });
-  }, [gid, stIdsInGroup, customOrders, setCustomOrders]);
-
-  const moveManual = (studentId, dir) => {
-    const currentOrder = studsInGroup.map(s => s.id);
-    const idx = currentOrder.indexOf(studentId);
-    if (idx === -1) return;
-
-    const newOrder = [...currentOrder];
-
-    if (dir === -1 && idx > 0) {
-      [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-      updateOrder(newOrder);
-    } else if (dir === 1 && idx < newOrder.length - 1) {
-      [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
-      updateOrder(newOrder);
-    }
-  };
-
-  const moveStudentDnD = (draggedId, targetId) => {
-    if (draggedId === targetId) return;
-
-    const currentOrder = studsInGroup.map(s => s.id);
-    const fromIdx = currentOrder.indexOf(draggedId);
-    const toIdx = currentOrder.indexOf(targetId);
-
-    if (fromIdx === -1 || toIdx === -1) return;
-
-    const newOrder = [...currentOrder];
-    const [movedItem] = newOrder.splice(fromIdx, 1);
-    newOrder.splice(toIdx, 0, movedItem);
-
+  if (dir === -1 && idx > 0) {
+    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
     updateOrder(newOrder);
-  };
+  } else if (dir === 1 && idx < newOrder.length - 1) {
+    [newOrder[idx + 1], newOrder[idx]] = [newOrder[idx], newOrder[idx + 1]];
+    updateOrder(newOrder);
+  }
+};
 
-  const addManual = async () => {
+const moveStudentDnD = (draggedId, targetId) => {
+  if (draggedId === targetId) return;
+
+  const currentOrder = studsInGroup.map(s => s.id);
+  const fromIdx = currentOrder.indexOf(draggedId);
+  const toIdx = currentOrder.indexOf(targetId);
+
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const newOrder = [...currentOrder];
+  const [movedItem] = newOrder.splice(fromIdx, 1);
+  newOrder.splice(toIdx, 0, movedItem);
+
+  updateOrder(newOrder);
+};
+
+const addManual = async () => {
     const name = manualName.trim();
     if (!name) return;
     try {
@@ -642,22 +620,17 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           try {
             const savedSg = await db.addStudentGroup(st.id, gid);
             if (savedSg) newSg = savedSg;
-          } catch (e) {}
+          } catch (e) {
+            console.error('addStudentGroup error:', e);
+          }
         }
         setStudentGrps(p => [...p, newSg]);
       }
 
       const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
       const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
-      
-      setAttn(p => [...p, a]); // Оптимістично додаємо
-      if(db.insertAttendance) {
-         db.insertAttendance(a).then(realRecord => {
-             if (realRecord && realRecord.id) {
-                 setAttn(prev => prev.map(item => item.id === a.id ? { ...item, id: realRecord.id } : item));
-             }
-         }).catch(err => console.error("Insert error:", err));
-      }
+      setAttn(p => [...p, a]);
+      if(db.insertAttendance) await db.insertAttendance(a);
 
     } catch (e) { console.warn("DB Error", e); }
     setManualName("");
@@ -670,19 +643,6 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
        const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
        if (toDelSg) {
          setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
-         setCustomOrders(prev => {
-           const current = Array.isArray(prev[gid]) ? prev[gid] : [];
-           const nextOrder = current.filter(id => id !== st.id);
-
-           supabase
-             .from('custom_orders')
-             .upsert({ group_id: gid, student_ids: nextOrder }, { onConflict: 'group_id' })
-             .then(({ error }) => {
-               if (error) console.error('Remove from custom order error:', error);
-             });
-
-           return { ...prev, [gid]: nextOrder };
-         });
          if (db.removeStudentGroup) await db.removeStudentGroup(toDelSg.studentId, toDelSg.groupId).catch(e => console.log(e));
        }
        const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
@@ -714,7 +674,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   const getStudentSubRanges = (studentId) => {
     if (!studentId || String(studentId).startsWith("guest_")) return [];
-    const stSubs = subsExt.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+    const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     const ranges = [];
     for (let i = 0; i < stSubs.length; i++) {
       const sub = stSubs[i];
@@ -806,23 +766,15 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
           (s.usedTrainings || 0) < (s.totalTrainings || 1)
         ) : null;
         
-        let gType = "single";
-        if (validSub && journalGuestMode === "subscription") gType = "subscription";
-        else if (journalGuestMode !== "subscription") gType = journalGuestMode;
-
-        if (!validSub && journalGuestMode === "subscription" && !student.isGuest) {
-            alert("Немає активного абонемента для цієї дати (або вичерпано ліміт). Буде позначено як Разове.");
-        }
-
-        const a = { id: newId, subId: validSub?.id, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
-        
-        setAttn(p => [...p, a]);
-        if(db.insertAttendance) {
-           db.insertAttendance(a).then(realRecord => {
-               if (realRecord && realRecord.id) {
-                   setAttn(prev => prev.map(item => item.id === newId ? { ...item, id: realRecord.id } : item));
-               }
-           }).catch(err => console.error("Insert error:", err));
+        if (validSub) {
+          const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) await db.insertAttendance(a);
+        } else {
+          const gType = "single";
+          const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) await db.insertAttendance(a);
         }
       }
     } catch (e) {
@@ -894,6 +846,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         dateCounts[a.date] = (dateCounts[a.date] || 0) + 1;
      });
      
+     // ФІКС: Кілька учениць з найкращою відвідуваністю
      const maxAttnCount = Object.values(attnCounts).length > 0 ? Math.max(...Object.values(attnCounts)) : 0;
      const bestAttenderIds = Object.keys(attnCounts).filter(id => attnCounts[id] === maxAttnCount && maxAttnCount > 0);
      const bestAttenderName = bestAttenderIds.length > 0 ? bestAttenderIds.map(id => studentMap[id] ? getDisplayName(studentMap[id]) : id).join(", ") : "Немає";
@@ -902,6 +855,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      const bestDate = Object.keys(dateCounts).sort((a,b) => dateCounts[b] - dateCounts[a])[0];
      const bestDateCount = bestDate ? dateCounts[bestDate] : 0;
 
+     // ФІКС: Середня відвідуваність
      const activeDaysCount = Object.keys(dateCounts).length;
      const avgAttendance = activeDaysCount > 0 ? (monthAttn.length / activeDaysCount).toFixed(1) : 0;
 
@@ -913,12 +867,12 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
      const topSpenderName = topSpenderId ? getDisplayName(studentMap[topSpenderId]) : "Немає";
      const topSpenderAmount = topSpenderId ? spendCounts[topSpenderId] : 0;
 
-     const expiringSubs = subsExt.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
-     const activeSubsCount = subsExt.filter(s => s.groupId === gid && getSubStatus(s) === "active").length;
+     // ФІКС: Скільки абонементів закінчуються найближчі 7 днів
+     const expiringSubs = subs.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
 
      const churn = [];
      const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
-     const activeInGroup = subsExt.filter(s => s.groupId === gid && getSubStatus(s) !== "expired");
+     const activeInGroup = subs.filter(s => s.groupId === gid && getSubStatus(s) !== "expired");
      
      activeInGroup.forEach(sub => {
         const st = studentMap[sub.studentId];
@@ -931,8 +885,8 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         }
      });
 
-     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs, activeSubsCount };
-  }, [attn, subs, subsExt, gid, journalMonth, studentMap]);
+     return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs };
+  }, [attn, subs, gid, journalMonth, studentMap]);
 
   return (
     <div style={{ maxWidth: "100%" }}>
@@ -1082,9 +1036,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
               <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, borderBottom: `none`, zIndex: 1, whiteSpace: "nowrap" }}>Всього присутніх:</td>
               {visibleDays.map((d, index) => {
                 const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                const count = studsInGroup.filter(st => {
-                   return attn.some(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
-                }).length;
+                const count = attn.filter(a => a.groupId === gid && a.date === d).length;
                 return (
                   <td key={d} style={{ padding: "8px 2px", fontWeight: 800, color: count > 0 ? theme.primary : theme.textLight, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `none`, background: theme.bg }}>
                     {count > 0 ? count : "-"}
@@ -1119,90 +1071,45 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
         <div className="split-left" style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
           <div style={{ padding: "16px 24px", background: theme.bg, fontWeight: 800, color: theme.secondary, borderBottom: `1px solid ${theme.border}` }}>Стан абонементів</div>
           {studsInGroup.map((st, i) => {
-             const stSubs = subsExt.filter(s => s.studentId === st.id && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
-             const activeSub = stSubs.find(s => {
-                 const trLeft = (s.totalTrainings || 1) - (s.usedTrainings || 0);
-                 return trLeft > 0 && s.endDate >= today();
-             });
+             const activeRanges = getStudentSubRanges(st.id).filter(r => r.id && !r.isExhausted && r.end >= today());
+             const activeSub = activeRanges.length > 0 ? subs.find(s => s.id === activeRanges[activeRanges.length-1].id) : null;
              
-             const displaySub = activeSub || (stSubs.length > 0 ? stSubs[0] : null);
-
              let badgeColor = theme.textLight;
              let badgeText = "Без абонемента";
              let detailText = "";
-             let isWarning = false;
-             let isExpired = false;
-             let rowBg = "transparent";
-
-             if (displaySub) {
-                 const planName = PLAN_TYPES.find(p => p.id === displaySub.planType)?.name || "Абонемент";
-                 const trUsed = displaySub.usedTrainings || 0;
-                 const trTotal = displaySub.totalTrainings || 1;
-                 const trLeft = trTotal - trUsed;
-                 const endD = displaySub.endDate;
-                 const todayStr = today();
-
-                 isExpired = trLeft <= 0 || endD < todayStr;
-                 isWarning = !isExpired && (trLeft <= 1 || endD === todayStr);
-
-                 if (isExpired) {
-                     badgeColor = theme.danger;
-                     badgeText = planName;
-                     rowBg = `${theme.danger}10`;
-                 } else if (isWarning) {
-                     badgeColor = theme.warning;
-                     badgeText = planName;
-                     rowBg = `${theme.warning}10`;
-                 } else {
-                     badgeColor = theme.success;
-                     badgeText = planName;
-                 }
-                 detailText = `${trUsed} / ${trTotal} (до ${fmt(endD)})`;
+             
+             if (activeSub) {
+                const planName = PLAN_TYPES.find(p => p.id === activeSub.planType)?.name || "Абонемент";
+                badgeColor = theme.success;
+                badgeText = planName;
+                detailText = `${activeSub.usedTrainings || 0} / ${activeSub.totalTrainings || 0} (до ${fmt(activeSub.endDate)})`;
              } else if (st.isGuest) {
-                 badgeColor = theme.warning;
-                 badgeText = "Гість";
-                 rowBg = "#FFF9F0";
+                badgeColor = theme.warning;
+                badgeText = "Гість";
              } else {
-                 const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
-                 if (recentAttn && recentAttn.entryType) {
-                     badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
-                     badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
-                 }
+                const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
+                if (recentAttn && recentAttn.entryType) {
+                   badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
+                   badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
+                }
              }
 
-             const tgUser = st.telegram?.replace("@","");
-             const tgLink = tgUser ? `https://t.me/${tgUser}` : null;
-
              return (
-                <div key={st.id} style={{ padding: "16px 20px", borderBottom: i < studsInGroup.length - 1 ? `1px solid ${theme.bg}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", background: rowBg, flexWrap: "wrap", gap: 12, opacity: (isExpired || isWarning) && warnedStudents[displaySub?.id] ? 0.6 : 1 }}>
-                   <div style={{ display: "flex", gap: 12, alignItems: "center", flex: 1, minWidth: 200 }}>
+                <div key={st.id} style={{ padding: "16px 20px", borderBottom: i < studsInGroup.length - 1 ? `1px solid ${theme.bg}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", background: st.isGuest ? "#FFF9F0" : "transparent", flexWrap: "wrap", gap: 12 }}>
+                   <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       <span style={{ color: theme.textLight, fontSize: 13, fontWeight: 700, minWidth: 20 }}>{i + 1}.</span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{getDisplayName(st)}</div>
-                        {(isExpired || isWarning) && displaySub && (
-                          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                             {tgLink && (
-                                <a href={tgLink} target="_blank" rel="noopener noreferrer" style={{ padding: "6px 10px", background: theme.card, color: theme.primary, borderRadius: 8, fontSize: 11, fontWeight: 700, textDecoration: "none", border: `1px solid ${theme.border}` }}>
-                                  💬 Написати
-                                </a>
-                             )}
-                             <button onClick={() => setWarnedStudents(p => ({...p, [displaySub.id]: !p[displaySub.id]}))} style={{ padding: "6px 10px", background: warnedStudents[displaySub.id] ? theme.success : theme.input, color: warnedStudents[displaySub.id] ? "#fff" : theme.textMuted, border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                                {warnedStudents[displaySub.id] ? "✅ Сповіщено" : "Сповістити"}
-                             </button>
-                          </div>
-                       )}
-                      </div>
+                      <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 14 }}>{getDisplayName(st)}</div>
                    </div>
                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                       <Badge color={badgeColor}>{badgeText}</Badge>
-                      {detailText && <span style={{ fontSize: 11, color: isExpired ? theme.danger : isWarning ? theme.warning : theme.textMuted, fontWeight: 600 }}>{detailText}</span>}
+                      {detailText && <span style={{ fontSize: 11, color: theme.textMuted, fontWeight: 500 }}>{detailText}</span>}
                    </div>
                 </div>
              );
           })}
         </div>
 
-        <div className="split-right" style={{ flex: "2 1 500px", minWidth: 300 }}>
+        <div className="split-right" style={{ flex: "2 1 500px" }}>
            <h3 style={{marginTop: 0, marginBottom: 16, fontSize: 20, fontWeight: 800, color: theme.secondary}}>📊 Аналітика групи (За обраний місяць)</h3>
            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
                <div style={{...cardSt, padding: 20}}>
@@ -1224,6 +1131,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
                  <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Всього відвідувань</div>
                  <div style={{fontSize: 24, fontWeight: 800, color: theme.primary, marginTop: 4}}>{groupAnalytics.totalMonthAttn}</div>
                </div>
+               {/* НОВІ ПАНЕЛІ */}
                <div style={{...cardSt, padding: 20}}>
                  <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 700, textTransform: "uppercase"}}>Середня присутність</div>
                  <div style={{fontSize: 24, fontWeight: 800, color: theme.success, marginTop: 4}}>{groupAnalytics.avgAttendance} <span style={{fontSize:13, fontWeight:600}}>люд./трен.</span></div>
@@ -1361,7 +1269,7 @@ function ProAnalyticsTab({ proAnalytics }) {
             {proAnalytics.bestAttenders.map((item, i) => (
               <div key={i} style={{padding: '16px', background: theme.bg, borderRadius: 16, borderLeft: `4px solid ${item.group.direction?.color || theme.primary}`}}>
                 <div style={{fontSize: 12, color: theme.textMuted, fontWeight: 600, marginBottom: 8}}>{item.group.name}</div>
-                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{item.names}</div>
+                <div style={{fontWeight: 800, color: theme.textMain, fontSize: 15}}>{getDisplayName(item.student)}</div>
                 <div style={{fontSize: 13, color: theme.primary, marginTop: 4, fontWeight: 700}}>{item.count} занять</div>
               </div>
             ))}
@@ -1582,6 +1490,7 @@ export default function App() {
     };
   },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
 
+  // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
   const proAnalytics = useMemo(() => {
     const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
     const subToSt = {}; subs.forEach(s => subToSt[s.id] = s.studentId);
@@ -1610,12 +1519,10 @@ export default function App() {
     
     const bestAttenders = groups.map(g => { 
         const counts = groupAttnCounts[g.id] || {}; 
-        const maxC = Object.values(counts).length > 0 ? Math.max(...Object.values(counts)) : 0;
-        const bestIds = Object.keys(counts).filter(id => counts[id] === maxC && maxC > 0);
-        const bestNames = bestIds.map(id => studentMap[id] ? getDisplayName(studentMap[id]) : "Невідомо").join(", ");
-        const dir = dirMap[g.directionId] || {};
-        return { group: {...g, direction: dir}, names: bestNames, count: maxC }; 
-    }).filter(x => x.count > 0);
+        const bestId = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b, null); 
+        const dir = dirMap[g.directionId] || {}; // Запобігає падінню
+        return { group: {...g, direction: dir}, student: studentMap[bestId], count: counts[bestId] }; 
+    }).filter(x => x.student && x.group);
 
     const latestAttnByStudent = {};
     attn.forEach(a => {
@@ -1639,7 +1546,7 @@ export default function App() {
       const st = studentMap[sub.studentId];
       const gr = groupMap[sub.groupId];
       if(!st || !gr) return;
-      const dir = dirMap[gr.directionId] || {}; 
+      const dir = dirMap[gr.directionId] || {}; // Запобігає падінню
       
       const stAttnDates = attn.filter(a => a.groupId === gr.id && a.subId === sub.id && a.date).map(a => a.date).sort();
       const stAttn30Days = stAttnDates.filter(d => d >= last30DaysStr).length;
@@ -1750,21 +1657,14 @@ export default function App() {
       const names = [st?.name, getDisplayName(st)].filter(Boolean);
       const subsToDel = subs.filter(s=>s.studentId===id).map(s=>s.id);
       
-      const toDelAttn = attn.filter(a => {
-        if(a.subId && subsToDel.includes(a.subId)) return true;
-        if(a.guestName && names.includes(a.guestName)) return true;
-        return false;
-      });
-      const toDelAttnIds = toDelAttn.map(a => a.id);
-
-      setAttn(p=>p.filter(a => !toDelAttnIds.includes(a.id)));
+      setAttn(p=>p.filter(a => {
+        if(a.subId && subsToDel.includes(a.subId)) return false;
+        if(a.guestName && names.includes(a.guestName)) return false;
+        return true;
+      }));
       setSubs(p=>p.filter(s=>s.studentId!==id));
       setStudents(p=>p.filter(s=>s.id!==id));
       setStudentGrps(p=>p.filter(sg=>sg.studentId!==id));
-      
-      if(toDelAttnIds.length > 0 && db.deleteAttendance) {
-          toDelAttnIds.forEach(attId => db.deleteAttendance(attId).catch(e=>console.warn(e)));
-      }
       if(db.deleteStudent) await db.deleteStudent(id);
     } catch(e) { console.warn("Помилка видалення учениці:", e); }
   };
@@ -1986,7 +1886,6 @@ export default function App() {
               );
             })}
             
-            {/* АРХІВ / НЕАКТИВНІ УЧЕНИЦІ */}
             {studentsByDirection.inactive.length > 0 && (
               <div style={{background: theme.archive, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
                   <button onClick={() => setExpandedDirs(p => ({...p, 'archive': !p['archive']}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
@@ -2105,7 +2004,7 @@ export default function App() {
           </div>}
         </div>}
 
-        {/* СПОВІЩЕННЯ: Оновлений компактний дизайн */}
+        {/* === СПОВІЩЕННЯ === */}
         {isAdmin && tab==="alerts" && <div>
           {alertsByGroup.length === 0 ? <div style={{textAlign:"center",padding:60,color:theme.textLight, fontSize: 16, fontWeight: 600}}>✨ Всі абонементи активні, боргів та сповіщень немає!</div>:
           <div>
