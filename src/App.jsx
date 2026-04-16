@@ -127,13 +127,7 @@ export default function App() {
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
       
-      if (ord && ord.length > 0) {
-         setCustomOrders(prev => {
-            const ordMap = { ...prev };
-            ord.forEach(o => ordMap[o.group_id] = o.student_ids);
-            return ordMap;
-         });
-      }
+    setCustomOrders(ord || {});
     } catch (e) {
       console.error("Global load error", e);
     } finally {
