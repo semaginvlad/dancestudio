@@ -12,6 +12,7 @@ import {
   cardSt,
 } from "../shared/constants";
 import {
+  daysLeft,
   fmt,
   getDisplayName,
   getNextTrainingDate,
