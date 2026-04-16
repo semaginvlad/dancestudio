@@ -1,7 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { supabase } from "../supabase";
-import { MONTHS, PLAN_TYPES, WEEKDAYS, btnP, btnS, cardSt, theme, inputSt } from "../shared/constants";
+import {
+  theme,
+  WEEKDAYS,
+  MONTHS,
+  PLAN_TYPES,
+  inputSt,
+  btnP,
+  btnS,
+  cardSt,
+} from "../shared/constants";
 import {
   fmt,
   getDisplayName,
