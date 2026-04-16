@@ -165,3 +165,50 @@ export {
   STATUS_LABELS,
   STATUS_COLORS,
 };
+export const inputSt = {
+  width: "100%",
+  padding: "16px 20px",
+  background: theme.input,
+  border: `1px solid transparent`,
+  borderRadius: 16,
+  color: theme.textMain,
+  fontSize: 14,
+  fontWeight: 500,
+  outline: "none",
+  boxSizing: "border-box",
+  fontFamily: "inherit",
+  transition: "0.2s"
+};
+
+export const btnP = {
+  padding: "16px 28px",
+  background: theme.primary,
+  color: "#fff",
+  border: "none",
+  borderRadius: 100,
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  boxShadow: `0 8px 24px ${theme.primary}40`
+};
+
+export const btnS = {
+  padding: "16px 28px",
+  background: theme.input,
+  color: theme.textMuted,
+  border: "none",
+  borderRadius: 100,
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "inherit"
+};
+
+export const cardSt = {
+  background: theme.card,
+  borderRadius: 24,
+  padding: "24px",
+  border: "none",
+  boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"
+};
