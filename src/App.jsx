@@ -535,7 +535,7 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
   const updateOrder = async (newOrder) => {
     const persistedIds = newOrder.filter(id => typeof id === "string" && !id.startsWith("guest_"));
-    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string");
+    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string" && !String(id).startsWith("guest_"));
 
     const normalizedOrder = [
       ...new Set([...persistedIds, ...validIds])
@@ -543,19 +543,42 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
 
     setCustomOrders(prev => ({ ...prev, [gid]: normalizedOrder }));
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('custom_orders')
       .upsert(
         { group_id: gid, student_ids: normalizedOrder },
         { onConflict: 'group_id' }
-      )
-      .select();
+      );
 
     if (error) {
       console.error('Order save error:', error);
-      return;
     }
   };
+
+  useEffect(() => {
+    if (!gid) return;
+
+    const currentOrder = Array.isArray(customOrders[gid]) ? customOrders[gid] : [];
+    const validIds = Array.from(stIdsInGroup).filter(id => typeof id === "string" && !String(id).startsWith("guest_"));
+
+    const cleanedOrder = [
+      ...new Set([
+        ...currentOrder.filter(id => typeof id === "string" && !id.startsWith("guest_") && validIds.includes(id)),
+        ...validIds,
+      ]),
+    ].filter(id => validIds.includes(id));
+
+    if (JSON.stringify(currentOrder) === JSON.stringify(cleanedOrder)) return;
+
+    setCustomOrders(prev => ({ ...prev, [gid]: cleanedOrder }));
+
+    supabase
+      .from('custom_orders')
+      .upsert({ group_id: gid, student_ids: cleanedOrder }, { onConflict: 'group_id' })
+      .then(({ error }) => {
+        if (error) console.error('Auto-clean custom order error:', error);
+      });
+  }, [gid, stIdsInGroup, customOrders, setCustomOrders]);
 
   const moveManual = (studentId, dir) => {
     const currentOrder = studsInGroup.map(s => s.id);
@@ -647,6 +670,19 @@ const AttendanceTab = React.memo(function AttendanceTab({ groups, rawSubs, subs,
        const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
        if (toDelSg) {
          setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
+         setCustomOrders(prev => {
+           const current = Array.isArray(prev[gid]) ? prev[gid] : [];
+           const nextOrder = current.filter(id => id !== st.id);
+
+           supabase
+             .from('custom_orders')
+             .upsert({ group_id: gid, student_ids: nextOrder }, { onConflict: 'group_id' })
+             .then(({ error }) => {
+               if (error) console.error('Remove from custom order error:', error);
+             });
+
+           return { ...prev, [gid]: nextOrder };
+         });
          if (db.removeStudentGroup) await db.removeStudentGroup(toDelSg.studentId, toDelSg.groupId).catch(e => console.log(e));
        }
        const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
