@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { theme, DIRECTIONS, PLAN_TYPES, PAY_METHODS, inputSt, btnP, btnS } from "../shared/constants";
-import { addMonth, today } from "../shared/utils";
+import { addMonth, today, fmt } from "../shared/utils";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 
 export function StudentForm({initial, onDone, onCancel, studentGrps, groups}){
