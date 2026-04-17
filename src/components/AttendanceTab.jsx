@@ -362,36 +362,47 @@ const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecor
             }
         }
 
-        // 🟢 ГНУЧКІ АБОНЕМЕНТИ
-        let validSub = null;
-        if (!student.isGuest) {
-            const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
-            
-            // 1. Шукаємо ідеальний збіг по даті
-            let validSubs = stSubs.filter(s => 
-              s.startDate <= cellDate && s.endDate >= cellDate && (s.usedTrainings || 0) < (s.totalTrainings || 1)
-            ).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-            
-            // 2. Якщо дата поза межами, але є старий абонемент із ЗАЛИШКОМ занять — беремо його
-            if (validSubs.length === 0) {
-              validSubs = stSubs.filter(s => (s.usedTrainings || 0) < (s.totalTrainings || 1))
-                                .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-            }
-            validSub = validSubs.length > 0 ? validSubs[0] : null;
-        }
-        
-        let gType = journalGuestMode;
+        let finalSubId = null;
+        let finalEntryType = journalGuestMode; // Чітко беремо те, що вибрано внизу (Разове, Борг, тощо)
+
+        // 🟢 ЛОГІКА ТІЛЬКИ ДЛЯ "АБОНЕМЕНТА"
         if (journalGuestMode === "subscription") {
-            if (validSub) {
-                gType = "subscription";
+            if (!student.isGuest) {
+                const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
+                
+                // 1. Шукаємо абонемент в межах дати
+                let validSubs = stSubs.filter(s => 
+                  s.startDate <= cellDate && s.endDate >= cellDate && (s.usedTrainings || 0) < (s.totalTrainings || 1)
+                ).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+                
+                // 2. Якщо дата поза межами, але є старий абонемент із ЗАЛИШКОМ — списуємо з нього
+                if (validSubs.length === 0) {
+                  validSubs = stSubs.filter(s => (s.usedTrainings || 0) < (s.totalTrainings || 1))
+                                    .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+                }
+                
+                if (validSubs.length > 0) {
+                    finalSubId = validSubs[0].id;
+                } else {
+                    alert(`У "${getDisplayName(student)}" немає активного абонемента із залишком на цю дату. Відмічено як "Разове".`);
+                    finalEntryType = "single";
+                }
             } else {
-                if (!student.isGuest) alert(`У "${getDisplayName(student)}" немає активного абонемента із залишком на цю дату. Відмічено як "Разове".`);
-                gType = "single";
+                finalEntryType = "single"; // Гості не мають абонементів
             }
         }
 
         const guestNameStr = student.name || getDisplayName(student);
-        const a = { id: newId, subId: validSub?.id || null, guestName: guestNameStr, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+        const a = { 
+            id: newId, 
+            subId: finalSubId, 
+            guestName: guestNameStr, 
+            guestType: finalEntryType, 
+            groupId: gid, 
+            date: cellDate, 
+            quantity: 1, 
+            entryType: finalEntryType 
+        };
         
         setAttn(p => [...p, a]);
         
@@ -402,8 +413,8 @@ const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecor
                }
            }).catch(err => {
                console.error("Insert error:", err);
-               alert("Помилка збереження! База відхилила запис.");
-               setAttn(prev => prev.filter(item => item.id !== newId)); // Стирання при помилці
+               alert("Помилка збереження! База відхилила запис. Можливо, це дублікат.");
+               setAttn(prev => prev.filter(item => item.id !== newId));
            });
         }
       }
