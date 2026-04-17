@@ -193,55 +193,42 @@ const addManual = async () => {
       setStudentGrps(p => [...p, newSg]);
     }
 
-   const displayName = st.name || getDisplayName(st);
-const existingRec = getAttendanceRecordForStudentDate(st, manualDate);
+    const displayName = st.name || getDisplayName(st);
+    const existingRecords = getAttendanceRecordsForStudentDate(st, manualDate);
 
-    if (existingRec) {
-      const updatedRec = {
-        ...existingRec,
-        subId: null,
-        guestName: displayName,
-        guestType: selectedEntryType,
-        entryType: selectedEntryType,
-        groupId: gid,
-        date: manualDate,
-        quantity: 1,
-      };
+    if (existingRecords.length > 0) {
+      const existingIds = existingRecords.map(r => r.id);
 
-      setAttn(prev => prev.map(a => (a.id === existingRec.id ? updatedRec : a)));
+      setAttn(prev => prev.filter(a => !existingIds.includes(a.id)));
 
-      const { error } = await supabase
-        .from("attendance")
-        .update({
-          sub_id: null,
-          guest_name: displayName,
-          guest_type: selectedEntryType,
-          entry_type: selectedEntryType,
-          group_id: gid,
-          date: manualDate,
-          quantity: 1,
-        })
-        .eq("id", existingRec.id);
-
-      if (error) {
-        console.warn("update attendance error:", error);
+      for (const rec of existingRecords) {
+        try {
+          if (db.deleteAttendance) {
+            await db.deleteAttendance(rec.id);
+          } else {
+            await supabase.from("attendance").delete().eq("id", rec.id);
+          }
+        } catch (e) {
+          console.warn("delete existing attendance error:", e);
+        }
       }
+    }
+
+    const attendancePayload = {
+      id: uid(),
+      guestName: displayName,
+      guestType: selectedEntryType,
+      groupId: gid,
+      date: manualDate,
+      quantity: 1,
+      entryType: selectedEntryType,
+    };
+
+    if (db.insertAttendance) {
+      const saved = await db.insertAttendance(attendancePayload);
+      setAttn(p => [...p, saved || attendancePayload]);
     } else {
-      const attendancePayload = {
-        id: uid(),
-        guestName: displayName,
-        guestType: selectedEntryType,
-        groupId: gid,
-        date: manualDate,
-        quantity: 1,
-        entryType: selectedEntryType,
-      };
-
       setAttn(p => [...p, attendancePayload]);
-
-      if (db.insertAttendance) {
-        await db.insertAttendance(attendancePayload);
-      }
     }
   } catch (e) {
     console.warn("DB Error", e);
@@ -365,27 +352,30 @@ const existingRec = getAttendanceRecordForStudentDate(st, manualDate);
     return spans;
   }, [visibleDays]);
 
+  const getAttendanceRecordsForStudentDate = (student, date) => {
+    const possibleNames = [
+      getDisplayName(student),
+      student?.name || "",
+    ]
+      .map(v => v.trim().toLowerCase())
+      .filter(Boolean);
+
+    return [...attn]
+      .filter(a => a.groupId === gid && a.date === date)
+      .filter(a => {
+        if (a.subId) {
+          const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
+          return subStudentId === student.id;
+        }
+
+        const guestName = (a.guestName || "").trim().toLowerCase();
+        return possibleNames.includes(guestName);
+      });
+  };
+
   const getAttendanceRecordForStudentDate = (student, date) => {
-  const possibleNames = [
-    getDisplayName(student),
-    student?.name || "",
-  ]
-    .map(v => v.trim().toLowerCase())
-    .filter(Boolean);
-
-  return [...attn]
-    .filter(a => a.groupId === gid && a.date === date)
-    .reverse()
-    .find(a => {
-      if (a.subId) {
-        const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
-        return subStudentId === student.id;
-      }
-
-      const guestName = (a.guestName || "").trim().toLowerCase();
-      return possibleNames.includes(guestName);
-    }) || null;
-};
+    return [...getAttendanceRecordsForStudentDate(student, date)].reverse()[0] || null;
+  };
 
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     try {
