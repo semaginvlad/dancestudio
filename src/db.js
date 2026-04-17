@@ -47,7 +47,6 @@ export async function insertStudent(s) {
     notes: s.notes,
     message_template: s.message_template || null,
   }).select().single()
-
   if (error) throw error
   return {
     ...data,
@@ -71,7 +70,6 @@ export async function updateStudent(id, s) {
 
   const { data, error } = await supabase.from('students').update(payload).eq('id', id).select().single()
   if (error) throw error
-
   return {
     ...data,
     messageTemplate: data.message_template,
@@ -81,7 +79,6 @@ export async function updateStudent(id, s) {
 }
 
 export async function deleteStudent(id) {
-  // Спершу підтягнемо імена — щоб прибрати також гостьові записи
   try {
     const { data: st } = await supabase.from('students').select('name, first_name, last_name').eq('id', id).single();
     if (st) {
@@ -93,10 +90,7 @@ export async function deleteStudent(id) {
         await supabase.from('attendance').delete().in('guest_name', names).is('sub_id', null);
       }
     }
-  } catch (e) {
-    console.warn('Cleanup of guest attendance failed:', e);
-  }
-
+  } catch (e) { console.warn('Cleanup of guest attendance failed:', e); }
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw error
 }
@@ -104,15 +98,8 @@ export async function deleteStudent(id) {
 // ─── STUDENT GROUPS ───
 export async function fetchStudentGroups() {
   const { data, error } = await supabase.from('student_groups').select('*')
-  if (error) {
-    console.warn('student_groups:', error.message)
-    return []
-  }
-  return data.map(sg => ({
-    id: sg.id,
-    studentId: sg.student_id,
-    groupId: sg.group_id,
-  }))
+  if (error) { console.warn('student_groups:', error.message); return []; }
+  return data.map(sg => ({ id: sg.id, studentId: sg.student_id, groupId: sg.group_id }))
 }
 
 export async function addStudentGroup(studentId, groupId) {
@@ -137,7 +124,7 @@ export async function fetchGroups() {
     ...g,
     directionId: g.direction_id,
     trainerPct: g.trainer_pct,
-    trainer_id: g.trainer_id, // ← для фільтрації груп тренера
+    trainer_id: g.trainer_id,
   }))
 }
 
@@ -167,6 +154,7 @@ export async function insertSub(s) {
     plan_type: s.planType,
     start_date: s.startDate,
     end_date: s.endDate,
+    activation_date: s.activationDate || null,  // 🆕
     total_trainings: s.totalTrainings,
     used_trainings: s.usedTrainings || 0,
     amount: s.amount,
@@ -178,7 +166,6 @@ export async function insertSub(s) {
     notification_sent: false,
     notes: s.notes,
   }).select().single()
-
   if (error) throw error
   return mapSub(data)
 }
@@ -188,6 +175,7 @@ export async function updateSub(id, s) {
   if (s.planType !== undefined) payload.plan_type = s.planType
   if (s.startDate !== undefined) payload.start_date = s.startDate
   if (s.endDate !== undefined) payload.end_date = s.endDate
+  if (s.activationDate !== undefined) payload.activation_date = s.activationDate  // 🆕
   if (s.totalTrainings !== undefined) payload.total_trainings = s.totalTrainings
   if (s.usedTrainings !== undefined) payload.used_trainings = s.usedTrainings
   if (s.amount !== undefined) payload.amount = s.amount
@@ -219,6 +207,7 @@ function mapSub(s) {
     planType: s.plan_type,
     startDate: s.start_date,
     endDate: s.end_date,
+    activationDate: s.activation_date,  // 🆕
     totalTrainings: s.total_trainings,
     usedTrainings: s.used_trainings,
     amount: s.amount,
@@ -229,31 +218,66 @@ function mapSub(s) {
     payMethod: s.pay_method,
     notificationSent: s.notification_sent,
     notes: s.notes,
-    created_at: s.created_at, // ← ФІКС: поле тепер є, аналітика "Цього місяця" працює
+    created_at: s.created_at,
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 🆕 СИНХРОНІЗАЦІЯ used_trainings — щоб бот бачив ту ж цифру що і фронт
+// 🆕 СИНХРОНІЗАЦІЯ used_trainings + activation_date при кожній дії в журналі
 // ═══════════════════════════════════════════════════════════════════
 export async function syncSubUsedTrainings(subId) {
   if (!subId) return;
   try {
-    // Рахуємо SUM(quantity) — важливо, бо бот може писати quantity=2
+    // Читаємо всі відмітки по абонементу
     const { data, error } = await supabase
       .from('attendance')
-      .select('quantity')
-      .eq('sub_id', subId);
+      .select('date, quantity')
+      .eq('sub_id', subId)
+      .order('date', { ascending: true });
 
     if (error) throw error;
-    const total = (data || []).reduce((s, r) => s + (r.quantity || 1), 0);
 
-    const { error: updateErr } = await supabase
+    const total = (data || []).reduce((s, r) => s + (r.quantity || 1), 0);
+    const firstDate = data && data.length > 0 ? data[0].date : null;
+
+    // Читаємо поточний стан абонемента
+    const { data: currentSub, error: getErr } = await supabase
       .from('subscriptions')
-      .update({ used_trainings: total })
+      .select('activation_date, start_date')
+      .eq('id', subId)
+      .single();
+
+    if (getErr) throw getErr;
+
+    const payload = { used_trainings: total };
+
+    if (firstDate) {
+      // Є відвідування — оновлюємо activation_date якщо треба
+      if (!currentSub?.activation_date || currentSub.activation_date !== firstDate) {
+        payload.activation_date = firstDate;
+        // І перераховуємо end_date = firstDate + 1 місяць
+        const d = new Date(firstDate + "T12:00:00");
+        d.setMonth(d.getMonth() + 1);
+        payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    } else {
+      // Відвідувань не залишилось — скидаємо activation_date і повертаємо end_date = startDate + 1 міс
+      if (currentSub?.activation_date) {
+        payload.activation_date = null;
+        if (currentSub.start_date) {
+          const d = new Date(currentSub.start_date + "T12:00:00");
+          d.setMonth(d.getMonth() + 1);
+          payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+      }
+    }
+
+    const { error: updErr } = await supabase
+      .from('subscriptions')
+      .update(payload)
       .eq('id', subId);
 
-    if (updateErr) throw updateErr;
+    if (updErr) throw updErr;
     return total;
   } catch (e) {
     console.warn('syncSubUsedTrainings failed for', subId, e);
@@ -287,9 +311,7 @@ export async function insertAttendance(a) {
     quantity: a.quantity || 1,
     entry_type: a.entryType || 'subscription',
   }).select().single()
-
   if (error) throw error
-
   return {
     id: data.id,
     subId: data.sub_id,
@@ -304,11 +326,6 @@ export async function insertAttendance(a) {
 
 export async function deleteAttendance(id) {
   const { error } = await supabase.from('attendance').delete().eq('id', id)
-  if (error) throw error
-}
-
-export async function deleteAttendanceBySubAndDate(subId, date) {
-  const { error } = await supabase.from('attendance').delete().eq('sub_id', subId).eq('date', date)
   if (error) throw error
 }
 
@@ -338,34 +355,11 @@ export async function deleteCancelled(id) {
   if (error) throw error;
 }
 
-// ─── HELPERS ───
-export async function incrementUsed(subId, qty = 1) {
-  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-  if (sub) {
-    await supabase.from('subscriptions').update({ used_trainings: (sub.used_trainings || 0) + qty }).eq('id', subId)
-  }
-}
-
-export async function decrementUsed(subId, qty = 1) {
-  const { data: sub } = await supabase.from('subscriptions').select('used_trainings').eq('id', subId).single()
-  if (sub) {
-    await supabase.from('subscriptions').update({ used_trainings: Math.max(0, (sub.used_trainings || 0) - qty) }).eq('id', subId)
-  }
-}
-
 // ─── WAITLIST ───
 export async function fetchWaitlist() {
   const { data, error } = await supabase.from('waitlist').select('*');
-  if (error) {
-    console.warn('waitlist:', error.message);
-    return [];
-  }
-  return (data || []).map(w => ({
-    id: w.id,
-    studentId: w.student_id,
-    groupId: w.group_id,
-    dateAdded: w.date_added,
-  }));
+  if (error) { console.warn('waitlist:', error.message); return []; }
+  return (data || []).map(w => ({ id: w.id, studentId: w.student_id, groupId: w.group_id, dateAdded: w.date_added }));
 }
 
 export async function insertWaitlist(item) {
