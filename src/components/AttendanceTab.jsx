@@ -195,40 +195,60 @@ const addManual = async () => {
 
     const displayName = st.name || getDisplayName(st);
     const existingRecords = getAttendanceRecordsForStudentDate(st, manualDate);
+    const existingIds = existingRecords.map(r => r.id);
 
-    if (existingRecords.length > 0) {
-      const existingIds = existingRecords.map(r => r.id);
-
+    if (existingIds.length > 0) {
       setAttn(prev => prev.filter(a => !existingIds.includes(a.id)));
 
-      for (const rec of existingRecords) {
+      for (const recId of existingIds) {
         try {
-          if (db.deleteAttendance) {
-            await db.deleteAttendance(rec.id);
-          } else {
-            await supabase.from("attendance").delete().eq("id", rec.id);
-          }
+          await supabase.from("attendance").delete().eq("id", recId);
         } catch (e) {
           console.warn("delete existing attendance error:", e);
         }
       }
     }
 
-    const attendancePayload = {
-      id: uid(),
-      guestName: displayName,
-      guestType: selectedEntryType,
-      groupId: gid,
-      date: manualDate,
-      quantity: 1,
-      entryType: selectedEntryType,
+    const { data, error } = await supabase
+      .from("attendance")
+      .insert({
+        sub_id: null,
+        date: manualDate,
+        guest_name: displayName,
+        guest_type: selectedEntryType,
+        group_id: gid,
+        quantity: 1,
+        entry_type: selectedEntryType,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.warn("insert attendance error:", error);
+      return;
+    }
+
+    const savedAttendance = {
+      id: data.id,
+      subId: data.sub_id,
+      date: data.date,
+      guestName: data.guest_name,
+      guestType: data.guest_type,
+      groupId: data.group_id,
+      quantity: data.quantity || 1,
+      entryType: data.entry_type || "subscription",
     };
 
-    if (db.insertAttendance) {
-      const saved = await db.insertAttendance(attendancePayload);
-      setAttn(p => [...p, saved || attendancePayload]);
+    if (db.fetchAttendance) {
+      try {
+        const freshAttendance = await db.fetchAttendance();
+        setAttn(freshAttendance);
+      } catch (e) {
+        console.warn("fetchAttendance refresh error:", e);
+        setAttn(prev => [...prev, savedAttendance]);
+      }
     } else {
-      setAttn(p => [...p, attendancePayload]);
+      setAttn(prev => [...prev, savedAttendance]);
     }
   } catch (e) {
     console.warn("DB Error", e);
@@ -236,30 +256,6 @@ const addManual = async () => {
 
   setManualName("");
 };
-
-  const removeStudentFromJournal = async (st) => {
-    if(!confirm(`Відкріпити ${getDisplayName(st)} від цієї групи? Її історія залишиться, але вона не відображатиметься в журналі.`)) return;
-    
-    if(!st.isGuest) {
-       const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
-       if (toDelSg) {
-         setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
-         if (db.removeStudentGroup) await db.removeStudentGroup(toDelSg.studentId, toDelSg.groupId).catch(e => console.log(e));
-       }
-       const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
-       if (activeSub) {
-          const newEnd = today();
-          if(db.updateSub) db.updateSub(activeSub.id, { endDate: newEnd }).catch(e=>console.warn(e));
-          setSubs(p => p.map(s => s.id === activeSub.id ? { ...s, endDate: newEnd } : s));
-       }
-    } else {
-       const toDelAttn = attn.filter(a => a.groupId === gid && a.guestName === st.name);
-       const toDelIds = toDelAttn.map(a => a.id);
-       setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
-       if(db.deleteAttendance) toDelIds.forEach(id => db.deleteAttendance(id).catch(e=>console.log(e)));
-    }
-    setActionMenuSt(null);
-  };
 
   const handlePrevMonth = () => {
     const [y, m] = journalMonth.split('-');
