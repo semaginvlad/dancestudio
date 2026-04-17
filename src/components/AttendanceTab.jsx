@@ -193,18 +193,8 @@ const addManual = async () => {
       setStudentGrps(p => [...p, newSg]);
     }
 
-    const displayName = st.name || getDisplayName(st);
-
-    const existingRec = attn.find(a => {
-      if (a.groupId !== gid || a.date !== manualDate) return false;
-
-      if (a.subId) {
-        const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
-        return subStudentId === st.id;
-      }
-
-      return (a.guestName || "").trim().toLowerCase() === displayName.trim().toLowerCase();
-    });
+   const displayName = st.name || getDisplayName(st);
+const existingRec = getAttendanceRecordForStudentDate(st, manualDate);
 
     if (existingRec) {
       const updatedRec = {
