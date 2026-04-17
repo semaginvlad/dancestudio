@@ -681,7 +681,7 @@ const groupAnalytics = useMemo(() => {
                 </td>
                 {visibleDays.map((d, index) => {
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
+                const rec = getAttendanceRecordForStudentDate(st, d);
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
