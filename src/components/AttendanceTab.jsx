@@ -298,31 +298,117 @@ const addManual = async () => {
     return spans;
   }, [visibleDays]);
 
-  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
+  const getAttendanceRecordsForStudentDate = (student, date) => {
+    const possibleNames = [
+      getDisplayName(student),
+      student?.name || "",
+      `${student?.lastName || student?.last_name || ""} ${student?.firstName || student?.first_name || ""}`.trim(),
+    ]
+      .map(v => (v || "").trim().toLowerCase())
+      .filter(Boolean);
+
+    return [...attn].filter(a => {
+      if (a.groupId !== gid || a.date !== date) return false;
+
+      if (a.subId) {
+        const linkedSub = subs.find(s => s.id === a.subId);
+        return linkedSub?.studentId === student.id;
+      }
+
+      const guestName = (a.guestName || "").trim().toLowerCase();
+      return possibleNames.includes(guestName);
+    });
+  };
+
+  const getAttendanceRecordForStudentDate = (student, date) => {
+    const records = getAttendanceRecordsForStudentDate(student, date);
+
+    if (!records.length) return null;
+
+    return [...records].sort((a, b) => {
+      const aCreated = a.createdAt || "";
+      const bCreated = b.createdAt || "";
+      return bCreated.localeCompare(aCreated);
+    })[0];
+  };
+
+  const toggleJournalCell = async (student, cellDate) => {
     try {
-      if (isCurrentlyAttended && dbRecord) {
-        setAttn(p => p.filter(a => a.id !== dbRecord.id));
-        if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
-      } else {
-        const newId = uid();
-        const validSub = !student.isGuest ? subs.find(s => 
-          s.studentId === student.id && 
-          s.groupId === gid && 
-          s.startDate <= cellDate && 
-          s.endDate >= cellDate && 
-          (s.usedTrainings || 0) < (s.totalTrainings || 1)
-        ) : null;
-        
-        if (validSub) {
-          const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
-          setAttn(p => [...p, a]);
-          if(db.insertAttendance) await db.insertAttendance(a);
-        } else {
-          const gType = "single";
-          const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
-          setAttn(p => [...p, a]);
-          if(db.insertAttendance) await db.insertAttendance(a);
+      const matchingRecords = getAttendanceRecordsForStudentDate(student, cellDate);
+
+      const matchingSub = !student.isGuest
+        ? [...subs]
+            .filter(s =>
+              s.studentId === student.id &&
+              s.groupId === gid &&
+              s.startDate <= cellDate &&
+              s.endDate >= cellDate
+            )
+            .sort((a, b) => {
+              const aStart = a.startDate || "";
+              const bStart = b.startDate || "";
+              return bStart.localeCompare(aStart);
+            })[0] || null
+        : null;
+
+      if (matchingRecords.length > 0) {
+        for (const rec of matchingRecords) {
+          if (db.deleteAttendance) {
+            await db.deleteAttendance(rec.id);
+          } else {
+            await supabase.from("attendance").delete().eq("id", rec.id);
+          }
         }
+      } else if (matchingSub) {
+        const newAttendance = {
+          id: uid(),
+          subId: matchingSub.id,
+          date: cellDate,
+          quantity: 1,
+          entryType: "subscription",
+          groupId: gid,
+        };
+
+        if (db.insertAttendance) {
+          await db.insertAttendance(newAttendance);
+        } else {
+          await supabase.from("attendance").insert({
+            sub_id: matchingSub.id,
+            date: cellDate,
+            quantity: 1,
+            entry_type: "subscription",
+            group_id: gid,
+          });
+        }
+      } else {
+        const guestType = "single";
+        const newAttendance = {
+          id: uid(),
+          guestName: student.name || getDisplayName(student),
+          guestType,
+          groupId: gid,
+          date: cellDate,
+          quantity: 1,
+          entryType: guestType,
+        };
+
+        if (db.insertAttendance) {
+          await db.insertAttendance(newAttendance);
+        } else {
+          await supabase.from("attendance").insert({
+            guest_name: student.name || getDisplayName(student),
+            guest_type: guestType,
+            group_id: gid,
+            date: cellDate,
+            quantity: 1,
+            entry_type: guestType,
+          });
+        }
+      }
+
+      if (db.fetchAttendance) {
+        const freshAttendance = await db.fetchAttendance();
+        setAttn(freshAttendance);
       }
     } catch (e) {
       console.warn("DB Error:", e);
@@ -524,7 +610,7 @@ const addManual = async () => {
                 </td>
                 {visibleDays.map((d, index) => {
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
+                  const rec = getAttendanceRecordForStudentDate(st, d);
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
@@ -535,10 +621,7 @@ const addManual = async () => {
                     if (rec.entryType === 'trial') markBg = theme.success;
                     else if (rec.entryType === 'single') markBg = theme.warning;
                     else if (rec.entryType === 'unpaid') markBg = theme.danger;
-                    else {
-                      const usedRange = subRanges.find(r => r.id === rec.subId);
-                      markBg = (usedRange && usedRange.isExhausted) ? theme.exhausted : theme.primary;
-                    }
+                    else if (rec.entryType === 'subscription') markBg = theme.primary;
                   }
 
                   let frameStyle = {};
