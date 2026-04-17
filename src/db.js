@@ -247,16 +247,16 @@ export async function insertAttendance(a) {
 
   if (error) throw error
 
-  return {
-    id: data.id,
-    subId: data.sub_id,
-    date: data.date,
-    guestName: data.guest_name,
-    guestType: data.guest_type,
-    groupId: data.group_id,
-    quantity: data.quantity || 1,
-    entryType: data.entry_type || 'subscription',
-  }
+return {
+  id: data.id,
+  subId: data.sub_id,
+  date: data.date,
+  guestName: data.guest_name,
+  guestType: data.guest_type,
+  groupId: data.group_id,
+  quantity: data.quantity || 1,
+  entryType: data.entry_type || 'subscription',
+  createdAt: data.created_at,
 }
 
 export async function deleteAttendance(id) {
