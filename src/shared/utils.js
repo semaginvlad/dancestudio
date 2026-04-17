@@ -11,6 +11,13 @@ const addMonth = (d) => {
   return toLocalISO(dt);
 };
 
+// 🆕 Додати N днів до дати (для скасувань)
+const addDays = (d, n) => {
+  const dt = new Date(d + "T12:00:00");
+  dt.setDate(dt.getDate() + n);
+  return toLocalISO(dt);
+};
+
 const today = () => toLocalISO(new Date());
 
 const fmt = (d) => {
@@ -34,14 +41,77 @@ function getDisplayName(st) {
   return st.name || "Без імені";
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 🆕 НОВА ЛОГІКА ТЕРМІНУ ДІЇ АБОНЕМЕНТУ
+// ═══════════════════════════════════════════════════════════════════
+//
+// Ключові правила:
+// 1. Якщо activation_date (дата першого відвідування) заповнена →
+//    effective_end = activation_date + 1 місяць
+// 2. Якщо activation_date порожня (абонемент куплений, ще не розпочат) →
+//    effective_end = start_date + 1 місяць (як було раніше)
+// 3. Додатково: скасовані тренування подовжують effective_end на 1 день
+//    за кожне скасування (це вже враховано в end_date самою міграцією).
+//
+// Функція getEffectiveEndDate рахує правильну дату, коли абонемент "помре".
+// Пріоритет: береться end_date з БД (якщо воно вже "скориговане" на скасування),
+// або обчислюється з activation_date.
+// ═══════════════════════════════════════════════════════════════════
+
+function getEffectiveEndDate(sub) {
+  if (!sub) return null;
+  // Якщо в БД вже збережено end_date — довіряємо йому
+  // (бо він вже враховує активацію + скасовані дні)
+  if (sub.endDate) return sub.endDate;
+  // Fallback — якщо end_date порожній (навряд чи, але про всяк)
+  const activationDate = sub.activationDate || sub.activation_date;
+  if (activationDate) return addMonth(activationDate);
+  if (sub.startDate) return addMonth(sub.startDate);
+  return null;
+}
+
+// 🆕 Статус абонемента: active / warning / expired
+// Тут "сірим" (exhausted) стає:
+//   - коли використані ВСІ тренування
+//   - АБО коли термін дії вийшов
+//   - АБО коли активація ще не сталася і минуло > 30 днів з покупки
 function getSubStatus(sub) {
-  if (!sub?.endDate) return "expired";
-  if (sub.endDate < today()) return "expired";
+  if (!sub) return "expired";
+
+  const end = getEffectiveEndDate(sub);
+  const activation = sub.activationDate || sub.activation_date;
+
+  // Якщо ще не активований (немає жодного відвідування):
+  //   - Якщо минуло <= 30 днів з покупки — вважаємо "active" (чекає першого заняття)
+  //   - Якщо минуло > 30 днів — expired (скасовуємо "зависле")
+  if (!activation) {
+    const daysSinceStart = sub.startDate
+      ? Math.ceil((new Date() - new Date(sub.startDate + "T12:00:00")) / 86400000)
+      : 0;
+    if (daysSinceStart > 30) return "expired";
+    return "active"; // Передоплата, ще чекає
+  }
+
+  // Активований — перевіряємо термін і залишок занять
+  if (!end || end < today()) return "expired";
   if ((sub.usedTrainings || 0) >= (sub.totalTrainings || 1)) return "expired";
-  const dl = daysLeft(sub.endDate);
+
+  // Warning — якщо <= 3 днів до кінця або <= 1 заняття залишилось
+  const dl = daysLeft(end);
   const tl = (sub.totalTrainings || 1) - (sub.usedTrainings || 0);
   if (dl <= 3 || tl <= 1) return "warning";
+
   return "active";
+}
+
+// 🆕 Перевірка "чи вичерпаний абонемент" — для сірої підсвітки в журналі
+// Повертає true якщо: використані ВСІ тренування АБО термін дії вийшов
+function isSubExhausted(sub) {
+  if (!sub) return true;
+  if ((sub.usedTrainings || 0) >= (sub.totalTrainings || 1)) return true;
+  const end = getEffectiveEndDate(sub);
+  if (end && end < today()) return true;
+  return false;
 }
 
 function getNextTrainingDate(schedule, afterDateStr) {
@@ -127,12 +197,15 @@ function useStickyState(defaultValue, key) {
 export {
   toLocalISO,
   addMonth,
+  addDays,
   today,
   fmt,
   daysLeft,
   uid,
   getDisplayName,
   getSubStatus,
+  getEffectiveEndDate,  // 🆕
+  isSubExhausted,        // 🆕
   getNextTrainingDate,
   getPreviousTrainingDate,
   getNotifMsg,
