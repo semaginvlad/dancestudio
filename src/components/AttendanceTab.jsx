@@ -317,18 +317,23 @@ export default function AttendanceTab({
     return spans;
   }, [visibleDays]);
 
-  const findRecord = (st, d) => {
-    return attn.find(a => {
+ const findRecord = (st, d) => {
+    const sName = (st.name || "").trim().toLowerCase();
+    const dName = getDisplayName(st).toLowerCase();
+
+    const matches = attn.filter(a => {
       if (a.groupId !== gid || a.date !== d) return false;
+      
       if (a.subId) {
-        const s = subs.find(sub => sub.id === a.subId);
-        return s && s.studentId === st.id;
+        const linkedSub = subs.find(sub => sub.id === a.subId);
+        if (linkedSub && linkedSub.studentId === st.id) return true;
       }
+      
       const gName = (a.guestName || "").trim().toLowerCase();
-      const sName = (st.name || "").trim().toLowerCase();
-      const dName = getDisplayName(st).toLowerCase();
-      return gName === sName || gName === dName;
+      return gName && (gName === sName || gName === dName);
     });
+
+    return matches.length > 0 ? matches[0] : undefined;
   };
 
 const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
