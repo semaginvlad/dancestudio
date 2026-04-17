@@ -742,7 +742,7 @@ const groupAnalytics = useMemo(() => {
                     if (rec.entryType === 'trial') markBg = theme.success;
                     else if (rec.entryType === 'single') markBg = theme.warning;
                     else if (rec.entryType === 'unpaid') markBg = theme.danger;
-                    else {
+                    else if (rec.entryType === 'subscription') markBg = theme.primary;
                       const usedRange = subRanges.find(r => r.id === rec.subId);
                       markBg = (usedRange && usedRange.isExhausted) ? theme.exhausted : theme.primary;
                     }
