@@ -218,11 +218,7 @@ function mapSub(s) {
 
 // ─── ATTENDANCE ───
 export async function fetchAttendance() {
-  const { data, error } = await supabase
-    .from('attendance')
-    .select('*')
-    .order('created_at', { ascending: true })
-
+  const { data, error } = await supabase.from('attendance').select('*')
   if (error) throw error
 
   return data.map(a => ({
@@ -234,20 +230,19 @@ export async function fetchAttendance() {
     groupId: a.group_id,
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
-    createdAt: a.created_at,
   }))
 }
 
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
-    sub_id: a.subId || null,
-    date: a.date,
-    guest_name: a.guestName || null,
-    guest_type: a.guestType || null,
-    group_id: a.groupId || null,
-    quantity: a.quantity || 1,
-    entry_type: a.entryType || 'subscription',
-  }).select().single()
+      sub_id: a.subId || null,
+      date: a.date,
+      guest_name: a.guestName || null,
+      guest_type: a.guestType || null,
+      group_id: a.groupId || null,
+      quantity: a.quantity || 1,
+      entry_type: a.entryType || 'subscription',
+    }).select().single()
 
   if (error) throw error
 
@@ -260,7 +255,6 @@ export async function insertAttendance(a) {
     groupId: data.group_id,
     quantity: data.quantity || 1,
     entryType: data.entry_type || 'subscription',
-    createdAt: data.created_at,
   }
 }
 
