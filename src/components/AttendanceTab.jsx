@@ -338,41 +338,49 @@ export default function AttendanceTab({
 
 const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     try {
-      // 1. ЗНЯТТЯ ГАЛОЧКИ
       if (isCurrentlyAttended && dbRecord) {
         setAttn(p => p.filter(a => a.id !== dbRecord.id));
         if (db.deleteAttendance) {
            db.deleteAttendance(dbRecord.id).catch(err => {
               alert("Помилка видалення в базі: " + err.message);
-              setAttn(p => [...p, dbRecord]); // Повертаємо галочку, якщо база відмовила
+              setAttn(p => [...p, dbRecord]);
            });
         }
-      } 
-      // 2. ПОСТАНОВКА ГАЛОЧКИ
-      else {
-        // Захист від подвійного "Пробного"
+      } else {
+        const newId = `temp_${uid()}`;
+        
+        // 🛑 ЗАХИСТ ВІД ПОДВІЙНИХ ПРОБНИХ
         if (journalGuestMode === "trial") {
-            const hasTrialBefore = attn.some(a => a.groupId === gid && a.entryType === "trial" && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === student.id : (a.guestName||"").trim().toLowerCase() === (student.name||"").trim().toLowerCase()));
-            if (hasTrialBefore) {
+            const sName = (student.name || "").trim().toLowerCase();
+            const dName = getDisplayName(student).toLowerCase();
+            const hasTrial = attn.some(a => {
+                if (a.groupId !== gid || a.entryType !== "trial") return false;
+                if (a.subId && subs.find(s => s.id === a.subId)?.studentId === student.id) return true;
+                const gName = (a.guestName || "").trim().toLowerCase();
+                return gName && (gName === sName || gName === dName);
+            });
+            if (hasTrial) {
                 alert(`Увага! "${getDisplayName(student)}" вже була на пробному занятті в цій групі. Оберіть "Разове" або "Абонемент".`);
-                return; // Блокуємо постановку галочки
+                return;
             }
         }
 
-        const tempId = `temp_${uid()}`; // Використовуємо явний тимчасовий ID
-        
+        // 🟢 ГНУЧКІ АБОНЕМЕНТИ
         let validSub = null;
         if (!student.isGuest) {
-            // Шукаємо абонемент, який АКТИВНИЙ саме в цю дату і має заняття
-            const activeSubsOnDate = subs.filter(s => 
-              s.studentId === student.id && 
-              s.groupId === gid && 
-              s.startDate <= cellDate && 
-              s.endDate >= cellDate && 
-              (s.usedTrainings || 0) < (s.totalTrainings || 1)
-            ).sort((a,b) => new Date(a.startDate) - new Date(b.startDate)); // FIFO
+            const stSubs = subs.filter(s => s.studentId === student.id && s.groupId === gid);
             
-            validSub = activeSubsOnDate.length > 0 ? activeSubsOnDate[0] : null;
+            // 1. Шукаємо ідеальний збіг по даті
+            let validSubs = stSubs.filter(s => 
+              s.startDate <= cellDate && s.endDate >= cellDate && (s.usedTrainings || 0) < (s.totalTrainings || 1)
+            ).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+            
+            // 2. Якщо дата поза межами, але є старий абонемент із ЗАЛИШКОМ занять — беремо його
+            if (validSubs.length === 0) {
+              validSubs = stSubs.filter(s => (s.usedTrainings || 0) < (s.totalTrainings || 1))
+                                .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+            }
+            validSub = validSubs.length > 0 ? validSubs[0] : null;
         }
         
         let gType = journalGuestMode;
@@ -380,26 +388,25 @@ const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecor
             if (validSub) {
                 gType = "subscription";
             } else {
-                if (!student.isGuest) alert(`На ${fmt(cellDate)} немає активного абонемента із залишком. Відмічено як "Разове".`);
+                if (!student.isGuest) alert(`У "${getDisplayName(student)}" немає активного абонемента із залишком на цю дату. Відмічено як "Разове".`);
                 gType = "single";
             }
         }
 
         const guestNameStr = student.name || getDisplayName(student);
-        const newRecord = { id: tempId, subId: validSub?.id || null, guestName: guestNameStr, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+        const a = { id: newId, subId: validSub?.id || null, guestName: guestNameStr, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
         
-        setAttn(p => [...p, newRecord]); // Миттєво малюємо на екрані
-
+        setAttn(p => [...p, a]);
+        
         if (db.insertAttendance) {
-           db.insertAttendance(newRecord).then(realRecord => {
+           db.insertAttendance(a).then(realRecord => {
                if (realRecord && realRecord.id) {
-                   // База зберегла успішно, міняємо temp_id на реальний
-                   setAttn(prev => prev.map(item => item.id === tempId ? { ...item, id: realRecord.id } : item));
+                   setAttn(prev => prev.map(item => item.id === newId ? { ...item, id: realRecord.id } : item));
                }
            }).catch(err => {
                console.error("Insert error:", err);
                alert("Помилка збереження! База відхилила запис.");
-               setAttn(prev => prev.filter(item => item.id !== tempId)); // Видаляємо галочку, якщо помилка
+               setAttn(prev => prev.filter(item => item.id !== newId)); // Стирання при помилці
            });
         }
       }
