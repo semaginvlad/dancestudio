@@ -156,15 +156,19 @@ export default function App() {
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
 
-  const subsExt = useMemo(()=>{
+ const subsExt = useMemo(()=>{
     const usedMap = {};
-    attn.forEach(a => { if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + 1; });
+    attn.forEach(a => {
+      if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + (a.quantity || 1);
+    });
     return subs.map(s => {
       const extSub = { ...s, usedTrainings: usedMap[s.id] || 0 };
       extSub.status = getSubStatus(extSub);
       return extSub;
     });
   },[subs, attn]);
+
+
 
   const activeSubs = useMemo(()=>subsExt.filter(s=>s.status!=="expired"),[subsExt]);
 
