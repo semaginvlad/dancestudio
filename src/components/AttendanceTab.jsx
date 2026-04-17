@@ -352,25 +352,34 @@ const addManual = async () => {
     const possibleNames = [
       getDisplayName(student),
       student?.name || "",
+      `${student?.lastName || student?.last_name || ""} ${student?.firstName || student?.first_name || ""}`.trim(),
     ]
-      .map(v => v.trim().toLowerCase())
+      .map(v => (v || "").trim().toLowerCase())
       .filter(Boolean);
 
-    return [...attn]
-      .filter(a => a.groupId === gid && a.date === date)
-      .filter(a => {
-        if (a.subId) {
-          const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
-          return subStudentId === student.id;
-        }
+    return [...attn].filter(a => {
+      if (a.groupId !== gid || a.date !== date) return false;
 
-        const guestName = (a.guestName || "").trim().toLowerCase();
-        return possibleNames.includes(guestName);
-      });
+      if (a.subId) {
+        const linkedSub = subs.find(s => s.id === a.subId);
+        return linkedSub?.studentId === student.id;
+      }
+
+      const guestName = (a.guestName || "").trim().toLowerCase();
+      return possibleNames.includes(guestName);
+    });
   };
 
   const getAttendanceRecordForStudentDate = (student, date) => {
-    return [...getAttendanceRecordsForStudentDate(student, date)].reverse()[0] || null;
+    const records = getAttendanceRecordsForStudentDate(student, date);
+    if (!records.length) return null;
+
+    return [...records].sort((a, b) => {
+      const aCreated = a.createdAt || "";
+      const bCreated = b.createdAt || "";
+      if (aCreated === bCreated) return String(b.id || "").localeCompare(String(a.id || ""));
+      return bCreated.localeCompare(aCreated);
+    })[0];
   };
 
  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
@@ -388,6 +397,7 @@ const addManual = async () => {
           .sort((a, b) => {
             const aStart = a.startDate || "";
             const bStart = b.startDate || "";
+            if (aStart === bStart) return String(b.id || "").localeCompare(String(a.id || ""));
             return bStart.localeCompare(aStart);
           })[0] || null
       : null;
@@ -400,59 +410,58 @@ const addManual = async () => {
           await supabase.from("attendance").delete().eq("id", rec.id);
         }
       }
-    } else {
-      if (matchingSub) {
-        const newAttendance = {
-          id: uid(),
-          subId: matchingSub.id,
-          date: cellDate,
-          quantity: 1,
-          entryType: "subscription",
-          groupId: gid,
-        };
+    } else if (matchingSub) {
+      const newAttendance = {
+        id: uid(),
+        subId: matchingSub.id,
+        date: cellDate,
+        quantity: 1,
+        entryType: "subscription",
+        groupId: gid,
+      };
 
-        if (db.insertAttendance) {
-          await db.insertAttendance(newAttendance);
-        } else {
-          await supabase.from("attendance").insert({
-            sub_id: matchingSub.id,
-            date: cellDate,
-            quantity: 1,
-            entry_type: "subscription",
-            group_id: gid,
-          });
-        }
+      if (db.insertAttendance) {
+        await db.insertAttendance(newAttendance);
       } else {
-        const guestType = "single";
-        const newAttendance = {
-          id: uid(),
-          guestName: student.name || getDisplayName(student),
-          guestType,
-          groupId: gid,
+        await supabase.from("attendance").insert({
+          sub_id: matchingSub.id,
           date: cellDate,
           quantity: 1,
-          entryType: guestType,
-        };
+          entry_type: "subscription",
+          group_id: gid,
+        });
+      }
+    } else {
+      const guestType = "single";
+      const displayName = student.name || getDisplayName(student);
+      const newAttendance = {
+        id: uid(),
+        guestName: displayName,
+        guestType,
+        groupId: gid,
+        date: cellDate,
+        quantity: 1,
+        entryType: guestType,
+      };
 
-        if (db.insertAttendance) {
-          await db.insertAttendance(newAttendance);
-        } else {
-          await supabase.from("attendance").insert({
-            guest_name: student.name || getDisplayName(student),
-            guest_type: guestType,
-            group_id: gid,
-            date: cellDate,
-            quantity: 1,
-            entry_type: guestType,
-          });
-        }
+      if (db.insertAttendance) {
+        await db.insertAttendance(newAttendance);
+      } else {
+        await supabase.from("attendance").insert({
+          guest_name: displayName,
+          guest_type: guestType,
+          group_id: gid,
+          date: cellDate,
+          quantity: 1,
+          entry_type: guestType,
+        });
       }
     }
 
-    if (db.fetchAttendance) {
-      const freshAttendance = await db.fetchAttendance();
-      setAttn(freshAttendance);
-    }
+    const freshAttendance = db.fetchAttendance
+      ? await db.fetchAttendance()
+      : [];
+    setAttn(freshAttendance);
   } catch (e) {
     console.warn("DB Error:", e);
   }
