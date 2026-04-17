@@ -248,28 +248,23 @@ export default function AttendanceTab({
 
   const getStudentSubRanges = (studentId) => {
     if (!studentId || String(studentId).startsWith("guest_")) return [];
-    // ВИПРАВЛЕНО: subs замість subsExt
+    
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     const ranges = [];
+    
     for (let i = 0; i < stSubs.length; i++) {
       const sub = stSubs[i];
-      let effectiveEnd = sub.endDate || "2099-12-31";
       let isExhausted = false;
+      let effectiveEnd = sub.endDate; // ЖОРСТКА МЕЖА: Ніколи не розтягуємо за endDate!
 
       const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
+      
       if (subAttns.length >= (sub.totalTrainings || 1)) {
         isExhausted = true;
-        effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; 
-      } else if (today() > effectiveEnd) {
-        isExhausted = true;
-      }
-
-      const nextSub = stSubs[i+1];
-      if (nextSub && nextSub.startDate && nextSub.startDate <= effectiveEnd) {
-         const d = new Date(nextSub.startDate + "T12:00:00");
-         d.setDate(d.getDate() - 1);
-         const newEnd = toLocalISO(d);
-         if (newEnd < effectiveEnd) effectiveEnd = newEnd;
+        // Якщо всі заняття виходжені, рамка обрізається по даті останнього заняття
+        if (subAttns[(sub.totalTrainings || 1) - 1] < effectiveEnd) {
+           effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; 
+        }
       }
 
       ranges.push({ start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted });
