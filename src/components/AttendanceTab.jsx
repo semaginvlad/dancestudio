@@ -258,15 +258,9 @@ export default function AttendanceTab({
       const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
       if (subAttns.length >= (sub.totalTrainings || 1)) {
         isExhausted = true;
-        // МИ ПРИБРАЛИ ЗВУЖЕННЯ РАМКИ: Тепер рамка стабільно стоїть до кінцевої дати абонемента
-      }
-
-      const nextSub = stSubs[i+1];
-      if (nextSub && nextSub.startDate && nextSub.startDate <= effectiveEnd) {
-         const d = new Date(nextSub.startDate + "T12:00:00");
-         d.setDate(d.getDate() - 1);
-         const newEnd = toLocalISO(d);
-         if (newEnd < effectiveEnd) effectiveEnd = newEnd;
+        if (subAttns[(sub.totalTrainings || 1) - 1] < effectiveEnd) {
+           effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; 
+        }
       }
 
       ranges.push({ start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted });
