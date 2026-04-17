@@ -10,7 +10,9 @@ import {
   inputSt,
   btnP,
   btnS,
-  cardSt
+  cardSt,
+  STATUS_COLORS,
+  STATUS_LABELS
 } from "../shared/constants";
 import {
   toLocalISO,
@@ -38,7 +40,7 @@ export default function AttendanceTab({
   
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
-  const [journalGuestMode, setJournalGuestMode] = useState("single");
+  const [journalGuestMode, setJournalGuestMode] = useState("subscription");
 
   const groupMap = useMemo(() => Object.fromEntries(groups.map(g => [g.id, g])), [groups]);
   const dirMap = useMemo(() => Object.fromEntries(DIRECTIONS.map(d => [d.id, d])), []);
@@ -307,6 +309,21 @@ export default function AttendanceTab({
     return spans;
   }, [visibleDays]);
 
+  // НАДІЙНИЙ ПОШУК (Вирішує баг з Яненко)
+  const findRecord = (st, d) => {
+    return attn.find(a => {
+      if (a.groupId !== gid || a.date !== d) return false;
+      if (a.subId) {
+        const s = subs.find(sub => sub.id === a.subId);
+        return s && s.studentId === st.id;
+      }
+      const gName = (a.guestName || "").trim().toLowerCase();
+      const sName = (st.name || "").trim().toLowerCase();
+      const dName = getDisplayName(st).toLowerCase();
+      return gName === sName || gName === dName;
+    });
+  };
+
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     try {
       if (isCurrentlyAttended && dbRecord) {
@@ -330,7 +347,8 @@ export default function AttendanceTab({
             alert("Немає активного абонемента для цієї дати (або вичерпано ліміт). Буде позначено як Разове.");
         }
 
-        const a = { id: newId, subId: validSub?.id, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+        const guestNameStr = student.name || getDisplayName(student);
+        const a = { id: newId, subId: validSub?.id || null, guestName: guestNameStr, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
         
         setAttn(p => [...p, a]);
         if(db.insertAttendance) {
@@ -491,8 +509,8 @@ export default function AttendanceTab({
             <tr>
               {visibleDays.map((d, index) => {
                 const dayNum = new Date(d + "T12:00:00").getDay();
-                const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
+                const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 
                 return (
                 <th key={d} style={{ padding: "8px 2px", background: isDayCancelled ? "rgba(255, 69, 58, 0.15)" : theme.card, color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `4px solid ${theme.border}`, verticalAlign: "top", height: 70 }}>
@@ -538,7 +556,7 @@ export default function AttendanceTab({
                 </td>
                 {visibleDays.map((d, index) => {
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
+                  const rec = findRecord(st, d);
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
@@ -597,9 +615,7 @@ export default function AttendanceTab({
               <td style={{ position: "sticky", left: 0, background: theme.card, padding: "10px 16px", fontWeight: 700, color: theme.secondary, borderRight: `2px solid ${theme.border}`, borderBottom: `none`, zIndex: 1, whiteSpace: "nowrap" }}>Всього присутніх:</td>
               {visibleDays.map((d, index) => {
                 const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                const count = studsInGroup.filter(st => {
-                   return attn.some(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
-                }).length;
+                const count = studsInGroup.filter(st => !!findRecord(st, d)).length;
                 return (
                   <td key={d} style={{ padding: "8px 2px", fontWeight: 800, color: count > 0 ? theme.primary : theme.textLight, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `none`, background: theme.bg }}>
                     {count > 0 ? count : "-"}
@@ -621,6 +637,7 @@ export default function AttendanceTab({
             <input style={{...inputSt, padding: "12px 16px"}} value={manualName} onChange={e=>setManualName(e.target.value)} placeholder="Прізвище Ім'я учениці" onKeyDown={e=>e.key==="Enter"&&addManual()}/>
           </div>
           <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100, overflowX: "auto" }}>
+            <Pill active={journalGuestMode==="subscription"} onClick={()=>setJournalGuestMode("subscription")} color={theme.primary}>Абонемент</Pill>
             <Pill active={journalGuestMode==="trial"} onClick={()=>setJournalGuestMode("trial")} color={theme.success}>Пробне</Pill>
             <Pill active={journalGuestMode==="single"} onClick={()=>setJournalGuestMode("single")} color={theme.warning}>Разове</Pill>
             <Pill active={journalGuestMode==="unpaid"} onClick={()=>setJournalGuestMode("unpaid")} color={theme.danger}>Борг</Pill>
