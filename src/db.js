@@ -218,7 +218,11 @@ function mapSub(s) {
 
 // ─── ATTENDANCE ───
 export async function fetchAttendance() {
-  const { data, error } = await supabase.from('attendance').select('*')
+  const { data, error } = await supabase
+    .from('attendance')
+    .select('*')
+    .order('created_at', { ascending: true })
+
   if (error) throw error
 
   return data.map(a => ({
@@ -230,6 +234,7 @@ export async function fetchAttendance() {
     groupId: a.group_id,
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
+    createdAt: a.created_at,
   }))
 }
 
