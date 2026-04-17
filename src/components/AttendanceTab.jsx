@@ -515,12 +515,19 @@ export default function AttendanceTab({
           }
         } catch (err) {
           const msg = err?.message || String(err);
-          if (msg.includes("duplicate") || msg.includes("unique")) {
-            alert("Запис вже є в базі. Перезавантаж сторінку.");
-          } else {
-            alert(`Не вдалось зберегти: ${msg}`);
-          }
-          setAttn(prev => prev.filter(i => i.id !== newId));
+         if (msg.includes("duplicate") || msg.includes("unique")) {
+  try {
+    const fresh = await db.fetchAttendance();
+    setAttn(fresh);
+    alert("Запис уже був у базі. Журнал оновлено.");
+  } catch (reloadErr) {
+    alert("Запис уже є в базі, але не вдалося оновити журнал.");
+  }
+} else {
+  alert(`Не вдалось зберегти: ${msg}`);
+}
+
+setAttn(prev => prev.filter(i => i.id !== newId));
         }
       }
     } catch (e) { console.warn("toggle:", e); }
