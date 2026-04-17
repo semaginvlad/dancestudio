@@ -158,9 +158,9 @@ const addManual = async () => {
     if (!st) {
       const nameParts = name.split(" ");
       const newStPayload = {
-        name: name,
+        name,
         first_name: nameParts.slice(1).join(" ") || "",
-        last_name: nameParts[0] || ""
+        last_name: nameParts[0] || "",
       };
 
       let createdSt = { id: uid(), ...newStPayload };
@@ -193,20 +193,65 @@ const addManual = async () => {
       setStudentGrps(p => [...p, newSg]);
     }
 
-    const attendancePayload = {
-      id: uid(),
-      guestName: st.name || getDisplayName(st),
-      guestType: selectedEntryType,
-      groupId: gid,
-      date: manualDate,
-      quantity: 1,
-      entryType: selectedEntryType
-    };
+    const displayName = st.name || getDisplayName(st);
 
-    setAttn(p => [...p, attendancePayload]);
+    const existingRec = attn.find(a => {
+      if (a.groupId !== gid || a.date !== manualDate) return false;
 
-    if (db.insertAttendance) {
-      await db.insertAttendance(attendancePayload);
+      if (a.subId) {
+        const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
+        return subStudentId === st.id;
+      }
+
+      return (a.guestName || "").trim().toLowerCase() === displayName.trim().toLowerCase();
+    });
+
+    if (existingRec) {
+      const updatedRec = {
+        ...existingRec,
+        subId: null,
+        guestName: displayName,
+        guestType: selectedEntryType,
+        entryType: selectedEntryType,
+        groupId: gid,
+        date: manualDate,
+        quantity: 1,
+      };
+
+      setAttn(prev => prev.map(a => (a.id === existingRec.id ? updatedRec : a)));
+
+      const { error } = await supabase
+        .from("attendance")
+        .update({
+          sub_id: null,
+          guest_name: displayName,
+          guest_type: selectedEntryType,
+          entry_type: selectedEntryType,
+          group_id: gid,
+          date: manualDate,
+          quantity: 1,
+        })
+        .eq("id", existingRec.id);
+
+      if (error) {
+        console.warn("update attendance error:", error);
+      }
+    } else {
+      const attendancePayload = {
+        id: uid(),
+        guestName: displayName,
+        guestType: selectedEntryType,
+        groupId: gid,
+        date: manualDate,
+        quantity: 1,
+        entryType: selectedEntryType,
+      };
+
+      setAttn(p => [...p, attendancePayload]);
+
+      if (db.insertAttendance) {
+        await db.insertAttendance(attendancePayload);
+      }
     }
   } catch (e) {
     console.warn("DB Error", e);
