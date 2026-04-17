@@ -392,11 +392,7 @@ const addManual = async () => {
           })[0] || null
       : null;
 
-    // якщо є записи на цю дату — видаляємо їх усі
     if (matchingRecords.length > 0) {
-      const idsToDelete = matchingRecords.map(r => r.id);
-      setAttn(prev => prev.filter(a => !idsToDelete.includes(a.id)));
-
       for (const rec of matchingRecords) {
         if (db.deleteAttendance) {
           await db.deleteAttendance(rec.id);
@@ -404,12 +400,8 @@ const addManual = async () => {
           await supabase.from("attendance").delete().eq("id", rec.id);
         }
       }
-
-      // якщо це був не абонементний запис, а на дату є підходящий абонемент,
-      // то одразу ставимо правильний subscription
-      const hadOnlyGuestLikeRecords = matchingRecords.every(r => !r.subId);
-
-      if (matchingSub && hadOnlyGuestLikeRecords) {
+    } else {
+      if (matchingSub) {
         const newAttendance = {
           id: uid(),
           subId: matchingSub.id,
@@ -419,49 +411,47 @@ const addManual = async () => {
           groupId: gid,
         };
 
-        const saved = db.insertAttendance
-          ? await db.insertAttendance(newAttendance)
-          : newAttendance;
+        if (db.insertAttendance) {
+          await db.insertAttendance(newAttendance);
+        } else {
+          await supabase.from("attendance").insert({
+            sub_id: matchingSub.id,
+            date: cellDate,
+            quantity: 1,
+            entry_type: "subscription",
+            group_id: gid,
+          });
+        }
+      } else {
+        const guestType = "single";
+        const newAttendance = {
+          id: uid(),
+          guestName: student.name || getDisplayName(student),
+          guestType,
+          groupId: gid,
+          date: cellDate,
+          quantity: 1,
+          entryType: guestType,
+        };
 
-        setAttn(prev => [...prev, saved || newAttendance]);
+        if (db.insertAttendance) {
+          await db.insertAttendance(newAttendance);
+        } else {
+          await supabase.from("attendance").insert({
+            guest_name: student.name || getDisplayName(student),
+            guest_type: guestType,
+            group_id: gid,
+            date: cellDate,
+            quantity: 1,
+            entry_type: guestType,
+          });
+        }
       }
-
-      return;
     }
 
-    // якщо записів нема, ставимо або subscription, або single
-    if (matchingSub) {
-      const newAttendance = {
-        id: uid(),
-        subId: matchingSub.id,
-        date: cellDate,
-        quantity: 1,
-        entryType: "subscription",
-        groupId: gid,
-      };
-
-      const saved = db.insertAttendance
-        ? await db.insertAttendance(newAttendance)
-        : newAttendance;
-
-      setAttn(prev => [...prev, saved || newAttendance]);
-    } else {
-      const guestType = "single";
-      const newAttendance = {
-        id: uid(),
-        guestName: student.name || getDisplayName(student),
-        guestType,
-        groupId: gid,
-        date: cellDate,
-        quantity: 1,
-        entryType: guestType,
-      };
-
-      const saved = db.insertAttendance
-        ? await db.insertAttendance(newAttendance)
-        : newAttendance;
-
-      setAttn(prev => [...prev, saved || newAttendance]);
+    if (db.fetchAttendance) {
+      const freshAttendance = await db.fetchAttendance();
+      setAttn(freshAttendance);
     }
   } catch (e) {
     console.warn("DB Error:", e);
