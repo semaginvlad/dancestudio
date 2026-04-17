@@ -791,7 +791,26 @@ const groupAnalytics = useMemo(() => {
                 badgeColor = theme.warning;
                 badgeText = "Гість";
              } else {
-                const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
+              const recentAttn = [...attn]
+  .filter(a => {
+    if (a.groupId !== gid) return false;
+
+    if (a.subId) {
+      const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
+      return subStudentId === st.id;
+    }
+
+    const possibleNames = [
+      getDisplayName(st),
+      st?.name || "",
+    ]
+      .map(v => v.trim().toLowerCase())
+      .filter(Boolean);
+
+    return possibleNames.includes((a.guestName || "").trim().toLowerCase());
+  })
+  .sort((a, b) => a.date.localeCompare(b.date))
+  .reverse()[0];
                 if (recentAttn && recentAttn.entryType) {
                    badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
                    badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
