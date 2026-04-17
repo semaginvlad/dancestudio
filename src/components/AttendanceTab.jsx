@@ -340,21 +340,33 @@ export default function AttendanceTab({
     });
   };
 
-  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
+ const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     try {
       if (isCurrentlyAttended && dbRecord) {
         setAttn(p => p.filter(a => a.id !== dbRecord.id));
-        if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
+        if (db.deleteAttendance) {
+           db.deleteAttendance(dbRecord.id).catch(err => {
+              alert("Помилка видалення в базі: " + err.message);
+              setAttn(p => [...p, dbRecord]); // Повертаємо галочку, якщо база відмовила
+           });
+        }
       } else {
         const newId = uid();
         
-        const validSubs = !student.isGuest ? subs.filter(s => 
-          s.studentId === student.id && 
-          s.groupId === gid && 
+        // Знаходимо всі абонементи учениці в цій групі
+        let studentSubs = !student.isGuest ? subs.filter(s => s.studentId === student.id && s.groupId === gid) : [];
+        
+        // Спочатку шукаємо той, який чітко підходить по датах і має залишок
+        let validSubs = studentSubs.filter(s => 
           s.startDate <= cellDate && 
           s.endDate >= cellDate && 
           (s.usedTrainings || 0) < (s.totalTrainings || 1)
-        ).sort((a,b) => new Date(a.startDate) - new Date(b.startDate)) : [];
+        ).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+
+        // Якщо такого немає, але є абонемент із залишком (можливо дати не збігаються), беремо найстаріший активний!
+        if (validSubs.length === 0) {
+           validSubs = studentSubs.filter(s => (s.usedTrainings || 0) < (s.totalTrainings || 1)).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+        }
         
         const validSub = validSubs.length > 0 ? validSubs[0] : null;
         
@@ -363,19 +375,24 @@ export default function AttendanceTab({
         else if (journalGuestMode !== "subscription") gType = journalGuestMode;
 
         if (!validSub && journalGuestMode === "subscription" && !student.isGuest) {
-            alert("Немає активного абонемента для цієї дати (або вичерпано ліміт). Буде позначено як Разове.");
+            alert("У цієї учениці немає жодного абонемента із залишком занять! Відмічено як Разове.");
         }
 
         const guestNameStr = student.name || getDisplayName(student);
         const a = { id: newId, subId: validSub?.id || null, guestName: guestNameStr, guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
         
-        setAttn(p => [...p, a]);
-        if(db.insertAttendance) {
+        setAttn(p => [...p, a]); // Оптимістично малюємо галочку
+
+        if (db.insertAttendance) {
            db.insertAttendance(a).then(realRecord => {
                if (realRecord && realRecord.id) {
                    setAttn(prev => prev.map(item => item.id === newId ? { ...item, id: realRecord.id } : item));
                }
-           }).catch(err => console.error("Insert error:", err));
+           }).catch(err => {
+               console.error("Insert error:", err);
+               alert("База даних Supabase ВІДХИЛИЛА запис! Причина: " + err.message);
+               setAttn(prev => prev.filter(item => item.id !== newId)); // Стирання галочки, бо вона не збереглася
+           });
         }
       }
     } catch (e) {
