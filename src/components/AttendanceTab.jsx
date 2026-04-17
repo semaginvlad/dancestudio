@@ -375,6 +375,28 @@ const addManual = async () => {
     return spans;
   }, [visibleDays]);
 
+  const getAttendanceRecordForStudentDate = (student, date) => {
+  const possibleNames = [
+    getDisplayName(student),
+    student?.name || "",
+  ]
+    .map(v => v.trim().toLowerCase())
+    .filter(Boolean);
+
+  return [...attn]
+    .filter(a => a.groupId === gid && a.date === date)
+    .reverse()
+    .find(a => {
+      if (a.subId) {
+        const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
+        return subStudentId === student.id;
+      }
+
+      const guestName = (a.guestName || "").trim().toLowerCase();
+      return possibleNames.includes(guestName);
+    }) || null;
+};
+
   const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
     try {
       if (isCurrentlyAttended && dbRecord) {
