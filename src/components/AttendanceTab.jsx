@@ -138,124 +138,74 @@ const moveStudentDnD = (draggedId, targetId) => {
 };
 
 const addManual = async () => {
-  const name = manualName.trim();
-  if (!name) return;
-
-  const selectedEntryType =
-    journalGuestMode === "trial"
-      ? "trial"
-      : journalGuestMode === "unpaid"
-      ? "unpaid"
-      : "single";
-
-  try {
-    let st = students.find(
-      s =>
-        getDisplayName(s).toLowerCase() === name.toLowerCase() ||
-        (s.name || "").toLowerCase() === name.toLowerCase()
-    );
-
-    if (!st) {
-      const nameParts = name.split(" ");
-      const newStPayload = {
-        name,
-        first_name: nameParts.slice(1).join(" ") || "",
-        last_name: nameParts[0] || "",
-      };
-
-      let createdSt = { id: uid(), ...newStPayload };
-
-      if (db.insertStudent) {
-        try {
-          const res = await db.insertStudent(newStPayload);
-          if (res) createdSt = res;
-        } catch (e) {
-          console.warn("insertStudent error:", e);
+    const name = manualName.trim();
+    if (!name) return;
+    try {
+      let st = students.find(s => getDisplayName(s).toLowerCase() === name.toLowerCase() || (s.name || "").toLowerCase() === name.toLowerCase());
+      
+      if (!st) {
+        const nameParts = name.split(' ');
+        const newStPayload = { 
+          name: name, 
+          first_name: nameParts.slice(1).join(' ') || '', 
+          last_name: nameParts[0] || '' 
+        };
+        let createdSt = { id: uid(), ...newStPayload };
+        if (db.insertStudent) {
+          try {
+            const res = await db.insertStudent(newStPayload);
+            if (res) createdSt = res;
+          } catch(e) {}
         }
+        setStudents(p => [...p, createdSt]);
+        st = createdSt;
       }
 
-      setStudents(p => [...p, createdSt]);
-      st = createdSt;
-    }
-
-    if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
-      let newSg = { id: uid(), studentId: st.id, groupId: gid };
-
-      if (db.addStudentGroup) {
-        try {
-          const savedSg = await db.addStudentGroup(st.id, gid);
-          if (savedSg) newSg = savedSg;
-        } catch (e) {
-          console.error("addStudentGroup error:", e);
+      if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
+        let newSg = { id: uid(), studentId: st.id, groupId: gid };
+        if (db.addStudentGroup) {
+          try {
+            const savedSg = await db.addStudentGroup(st.id, gid);
+            if (savedSg) newSg = savedSg;
+          } catch (e) {
+            console.error('addStudentGroup error:', e);
+          }
         }
+        setStudentGrps(p => [...p, newSg]);
       }
 
-      setStudentGrps(p => [...p, newSg]);
-    }
+      const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
+      const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
+      setAttn(p => [...p, a]);
+      if(db.insertAttendance) await db.insertAttendance(a);
 
-    const displayName = st.name || getDisplayName(st);
-    const existingRecords = getAttendanceRecordsForStudentDate(st, manualDate);
-    const existingIds = existingRecords.map(r => r.id);
+    } catch (e) { console.warn("DB Error", e); }
+    setManualName("");
+  };
 
-    if (existingIds.length > 0) {
-      setAttn(prev => prev.filter(a => !existingIds.includes(a.id)));
-
-      for (const recId of existingIds) {
-        try {
-          await supabase.from("attendance").delete().eq("id", recId);
-        } catch (e) {
-          console.warn("delete existing attendance error:", e);
-        }
-      }
-    }
-
-    const { data, error } = await supabase
-      .from("attendance")
-      .insert({
-        sub_id: null,
-        date: manualDate,
-        guest_name: displayName,
-        guest_type: selectedEntryType,
-        group_id: gid,
-        quantity: 1,
-        entry_type: selectedEntryType,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.warn("insert attendance error:", error);
-      return;
-    }
-
-    const savedAttendance = {
-      id: data.id,
-      subId: data.sub_id,
-      date: data.date,
-      guestName: data.guest_name,
-      guestType: data.guest_type,
-      groupId: data.group_id,
-      quantity: data.quantity || 1,
-      entryType: data.entry_type || "subscription",
-    };
-
-    if (db.fetchAttendance) {
-      try {
-        const freshAttendance = await db.fetchAttendance();
-        setAttn(freshAttendance);
-      } catch (e) {
-        console.warn("fetchAttendance refresh error:", e);
-        setAttn(prev => [...prev, savedAttendance]);
-      }
+  const removeStudentFromJournal = async (st) => {
+    if(!confirm(`Відкріпити ${getDisplayName(st)} від цієї групи? Її історія залишиться, але вона не відображатиметься в журналі.`)) return;
+    
+    if(!st.isGuest) {
+       const toDelSg = studentGrps.find(sg => sg.studentId === st.id && sg.groupId === gid);
+       if (toDelSg) {
+         setStudentGrps(p => p.filter(sg => sg.id !== toDelSg.id));
+         if (db.removeStudentGroup) await db.removeStudentGroup(toDelSg.studentId, toDelSg.groupId).catch(e => console.log(e));
+       }
+       const activeSub = subs.find(s => s.studentId === st.id && s.groupId === gid && getSubStatus(s) !== "expired");
+       if (activeSub) {
+          const newEnd = today();
+          if(db.updateSub) db.updateSub(activeSub.id, { endDate: newEnd }).catch(e=>console.warn(e));
+          setSubs(p => p.map(s => s.id === activeSub.id ? { ...s, endDate: newEnd } : s));
+       }
     } else {
-      setAttn(prev => [...prev, savedAttendance]);
+       const toDelAttn = attn.filter(a => a.groupId === gid && a.guestName === st.name);
+       const toDelIds = toDelAttn.map(a => a.id);
+       setAttn(p => p.filter(a => !toDelIds.includes(a.id)));
+       if(db.deleteAttendance) toDelIds.forEach(id => db.deleteAttendance(id).catch(e=>console.log(e)));
     }
-  } catch (e) {
-    console.warn("DB Error", e);
-  }
-
-  setManualName("");
-};
+    setActionMenuSt(null);
+  };
 
   const handlePrevMonth = () => {
     const [y, m] = journalMonth.split('-');
@@ -348,247 +298,91 @@ const addManual = async () => {
     return spans;
   }, [visibleDays]);
 
-  const getAttendanceRecordsForStudentDate = (student, date) => {
-  const possibleNames = [
-    getDisplayName(student),
-    student?.name || "",
-    `${student?.lastName || student?.last_name || ""} ${student?.firstName || student?.first_name || ""}`.trim(),
-  ]
-    .map(v => (v || "").trim().toLowerCase())
-    .filter(Boolean);
-
-  return [...attn].filter(a => {
-    if (a.groupId !== gid || a.date !== date) return false;
-
-    if (a.subId) {
-      const linkedSub = subs.find(s => s.id === a.subId);
-      return linkedSub?.studentId === student.id;
-    }
-
-    const guestName = (a.guestName || "").trim().toLowerCase();
-    return possibleNames.includes(guestName);
-  });
-};
-
-const getAttendanceRecordForStudentDate = (student, date) => {
-  const records = getAttendanceRecordsForStudentDate(student, date);
-
-  if (!records.length) return null;
-
-  return [...records].sort((a, b) => {
-    const aCreated = a.createdAt || "";
-    const bCreated = b.createdAt || "";
-    if (aCreated !== bCreated) return bCreated.localeCompare(aCreated);
-    return String(b.id || "").localeCompare(String(a.id || ""));
-  })[0];
-};
-
-const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
-  try {
-    const matchingRecords = getAttendanceRecordsForStudentDate(student, cellDate);
-
-    const matchingSub = !student.isGuest
-      ? [...subs]
-          .filter(
-            s =>
-              s.studentId === student.id &&
-              s.groupId === gid &&
-              s.startDate <= cellDate &&
-              s.endDate >= cellDate
-          )
-          .sort((a, b) => {
-            const aStart = a.startDate || "";
-            const bStart = b.startDate || "";
-            return bStart.localeCompare(aStart);
-          })[0] || null
-      : null;
-
-    if (matchingRecords.length > 0) {
-      for (const rec of matchingRecords) {
-        if (db.deleteAttendance) {
-          await db.deleteAttendance(rec.id);
+  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
+    try {
+      if (isCurrentlyAttended && dbRecord) {
+        setAttn(p => p.filter(a => a.id !== dbRecord.id));
+        if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
+      } else {
+        const newId = uid();
+        const validSub = !student.isGuest ? subs.find(s => 
+          s.studentId === student.id && 
+          s.groupId === gid && 
+          s.startDate <= cellDate && 
+          s.endDate >= cellDate && 
+          (s.usedTrainings || 0) < (s.totalTrainings || 1)
+        ) : null;
+        
+        if (validSub) {
+          const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) await db.insertAttendance(a);
         } else {
-          await supabase.from("attendance").delete().eq("id", rec.id);
+          const gType = "single";
+          const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
+          setAttn(p => [...p, a]);
+          if(db.insertAttendance) await db.insertAttendance(a);
         }
       }
-    } else if (matchingSub) {
-      const newAttendance = {
-        id: uid(),
-        subId: matchingSub.id,
-        date: cellDate,
-        quantity: 1,
-        entryType: "subscription",
-        groupId: gid,
-      };
+    } catch (e) {
+      console.warn("DB Error:", e);
+    }
+  };
 
-      if (db.insertAttendance) {
-        await db.insertAttendance(newAttendance);
+  const handleCancelSpecificDay = async (cancelDate) => {
+    if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
+    try {
+      const currentGroup = groups.find(g => g.id === gid);
+      const affectedSubs = rawSubs.filter(s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate);
+      
+      const originalEnds = {};
+      let newSubs = [...rawSubs];
+      
+      for (let sub of affectedSubs) {
+        originalEnds[sub.id] = sub.endDate; 
+        const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
+        if(db.updateSub) db.updateSub(sub.id, { endDate: newEndStr }).catch(e=>console.warn(e));
+        newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: newEndStr } : s);
+      }
+      
+      const newCancel = { id: uid(), groupId: gid, date: cancelDate, originalEnds };
+      setCancelled(p => [...p, newCancel]);
+      setSubs(newSubs);
+      if (db.insertCancelled) db.insertCancelled(newCancel).catch(e=>console.warn(e)); 
+    } catch (e) { console.warn(e); }
+  };
+
+  const handleRestoreSpecificDay = async (restoreDate) => {
+    if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до початкових.`)) return;
+    try {
+      const targetCancel = cancelled.find(c => c.groupId === gid && c.date === restoreDate);
+      if (!targetCancel) return;
+
+      let newSubs = [...rawSubs];
+      const currentGroup = groups.find(g => g.id === gid);
+
+      if (targetCancel.originalEnds && Object.keys(targetCancel.originalEnds).length > 0) {
+        for (const [subId, origEnd] of Object.entries(targetCancel.originalEnds)) {
+           if(db.updateSub) db.updateSub(subId, { endDate: origEnd }).catch(e=>console.warn(e));
+           newSubs = newSubs.map(s => s.id === subId ? { ...s, endDate: origEnd } : s);
+        }
       } else {
-        await supabase.from("attendance").insert({
-          sub_id: matchingSub.id,
-          date: cellDate,
-          quantity: 1,
-          entry_type: "subscription",
-          group_id: gid,
-        });
-      }
-    } else {
-      const guestType = "single";
-      const newAttendance = {
-        id: uid(),
-        guestName: student.name || getDisplayName(student),
-        guestType,
-        groupId: gid,
-        date: cellDate,
-        quantity: 1,
-        entryType: guestType,
-      };
-
-      if (db.insertAttendance) {
-        await db.insertAttendance(newAttendance);
-      } else {
-        await supabase.from("attendance").insert({
-          guest_name: student.name || getDisplayName(student),
-          guest_type: guestType,
-          group_id: gid,
-          date: cellDate,
-          quantity: 1,
-          entry_type: guestType,
-        });
-      }
-    }
-
-    if (db.fetchAttendance) {
-      const freshAttendance = await db.fetchAttendance();
-      setAttn(freshAttendance);
-    }
-  } catch (e) {
-    console.warn("DB Error:", e);
-  }
-};
-
-const handleCancelSpecificDay = async (cancelDate) => {
-  if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
-
-  try {
-    const currentGroup = groups.find(g => g.id === gid);
-    const affectedSubs = rawSubs.filter(
-      s => s.groupId === gid && s.startDate <= cancelDate && s.endDate >= cancelDate
-    );
-
-    const originalEnds = {};
-    let newSubs = [...rawSubs];
-
-    for (const sub of affectedSubs) {
-      originalEnds[sub.id] = sub.endDate;
-      const newEndStr = getNextTrainingDate(currentGroup?.schedule, sub.endDate);
-
-      if (db.updateSub) {
-        await db.updateSub(sub.id, { endDate: newEndStr });
-      }
-
-      newSubs = newSubs.map(s =>
-        s.id === sub.id ? { ...s, endDate: newEndStr } : s
-      );
-    }
-
-    const cancelPayload = {
-      groupId: gid,
-      date: cancelDate,
-      originalEnds,
-    };
-
-    let savedCancel = { id: uid(), ...cancelPayload };
-
-    if (db.insertCancelled) {
-      try {
-        const inserted = await db.insertCancelled(cancelPayload);
-        if (inserted) savedCancel = inserted;
-      } catch (e) {
-        console.warn("insertCancelled error:", e);
-      }
-    }
-
-    setSubs(newSubs);
-
-    setCancelled(prev => {
-      const withoutSameDate = prev.filter(
-        c => !(c.groupId === gid && c.date === cancelDate)
-      );
-      return [...withoutSameDate, savedCancel];
-    });
-  } catch (e) {
-    console.warn("Cancel Error:", e);
-  }
-};
-
-  
-
-const handleRestoreSpecificDay = async (restoreDate) => {
-  if (!confirm(`Відновити скасоване тренування ${restoreDate}? Терміни абонементів будуть повернуті до початкових.`)) return;
-
-  try {
-    const matchingCancels = cancelled.filter(
-      c => c.groupId === gid && c.date === restoreDate
-    );
-
-    if (matchingCancels.length === 0) return;
-
-    const targetCancel = matchingCancels[matchingCancels.length - 1];
-    const originalEnds = targetCancel.originalEnds || {};
-
-    let newSubs = [...rawSubs];
-    const currentGroup = groups.find(g => g.id === gid);
-
-    if (Object.keys(originalEnds).length > 0) {
-      for (const [subId, origEnd] of Object.entries(originalEnds)) {
-        if (db.updateSub) {
-          await db.updateSub(subId, { endDate: origEnd });
-        }
-
-        newSubs = newSubs.map(s =>
-          s.id === subId ? { ...s, endDate: origEnd } : s
-        );
-      }
-    } else {
-      const affectedSubs = newSubs.filter(
-        s => s.groupId === gid && s.endDate >= restoreDate
-      );
-
-      for (const sub of affectedSubs) {
-        const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
-
-        if (db.updateSub) {
-          await db.updateSub(sub.id, { endDate: revertedEnd });
-        }
-
-        newSubs = newSubs.map(s =>
-          s.id === sub.id ? { ...s, endDate: revertedEnd } : s
-        );
-      }
-    }
-
-    setSubs(newSubs);
-
-    setCancelled(prev =>
-      prev.filter(c => !(c.groupId === gid && c.date === restoreDate))
-    );
-
-    if (db.deleteCancelled) {
-      for (const item of matchingCancels) {
-        try {
-          await db.deleteCancelled(item.id);
-        } catch (e) {
-          console.warn("deleteCancelled error:", e);
+        const affectedSubs = newSubs.filter(s => s.groupId === gid && s.endDate >= restoreDate);
+        for (let sub of affectedSubs) {
+           const revertedEnd = getPreviousTrainingDate(currentGroup?.schedule, sub.endDate);
+           if(db.updateSub) db.updateSub(sub.id, { endDate: revertedEnd }).catch(e=>console.warn(e));
+           newSubs = newSubs.map(s => s.id === sub.id ? { ...s, endDate: revertedEnd } : s);
         }
       }
-    }
-  } catch (e) {
-    console.warn("Restore Error:", e);
-  }
-};
+      
+      setSubs(newSubs);
+      setCancelled(p => p.filter(c => c.id !== targetCancel.id));
+      if (db.deleteCancelled) db.deleteCancelled(targetCancel.id).catch(e=>console.warn(e));
+      
+    } catch (e) { console.warn("Restore Error:", e); }
+  };
 
-const groupAnalytics = useMemo(() => {
+  const groupAnalytics = useMemo(() => {
      const monthAttn = attn.filter(a => a.groupId === gid && a.date && a.date.startsWith(journalMonth));
      const attnCounts = {};
      const dateCounts = {};
@@ -730,24 +524,22 @@ const groupAnalytics = useMemo(() => {
                 </td>
                 {visibleDays.map((d, index) => {
                   const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
-                const rec = getAttendanceRecordForStudentDate(st, d);
+                  const rec = attn.find(a => a.groupId === gid && a.date === d && (a.subId ? subs.find(s=>s.id===a.subId)?.studentId === st.id : (a.guestName||"").trim().toLowerCase() === (st.name||"").trim().toLowerCase()));
                   const isAttended = !!rec;
                   const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                   
                   const activeRange = subRanges.find(r => d >= r.start && d <= r.end);
                   
-let markBg = theme.input;
-if (isAttended) {
-  if (rec.entryType === 'trial') {
-    markBg = theme.success;
-  } else if (rec.entryType === 'single') {
-    markBg = theme.warning;
-  } else if (rec.entryType === 'unpaid') {
-    markBg = theme.danger;
-  } else if (rec.entryType === 'subscription') {
-    markBg = theme.primary;
-  }
-}
+                  let markBg = theme.input;
+                  if (isAttended) {
+                    if (rec.entryType === 'trial') markBg = theme.success;
+                    else if (rec.entryType === 'single') markBg = theme.warning;
+                    else if (rec.entryType === 'unpaid') markBg = theme.danger;
+                    else {
+                      const usedRange = subRanges.find(r => r.id === rec.subId);
+                      markBg = (usedRange && usedRange.isExhausted) ? theme.exhausted : theme.primary;
+                    }
+                  }
 
                   let frameStyle = {};
                   if (activeRange) {
@@ -842,26 +634,7 @@ if (isAttended) {
                 badgeColor = theme.warning;
                 badgeText = "Гість";
              } else {
-              const recentAttn = [...attn]
-  .filter(a => {
-    if (a.groupId !== gid) return false;
-
-    if (a.subId) {
-      const subStudentId = subs.find(s => s.id === a.subId)?.studentId;
-      return subStudentId === st.id;
-    }
-
-    const possibleNames = [
-      getDisplayName(st),
-      st?.name || "",
-    ]
-      .map(v => v.trim().toLowerCase())
-      .filter(Boolean);
-
-    return possibleNames.includes((a.guestName || "").trim().toLowerCase());
-  })
-  .sort((a, b) => a.date.localeCompare(b.date))
-  .reverse()[0];
+                const recentAttn = attn.filter(a => a.groupId === gid && (a.guestName === st.name || a.subId === st.id)).sort((a,b)=>a.date.localeCompare(b.date)).reverse()[0];
                 if (recentAttn && recentAttn.entryType) {
                    badgeText = recentAttn.entryType === 'trial' ? "Пробне" : "Разове";
                    badgeColor = recentAttn.entryType === 'trial' ? theme.success : theme.warning;
