@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-// ─── AUTH (ЛОГІН / ТРЕНЕРИ) ───
+// ─── AUTH ───
 export const signIn = async (email, password) => {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
@@ -28,7 +28,6 @@ export const onAuthChange = (callback) => {
 export async function fetchStudents() {
   const { data, error } = await supabase.from('students').select('*')
   if (error) throw error
-
   return data.map(s => ({
     ...s,
     messageTemplate: s.message_template,
@@ -40,14 +39,14 @@ export async function fetchStudents() {
 export async function insertStudent(s) {
   const fullName = [s.last_name, s.first_name].filter(Boolean).join(' ') || s.name || ''
   const { data, error } = await supabase.from('students').insert({
-      name: fullName,
-      first_name: s.first_name || '',
-      last_name: s.last_name || '',
-      phone: s.phone,
-      telegram: s.telegram,
-      notes: s.notes,
-      message_template: s.message_template || null,
-    }).select().single()
+    name: fullName,
+    first_name: s.first_name || '',
+    last_name: s.last_name || '',
+    phone: s.phone,
+    telegram: s.telegram,
+    notes: s.notes,
+    message_template: s.message_template || null,
+  }).select().single()
 
   if (error) throw error
   return {
@@ -63,7 +62,7 @@ export async function updateStudent(id, s) {
   if (s.first_name !== undefined) payload.first_name = s.first_name
   if (s.last_name !== undefined) payload.last_name = s.last_name
   if (s.first_name !== undefined || s.last_name !== undefined) {
-      payload.name = [s.last_name || payload.last_name, s.first_name || payload.first_name].filter(Boolean).join(' ')
+    payload.name = [s.last_name || payload.last_name, s.first_name || payload.first_name].filter(Boolean).join(' ')
   }
   if (s.phone !== undefined) payload.phone = s.phone
   if (s.telegram !== undefined) payload.telegram = s.telegram
@@ -82,6 +81,22 @@ export async function updateStudent(id, s) {
 }
 
 export async function deleteStudent(id) {
+  // Спершу підтягнемо імена — щоб прибрати також гостьові записи
+  try {
+    const { data: st } = await supabase.from('students').select('name, first_name, last_name').eq('id', id).single();
+    if (st) {
+      const names = [
+        st.name,
+        [st.last_name, st.first_name].filter(Boolean).join(' ')
+      ].filter(Boolean);
+      if (names.length > 0) {
+        await supabase.from('attendance').delete().in('guest_name', names).is('sub_id', null);
+      }
+    }
+  } catch (e) {
+    console.warn('Cleanup of guest attendance failed:', e);
+  }
+
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw error
 }
@@ -102,10 +117,9 @@ export async function fetchStudentGroups() {
 
 export async function addStudentGroup(studentId, groupId) {
   const { data, error } = await supabase.from('student_groups').upsert(
-      { student_id: studentId, group_id: groupId },
-      { onConflict: 'student_id,group_id' }
-    ).select().single()
-
+    { student_id: studentId, group_id: groupId },
+    { onConflict: 'student_id,group_id' }
+  ).select().single()
   if (error) throw error
   return { id: data.id, studentId: data.student_id, groupId: data.group_id }
 }
@@ -123,6 +137,7 @@ export async function fetchGroups() {
     ...g,
     directionId: g.direction_id,
     trainerPct: g.trainer_pct,
+    trainer_id: g.trainer_id, // ← для фільтрації груп тренера
   }))
 }
 
@@ -131,10 +146,11 @@ export async function updateGroup(id, g) {
   if (g.name !== undefined) payload.name = g.name
   if (g.schedule !== undefined) payload.schedule = g.schedule
   if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
+  if (g.trainer_id !== undefined) payload.trainer_id = g.trainer_id
 
   const { data, error } = await supabase.from('groups').update(payload).eq('id', id).select().single()
   if (error) throw error
-  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct }
+  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
 }
 
 // ─── SUBSCRIPTIONS ───
@@ -146,22 +162,22 @@ export async function fetchSubs() {
 
 export async function insertSub(s) {
   const { data, error } = await supabase.from('subscriptions').insert({
-      student_id: s.studentId,
-      group_id: s.groupId,
-      plan_type: s.planType,
-      start_date: s.startDate,
-      end_date: s.endDate,
-      total_trainings: s.totalTrainings,
-      used_trainings: s.usedTrainings || 0,
-      amount: s.amount,
-      base_price: s.basePrice || s.amount,
-      discount_pct: s.discountPct || 0,
-      discount_source: s.discountSource || 'studio',
-      paid: s.paid,
-      pay_method: s.payMethod || 'card',
-      notification_sent: false,
-      notes: s.notes,
-    }).select().single()
+    student_id: s.studentId,
+    group_id: s.groupId,
+    plan_type: s.planType,
+    start_date: s.startDate,
+    end_date: s.endDate,
+    total_trainings: s.totalTrainings,
+    used_trainings: s.usedTrainings || 0,
+    amount: s.amount,
+    base_price: s.basePrice || s.amount,
+    discount_pct: s.discountPct || 0,
+    discount_source: s.discountSource || 'studio',
+    paid: s.paid,
+    pay_method: s.payMethod || 'card',
+    notification_sent: false,
+    notes: s.notes,
+  }).select().single()
 
   if (error) throw error
   return mapSub(data)
@@ -213,6 +229,35 @@ function mapSub(s) {
     payMethod: s.pay_method,
     notificationSent: s.notification_sent,
     notes: s.notes,
+    created_at: s.created_at, // ← ФІКС: поле тепер є, аналітика "Цього місяця" працює
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 🆕 СИНХРОНІЗАЦІЯ used_trainings — щоб бот бачив ту ж цифру що і фронт
+// ═══════════════════════════════════════════════════════════════════
+export async function syncSubUsedTrainings(subId) {
+  if (!subId) return;
+  try {
+    // Рахуємо SUM(quantity) — важливо, бо бот може писати quantity=2
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('quantity')
+      .eq('sub_id', subId);
+
+    if (error) throw error;
+    const total = (data || []).reduce((s, r) => s + (r.quantity || 1), 0);
+
+    const { error: updateErr } = await supabase
+      .from('subscriptions')
+      .update({ used_trainings: total })
+      .eq('id', subId);
+
+    if (updateErr) throw updateErr;
+    return total;
+  } catch (e) {
+    console.warn('syncSubUsedTrainings failed for', subId, e);
+    return null;
   }
 }
 
@@ -220,7 +265,6 @@ function mapSub(s) {
 export async function fetchAttendance() {
   const { data, error } = await supabase.from('attendance').select('*')
   if (error) throw error
-
   return data.map(a => ({
     id: a.id,
     subId: a.sub_id,
@@ -235,14 +279,14 @@ export async function fetchAttendance() {
 
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
-      sub_id: a.subId || null,
-      date: a.date,
-      guest_name: a.guestName || null,
-      guest_type: a.guestType || null,
-      group_id: a.groupId || null,
-      quantity: a.quantity || 1,
-      entry_type: a.entryType || 'subscription',
-    }).select().single()
+    sub_id: a.subId || null,
+    date: a.date,
+    guest_name: a.guestName || null,
+    guest_type: a.guestType || null,
+    group_id: a.groupId || null,
+    quantity: a.quantity || 1,
+    entry_type: a.entryType || 'subscription',
+  }).select().single()
 
   if (error) throw error
 
@@ -272,23 +316,20 @@ export async function deleteAttendanceBySubAndDate(subId, date) {
 export async function fetchCancelled() {
   const { data, error } = await supabase.from('cancelled_trainings').select('*')
   if (error) throw error
-
   return data.map(c => {
     let parsed = null;
-    try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch(e) {}
+    try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch (e) {}
     return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
   })
 }
 
 export async function insertCancelled(c) {
   const { data, error } = await supabase.from('cancelled_trainings').insert({
-      group_id: c.groupId,
-      date: c.date,
-      reason: c.originalEnds ? JSON.stringify(c.originalEnds) : null,
-    }).select().single()
-
+    group_id: c.groupId,
+    date: c.date,
+    reason: c.originalEnds ? JSON.stringify(c.originalEnds) : null,
+  }).select().single()
   if (error) throw error
-
   return { id: data.id, groupId: data.group_id, date: data.date, originalEnds: data.reason ? JSON.parse(data.reason) : null }
 }
 
@@ -315,14 +356,27 @@ export async function decrementUsed(subId, qty = 1) {
 // ─── WAITLIST ───
 export async function fetchWaitlist() {
   const { data, error } = await supabase.from('waitlist').select('*');
-  if (error) return [];
-  return data || [];
+  if (error) {
+    console.warn('waitlist:', error.message);
+    return [];
+  }
+  return (data || []).map(w => ({
+    id: w.id,
+    studentId: w.student_id,
+    groupId: w.group_id,
+    dateAdded: w.date_added,
+  }));
 }
 
 export async function insertWaitlist(item) {
-  const { data, error } = await supabase.from('waitlist').insert([item]).select();
+  const { data, error } = await supabase.from('waitlist').insert([{
+    student_id: item.studentId,
+    group_id: item.groupId,
+    date_added: item.dateAdded || new Date().toISOString().slice(0, 10),
+  }]).select();
   if (error) throw error;
-  return data[0];
+  const w = data[0];
+  return { id: w.id, studentId: w.student_id, groupId: w.group_id, dateAdded: w.date_added };
 }
 
 export async function deleteWaitlist(id) {
