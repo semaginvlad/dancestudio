@@ -515,7 +515,8 @@ export default function AttendanceTab({
           }
         } catch (err) {
           const msg = err?.message || String(err);
-         if (msg.includes("duplicate") || msg.includes("unique")) {
+if (msg.includes("duplicate") || msg.includes("unique")) {
+  setAttn(prev => prev.filter(i => i.id !== newId));
   try {
     const fresh = await db.fetchAttendance();
     setAttn(fresh);
@@ -523,11 +524,11 @@ export default function AttendanceTab({
   } catch (reloadErr) {
     alert("Запис уже є в базі, але не вдалося оновити журнал.");
   }
+  return;
 } else {
   alert(`Не вдалось зберегти: ${msg}`);
+  setAttn(prev => prev.filter(i => i.id !== newId));
 }
-
-setAttn(prev => prev.filter(i => i.id !== newId));
         }
       }
     } catch (e) { console.warn("toggle:", e); }
