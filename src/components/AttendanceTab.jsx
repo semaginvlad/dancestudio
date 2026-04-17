@@ -246,24 +246,21 @@ export default function AttendanceTab({
     setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   };
 
-  const getStudentSubRanges = (studentId) => {
+const getStudentSubRanges = (studentId) => {
     if (!studentId || String(studentId).startsWith("guest_")) return [];
     const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     const ranges = [];
     for (let i = 0; i < stSubs.length; i++) {
       const sub = stSubs[i];
-      let effectiveEnd = sub.endDate || "2099-12-31";
       let isExhausted = false;
 
-      const subAttns = attn.filter(a => a.subId === sub.id).map(a => a.date).sort();
+      const subAttns = attn.filter(a => a.subId === sub.id);
       if (subAttns.length >= (sub.totalTrainings || 1)) {
         isExhausted = true;
-        if (subAttns[(sub.totalTrainings || 1) - 1] < effectiveEnd) {
-           effectiveEnd = subAttns[(sub.totalTrainings || 1) - 1]; 
-        }
       }
 
-      ranges.push({ start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted });
+      // ЖОРСТКА МЕЖА: Беремо тільки реальні дати абонемента, жодних розтягувань!
+      ranges.push({ start: sub.startDate || "2000-01-01", end: sub.endDate || "2099-12-31", id: sub.id, isExhausted });
     }
     return ranges;
   };
