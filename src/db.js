@@ -230,6 +230,7 @@ export async function fetchAttendance() {
     groupId: a.group_id,
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
+    createdAt: a.created_at,
   }))
 }
 
