@@ -373,36 +373,100 @@ const addManual = async () => {
     return [...getAttendanceRecordsForStudentDate(student, date)].reverse()[0] || null;
   };
 
-  const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
-    try {
-      if (isCurrentlyAttended && dbRecord) {
-        setAttn(p => p.filter(a => a.id !== dbRecord.id));
-        if(db.deleteAttendance) await db.deleteAttendance(dbRecord.id);
-      } else {
-        const newId = uid();
-        const validSub = !student.isGuest ? subs.find(s => 
-          s.studentId === student.id && 
-          s.groupId === gid && 
-          s.startDate <= cellDate && 
-          s.endDate >= cellDate && 
-          (s.usedTrainings || 0) < (s.totalTrainings || 1)
-        ) : null;
-        
-        if (validSub) {
-          const a = { id: newId, subId: validSub.id, date: cellDate, quantity: 1, entryType: "subscription", groupId: gid };
-          setAttn(p => [...p, a]);
-          if(db.insertAttendance) await db.insertAttendance(a);
+ const toggleJournalCell = async (student, cellDate, isCurrentlyAttended, dbRecord) => {
+  try {
+    const matchingRecords = getAttendanceRecordsForStudentDate(student, cellDate);
+
+    const matchingSub = !student.isGuest
+      ? [...subs]
+          .filter(s =>
+            s.studentId === student.id &&
+            s.groupId === gid &&
+            s.startDate <= cellDate &&
+            s.endDate >= cellDate
+          )
+          .sort((a, b) => {
+            const aStart = a.startDate || "";
+            const bStart = b.startDate || "";
+            return bStart.localeCompare(aStart);
+          })[0] || null
+      : null;
+
+    // якщо є записи на цю дату — видаляємо їх усі
+    if (matchingRecords.length > 0) {
+      const idsToDelete = matchingRecords.map(r => r.id);
+      setAttn(prev => prev.filter(a => !idsToDelete.includes(a.id)));
+
+      for (const rec of matchingRecords) {
+        if (db.deleteAttendance) {
+          await db.deleteAttendance(rec.id);
         } else {
-          const gType = "single";
-          const a = { id: newId, guestName: student.name || getDisplayName(student), guestType: gType, groupId: gid, date: cellDate, quantity: 1, entryType: gType };
-          setAttn(p => [...p, a]);
-          if(db.insertAttendance) await db.insertAttendance(a);
+          await supabase.from("attendance").delete().eq("id", rec.id);
         }
       }
-    } catch (e) {
-      console.warn("DB Error:", e);
+
+      // якщо це був не абонементний запис, а на дату є підходящий абонемент,
+      // то одразу ставимо правильний subscription
+      const hadOnlyGuestLikeRecords = matchingRecords.every(r => !r.subId);
+
+      if (matchingSub && hadOnlyGuestLikeRecords) {
+        const newAttendance = {
+          id: uid(),
+          subId: matchingSub.id,
+          date: cellDate,
+          quantity: 1,
+          entryType: "subscription",
+          groupId: gid,
+        };
+
+        const saved = db.insertAttendance
+          ? await db.insertAttendance(newAttendance)
+          : newAttendance;
+
+        setAttn(prev => [...prev, saved || newAttendance]);
+      }
+
+      return;
     }
-  };
+
+    // якщо записів нема, ставимо або subscription, або single
+    if (matchingSub) {
+      const newAttendance = {
+        id: uid(),
+        subId: matchingSub.id,
+        date: cellDate,
+        quantity: 1,
+        entryType: "subscription",
+        groupId: gid,
+      };
+
+      const saved = db.insertAttendance
+        ? await db.insertAttendance(newAttendance)
+        : newAttendance;
+
+      setAttn(prev => [...prev, saved || newAttendance]);
+    } else {
+      const guestType = "single";
+      const newAttendance = {
+        id: uid(),
+        guestName: student.name || getDisplayName(student),
+        guestType,
+        groupId: gid,
+        date: cellDate,
+        quantity: 1,
+        entryType: guestType,
+      };
+
+      const saved = db.insertAttendance
+        ? await db.insertAttendance(newAttendance)
+        : newAttendance;
+
+      setAttn(prev => [...prev, saved || newAttendance]);
+    }
+  } catch (e) {
+    console.warn("DB Error:", e);
+  }
+};
 
 const handleCancelSpecificDay = async (cancelDate) => {
   if (!confirm(`Точно скасувати тренування ${cancelDate}? Всі активні абонементи будуть подовжені на наступне заняття групи.`)) return;
