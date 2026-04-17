@@ -240,14 +240,14 @@ export async function fetchAttendance() {
 
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
-      sub_id: a.subId || null,
-      date: a.date,
-      guest_name: a.guestName || null,
-      guest_type: a.guestType || null,
-      group_id: a.groupId || null,
-      quantity: a.quantity || 1,
-      entry_type: a.entryType || 'subscription',
-    }).select().single()
+    sub_id: a.subId || null,
+    date: a.date,
+    guest_name: a.guestName || null,
+    guest_type: a.guestType || null,
+    group_id: a.groupId || null,
+    quantity: a.quantity || 1,
+    entry_type: a.entryType || 'subscription',
+  }).select().single()
 
   if (error) throw error
 
@@ -260,6 +260,7 @@ export async function insertAttendance(a) {
     groupId: data.group_id,
     quantity: data.quantity || 1,
     entryType: data.entry_type || 'subscription',
+    createdAt: data.created_at,
   }
 }
 
