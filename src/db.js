@@ -221,16 +221,17 @@ export async function fetchAttendance() {
   const { data, error } = await supabase.from('attendance').select('*')
   if (error) throw error
 
-  return data.map(a => ({
-    id: a.id,
-    subId: a.sub_id,
-    date: a.date,
-    guestName: a.guest_name,
-    guestType: a.guest_type,
-    groupId: a.group_id,
-    quantity: a.quantity || 1,
-    entryType: a.entry_type || 'subscription',
-  }))
+ return data.map(a => ({
+  id: a.id,
+  subId: a.sub_id,
+  date: a.date,
+  guestName: a.guest_name,
+  guestType: a.guest_type,
+  groupId: a.group_id,
+  quantity: a.quantity || 1,
+  entryType: a.entry_type || 'subscription',
+  createdAt: a.created_at,
+}))
 }
 
 export async function insertAttendance(a) {
