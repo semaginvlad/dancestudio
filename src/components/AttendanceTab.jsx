@@ -138,50 +138,82 @@ const moveStudentDnD = (draggedId, targetId) => {
 };
 
 const addManual = async () => {
-    const name = manualName.trim();
-    if (!name) return;
-    try {
-      let st = students.find(s => getDisplayName(s).toLowerCase() === name.toLowerCase() || (s.name || "").toLowerCase() === name.toLowerCase());
-      
-      if (!st) {
-        const nameParts = name.split(' ');
-        const newStPayload = { 
-          name: name, 
-          first_name: nameParts.slice(1).join(' ') || '', 
-          last_name: nameParts[0] || '' 
-        };
-        let createdSt = { id: uid(), ...newStPayload };
-        if (db.insertStudent) {
-          try {
-            const res = await db.insertStudent(newStPayload);
-            if (res) createdSt = res;
-          } catch(e) {}
+  const name = manualName.trim();
+  if (!name) return;
+
+  const selectedEntryType =
+    journalGuestMode === "trial"
+      ? "trial"
+      : journalGuestMode === "unpaid"
+      ? "unpaid"
+      : "single";
+
+  try {
+    let st = students.find(
+      s =>
+        getDisplayName(s).toLowerCase() === name.toLowerCase() ||
+        (s.name || "").toLowerCase() === name.toLowerCase()
+    );
+
+    if (!st) {
+      const nameParts = name.split(" ");
+      const newStPayload = {
+        name: name,
+        first_name: nameParts.slice(1).join(" ") || "",
+        last_name: nameParts[0] || ""
+      };
+
+      let createdSt = { id: uid(), ...newStPayload };
+
+      if (db.insertStudent) {
+        try {
+          const res = await db.insertStudent(newStPayload);
+          if (res) createdSt = res;
+        } catch (e) {
+          console.warn("insertStudent error:", e);
         }
-        setStudents(p => [...p, createdSt]);
-        st = createdSt;
       }
 
-      if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
-        let newSg = { id: uid(), studentId: st.id, groupId: gid };
-        if (db.addStudentGroup) {
-          try {
-            const savedSg = await db.addStudentGroup(st.id, gid);
-            if (savedSg) newSg = savedSg;
-          } catch (e) {
-            console.error('addStudentGroup error:', e);
-          }
+      setStudents(p => [...p, createdSt]);
+      st = createdSt;
+    }
+
+    if (!studentGrps.some(sg => sg.studentId === st.id && sg.groupId === gid)) {
+      let newSg = { id: uid(), studentId: st.id, groupId: gid };
+
+      if (db.addStudentGroup) {
+        try {
+          const savedSg = await db.addStudentGroup(st.id, gid);
+          if (savedSg) newSg = savedSg;
+        } catch (e) {
+          console.error("addStudentGroup error:", e);
         }
-        setStudentGrps(p => [...p, newSg]);
       }
 
-      const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
-      const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
-      setAttn(p => [...p, a]);
-      if(db.insertAttendance) await db.insertAttendance(a);
+      setStudentGrps(p => [...p, newSg]);
+    }
 
-    } catch (e) { console.warn("DB Error", e); }
-    setManualName("");
-  };
+    const attendancePayload = {
+      id: uid(),
+      guestName: st.name || getDisplayName(st),
+      guestType: selectedEntryType,
+      groupId: gid,
+      date: manualDate,
+      quantity: 1,
+      entryType: selectedEntryType
+    };
+
+    setAttn(p => [...p, attendancePayload]);
+
+    if (db.insertAttendance) {
+      await db.insertAttendance(attendancePayload);
+    }
+  } catch (e) {
+    console.warn("DB Error", e);
+  }
+
+  setManualName("");
+};
 
   const removeStudentFromJournal = async (st) => {
     if(!confirm(`Відкріпити ${getDisplayName(st)} від цієї групи? Її історія залишиться, але вона не відображатиметься в журналі.`)) return;
