@@ -6,7 +6,6 @@ import {
   WEEKDAYS,
   MONTHS,
   PLAN_TYPES,
-  DIRECTIONS,
   inputSt,
   btnP,
   btnS,
@@ -41,9 +40,6 @@ export default function AttendanceTab({
   const [manualName, setManualName] = useState("");
   const [manualDate, setManualDate] = useState(today());
   const [journalGuestMode, setJournalGuestMode] = useState("subscription");
-
-  const groupMap = useMemo(() => Object.fromEntries(groups.map(g => [g.id, g])), [groups]);
-  const dirMap = useMemo(() => Object.fromEntries(DIRECTIONS.map(d => [d.id, d])), []);
   
   useEffect(() => { if (groups.length > 0 && !gid) setGid(groups[0].id); }, [groups, gid]);
 
@@ -179,8 +175,28 @@ export default function AttendanceTab({
         setStudentGrps(p => [...p, newSg]);
       }
 
-      const gType = journalGuestMode === "subscription" ? "single" : journalGuestMode;
-      const a = { id: uid(), guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
+      let subId = null;
+      let gType = journalGuestMode;
+
+      // ВИПРАВЛЕНО: Тепер додавання в Абонемент шукає реальний абонемент
+      if (journalGuestMode === "subscription") {
+          const validSubs = !st.isGuest ? subs.filter(s => 
+            s.studentId === st.id && 
+            s.groupId === gid && 
+            s.startDate <= manualDate && 
+            s.endDate >= manualDate && 
+            (s.usedTrainings || 0) < (s.totalTrainings || 1)
+          ).sort((a,b) => new Date(a.startDate) - new Date(b.startDate)) : [];
+
+          if (validSubs.length > 0) {
+              subId = validSubs[0].id;
+          } else {
+              alert("Немає активного абонемента для цієї дати (або вичерпано ліміт). Буде позначено як Разове.");
+              gType = "single";
+          }
+      }
+
+      const a = { id: uid(), subId: subId, guestName: st.name || getDisplayName(st), guestType: gType, groupId: gid, date: manualDate, quantity: 1, entryType: gType };
       
       setAttn(p => [...p, a]);
       if(db.insertAttendance) {
@@ -230,14 +246,11 @@ export default function AttendanceTab({
     setJournalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   };
 
-  // ФІКС 1: Вирішено баг з накладанням абонементів для візуального відображення меж.
-  // Тепер межі абонементів малюються повністю і не обрізають один одного.
   const getStudentSubRanges = (studentId) => {
     if (!studentId || String(studentId).startsWith("guest_")) return [];
-    // Сортуємо абонементи від найстарішого до найновішого
-    const stSubs = subsExt.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+    // ВИПРАВЛЕНО: subs замість subsExt
+    const stSubs = subs.filter(s => s.studentId === studentId && s.groupId === gid).sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     const ranges = [];
-    
     for (let i = 0; i < stSubs.length; i++) {
       const sub = stSubs[i];
       let effectiveEnd = sub.endDate || "2099-12-31";
@@ -251,7 +264,14 @@ export default function AttendanceTab({
         isExhausted = true;
       }
 
-      // Ми прибрали штучне обрізання дати. Тепер якщо абонементи накладаються - вони будуть відображатися чесно.
+      const nextSub = stSubs[i+1];
+      if (nextSub && nextSub.startDate && nextSub.startDate <= effectiveEnd) {
+         const d = new Date(nextSub.startDate + "T12:00:00");
+         d.setDate(d.getDate() - 1);
+         const newEnd = toLocalISO(d);
+         if (newEnd < effectiveEnd) effectiveEnd = newEnd;
+      }
+
       ranges.push({ start: sub.startDate || "2000-01-01", end: effectiveEnd, id: sub.id, isExhausted });
     }
     return ranges;
@@ -328,8 +348,6 @@ export default function AttendanceTab({
       } else {
         const newId = uid();
         
-        // ФІКС 2: Логіка FIFO (Перший прийшов - Перший пішов)
-        // Знаходимо ВСІ доступні абонементи на цю дату, сортуємо їх від найстарішого до найновішого
         const validSubs = !student.isGuest ? subs.filter(s => 
           s.studentId === student.id && 
           s.groupId === gid && 
@@ -338,7 +356,6 @@ export default function AttendanceTab({
           (s.usedTrainings || 0) < (s.totalTrainings || 1)
         ).sort((a,b) => new Date(a.startDate) - new Date(b.startDate)) : [];
         
-        // Беремо найстарший доступний абонемент
         const validSub = validSubs.length > 0 ? validSubs[0] : null;
         
         let gType = "single";
@@ -449,11 +466,12 @@ export default function AttendanceTab({
      const topSpenderName = topSpenderId ? getDisplayName(studentMap[topSpenderId]) : "Немає";
      const topSpenderAmount = topSpenderId ? spendCounts[topSpenderId] : 0;
 
-     const expiringSubs = subsExt.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
+     // ВИПРАВЛЕНО: subs замість subsExt
+     const expiringSubs = subs.filter(s => s.groupId === gid && getSubStatus(s) === "active" && daysLeft(s.endDate) <= 7 && daysLeft(s.endDate) >= 0).length;
 
      const churn = [];
      const last30DaysStr = toLocalISO(new Date(new Date().getTime() - 30 * 86400000));
-     const activeInGroup = subsExt.filter(s => s.groupId === gid && getSubStatus(s) !== "expired");
+     const activeInGroup = subs.filter(s => s.groupId === gid && getSubStatus(s) !== "expired");
      
      activeInGroup.forEach(sub => {
         const st = studentMap[sub.studentId];
@@ -467,7 +485,7 @@ export default function AttendanceTab({
      });
 
      return { bestAttenderName, bestAttenderCount, bestDate, bestDateCount, topSpenderName, topSpenderAmount, churn, totalMonthAttn: monthAttn.length, avgAttendance, expiringSubs };
-  }, [attn, subs, subsExt, gid, journalMonth, studentMap]);
+  }, [attn, subs, gid, journalMonth, studentMap]);
 
   return (
     <div style={{ maxWidth: "100%" }}>
@@ -511,8 +529,8 @@ export default function AttendanceTab({
             <tr>
               {visibleDays.map((d, index) => {
                 const dayNum = new Date(d + "T12:00:00").getDay();
-                const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 const isNewMonth = index === 0 || d.split('-')[1] !== visibleDays[index - 1].split('-')[1];
+                const isDayCancelled = cancelled.some(c => c.groupId === gid && c.date === d);
                 
                 return (
                 <th key={d} style={{ padding: "8px 2px", background: isDayCancelled ? "rgba(255, 69, 58, 0.15)" : theme.card, color: theme.textMain, fontWeight: 600, minWidth: 44, textAlign: "center", borderLeft: isNewMonth && index !== 0 ? `4px solid ${theme.border}` : "none", borderBottom: `4px solid ${theme.border}`, verticalAlign: "top", height: 70 }}>
@@ -653,7 +671,8 @@ export default function AttendanceTab({
         <div className="split-left" style={{ flex: "1 1 350px", maxWidth: "450px", background: theme.card, borderRadius: 24, border: `1px solid ${theme.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)" }}>
           <div style={{ padding: "16px 24px", background: theme.bg, fontWeight: 800, color: theme.secondary, borderBottom: `1px solid ${theme.border}` }}>Стан абонементів</div>
           {studsInGroup.map((st, i) => {
-             const stSubs = subsExt.filter(s => s.studentId === st.id && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
+             // ВИПРАВЛЕНО: subs замість subsExt
+             const stSubs = subs.filter(s => s.studentId === st.id && s.groupId === gid).sort((a,b) => new Date(b.startDate) - new Date(a.startDate));
              const activeSub = stSubs.find(s => {
                  const trLeft = (s.totalTrainings || 1) - (s.usedTrainings || 0);
                  return trLeft > 0 && s.endDate >= today();
