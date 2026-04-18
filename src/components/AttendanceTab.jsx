@@ -1,5 +1,6 @@
 // test preview deploy
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as db from "../db";
 import {
   today,
@@ -70,10 +71,12 @@ const styles = {
     border: "1px solid rgba(0,0,0,0.08)",
   }),
   tableWrap: {
-    overflow: "auto",
+    overflowX: "auto",
+    overflowY: "visible",
     border: "1px solid #e5e7eb",
     borderRadius: 12,
     background: "#fff",
+    position: "relative",
   },
   table: {
     borderCollapse: "separate",
@@ -159,17 +162,86 @@ const styles = {
     background: "#fff",
     borderRight: "1px solid #e5e7eb",
     borderBottom: "1px solid #eef2f7",
-    padding: "10px 12px",
+    padding: "8px 10px",
   },
   studentName: {
     fontSize: 14,
     fontWeight: 600,
     color: "#111827",
   },
-  studentMeta: {
+  studentNameRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  orderBtns: {
+    display: "flex",
+    gap: 4,
+  },
+  orderBtn: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#374151",
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: "16px",
+    fontSize: 11,
+  },
+  menuWrap: {
+    position: "relative",
+  },
+  menuBtn: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#4b5563",
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: "16px",
     fontSize: 12,
+  },
+  menu: {
+    position: "fixed",
+    minWidth: 160,
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+    zIndex: 20,
+    padding: 6,
+  },
+  totalsHead: {
+    minWidth: 150,
+    maxWidth: 150,
+    width: 150,
+    fontWeight: 700,
+    color: "#374151",
+    whiteSpace: "nowrap",
+    fontSize: 12,
+    padding: "8px 10px",
+  },
+  menuItem: {
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    background: "transparent",
+    padding: "8px 10px",
+    borderRadius: 8,
+    fontSize: 12,
+    color: "#374151",
+    cursor: "pointer",
+  },
+  studentMeta: {
+    fontSize: 11,
     color: "#6b7280",
-    marginTop: 3,
+    marginTop: 2,
+    lineHeight: 1.2,
   },
   cell: (isCancelled) => ({
     width: 58,
@@ -194,6 +266,20 @@ const styles = {
     fontWeight: 700,
     color: bg === "#ffffff" ? "#9ca3af" : "#fff",
   }),
+  subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
+    background: isCancelled ? "#fef2f2" : tone,
+    boxShadow: [
+      `inset 0 1px 0 ${border}`,
+      `inset 0 -1px 0 ${border}`,
+      isStart ? `inset 2px 0 0 ${border}` : "",
+      isEnd ? `inset -2px 0 0 ${border}` : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
+  }),
+  monthDivider: {
+    borderRight: "1px solid #d1d5db",
+  },
   emptyState: {
     padding: 18,
     border: "1px dashed #d1d5db",
@@ -260,26 +346,65 @@ const getMonthDays = (monthStr) => {
 };
 
 const getDayOfWeek = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
+const toDateKey = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return ymd(value);
+  return String(value).slice(0, 10);
+};
+const fmtUaShortDate = (dateStr) => {
+  if (!dateStr) return "—";
+  const [y, m, d] = dateStr.split("-");
+  if (!y || !m || !d) return dateStr;
+  return `${d}.${m}`;
+};
 
 const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  return subs.find((s) => {
-    if (s.studentId !== studentId) return false;
-    if (s.groupId !== groupId) return false;
-    if (isSubExhausted(s)) return false;
-    const end = getEffectiveEndDate(s) || "2099-12-31";
-    return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-  }) || null;
+  const validSubs = subs
+    .filter((s) => {
+      if (s.studentId !== studentId) return false;
+      if (s.groupId !== groupId) return false;
+      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+    })
+    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+
+  return validSubs[0] || null;
 };
 
 const getStudentStatusText = (subs, studentId, groupId) => {
   const groupSubs = subs
     .filter((s) => s.studentId === studentId && s.groupId === groupId)
     .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
-  if (!groupSubs.length) return "Без абонемента";
-  const active = groupSubs.find((s) => !isSubExhausted(s));
-  if (!active) return "Абонементів немає";
-  const end = getEffectiveEndDate(active) || active.endDate || "—";
-  return `До ${end}`;
+  if (!groupSubs.length) return { text: "Без абонемента", tone: "neutral" };
+
+  const todayStr = today();
+  const tomorrow = new Date(`${todayStr}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = ymd(tomorrow);
+
+  const activeNow = groupSubs.find((s) => {
+    const end = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+    return (s.startDate || "0000-00-00") <= todayStr && end >= todayStr;
+  });
+  const latest = [...groupSubs].sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))[0];
+  const sub = activeNow || latest;
+  if (!sub) return { text: "Абонементів немає", tone: "neutral" };
+
+  const total = sub.totalTrainings || 0;
+  const used = sub.usedTrainings || 0;
+  const left = Math.max(0, total - used);
+  const start = sub.activationDate || sub.startDate || "";
+  const end = getEffectiveEndDate(sub) || sub.endDate || "";
+  const isDanger = left <= 0 || (end && end < todayStr);
+  const isWarning = !isDanger && (left <= 1 || end === todayStr || end === tomorrowStr);
+
+  return {
+    tone: isDanger ? "danger" : (isWarning ? "warning" : "neutral"),
+    text: `${left}/${total}  •  ${fmtUaShortDate(start)}–${fmtUaShortDate(end)}`,
+  };
 };
 
 export default function AttendanceTab({
@@ -291,15 +416,39 @@ export default function AttendanceTab({
   setAttn,
   studentMap,
   studentGrps,
+  setStudentGrps,
   cancelled,
   setCancelled,
   customOrders,
+  onActionAddSub,
+  onActionEditStudent,
 }) {
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
+  const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
+  const [openMenuState, setOpenMenuState] = useState(null);
+  const menuPopupRef = useRef(null);
+
+  useEffect(() => {
+    if (!openMenuState) return;
+    const onDocClick = (e) => {
+      if (menuPopupRef.current?.contains(e.target)) return;
+      if (e.target?.closest?.("[data-attn-menu-btn='1']")) return;
+      setOpenMenuState(null);
+    };
+    const onViewportChange = () => setOpenMenuState(null);
+    document.addEventListener("click", onDocClick);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, [openMenuState]);
 
   useEffect(() => {
     if (!groups?.length) return;
@@ -340,6 +489,14 @@ export default function AttendanceTab({
     }));
   }, [months, visibleDays]);
 
+  const visibleDayIndex = useMemo(() => {
+    const map = {};
+    visibleDays.forEach((d, idx) => {
+      map[d] = idx;
+    });
+    return map;
+  }, [visibleDays]);
+
   const studentIdsInGroup = useMemo(() => {
     const fromLinks = studentGrps
       .filter((sg) => sg.groupId === gid)
@@ -349,7 +506,8 @@ export default function AttendanceTab({
       .filter((s) => s.groupId === gid)
       .map((s) => s.studentId);
 
-    return [...new Set([...fromLinks, ...fromSubs])];
+    if (fromLinks.length) return [...new Set(fromLinks)];
+    return [...new Set(fromSubs)];
   }, [studentGrps, rawSubs, gid]);
 
   const orderedStudents = useMemo(() => {
@@ -357,7 +515,7 @@ export default function AttendanceTab({
       .map((id) => studentMap[id])
       .filter(Boolean);
 
-    const savedOrder = customOrders?.[gid] || [];
+    const savedOrder = localOrders?.[gid] || customOrders?.[gid] || [];
     const orderIndex = new Map(savedOrder.map((id, idx) => [id, idx]));
 
     return [...list].sort((a, b) => {
@@ -366,7 +524,78 @@ export default function AttendanceTab({
       if (aIdx !== bIdx) return aIdx - bIdx;
       return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
     });
-  }, [studentIdsInGroup, studentMap, customOrders, gid]);
+  }, [studentIdsInGroup, studentMap, customOrders, localOrders, gid]);
+
+  const moveStudent = (studentId, direction) => {
+    setLocalOrders((prev) => {
+      const idsInGroup = orderedStudents.map((s) => s.id);
+      const base = ((prev?.[gid] || customOrders?.[gid] || [])).filter((id) => idsInGroup.includes(id));
+      const full = [...base, ...idsInGroup.filter((id) => !base.includes(id))];
+      const idx = full.indexOf(studentId);
+      if (idx < 0) return prev;
+      const nextIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (nextIdx < 0 || nextIdx >= full.length) return prev;
+      const next = [...full];
+      [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+      return { ...(prev || {}), [gid]: next };
+    });
+  };
+
+  const handleRemoveFromGroup = async (student) => {
+    if (!gid || !student?.id) return;
+    const ok = window.confirm(`Прибрати ${getDisplayName(student)} з групи "${currentGroup?.name || gid}"?`);
+    if (!ok) return;
+    try {
+      await db.removeStudentGroup(student.id, gid);
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => prev.filter((sg) => !(sg.studentId === student.id && sg.groupId === gid)));
+      }
+      setLocalOrders((prev) => {
+        const arr = prev?.[gid] || [];
+        if (!arr.includes(student.id)) return prev;
+        return { ...(prev || {}), [gid]: arr.filter((id) => id !== student.id) };
+      });
+    } catch (err) {
+      alert(err?.message || "Не вдалося прибрати ученицю з групи");
+    }
+  };
+
+  const handleAddSub = (student) => {
+    if (typeof onActionAddSub === "function") {
+      onActionAddSub(student.id, gid);
+    }
+    setOpenMenuState(null);
+  };
+
+  const handleEditStudent = (student) => {
+    if (typeof onActionEditStudent === "function") {
+      onActionEditStudent(student);
+    } else {
+      alert("Редагування учениці недоступне в цьому екрані");
+    }
+    setOpenMenuState(null);
+  };
+
+  const openStudentMenu = (student, btnEl) => {
+    const rect = btnEl.getBoundingClientRect();
+    const menuWidth = 170;
+    const menuHeight = 126;
+    const margin = 8;
+
+    let left = rect.right - menuWidth;
+    if (left < margin) left = margin;
+    if (left + menuWidth > window.innerWidth - margin) {
+      left = window.innerWidth - menuWidth - margin;
+    }
+
+    let top = rect.bottom + 6;
+    if (top + menuHeight > window.innerHeight - margin) {
+      top = rect.top - menuHeight - 6;
+    }
+    if (top < margin) top = margin;
+
+    setOpenMenuState({ studentId: student.id, top, left });
+  };
 
   const subsById = useMemo(() => {
     const map = {};
@@ -376,10 +605,56 @@ export default function AttendanceTab({
     return map;
   }, [subs]);
 
+  const lastAttendanceBySub = useMemo(() => {
+    const map = {};
+    attn.forEach((a) => {
+      if (!a.subId) return;
+      if (!map[a.subId] || map[a.subId] < a.date) {
+        map[a.subId] = a.date;
+      }
+    });
+    return map;
+  }, [attn]);
+
+  const subPeriodsByStudent = useMemo(() => {
+    const map = {};
+
+    subs
+      .filter((s) => s.groupId === gid)
+      .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""))
+      .forEach((s) => {
+        const start = s.activationDate || s.startDate || "0000-00-00";
+        const exhausted = (s.usedTrainings || 0) >= (s.totalTrainings || 0);
+        const defaultEnd = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+        const end = exhausted
+          ? (lastAttendanceBySub[s.id] || defaultEnd)
+          : defaultEnd;
+        const completed = exhausted || end < today();
+
+        if (!map[s.studentId]) map[s.studentId] = [];
+        map[s.studentId].push({
+          subId: s.id,
+          start,
+          end: end >= start ? end : start,
+          completed,
+        });
+      });
+
+    return map;
+  }, [subs, gid, lastAttendanceBySub]);
+
+  const getSubPeriodForCell = (studentId, dateStr) => {
+    const periods = subPeriodsByStudent[studentId] || [];
+    return periods.find((p) => p.start <= dateStr && p.end >= dateStr) || null;
+  };
+
   const sameStudentByRecord = (record, student) => {
+    if (record.studentId) {
+      return String(record.studentId) === String(student.id);
+    }
     if (record.subId) {
       const linkedSub = subsById[record.subId];
-      return linkedSub?.studentId === student.id;
+      return String(linkedSub?.studentId) === String(student.id);
     }
     const recName = normalizeName(record.guestName);
     const stName1 = normalizeName(getDisplayName(student));
@@ -387,13 +662,16 @@ export default function AttendanceTab({
     return !!recName && (recName === stName1 || recName === stName2);
   };
 
-  const getRecordsForCell = (student, dateStr) => {
-    return attn.filter(
-      (a) =>
-        a.groupId === gid &&
-        a.date === dateStr &&
-        sameStudentByRecord(a, student)
+  const recordMatchesCell = (record, student, dateStr, groupId = gid) => {
+    return (
+      String(record.groupId) === String(groupId) &&
+      toDateKey(record.date) === toDateKey(dateStr) &&
+      sameStudentByRecord(record, student)
     );
+  };
+
+  const getRecordsForCell = (student, dateStr) => {
+    return attn.filter((a) => recordMatchesCell(a, student, dateStr));
   };
 
   const getRecordForCell = (student, dateStr) => {
@@ -458,6 +736,7 @@ export default function AttendanceTab({
     setAttn(freshAttn);
     setSubs(freshSubs);
     setCancelled(freshCancelled);
+    return { freshAttn, freshSubs, freshCancelled };
   };
 
   const handleToggleCell = async (student, dateStr) => {
@@ -471,10 +750,14 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
+        const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
           }
+        }
+        for (const subId of subIdsToSync) {
+          await db.syncSubUsedTrainings(subId);
         }
         await reloadFromDb();
         return;
@@ -485,6 +768,7 @@ export default function AttendanceTab({
       await db.insertAttendance({
         id: `tmp_${uid()}`,
         subId: nextEntry.subId,
+        studentId: student.id,
         date: dateStr,
         guestName: student.name || getDisplayName(student),
         guestType: nextEntry.entryType,
@@ -493,13 +777,19 @@ export default function AttendanceTab({
         entryType: nextEntry.entryType,
       });
 
+      if (nextEntry.subId) {
+        await db.syncSubUsedTrainings(nextEntry.subId);
+      }
       await reloadFromDb();
     } catch (err) {
       const msg = err?.message || "Невідома помилка";
       if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
         try {
-          await reloadFromDb();
-          alert("Запис уже був у базі. Журнал оновлено.");
+          const { freshAttn } = await reloadFromDb();
+          const existsAfterReload = freshAttn.some((a) => recordMatchesCell(a, student, dateStr));
+          if (!existsAfterReload) {
+            alert("Не вдалося додати відвідування. Спробуй ще раз.");
+          }
         } catch {
           alert("Запис уже є в базі.");
         }
@@ -589,6 +879,15 @@ export default function AttendanceTab({
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
 
+  const totalPresentByDate = visibleDays.reduce((acc, dateStr) => {
+    if (isCancelledDate(dateStr)) {
+      acc[dateStr] = 0;
+      return acc;
+    }
+    acc[dateStr] = attn.filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)).length;
+    return acc;
+  }, {});
+
   return (
     <div style={styles.wrap}>
       <div style={styles.toolbar}>
@@ -637,6 +936,14 @@ export default function AttendanceTab({
             <span style={styles.dot("#fee2e2")} />
             <span>Скасоване</span>
           </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#eff6ff")} />
+            <span>Період абонемента</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#f3f4f6")} />
+            <span>Завершений абонемент</span>
+          </div>
         </div>
       </div>
 
@@ -666,11 +973,19 @@ export default function AttendanceTab({
                 const cancelledDay = isCancelledDate(dateStr);
                 const dow = getDayOfWeek(dateStr);
                 const isBusy = busyCancelDate === dateStr;
+                const dayIdx = visibleDayIndex[dateStr];
+                const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                const headStyle = {
+                  ...styles.headTop,
+                  ...styles.dayHead(cancelledDay),
+                  ...(isMonthBoundary ? styles.monthDivider : {}),
+                };
 
                 return (
                   <th
                     key={dateStr}
-                    style={{ ...styles.headTop, ...styles.dayHead(cancelledDay) }}
+                    style={headStyle}
                   >
                     <div style={styles.dayNum}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName}>{WEEKDAYS_SHORT[dow]}</div>
@@ -690,12 +1005,49 @@ export default function AttendanceTab({
           </thead>
 
           <tbody>
-            {orderedStudents.map((student) => (
+            {orderedStudents.map((student) => {
+              const statusInfo = getStudentStatusText(subs, student.id, gid);
+              const metaColor = statusInfo.tone === "danger"
+                ? "#dc2626"
+                : statusInfo.tone === "warning"
+                  ? "#d97706"
+                  : styles.studentMeta.color;
+              const rowHighlightStyle = statusInfo.tone === "danger"
+                ? { background: "#fef2f2", borderLeft: "3px solid #dc2626" }
+                : statusInfo.tone === "warning"
+                  ? { background: "#fff7ed", borderLeft: "3px solid #f59e0b" }
+                  : {};
+
+              return (
               <tr key={student.id}>
-                <td style={styles.rowHead}>
-                  <div style={styles.studentName}>{getDisplayName(student)}</div>
-                  <div style={styles.studentMeta}>
-                    {getStudentStatusText(subs, student.id, gid)}
+                <td style={{ ...styles.rowHead, ...rowHighlightStyle }}>
+                  <div style={styles.studentNameRow}>
+                    <div style={styles.studentName}>{getDisplayName(student)}</div>
+                    <div style={styles.orderBtns}>
+                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "up")} title="Вгору">↑</button>
+                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "down")} title="Вниз">↓</button>
+                      <div style={styles.menuWrap}>
+                        <button
+                          type="button"
+                          style={styles.menuBtn}
+                          title="Дії"
+                          data-attn-menu-btn="1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (openMenuState?.studentId === student.id) {
+                              setOpenMenuState(null);
+                              return;
+                            }
+                            openStudentMenu(student, e.currentTarget);
+                          }}
+                        >
+                          ⋮
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ ...styles.studentMeta, color: metaColor }}>
+                    {statusInfo.text}
                   </div>
                 </td>
 
@@ -704,14 +1056,34 @@ export default function AttendanceTab({
                   const cellKey = `${student.id}_${dateStr}`;
                   const saving = busyCell === cellKey;
                   const cellView = getCellView(student, dateStr);
+                  const subPeriod = getSubPeriodForCell(student.id, dateStr);
+                  const dayIdx = visibleDayIndex[dateStr];
+                  const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
+                  const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                  const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
+                  const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
+                  const tone = subPeriod?.completed ? "#edf1f5" : "#e8f1ff";
+                  const border = subPeriod?.completed ? "#6b7280" : "#3b82f6";
+                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                  const cellStyle = subPeriod
+                    ? {
+                        ...styles.cell(cancelledDay),
+                        ...styles.subPeriodCell(tone, border, isStart, isEnd, cancelledDay),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      }
+                    : {
+                        ...styles.cell(cancelledDay),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      };
 
                   return (
-                    <td key={dateStr} style={styles.cell(cancelledDay)}>
+                    <td key={dateStr} style={cellStyle}>
                       <button
                         type="button"
                         disabled={cancelledDay || saving}
                         onClick={() => handleToggleCell(student, dateStr)}
-                        style={styles.cellBtn(cellView.bg, cancelledDay, saving)}
+                        style={styles.cellBtn(buttonBg, cancelledDay, saving)}
                         title={cancelledDay ? "Тренування скасоване" : dateStr}
                       >
                         {cellView.mark}
@@ -720,7 +1092,7 @@ export default function AttendanceTab({
                   );
                 })}
               </tr>
-            ))}
+            )})}
 
             {!orderedStudents.length && (
               <tr>
@@ -730,9 +1102,37 @@ export default function AttendanceTab({
                 </td>
               </tr>
             )}
+
+            <tr>
+              <td style={{ ...styles.rowHead, ...styles.totalsHead }}>Всього присутніх:</td>
+              {visibleDays.map((dateStr) => (
+                <td key={`total_${dateStr}`} style={{ ...styles.cell(isCancelledDate(dateStr)), fontWeight: 700, color: "#111827" }}>
+                  {totalPresentByDate[dateStr] || 0}
+                </td>
+              ))}
+            </tr>
           </tbody>
         </table>
       </div>
+      {openMenuState && createPortal(
+        <div
+          ref={menuPopupRef}
+          style={{ ...styles.menu, top: openMenuState.top, left: openMenuState.left }}
+        >
+          {(() => {
+            const student = orderedStudents.find((s) => s.id === openMenuState.studentId);
+            if (!student) return null;
+            return (
+              <>
+                <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
+                <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
+                <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+              </>
+            );
+          })()}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
