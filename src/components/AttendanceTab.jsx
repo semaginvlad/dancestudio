@@ -1,5 +1,6 @@
 // test preview deploy
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as db from "../db";
 import {
   today,
@@ -206,9 +207,7 @@ const styles = {
     fontSize: 12,
   },
   menu: {
-    position: "absolute",
-    top: 22,
-    right: 0,
+    position: "fixed",
     minWidth: 160,
     background: "#fff",
     border: "1px solid #e5e7eb",
@@ -430,19 +429,26 @@ export default function AttendanceTab({
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
-  const [openMenuStudentId, setOpenMenuStudentId] = useState("");
-  const menuRootRef = useRef(null);
+  const [openMenuState, setOpenMenuState] = useState(null);
+  const menuPopupRef = useRef(null);
 
   useEffect(() => {
+    if (!openMenuState) return;
     const onDocClick = (e) => {
-      if (!menuRootRef.current) return;
-      if (!menuRootRef.current.contains(e.target)) {
-        setOpenMenuStudentId("");
-      }
+      if (menuPopupRef.current?.contains(e.target)) return;
+      if (e.target?.closest?.("[data-attn-menu-btn='1']")) return;
+      setOpenMenuState(null);
     };
+    const onViewportChange = () => setOpenMenuState(null);
     document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, []);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, [openMenuState]);
 
   useEffect(() => {
     if (!groups?.length) return;
@@ -558,7 +564,7 @@ export default function AttendanceTab({
     if (typeof onActionAddSub === "function") {
       onActionAddSub(student.id, gid);
     }
-    setOpenMenuStudentId("");
+    setOpenMenuState(null);
   };
 
   const handleEditStudent = (student) => {
@@ -567,7 +573,28 @@ export default function AttendanceTab({
     } else {
       alert("Редагування учениці недоступне в цьому екрані");
     }
-    setOpenMenuStudentId("");
+    setOpenMenuState(null);
+  };
+
+  const openStudentMenu = (student, btnEl) => {
+    const rect = btnEl.getBoundingClientRect();
+    const menuWidth = 170;
+    const menuHeight = 126;
+    const margin = 8;
+
+    let left = rect.right - menuWidth;
+    if (left < margin) left = margin;
+    if (left + menuWidth > window.innerWidth - margin) {
+      left = window.innerWidth - menuWidth - margin;
+    }
+
+    let top = rect.bottom + 6;
+    if (top + menuHeight > window.innerHeight - margin) {
+      top = rect.top - menuHeight - 6;
+    }
+    if (top < margin) top = margin;
+
+    setOpenMenuState({ studentId: student.id, top, left });
   };
 
   const subsById = useMemo(() => {
@@ -920,7 +947,7 @@ export default function AttendanceTab({
         </div>
       </div>
 
-      <div style={styles.tableWrap} ref={menuRootRef}>
+      <div style={styles.tableWrap}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -1004,20 +1031,18 @@ export default function AttendanceTab({
                           type="button"
                           style={styles.menuBtn}
                           title="Дії"
+                          data-attn-menu-btn="1"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setOpenMenuStudentId((prev) => (prev === student.id ? "" : student.id));
+                            if (openMenuState?.studentId === student.id) {
+                              setOpenMenuState(null);
+                              return;
+                            }
+                            openStudentMenu(student, e.currentTarget);
                           }}
                         >
                           ⋮
                         </button>
-                        {openMenuStudentId === student.id && (
-                          <div style={styles.menu}>
-                            <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
-                            <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
-                            <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuStudentId(""); }}>Прибрати з групи</button>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -1089,6 +1114,25 @@ export default function AttendanceTab({
           </tbody>
         </table>
       </div>
+      {openMenuState && createPortal(
+        <div
+          ref={menuPopupRef}
+          style={{ ...styles.menu, top: openMenuState.top, left: openMenuState.left }}
+        >
+          {(() => {
+            const student = orderedStudents.find((s) => s.id === openMenuState.studentId);
+            if (!student) return null;
+            return (
+              <>
+                <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
+                <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
+                <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+              </>
+            );
+          })()}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
