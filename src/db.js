@@ -287,11 +287,35 @@ export async function syncSubUsedTrainings(subId) {
 
 // ─── ATTENDANCE ───
 export async function fetchAttendance() {
-  const { data, error } = await supabase.from('attendance').select('*')
-  if (error) throw error
-  return data.map(a => ({
+  const chunk = 1000;
+  let from = 0;
+  let rows = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .range(from, from + chunk - 1);
+    if (error) throw error;
+    const part = data || [];
+    rows = rows.concat(part);
+    if (part.length < chunk) break;
+    from += chunk;
+  }
+
+  const hasMarinaRow = rows.some((a) =>
+    a.id === '5f1571d0-607e-4268-9ecf-6ea8ee06d1c8' &&
+    a.student_id === 'e5914deb-3c16-4f7e-b549-abaffe48d914' &&
+    (a.date || '').slice(0, 10) === '2026-04-17' &&
+    a.group_id === 'lat-mix-am'
+  );
+  console.log('[db.fetchAttendance debug] total rows:', rows.length);
+  console.log('[db.fetchAttendance debug] marina row exists:', hasMarinaRow);
+
+  return rows.map(a => ({
     id: a.id,
     subId: a.sub_id,
+    studentId: a.student_id,
     date: a.date,
     guestName: a.guest_name,
     guestType: a.guest_type,
@@ -304,6 +328,7 @@ export async function fetchAttendance() {
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
     sub_id: a.subId || null,
+    student_id: a.studentId || null,
     date: a.date,
     guest_name: a.guestName || null,
     guest_type: a.guestType || null,
@@ -315,6 +340,7 @@ export async function insertAttendance(a) {
   return {
     id: data.id,
     subId: data.sub_id,
+    studentId: data.student_id,
     date: data.date,
     guestName: data.guest_name,
     guestType: data.guest_type,
