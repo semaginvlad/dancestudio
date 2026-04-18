@@ -32,6 +32,7 @@ import { StudentForm, SubForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
+import MessagesTab from "./components/MessagesTab";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -66,6 +67,7 @@ export default function App() {
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
   const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
+  const [selectedMessageStudentId, setSelectedMessageStudentId] = useStickyState("", "ds_messages_selected_student_id");
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -479,6 +481,7 @@ export default function App() {
               {id:"students", label:"Учениці"},
               {id:"subs", label:"Абонементи"},
               {id:"attendance", label:"Відвідування"},
+              {id:"messages", label:"Повідомлення / Чати"},
               {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
               {id:"finance", label:"Фінанси"},
               {id:"pro_analytics", label:"📈 Про-Аналітика"},
@@ -502,6 +505,13 @@ export default function App() {
         )}
 
         {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} />}
+        
+        {isAdmin && tab==="messages" && (
+          <MessagesTab
+            selectedStudentId={selectedMessageStudentId || null}
+            selectedStudent={selectedMessageStudentId ? studentMap[selectedMessageStudentId] : null}
+          />
+        )}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         
