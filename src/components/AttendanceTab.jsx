@@ -194,6 +194,17 @@ const styles = {
     fontWeight: 700,
     color: bg === "#ffffff" ? "#9ca3af" : "#fff",
   }),
+  subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
+    background: isCancelled ? "#fef2f2" : tone,
+    boxShadow: [
+      `inset 0 1px 0 ${border}`,
+      `inset 0 -1px 0 ${border}`,
+      isStart ? `inset 2px 0 0 ${border}` : "",
+      isEnd ? `inset -2px 0 0 ${border}` : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
+  }),
   emptyState: {
     padding: 18,
     border: "1px dashed #d1d5db",
@@ -262,13 +273,18 @@ const getMonthDays = (monthStr) => {
 const getDayOfWeek = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
 
 const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  return subs.find((s) => {
-    if (s.studentId !== studentId) return false;
-    if (s.groupId !== groupId) return false;
-    if (isSubExhausted(s)) return false;
-    const end = getEffectiveEndDate(s) || "2099-12-31";
-    return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-  }) || null;
+  const validSubs = subs
+    .filter((s) => {
+      if (s.studentId !== studentId) return false;
+      if (s.groupId !== groupId) return false;
+      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+    })
+    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+
+  return validSubs[0] || null;
 };
 
 const getStudentStatusText = (subs, studentId, groupId) => {
@@ -340,6 +356,14 @@ export default function AttendanceTab({
     }));
   }, [months, visibleDays]);
 
+  const visibleDayIndex = useMemo(() => {
+    const map = {};
+    visibleDays.forEach((d, idx) => {
+      map[d] = idx;
+    });
+    return map;
+  }, [visibleDays]);
+
   const studentIdsInGroup = useMemo(() => {
     const fromLinks = studentGrps
       .filter((sg) => sg.groupId === gid)
@@ -375,6 +399,49 @@ export default function AttendanceTab({
     });
     return map;
   }, [subs]);
+
+  const lastAttendanceBySub = useMemo(() => {
+    const map = {};
+    attn.forEach((a) => {
+      if (!a.subId) return;
+      if (!map[a.subId] || map[a.subId] < a.date) {
+        map[a.subId] = a.date;
+      }
+    });
+    return map;
+  }, [attn]);
+
+  const subPeriodsByStudent = useMemo(() => {
+    const map = {};
+
+    subs
+      .filter((s) => s.groupId === gid)
+      .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""))
+      .forEach((s) => {
+        const start = s.activationDate || s.startDate || "0000-00-00";
+        const exhausted = (s.usedTrainings || 0) >= (s.totalTrainings || 0);
+        const defaultEnd = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+        const end = exhausted
+          ? (lastAttendanceBySub[s.id] || defaultEnd)
+          : defaultEnd;
+        const completed = exhausted || end < today();
+
+        if (!map[s.studentId]) map[s.studentId] = [];
+        map[s.studentId].push({
+          subId: s.id,
+          start,
+          end: end >= start ? end : start,
+          completed,
+        });
+      });
+
+    return map;
+  }, [subs, gid, lastAttendanceBySub]);
+
+  const getSubPeriodForCell = (studentId, dateStr) => {
+    const periods = subPeriodsByStudent[studentId] || [];
+    return periods.find((p) => p.start <= dateStr && p.end >= dateStr) || null;
+  };
 
   const sameStudentByRecord = (record, student) => {
     if (record.subId) {
@@ -471,10 +538,14 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
+        const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
           }
+        }
+        for (const subId of subIdsToSync) {
+          await db.syncSubUsedTrainings(subId);
         }
         await reloadFromDb();
         return;
@@ -493,6 +564,9 @@ export default function AttendanceTab({
         entryType: nextEntry.entryType,
       });
 
+      if (nextEntry.subId) {
+        await db.syncSubUsedTrainings(nextEntry.subId);
+      }
       await reloadFromDb();
     } catch (err) {
       const msg = err?.message || "Невідома помилка";
@@ -637,6 +711,14 @@ export default function AttendanceTab({
             <span style={styles.dot("#fee2e2")} />
             <span>Скасоване</span>
           </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#eff6ff")} />
+            <span>Період абонемента</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#f3f4f6")} />
+            <span>Завершений абонемент</span>
+          </div>
         </div>
       </div>
 
@@ -704,14 +786,29 @@ export default function AttendanceTab({
                   const cellKey = `${student.id}_${dateStr}`;
                   const saving = busyCell === cellKey;
                   const cellView = getCellView(student, dateStr);
+                  const subPeriod = getSubPeriodForCell(student.id, dateStr);
+                  const dayIdx = visibleDayIndex[dateStr];
+                  const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
+                  const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                  const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
+                  const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
+                  const tone = subPeriod?.completed ? "#f3f4f6" : "#eff6ff";
+                  const border = subPeriod?.completed ? "#9ca3af" : "#60a5fa";
+                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const cellStyle = subPeriod
+                    ? {
+                        ...styles.cell(cancelledDay),
+                        ...styles.subPeriodCell(tone, border, isStart, isEnd, cancelledDay),
+                      }
+                    : styles.cell(cancelledDay);
 
                   return (
-                    <td key={dateStr} style={styles.cell(cancelledDay)}>
+                    <td key={dateStr} style={cellStyle}>
                       <button
                         type="button"
                         disabled={cancelledDay || saving}
                         onClick={() => handleToggleCell(student, dateStr)}
-                        style={styles.cellBtn(cellView.bg, cancelledDay, saving)}
+                        style={styles.cellBtn(buttonBg, cancelledDay, saving)}
                         title={cancelledDay ? "Тренування скасоване" : dateStr}
                       >
                         {cellView.mark}
