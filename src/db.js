@@ -292,6 +292,7 @@ export async function fetchAttendance() {
   return data.map(a => ({
     id: a.id,
     subId: a.sub_id,
+    studentId: a.student_id,
     date: a.date,
     guestName: a.guest_name,
     guestType: a.guest_type,
@@ -304,6 +305,7 @@ export async function fetchAttendance() {
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
     sub_id: a.subId || null,
+    student_id: a.studentId || null,
     date: a.date,
     guest_name: a.guestName || null,
     guest_type: a.guestType || null,
@@ -315,6 +317,7 @@ export async function insertAttendance(a) {
   return {
     id: data.id,
     subId: data.sub_id,
+    studentId: data.student_id,
     date: data.date,
     guestName: data.guest_name,
     guestType: data.guest_type,
