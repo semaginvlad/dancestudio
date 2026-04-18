@@ -166,10 +166,33 @@ const styles = {
     fontWeight: 600,
     color: "#111827",
   },
+  studentNameRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  orderBtns: {
+    display: "flex",
+    gap: 6,
+  },
+  orderBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#374151",
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: "20px",
+    fontSize: 12,
+  },
   studentMeta: {
     fontSize: 12,
     color: "#6b7280",
-    marginTop: 3,
+    marginTop: 5,
+    lineHeight: 1.45,
   },
   cell: (isCancelled) => ({
     width: 58,
@@ -194,6 +217,20 @@ const styles = {
     fontWeight: 700,
     color: bg === "#ffffff" ? "#9ca3af" : "#fff",
   }),
+  subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
+    background: isCancelled ? "#fef2f2" : tone,
+    boxShadow: [
+      `inset 0 1px 0 ${border}`,
+      `inset 0 -1px 0 ${border}`,
+      isStart ? `inset 2px 0 0 ${border}` : "",
+      isEnd ? `inset -2px 0 0 ${border}` : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
+  }),
+  monthDivider: {
+    borderRight: "1px solid #d1d5db",
+  },
   emptyState: {
     padding: 18,
     border: "1px dashed #d1d5db",
@@ -260,26 +297,64 @@ const getMonthDays = (monthStr) => {
 };
 
 const getDayOfWeek = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
+const fmtUaDate = (dateStr) => {
+  if (!dateStr) return "—";
+  const [y, m, d] = dateStr.split("-");
+  if (!y || !m || !d) return dateStr;
+  return `${d}.${m}.${y}`;
+};
 
 const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  return subs.find((s) => {
-    if (s.studentId !== studentId) return false;
-    if (s.groupId !== groupId) return false;
-    if (isSubExhausted(s)) return false;
-    const end = getEffectiveEndDate(s) || "2099-12-31";
-    return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-  }) || null;
+  const validSubs = subs
+    .filter((s) => {
+      if (s.studentId !== studentId) return false;
+      if (s.groupId !== groupId) return false;
+      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+    })
+    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+
+  return validSubs[0] || null;
 };
 
 const getStudentStatusText = (subs, studentId, groupId) => {
   const groupSubs = subs
     .filter((s) => s.studentId === studentId && s.groupId === groupId)
     .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
-  if (!groupSubs.length) return "Без абонемента";
-  const active = groupSubs.find((s) => !isSubExhausted(s));
-  if (!active) return "Абонементів немає";
-  const end = getEffectiveEndDate(active) || active.endDate || "—";
-  return `До ${end}`;
+  if (!groupSubs.length) return { text: "Без абонемента", tone: "neutral" };
+
+  const todayStr = today();
+  const tomorrow = new Date(`${todayStr}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = ymd(tomorrow);
+
+  const activeNow = groupSubs.find((s) => {
+    const end = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+    return (s.startDate || "0000-00-00") <= todayStr && end >= todayStr;
+  });
+  const latest = [...groupSubs].sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))[0];
+  const sub = activeNow || latest;
+  if (!sub) return { text: "Абонементів немає", tone: "neutral" };
+
+  const total = sub.totalTrainings || 0;
+  const used = sub.usedTrainings || 0;
+  const left = Math.max(0, total - used);
+  const start = sub.activationDate || sub.startDate || "—";
+  const end = getEffectiveEndDate(sub) || sub.endDate || "—";
+  const isDanger = left <= 0 || (end !== "—" && end < todayStr);
+  const isWarning = !isDanger && (left <= 1 || end === todayStr || end === tomorrowStr);
+
+  return {
+    tone: isDanger ? "danger" : (isWarning ? "warning" : "neutral"),
+    lines: [
+      `Залишилось: ${left}`,
+      `Абонемент: ${total} тренувань`,
+      `Початок: ${fmtUaDate(start)}`,
+      `Кінець: ${fmtUaDate(end)}`,
+    ],
+  };
 };
 
 export default function AttendanceTab({
@@ -300,6 +375,7 @@ export default function AttendanceTab({
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
+  const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
 
   useEffect(() => {
     if (!groups?.length) return;
@@ -340,6 +416,14 @@ export default function AttendanceTab({
     }));
   }, [months, visibleDays]);
 
+  const visibleDayIndex = useMemo(() => {
+    const map = {};
+    visibleDays.forEach((d, idx) => {
+      map[d] = idx;
+    });
+    return map;
+  }, [visibleDays]);
+
   const studentIdsInGroup = useMemo(() => {
     const fromLinks = studentGrps
       .filter((sg) => sg.groupId === gid)
@@ -357,7 +441,7 @@ export default function AttendanceTab({
       .map((id) => studentMap[id])
       .filter(Boolean);
 
-    const savedOrder = customOrders?.[gid] || [];
+    const savedOrder = localOrders?.[gid] || customOrders?.[gid] || [];
     const orderIndex = new Map(savedOrder.map((id, idx) => [id, idx]));
 
     return [...list].sort((a, b) => {
@@ -366,7 +450,22 @@ export default function AttendanceTab({
       if (aIdx !== bIdx) return aIdx - bIdx;
       return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
     });
-  }, [studentIdsInGroup, studentMap, customOrders, gid]);
+  }, [studentIdsInGroup, studentMap, customOrders, localOrders, gid]);
+
+  const moveStudent = (studentId, direction) => {
+    setLocalOrders((prev) => {
+      const idsInGroup = orderedStudents.map((s) => s.id);
+      const base = ((prev?.[gid] || customOrders?.[gid] || [])).filter((id) => idsInGroup.includes(id));
+      const full = [...base, ...idsInGroup.filter((id) => !base.includes(id))];
+      const idx = full.indexOf(studentId);
+      if (idx < 0) return prev;
+      const nextIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (nextIdx < 0 || nextIdx >= full.length) return prev;
+      const next = [...full];
+      [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+      return { ...(prev || {}), [gid]: next };
+    });
+  };
 
   const subsById = useMemo(() => {
     const map = {};
@@ -376,7 +475,53 @@ export default function AttendanceTab({
     return map;
   }, [subs]);
 
+  const lastAttendanceBySub = useMemo(() => {
+    const map = {};
+    attn.forEach((a) => {
+      if (!a.subId) return;
+      if (!map[a.subId] || map[a.subId] < a.date) {
+        map[a.subId] = a.date;
+      }
+    });
+    return map;
+  }, [attn]);
+
+  const subPeriodsByStudent = useMemo(() => {
+    const map = {};
+
+    subs
+      .filter((s) => s.groupId === gid)
+      .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""))
+      .forEach((s) => {
+        const start = s.activationDate || s.startDate || "0000-00-00";
+        const exhausted = (s.usedTrainings || 0) >= (s.totalTrainings || 0);
+        const defaultEnd = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+        const end = exhausted
+          ? (lastAttendanceBySub[s.id] || defaultEnd)
+          : defaultEnd;
+        const completed = exhausted || end < today();
+
+        if (!map[s.studentId]) map[s.studentId] = [];
+        map[s.studentId].push({
+          subId: s.id,
+          start,
+          end: end >= start ? end : start,
+          completed,
+        });
+      });
+
+    return map;
+  }, [subs, gid, lastAttendanceBySub]);
+
+  const getSubPeriodForCell = (studentId, dateStr) => {
+    const periods = subPeriodsByStudent[studentId] || [];
+    return periods.find((p) => p.start <= dateStr && p.end >= dateStr) || null;
+  };
+
   const sameStudentByRecord = (record, student) => {
+    if (record.studentId) {
+      return record.studentId === student.id;
+    }
     if (record.subId) {
       const linkedSub = subsById[record.subId];
       return linkedSub?.studentId === student.id;
@@ -471,10 +616,14 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
+        const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
           }
+        }
+        for (const subId of subIdsToSync) {
+          await db.syncSubUsedTrainings(subId);
         }
         await reloadFromDb();
         return;
@@ -485,6 +634,7 @@ export default function AttendanceTab({
       await db.insertAttendance({
         id: `tmp_${uid()}`,
         subId: nextEntry.subId,
+        studentId: student.id,
         date: dateStr,
         guestName: student.name || getDisplayName(student),
         guestType: nextEntry.entryType,
@@ -493,6 +643,9 @@ export default function AttendanceTab({
         entryType: nextEntry.entryType,
       });
 
+      if (nextEntry.subId) {
+        await db.syncSubUsedTrainings(nextEntry.subId);
+      }
       await reloadFromDb();
     } catch (err) {
       const msg = err?.message || "Невідома помилка";
@@ -637,6 +790,14 @@ export default function AttendanceTab({
             <span style={styles.dot("#fee2e2")} />
             <span>Скасоване</span>
           </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#eff6ff")} />
+            <span>Період абонемента</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#f3f4f6")} />
+            <span>Завершений абонемент</span>
+          </div>
         </div>
       </div>
 
@@ -666,11 +827,19 @@ export default function AttendanceTab({
                 const cancelledDay = isCancelledDate(dateStr);
                 const dow = getDayOfWeek(dateStr);
                 const isBusy = busyCancelDate === dateStr;
+                const dayIdx = visibleDayIndex[dateStr];
+                const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                const headStyle = {
+                  ...styles.headTop,
+                  ...styles.dayHead(cancelledDay),
+                  ...(isMonthBoundary ? styles.monthDivider : {}),
+                };
 
                 return (
                   <th
                     key={dateStr}
-                    style={{ ...styles.headTop, ...styles.dayHead(cancelledDay) }}
+                    style={headStyle}
                   >
                     <div style={styles.dayNum}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName}>{WEEKDAYS_SHORT[dow]}</div>
@@ -690,12 +859,28 @@ export default function AttendanceTab({
           </thead>
 
           <tbody>
-            {orderedStudents.map((student) => (
+            {orderedStudents.map((student) => {
+              const statusInfo = getStudentStatusText(subs, student.id, gid);
+              const metaColor = statusInfo.tone === "danger"
+                ? "#dc2626"
+                : statusInfo.tone === "warning"
+                  ? "#d97706"
+                  : styles.studentMeta.color;
+
+              return (
               <tr key={student.id}>
                 <td style={styles.rowHead}>
-                  <div style={styles.studentName}>{getDisplayName(student)}</div>
-                  <div style={styles.studentMeta}>
-                    {getStudentStatusText(subs, student.id, gid)}
+                  <div style={styles.studentNameRow}>
+                    <div style={styles.studentName}>{getDisplayName(student)}</div>
+                    <div style={styles.orderBtns}>
+                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "up")} title="Вгору">↑</button>
+                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "down")} title="Вниз">↓</button>
+                    </div>
+                  </div>
+                  <div style={{ ...styles.studentMeta, color: metaColor }}>
+                    {(statusInfo.lines || [statusInfo.text]).map((line) => (
+                      <div key={line}>{line}</div>
+                    ))}
                   </div>
                 </td>
 
@@ -704,14 +889,34 @@ export default function AttendanceTab({
                   const cellKey = `${student.id}_${dateStr}`;
                   const saving = busyCell === cellKey;
                   const cellView = getCellView(student, dateStr);
+                  const subPeriod = getSubPeriodForCell(student.id, dateStr);
+                  const dayIdx = visibleDayIndex[dateStr];
+                  const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
+                  const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                  const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
+                  const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
+                  const tone = subPeriod?.completed ? "#edf1f5" : "#e8f1ff";
+                  const border = subPeriod?.completed ? "#6b7280" : "#3b82f6";
+                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                  const cellStyle = subPeriod
+                    ? {
+                        ...styles.cell(cancelledDay),
+                        ...styles.subPeriodCell(tone, border, isStart, isEnd, cancelledDay),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      }
+                    : {
+                        ...styles.cell(cancelledDay),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      };
 
                   return (
-                    <td key={dateStr} style={styles.cell(cancelledDay)}>
+                    <td key={dateStr} style={cellStyle}>
                       <button
                         type="button"
                         disabled={cancelledDay || saving}
                         onClick={() => handleToggleCell(student, dateStr)}
-                        style={styles.cellBtn(cellView.bg, cancelledDay, saving)}
+                        style={styles.cellBtn(buttonBg, cancelledDay, saving)}
                         title={cancelledDay ? "Тренування скасоване" : dateStr}
                       >
                         {cellView.mark}
@@ -720,7 +925,7 @@ export default function AttendanceTab({
                   );
                 })}
               </tr>
-            ))}
+            )})}
 
             {!orderedStudents.length && (
               <tr>
