@@ -262,13 +262,18 @@ const getMonthDays = (monthStr) => {
 const getDayOfWeek = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
 
 const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  return subs.find((s) => {
-    if (s.studentId !== studentId) return false;
-    if (s.groupId !== groupId) return false;
-    if (isSubExhausted(s)) return false;
-    const end = getEffectiveEndDate(s) || "2099-12-31";
-    return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-  }) || null;
+  const validSubs = subs
+    .filter((s) => {
+      if (s.studentId !== studentId) return false;
+      if (s.groupId !== groupId) return false;
+      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+    })
+    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+
+  return validSubs[0] || null;
 };
 
 const getStudentStatusText = (subs, studentId, groupId) => {
@@ -471,10 +476,14 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
+        const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
           }
+        }
+        for (const subId of subIdsToSync) {
+          await db.syncSubUsedTrainings(subId);
         }
         await reloadFromDb();
         return;
@@ -493,6 +502,9 @@ export default function AttendanceTab({
         entryType: nextEntry.entryType,
       });
 
+      if (nextEntry.subId) {
+        await db.syncSubUsedTrainings(nextEntry.subId);
+      }
       await reloadFromDb();
     } catch (err) {
       const msg = err?.message || "Невідома помилка";
