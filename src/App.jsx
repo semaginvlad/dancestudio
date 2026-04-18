@@ -66,6 +66,7 @@ export default function App() {
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
   const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
+  const [restoreGroupByStudent, setRestoreGroupByStudent] = useState({});
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -438,6 +439,33 @@ export default function App() {
     } catch(e) { console.warn("Помилка видалення абонемента:", e); }
   };
 
+  const restoreStudentToGroup = async (studentId) => {
+    const groupId = restoreGroupByStudent[studentId];
+    if (!groupId) {
+      alert("Обери групу для відновлення");
+      return;
+    }
+    const st = studentMap[studentId];
+    const gr = groupMap[groupId];
+    const ok = window.confirm(`Відновити ${getDisplayName(st)} у групу "${gr?.name || groupId}"?`);
+    if (!ok) return;
+
+    try {
+      const link = await db.addStudentGroup(studentId, groupId);
+      setStudentGrps((prev) => {
+        if (prev.some((sg) => sg.studentId === studentId && sg.groupId === groupId)) return prev;
+        return [...prev, link || { id: uid(), studentId, groupId }];
+      });
+      setRestoreGroupByStudent((prev) => {
+        const next = { ...prev };
+        delete next[studentId];
+        return next;
+      });
+    } catch (e) {
+      alert(e?.message || "Не вдалося відновити ученицю в групу");
+    }
+  };
+
 
 
   return (
@@ -567,7 +595,18 @@ export default function App() {
                         </div>
                         <Badge color={theme.textLight}>Немає активних груп</Badge>
                         <div style={{display:"flex",gap:8}}>
-                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:theme.bg}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️ Відновити</button>
+                          <select
+                            value={restoreGroupByStudent[st.id] || ""}
+                            onChange={(e) => setRestoreGroupByStudent((prev) => ({ ...prev, [st.id]: e.target.value }))}
+                            style={{ ...inputSt, width: 180, height: 40, padding: "0 12px", fontSize: 13, borderRadius: 10 }}
+                          >
+                            <option value="">Група для відновлення</option>
+                            {groups.map((g) => (
+                              <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                          </select>
+                          <button style={{...btnS,padding:"10px 14px",fontSize:13, background:theme.bg}} onClick={()=>restoreStudentToGroup(st.id)}>↩ Відновити</button>
+                          <button style={{...btnS,padding:"10px 12px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
                           <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
                         </div>
                       </div>
@@ -797,8 +836,8 @@ export default function App() {
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
-      <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>
+      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}]);}setModal(null);}catch(e){console.warn(e);setWaitlist(p=>[...p,{...d, id:uid()}]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
     </div>
   );
