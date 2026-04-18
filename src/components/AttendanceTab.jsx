@@ -170,6 +170,45 @@ const styles = {
     color: "#6b7280",
     marginTop: 3,
   },
+  actionsWrap: {
+    position: "absolute",
+    top: 10,
+    right: 8,
+  },
+  actionsBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 16,
+    lineHeight: "26px",
+    color: "#374151",
+  },
+  actionsMenu: {
+    position: "absolute",
+    right: 0,
+    top: 32,
+    minWidth: 180,
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    boxShadow: "0 10px 25px rgba(15,23,42,0.12)",
+    padding: 6,
+    zIndex: 20,
+  },
+  actionItem: {
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    background: "transparent",
+    borderRadius: 8,
+    padding: "8px 10px",
+    fontSize: 13,
+    color: "#111827",
+    cursor: "pointer",
+  },
   cell: (isCancelled) => ({
     width: 58,
     minWidth: 58,
@@ -290,15 +329,21 @@ export default function AttendanceTab({
   setAttn,
   studentMap,
   studentGrps,
+  setStudentGrps,
   cancelled,
   setCancelled,
   customOrders,
+  onActionAddSub,
+  onActionEditSub,
+  onActionEditStudent,
+  onOpenMessages,
 }) {
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
+  const [openActionsStudentId, setOpenActionsStudentId] = useState("");
 
   useEffect(() => {
     if (!groups?.length) return;
@@ -580,6 +625,67 @@ export default function AttendanceTab({
     return { bg: "#2563eb", mark: "✓" };
   };
 
+  const handleMessageStudent = (student) => {
+    if (!student?.id) return;
+    if (typeof onOpenMessages !== "function") return;
+    setOpenActionsStudentId("");
+    onOpenMessages(student.id);
+  };
+
+  const handleAddSubForStudent = (student) => {
+    if (!student?.id) return;
+    if (typeof onActionAddSub !== "function") return;
+    setOpenActionsStudentId("");
+    onActionAddSub(student.id, gid);
+  };
+
+  const handleEditSubForStudent = (student) => {
+    if (!student?.id) return;
+    if (typeof onActionEditSub !== "function") return;
+
+    const todayStr = today();
+    const activeSub = subs.find((s) => {
+      if (s.studentId !== student.id) return false;
+      if (s.groupId !== gid) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= todayStr && end >= todayStr;
+    });
+
+    if (!activeSub) {
+      alert("Немає активного абонемента для редагування.");
+      return;
+    }
+
+    setOpenActionsStudentId("");
+    onActionEditSub(activeSub);
+  };
+
+  const handleEditStudent = (student) => {
+    if (!student?.id) return;
+    if (typeof onActionEditStudent !== "function") return;
+    setOpenActionsStudentId("");
+    onActionEditStudent(student);
+  };
+
+  const handleRemoveFromGroup = async (student) => {
+    if (!student?.id || !gid) return;
+    const ok = window.confirm(`Прибрати ${getDisplayName(student)} з групи?`);
+    if (!ok) return;
+
+    try {
+      await db.removeStudentGroup(student.id, gid);
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) =>
+          prev.filter((sg) => !(sg.studentId === student.id && sg.groupId === gid))
+        );
+      }
+      setOpenActionsStudentId("");
+    } catch (err) {
+      alert(err?.message || "Не вдалося прибрати ученицю з групи");
+    }
+  };
+
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
   }
@@ -695,6 +801,68 @@ export default function AttendanceTab({
                   <div style={styles.studentName}>{getDisplayName(student)}</div>
                   <div style={styles.studentMeta}>
                     {getStudentStatusText(subs, student.id, gid)}
+                  </div>
+                  <div style={styles.actionsWrap}>
+                    <button
+                      type="button"
+                      style={styles.actionsBtn}
+                      onClick={() =>
+                        setOpenActionsStudentId((prev) =>
+                          prev === student.id ? "" : student.id
+                        )
+                      }
+                      title="Меню дій"
+                    >
+                      ⋮
+                    </button>
+
+                    {openActionsStudentId === student.id && (
+                      <div style={styles.actionsMenu}>
+                        {typeof onActionAddSub === "function" && (
+                          <button
+                            type="button"
+                            style={styles.actionItem}
+                            onClick={() => handleAddSubForStudent(student)}
+                          >
+                            Додати абонемент
+                          </button>
+                        )}
+                        {typeof onActionEditSub === "function" && (
+                          <button
+                            type="button"
+                            style={styles.actionItem}
+                            onClick={() => handleEditSubForStudent(student)}
+                          >
+                            Змінити абонемент
+                          </button>
+                        )}
+                        {typeof onActionEditStudent === "function" && (
+                          <button
+                            type="button"
+                            style={styles.actionItem}
+                            onClick={() => handleEditStudent(student)}
+                          >
+                            Редагувати ученицю
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          style={styles.actionItem}
+                          onClick={() => handleRemoveFromGroup(student)}
+                        >
+                          Прибрати з групи
+                        </button>
+                        {typeof onOpenMessages === "function" && (
+                          <button
+                            type="button"
+                            style={styles.actionItem}
+                            onClick={() => handleMessageStudent(student)}
+                          >
+                            Написати учениці
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </td>
 
