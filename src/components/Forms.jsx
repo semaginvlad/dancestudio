@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { theme, DIRECTIONS, PLAN_TYPES, PAY_METHODS, inputSt, btnP, btnS } from "../shared/constants";
-import { addMonth, today, fmt } from "../shared/utils";
+import { addMonth, today } from "../shared/utils";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
@@ -65,7 +65,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
   );
 }
 
-export function SubForm({ initial, onDone, onCancel, students, groups, studentGrps }) {
+export function SubForm({ initial, onDone, onCancel, students, groups, studentGrps, subs = [] }) {
   const [studentId, setStudentId] = useState(initial?.studentId || "");
   const [groupId, setGroupId] = useState(initial?.groupId || "");
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
@@ -76,6 +76,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [discountPct, setDiscountPct] = useState(initial?.discountPct || 0);
   const [discountSource, setDiscountSource] = useState(initial?.discountSource || "studio");
   const [notes, setNotes] = useState(initial?.notes || "");
+  const [retrospectiveMode, setRetrospectiveMode] = useState(false);
 
   // 🆕 Перемикач активації
   // За замовч. true = активувати одразу (стандартний випадок: оплата + відвідування в один день)
@@ -83,13 +84,37 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [activateNow, setActivateNow] = useState(
     initial?.activationDate ? true : !initial  // для існуючих: дивимось чи activation_date є. для нових: true.
   );
+  const autoEndDate = addMonth(startDate || today());
+  const inferredInitialAutoEndDate = addMonth(initial?.startDate || today());
+  const hasInitialManualEndDate = !!(initial?.endDate && initial.endDate !== inferredInitialAutoEndDate);
+  const [isEndDateManualOverride, setIsEndDateManualOverride] = useState(hasInitialManualEndDate);
+  const [manualEndDate, setManualEndDate] = useState(initial?.endDate || autoEndDate);
+  const [manualActivationDate, setManualActivationDate] = useState(initial?.activationDate || "");
+  const [manualTotalTrainings, setManualTotalTrainings] = useState(initial?.totalTrainings || 8);
+  const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
   const basePrice = plan?.price || 0;
 
   // 🆕 Обчислюємо дату закінчення залежно від активації
-  const endDate = activateNow ? addMonth(startDate) : addMonth(startDate);
-  // (візуально це однаково — бо якщо не активувати, кінець буде перерахований при першій галочці)
+  const selectedEndDate = isEndDateManualOverride ? manualEndDate : autoEndDate;
+  const selectedActivationDate = retrospectiveMode
+    ? (manualActivationDate || null)
+    : (activateNow ? startDate : null);
+  const selectedTotalTrainings = retrospectiveMode ? manualTotalTrainings : (plan?.trainings || 8);
+  const selectedUsedTrainings = retrospectiveMode ? manualUsedTrainings : (initial?.usedTrainings || 0);
+
+  const overlaps = subs.filter((s) => {
+    if (!studentId || !groupId) return false;
+    if (initial?.id && s.id === initial.id) return false;
+    if (s.studentId !== studentId || s.groupId !== groupId) return false;
+
+    const aStart = startDate || "0000-00-00";
+    const aEnd = selectedEndDate || "9999-12-31";
+    const bStart = s.startDate || "0000-00-00";
+    const bEnd = s.endDate || addMonth(s.startDate || today());
+    return !(aEnd < bStart || aStart > bEnd);
+  });
 
   // 🔧 Перераховуємо amount при зміні planType АБО discountPct (і при редагуванні теж)
   useEffect(() => {
@@ -97,10 +122,20 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
     if (p) setAmount(p.price - Math.round(p.price * discountPct / 100));
   }, [planType, discountPct]);
 
+  useEffect(() => {
+    if (!isEndDateManualOverride) setManualEndDate(autoEndDate);
+  }, [autoEndDate, isEndDateManualOverride]);
+
   return (
     <div>
       <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
       <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="">
+        <label style={{ display: "flex", alignItems: "center", gap: 12, color: theme.textMain, cursor: "pointer", fontSize: 14, fontWeight: 600, background: theme.input, padding: "14px 18px", borderRadius: 14 }}>
+          <input type="checkbox" checked={retrospectiveMode} onChange={e => setRetrospectiveMode(e.target.checked)} style={{ width: 18, height: 18 }} />
+          Ретроспективне внесення
+        </label>
+      </Field>
       <Field label="Тип Абонемента">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}` }}>
           {PLAN_TYPES.map(p => (
@@ -113,15 +148,23 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
         <Field label="Дата покупки">
           <input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} />
         </Field>
-        <Field label={activateNow ? "Кінець (від дати покупки)" : "Кінець (розрахується від першого заняття)"}>
-          <div style={{ ...inputSt, background: theme.bg, color: theme.textLight, cursor: "not-allowed", display: "flex", alignItems: "center", height: "52px" }}>
-            {activateNow ? fmt(endDate) : "—"}
-          </div>
+        <Field label="Кінець (вручну)">
+          <input
+            style={{ ...inputSt, cursor: "pointer", height: "52px" }}
+            type="date"
+            value={manualEndDate}
+            onChange={e => {
+              const newDate = e.target.value;
+              setManualEndDate(newDate);
+              setIsEndDateManualOverride(newDate !== autoEndDate);
+            }}
+            onClick={e => e.target.showPicker && e.target.showPicker()}
+          />
         </Field>
       </div>
 
       {/* 🆕 Перемикач "Активувати одразу" */}
-      <Field label="">
+      {!retrospectiveMode && <Field label="">
         <div style={{
           background: activateNow ? theme.card : "#FFF9F0",
           border: `1px solid ${activateNow ? theme.border : theme.warning + "40"}`,
@@ -142,7 +185,28 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
             }
           </div>
         </div>
-      </Field>
+      </Field>}
+
+      {retrospectiveMode && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+          <Field label="Activation Date (вручну)">
+            <input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={manualActivationDate} onChange={e => setManualActivationDate(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} />
+          </Field>
+          <Field label="К-сть тренувань">
+            <input style={inputSt} type="number" min={1} value={manualTotalTrainings} onChange={e => setManualTotalTrainings(Math.max(1, +e.target.value || 1))} />
+          </Field>
+          <Field label="Використано тренувань">
+            <input style={inputSt} type="number" min={0} value={manualUsedTrainings} onChange={e => setManualUsedTrainings(Math.max(0, +e.target.value || 0))} />
+          </Field>
+        </div>
+      )}
+
+      {!!overlaps.length && (
+        <div style={{ marginBottom: 12, fontSize: 13, color: theme.warning, background: "#fff7ed", border: `1px solid ${theme.warning}55`, borderRadius: 12, padding: "10px 12px" }}>
+          ⚠ Є перетин з {overlaps.length} абонемент(ами) цієї учениці у цій групі.
+          {!retrospectiveMode ? " Вимкни перетин або увімкни «Ретроспективне внесення»." : " У ретроспективному режимі це дозволено."}
+        </div>
+      )}
 
       <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginBottom: 16, border: `1px solid ${theme.border}` }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -187,14 +251,26 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
         <button type="button" style={{ ...btnP, opacity: studentId && groupId ? 1 : .4 }} onClick={() => {
           if (!studentId || !groupId) return;
+          if (selectedUsedTrainings > selectedTotalTrainings) {
+            alert("Використані тренування не можуть перевищувати загальну кількість.");
+            return;
+          }
+          if (overlaps.length && !retrospectiveMode) {
+            alert("Є перетин дат з іншим абонементом. Для історичних абонементів увімкни «Ретроспективне внесення».");
+            return;
+          }
+          if (overlaps.length && retrospectiveMode) {
+            const ok = window.confirm("Увага: знайдено перетин з іншими абонементами. Зберегти ретроспективний абонемент?");
+            if (!ok) return;
+          }
           onDone({
             studentId, groupId, planType, startDate,
-            endDate: activateNow ? addMonth(startDate) : addMonth(startDate),
-            // 🆕 activationDate: якщо "активувати одразу" — ставимо startDate;
-            // якщо передоплата — залишаємо null (перерахується при першій галочці)
-            activationDate: activateNow ? startDate : null,
-            totalTrainings: (plan?.trainings || 8),
-            usedTrainings: initial?.usedTrainings || 0,
+            endDate: selectedEndDate,
+            // Звичайний режим: activationDate від поточної логіки.
+            // Ретроспективний режим: повністю ручне введення.
+            activationDate: selectedActivationDate,
+            totalTrainings: selectedTotalTrainings,
+            usedTrainings: selectedUsedTrainings,
             amount, paid, payMethod, discountPct, discountSource,
             basePrice, notes,
             notificationSent: initial?.notificationSent || false
