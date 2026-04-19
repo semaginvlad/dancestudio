@@ -481,6 +481,7 @@ export default function App() {
               {id:"students", label:"Учениці"},
               {id:"subs", label:"Абонементи"},
               {id:"attendance", label:"Відвідування"},
+              {id:"messages", label:"Повідомлення / Чати"},
               {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
               {id:"finance", label:"Фінанси"},
               {id:"pro_analytics", label:"📈 Про-Аналітика"},
