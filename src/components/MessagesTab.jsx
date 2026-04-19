@@ -94,6 +94,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const [sendLoading, setSendLoading] = useState(false);
   const [sendError, setSendError] = useState("");
   const [sendInfo, setSendInfo] = useState("");
+  const [metaSyncError, setMetaSyncError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -270,6 +271,79 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
     return students.filter((s) => getDisplayName(s).toLowerCase().includes(normalized));
   }, [students, studentSearchQuery]);
+
+  useEffect(() => {
+    const chatIds = dialogs.map((d) => String(d.id)).filter(Boolean);
+    if (chatIds.length === 0) return;
+
+    let cancelled = false;
+
+    const loadChatMeta = async () => {
+      try {
+        const resp = await fetch(`/api/telegram-chat-meta?chatIds=${encodeURIComponent(chatIds.join(","))}`);
+        const parsed = await readJsonSafe(resp);
+
+        if (parsed.parseError || !parsed.ok) {
+          throw new Error(parsed.data?.error || "Failed to load chat metadata");
+        }
+
+        if (cancelled) return;
+
+        const items = Array.isArray(parsed.data?.items) ? parsed.data.items : [];
+        const nextFav = {};
+        const nextNeed = {};
+        const nextNote = {};
+
+        items.forEach((item) => {
+          const chatId = String(item.chat_id);
+          nextFav[chatId] = Boolean(item.is_favorite);
+          nextNeed[chatId] = Boolean(item.needs_reply);
+          nextNote[chatId] = item.internal_note || "";
+        });
+
+        setFavoriteChats((prev) => ({ ...prev, ...nextFav }));
+        setNeedsReplyChats((prev) => ({ ...prev, ...nextNeed }));
+        setChatNotes((prev) => ({ ...prev, ...nextNote }));
+        setMetaSyncError("");
+      } catch (error) {
+        if (!cancelled) {
+          setMetaSyncError(String(error?.message || error));
+        }
+      }
+    };
+
+    loadChatMeta();
+    return () => {
+      cancelled = true;
+    };
+  }, [dialogs]);
+
+  const persistChatMeta = async (chatId, patch) => {
+    const safeChatId = String(chatId || "");
+    if (!safeChatId) return;
+
+    const payload = {
+      chatId: safeChatId,
+      isFavorite: patch.isFavorite ?? Boolean(favoriteChats[safeChatId]),
+      needsReply: patch.needsReply ?? Boolean(needsReplyChats[safeChatId]),
+      internalNote: patch.internalNote ?? (chatNotes[safeChatId] || ""),
+    };
+
+    try {
+      const resp = await fetch("/api/telegram-chat-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const parsed = await readJsonSafe(resp);
+      if (parsed.parseError || !parsed.ok) {
+        throw new Error(parsed.data?.error || "Failed to save chat metadata");
+      }
+      setMetaSyncError("");
+    } catch (error) {
+      setMetaSyncError(String(error?.message || error));
+    }
+  };
 
   const handleSelectDialog = (dialog) => {
     setSelectedChatId(String(dialog.id));
@@ -553,7 +627,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                     <button
                       type="button"
-                      onClick={() => setFavoriteChats((prev) => ({ ...prev, [dialog.id]: !prev[dialog.id] }))}
+                      onClick={() => {
+                        const next = !favoriteChats[dialog.id];
+                        setFavoriteChats((prev) => ({ ...prev, [dialog.id]: next }));
+                        persistChatMeta(dialog.id, { isFavorite: next });
+                      }}
                       style={{
                         border: "1px solid rgba(15, 23, 42, 0.1)",
                         borderRadius: 8,
@@ -567,7 +645,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNeedsReplyChats((prev) => ({ ...prev, [dialog.id]: !prev[dialog.id] }))}
+                      onClick={() => {
+                        const next = !needsReplyChats[dialog.id];
+                        setNeedsReplyChats((prev) => ({ ...prev, [dialog.id]: next }));
+                        persistChatMeta(dialog.id, { needsReply: next });
+                      }}
                       style={{
                         border: "1px solid rgba(15, 23, 42, 0.1)",
                         borderRadius: 8,
@@ -686,6 +768,10 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             {selectedDialog ? `Чат: ${selectedDialog.title}` : "Оберіть діалог"}
           </div>
 
+          {metaSyncError && (
+            <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{metaSyncError}</div>
+          )}
+
           {crmData ? (
             <div style={{ marginBottom: 14, border: "1px solid rgba(15, 23, 42, 0.08)", borderRadius: 14, padding: 12, background: "#f8faff", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)" }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8, letterSpacing: "-0.1px" }}>
@@ -719,6 +805,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                     [selectedDialog.id]: e.target.value,
                   }))
                 }
+                onBlur={() => {
+                  if (selectedDialog?.id) {
+                    persistChatMeta(selectedDialog.id, { internalNote: selectedChatNote });
+                  }
+                }}
                 placeholder="Коротка нотатка по діалогу..."
                 rows={2}
                 style={{
