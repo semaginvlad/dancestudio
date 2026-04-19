@@ -68,6 +68,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
   const [messages, setMessages] = useState([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesError, setMessagesError] = useState("");
+  const [messagesReloadTick, setMessagesReloadTick] = useState(0);
 
   const [favoriteChats, setFavoriteChats] = useState({});
   const [needsReplyChats, setNeedsReplyChats] = useState({});
@@ -81,6 +82,11 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
   const [studentSearchQuery, setStudentSearchQuery] = useState("");
   const [linkSaving, setLinkSaving] = useState(false);
   const [linkError, setLinkError] = useState("");
+
+  const [composerText, setComposerText] = useState("");
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [sendInfo, setSendInfo] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -139,18 +145,14 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
         : undefined;
 
       const matchedById = studentsByTelegramUserId[String(dialog.id)] || null;
-      const matchedByUsername = students.find(
-        (s) => normalizeTelegramUsername(s.telegram) === normalizeTelegramUsername(dialog.username),
-      ) || null;
-
-      const matchedStudent = override === undefined ? (matchedById || matchedByUsername) : override;
+      const matchedStudent = override === undefined ? matchedById : override;
 
       return {
         ...dialog,
         matchedStudent,
       };
     });
-  }, [dialogs, linkOverrides, studentsByTelegramUserId, students]);
+  }, [dialogs, linkOverrides, studentsByTelegramUserId]);
 
   useEffect(() => {
     if (!dialogsWithStudents.length || !selectedStudentId || selectedChatId) {
@@ -243,7 +245,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
     return () => {
       cancelled = true;
     };
-  }, [selectedChatId]);
+  }, [selectedChatId, messagesReloadTick]);
 
   const selectedDialog = useMemo(
     () => dialogsWithStudents.find((d) => String(d.id) === String(selectedChatId)) || null,
@@ -299,7 +301,9 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
       }
 
       if (!parsed.ok) {
-        throw new Error(parsed.data?.error || "Не вдалося зберегти прив’язку.");
+        const backendError = parsed.data?.error || "Не вдалося зберегти прив’язку.";
+        const backendDetails = parsed.data?.details ? ` (${parsed.data.details})` : "";
+        throw new Error(`${backendError}${backendDetails}`);
       }
 
       setLinkOverrides((prev) => ({ ...prev, [String(dialog.id)]: student }));
@@ -336,14 +340,70 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
       }
 
       if (!parsed.ok) {
-        throw new Error(parsed.data?.error || "Не вдалося виконати відв’язку.");
+        const backendError = parsed.data?.error || "Не вдалося виконати відв’язку.";
+        const backendDetails = parsed.data?.details ? ` (${parsed.data.details})` : "";
+        throw new Error(`${backendError}${backendDetails}`);
       }
 
       setLinkOverrides((prev) => ({ ...prev, [String(dialog.id)]: null }));
+      setLinkDialogId("");
     } catch (error) {
       setLinkError(String(error?.message || error));
     } finally {
       setLinkSaving(false);
+    }
+  };
+
+  const handleInsertTemplateToComposer = () => {
+    setComposerText((prev) => (prev ? `${prev}\n${templateDraft}` : templateDraft));
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedDialog) return;
+
+    const username = normalizeTelegramUsername(selectedDialog.username);
+    const message = composerText.trim();
+
+    if (!message) {
+      setSendError("Введіть текст повідомлення.");
+      setSendInfo("");
+      return;
+    }
+
+    if (!username) {
+      setSendError("Для цього чату немає username. Реальне надсилання поки доступне лише для чатів з @username.");
+      setSendInfo("");
+      return;
+    }
+
+    setSendLoading(true);
+    setSendError("");
+    setSendInfo("");
+
+    try {
+      const resp = await fetch("/api/send-test-telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, message }),
+      });
+
+      const parsed = await readJsonSafe(resp);
+
+      if (parsed.parseError) {
+        throw new Error("Сервер повернув не-JSON відповідь під час надсилання.");
+      }
+
+      if (!parsed.ok) {
+        throw new Error(parsed.data?.error || "Не вдалося надіслати повідомлення.");
+      }
+
+      setComposerText("");
+      setSendInfo("Повідомлення надіслано.");
+      setMessagesReloadTick((v) => v + 1);
+    } catch (error) {
+      setSendError(String(error?.message || error));
+    } finally {
+      setSendLoading(false);
     }
   };
 
@@ -619,7 +679,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
           )}
 
           {selectedDialog && !messagesLoading && !messagesError && messages.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 430, overflow: "auto", paddingRight: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflow: "auto", paddingRight: 6 }}>
               {messages.map((m) => (
                 <div
                   key={m.id}
@@ -640,6 +700,67 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {selectedDialog && (
+            <div style={{ borderTop: `1px solid ${theme.border}`, marginTop: 12, paddingTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>Повідомлення</div>
+                <button
+                  type="button"
+                  onClick={handleInsertTemplateToComposer}
+                  style={{
+                    border: `1px solid ${theme.border}`,
+                    borderRadius: 8,
+                    padding: "4px 8px",
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  Вставити шаблон
+                </button>
+              </div>
+
+              <textarea
+                rows={3}
+                value={composerText}
+                onChange={(e) => setComposerText(e.target.value)}
+                placeholder="Введіть повідомлення..."
+                style={{
+                  width: "100%",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  resize: "vertical",
+                }}
+              />
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <div style={{ fontSize: 12, color: theme.textLight }}>
+                  Надсилання виконується через `/api/send-test-telegram` для чатів з `@username`.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSendMessage}
+                  disabled={sendLoading}
+                  style={{
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    background: sendLoading ? theme.textLight : theme.primary,
+                    color: "#fff",
+                    cursor: sendLoading ? "not-allowed" : "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  {sendLoading ? "Надсилання..." : "Надіслати"}
+                </button>
+              </div>
+
+              {sendError && <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{sendError}</div>}
+              {sendInfo && <div style={{ color: theme.primary, fontSize: 12, marginTop: 6 }}>{sendInfo}</div>}
             </div>
           )}
         </div>
@@ -687,7 +808,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
             }}
           />
           <div style={{ color: theme.textLight, fontSize: 12, marginTop: 6 }}>
-            Тільки UI-заготовка. Відправка повідомлень не реалізована.
+            Шаблон можна вставити у нижню панель і надіслати кнопкою “Надіслати”.
           </div>
         </div>
       </div>

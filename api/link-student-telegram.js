@@ -24,11 +24,16 @@ export default async function handler(req, res) {
       return sendJsonError(res, 400, "telegramUserId is required for link action");
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      return sendJsonError(res, 500, "Missing Supabase server environment variables");
+      return sendJsonError(
+        res,
+        500,
+        "Missing Supabase server environment variables",
+        "Required: SUPABASE_URL (or VITE_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY",
+      );
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
