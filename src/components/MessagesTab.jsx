@@ -31,6 +31,13 @@ const TEMPLATE_OPTIONS = [
   },
 ];
 
+const shellCard = {
+  background: "#ffffff",
+  border: "1px solid rgba(15, 23, 42, 0.08)",
+  borderRadius: 18,
+  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+};
+
 function normalizeTelegramUsername(value) {
   return String(value || "").replace(/^@/, "").trim().toLowerCase();
 }
@@ -449,9 +456,9 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
-      <div style={{ background: "#fff", border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10, color: theme.textMain }}>
+    <div style={{ display: "grid", gridTemplateColumns: "370px 1fr", gap: 18 }}>
+      <div style={{ ...shellCard, padding: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: theme.textMain, letterSpacing: "-0.2px" }}>
           Діалоги Telegram
         </div>
 
@@ -461,11 +468,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           placeholder="Пошук: title, username, учениця..."
           style={{
             width: "100%",
-            border: `1px solid ${theme.border}`,
-            borderRadius: 10,
-            padding: "10px 12px",
-            marginBottom: 10,
+            border: "1px solid rgba(15, 23, 42, 0.1)",
+            borderRadius: 12,
+            padding: "11px 12px",
+            marginBottom: 12,
             outline: "none",
+            background: "#fbfcff",
+            boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
           }}
         />
 
@@ -477,13 +486,14 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
               onClick={() => setQuickFilter(f.id)}
               style={{
                 borderRadius: 999,
-                border: `1px solid ${quickFilter === f.id ? theme.primary : theme.border}`,
-                background: quickFilter === f.id ? "#eef2ff" : "#fff",
-                color: quickFilter === f.id ? theme.primary : theme.textMain,
+                border: `1px solid ${quickFilter === f.id ? "rgba(99, 102, 241, 0.35)" : "rgba(15, 23, 42, 0.1)"}`,
+                background: quickFilter === f.id ? "rgba(99, 102, 241, 0.08)" : "#ffffff",
+                color: quickFilter === f.id ? "#4f46e5" : theme.textMain,
                 fontWeight: 600,
                 fontSize: 12,
-                padding: "6px 10px",
+                padding: "6px 11px",
                 cursor: "pointer",
+                transition: "all .18s ease",
               }}
             >
               {f.label}
@@ -498,7 +508,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
         )}
 
         {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 610, overflow: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflow: "auto", paddingRight: 2 }}>
             {rankedAndFilteredDialogs.map((dialog) => {
               const active = String(selectedChatId) === String(dialog.id);
               const isFavorite = Boolean(favoriteChats[dialog.id]);
@@ -509,10 +519,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 <div
                   key={dialog.id}
                   style={{
-                    borderRadius: 10,
-                    border: `1px solid ${active ? theme.primary : theme.border}`,
-                    background: active ? "#eef2ff" : "#fff",
-                    padding: 8,
+                    borderRadius: 14,
+                    border: `1px solid ${active ? "rgba(99, 102, 241, 0.28)" : "rgba(15, 23, 42, 0.08)"}`,
+                    background: active ? "rgba(99, 102, 241, 0.05)" : "#ffffff",
+                    padding: 10,
+                    boxShadow: active ? "0 6px 18px rgba(99, 102, 241, 0.08)" : "0 4px 12px rgba(15, 23, 42, 0.04)",
+                    transition: "all .2s ease",
                   }}
                 >
                   <button
@@ -524,7 +536,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       cursor: "pointer",
                       width: "100%",
                       textAlign: "left",
-                      padding: 2,
+                      padding: 4,
                     }}
                   >
                     <div style={{ color: theme.textMain, fontSize: 14, fontWeight: 700 }}>
@@ -538,17 +550,17 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                     </div>
                   </button>
 
-                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => setFavoriteChats((prev) => ({ ...prev, [dialog.id]: !prev[dialog.id] }))}
                       style={{
-                        border: `1px solid ${theme.border}`,
+                        border: "1px solid rgba(15, 23, 42, 0.1)",
                         borderRadius: 8,
                         fontSize: 12,
                         padding: "4px 8px",
                         cursor: "pointer",
-                        background: isFavorite ? "#fff7e6" : "#fff",
+                        background: isFavorite ? "#fff9ee" : "#fff",
                       }}
                     >
                       {isFavorite ? "★ Pin" : "☆ Pin"}
@@ -557,12 +569,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       type="button"
                       onClick={() => setNeedsReplyChats((prev) => ({ ...prev, [dialog.id]: !prev[dialog.id] }))}
                       style={{
-                        border: `1px solid ${theme.border}`,
+                        border: "1px solid rgba(15, 23, 42, 0.1)",
                         borderRadius: 8,
                         fontSize: 12,
                         padding: "4px 8px",
                         cursor: "pointer",
-                        background: needsReply ? "#ffecec" : "#fff",
+                        background: needsReply ? "#fff1f1" : "#fff",
                         color: needsReply ? theme.danger : theme.textMain,
                       }}
                     >
@@ -572,7 +584,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       type="button"
                       onClick={() => handleStartLink(dialog.id)}
                       style={{
-                        border: `1px solid ${theme.border}`,
+                        border: "1px solid rgba(15, 23, 42, 0.1)",
                         borderRadius: 8,
                         fontSize: 12,
                         padding: "4px 8px",
@@ -588,7 +600,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         onClick={() => handleUnlink(dialog)}
                         disabled={linkSaving}
                         style={{
-                          border: `1px solid ${theme.border}`,
+                          border: "1px solid rgba(15, 23, 42, 0.1)",
                           borderRadius: 8,
                           fontSize: 12,
                           padding: "4px 8px",
@@ -603,7 +615,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   </div>
 
                   {isLinking && (
-                    <div style={{ marginTop: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 10, background: "#fff" }}>
+                    <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 12, background: "#fbfcff" }}>
                       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: theme.textMain }}>
                         Прив’язка чату до учениці
                       </div>
@@ -613,7 +625,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         placeholder="Пошук учениці..."
                         style={{
                           width: "100%",
-                          border: `1px solid ${theme.border}`,
+                          border: "1px solid rgba(15, 23, 42, 0.1)",
                           borderRadius: 8,
                           padding: "8px 10px",
                           marginBottom: 8,
@@ -627,7 +639,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                             onClick={() => handleSaveLink(dialog, student)}
                             disabled={linkSaving}
                             style={{
-                              border: `1px solid ${theme.border}`,
+                              border: "1px solid rgba(15, 23, 42, 0.1)",
                               borderRadius: 8,
                               padding: "6px 8px",
                               textAlign: "left",
@@ -668,18 +680,18 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 16 }}>
-        <div style={{ background: "#fff", border: `1px solid ${theme.border}`, borderRadius: 16, padding: 20 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: theme.textMain, marginBottom: 8 }}>
+      <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 18 }}>
+        <div style={{ ...shellCard, padding: 22 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: theme.textMain, marginBottom: 10, letterSpacing: "-0.2px" }}>
             {selectedDialog ? `Чат: ${selectedDialog.title}` : "Оберіть діалог"}
           </div>
 
           {crmData ? (
-            <div style={{ marginBottom: 12, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.bg }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8 }}>
+            <div style={{ marginBottom: 14, border: "1px solid rgba(15, 23, 42, 0.08)", borderRadius: 14, padding: 12, background: "#f8faff", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8, letterSpacing: "-0.1px" }}>
                 CRM по учениці: {getDisplayName(crmData.student)}
               </div>
-              <div style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 4 }}>
+              <div style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 5, lineHeight: 1.35 }}>
                 <div><strong>Групи:</strong> {crmData.groups.length ? crmData.groups.map((g) => g.name).join(", ") : "—"}</div>
                 <div><strong>Напрямок:</strong> {crmData.direction?.name || "—"}</div>
                 <div><strong>Статус абонемента:</strong> {crmData.sub?.status || "—"}</div>
@@ -689,7 +701,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
               </div>
             </div>
           ) : (
-            <div style={{ marginBottom: 12, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: 10, color: theme.textMuted, fontSize: 13 }}>
+            <div style={{ marginBottom: 14, border: "1px dashed rgba(15, 23, 42, 0.18)", borderRadius: 14, padding: 12, color: theme.textMuted, fontSize: 13, background: "#fafcff" }}>
               Чат не прив’язаний до учениці — CRM-дані недоступні.
             </div>
           )}
@@ -711,10 +723,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 rows={2}
                 style={{
                   width: "100%",
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 10,
-                  padding: "8px 10px",
+                  border: "1px solid rgba(15, 23, 42, 0.1)",
+                  borderRadius: 12,
+                  padding: "9px 10px",
                   resize: "vertical",
+                  background: "#fbfcff",
                 }}
               />
             </div>
@@ -732,23 +745,24 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
 
           {selectedDialog && !messagesLoading && !messagesError && messages.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflow: "auto", paddingRight: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11, maxHeight: 360, overflow: "auto", paddingRight: 6 }}>
               {messages.map((m) => (
                 <div
                   key={m.id}
                   style={{
                     alignSelf: m.out ? "flex-end" : "flex-start",
-                    maxWidth: "85%",
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: `1px solid ${theme.border}`,
-                    background: m.out ? "#eef2ff" : theme.bg,
+                    maxWidth: "82%",
+                    padding: "10px 13px",
+                    borderRadius: 16,
+                    border: "1px solid rgba(15, 23, 42, 0.08)",
+                    background: m.out ? "linear-gradient(180deg, #eef2ff 0%, #e9efff 100%)" : "#f7f9fd",
+                    boxShadow: "0 3px 10px rgba(15, 23, 42, 0.05)",
                   }}
                 >
-                  <div style={{ color: theme.textMain, fontSize: 14, whiteSpace: "pre-wrap" }}>
+                  <div style={{ color: theme.textMain, fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                     {m.text || "(без тексту)"}
                   </div>
-                  <div style={{ color: theme.textLight, fontSize: 11, marginTop: 6 }}>
+                  <div style={{ color: theme.textLight, fontSize: 11, marginTop: 7, letterSpacing: "0.1px" }}>
                     {m.date ? new Date(m.date).toLocaleString("uk-UA") : "—"}
                   </div>
                 </div>
@@ -757,17 +771,17 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
 
           {selectedDialog && (
-            <div style={{ borderTop: `1px solid ${theme.border}`, marginTop: 12, paddingTop: 12 }}>
+            <div style={{ borderTop: "1px solid rgba(15, 23, 42, 0.08)", marginTop: 14, paddingTop: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>Повідомлення</div>
                 <button
                   type="button"
                   onClick={handleInsertTemplateToComposer}
                   style={{
-                    border: `1px solid ${theme.border}`,
-                    borderRadius: 8,
-                    padding: "4px 8px",
-                    background: "#fff",
+                    border: "1px solid rgba(15, 23, 42, 0.1)",
+                    borderRadius: 10,
+                    padding: "5px 10px",
+                    background: "#f8faff",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
@@ -783,10 +797,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 placeholder="Введіть повідомлення..."
                 style={{
                   width: "100%",
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 10,
-                  padding: "8px 10px",
+                  border: "1px solid rgba(15, 23, 42, 0.12)",
+                  borderRadius: 14,
+                  padding: "10px 12px",
                   resize: "vertical",
+                  background: "#fbfcff",
+                  boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.04)",
                 }}
               />
 
@@ -800,12 +816,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   disabled={sendLoading}
                   style={{
                     border: "none",
-                    borderRadius: 10,
-                    padding: "8px 12px",
-                    background: sendLoading ? theme.textLight : theme.primary,
+                    borderRadius: 12,
+                    padding: "9px 14px",
+                    background: sendLoading ? theme.textLight : "linear-gradient(180deg, #6366f1 0%, #4f46e5 100%)",
                     color: "#fff",
                     cursor: sendLoading ? "not-allowed" : "pointer",
                     fontWeight: 700,
+                    boxShadow: sendLoading ? "none" : "0 8px 18px rgba(79, 70, 229, 0.25)",
                   }}
                 >
                   {sendLoading ? "Надсилання..." : "Надіслати"}
@@ -818,12 +835,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
         </div>
 
-        <div style={{ background: "#fff", border: `1px solid ${theme.border}`, borderRadius: 16, padding: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: theme.textMain, marginBottom: 10 }}>
+        <div style={{ ...shellCard, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: theme.textMain, marginBottom: 12, letterSpacing: "-0.2px" }}>
             Шаблони повідомлень (UI)
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 9, marginBottom: 10 }}>
             {TEMPLATE_OPTIONS.map((tpl) => (
               <button
                 key={tpl.id}
@@ -833,11 +850,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   setTemplateDraft(tpl.text);
                 }}
                 style={{
-                  borderRadius: 10,
-                  border: `1px solid ${selectedTemplateId === tpl.id ? theme.primary : theme.border}`,
-                  background: selectedTemplateId === tpl.id ? "#eef2ff" : "#fff",
+                  borderRadius: 12,
+                  border: `1px solid ${selectedTemplateId === tpl.id ? "rgba(99, 102, 241, 0.35)" : "rgba(15, 23, 42, 0.09)"}`,
+                  background: selectedTemplateId === tpl.id ? "rgba(99, 102, 241, 0.08)" : "#fbfcff",
                   textAlign: "left",
-                  padding: "8px 10px",
+                  padding: "9px 10px",
                   cursor: "pointer",
                   fontSize: 13,
                   fontWeight: 600,
@@ -854,10 +871,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             onChange={(e) => setTemplateDraft(e.target.value)}
             style={{
               width: "100%",
-              border: `1px solid ${theme.border}`,
-              borderRadius: 10,
-              padding: "8px 10px",
+              border: "1px solid rgba(15, 23, 42, 0.12)",
+              borderRadius: 12,
+              padding: "9px 10px",
               resize: "vertical",
+              background: "#fbfcff",
             }}
           />
           <div style={{ color: theme.textLight, fontSize: 12, marginTop: 6 }}>
