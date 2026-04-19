@@ -32,6 +32,7 @@ import { StudentForm, SubForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
+import MessagesTab from "./components/MessagesTab";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
