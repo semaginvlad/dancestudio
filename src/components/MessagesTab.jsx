@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { theme } from "../shared/constants";
+import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName } from "../shared/utils";
 
 const QUICK_FILTERS = [
@@ -55,7 +55,7 @@ async function readJsonSafe(response) {
   }
 }
 
-export default function MessagesTab({ students = [], selectedStudentId = "", onSelectStudent }) {
+export default function MessagesTab({ students = [], groups = [], subs = [], attn = [], selectedStudentId = "", onSelectStudent }) {
   const [dialogs, setDialogs] = useState([]);
   const [dialogsLoading, setDialogsLoading] = useState(false);
   const [dialogsError, setDialogsError] = useState("");
@@ -407,6 +407,45 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
     }
   };
 
+
+  const groupById = useMemo(() => Object.fromEntries((groups || []).map((g) => [g.id, g])), [groups]);
+  const directionById = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [d.id, d])), []);
+
+  const crmData = useMemo(() => {
+    const student = selectedDialog?.matchedStudent;
+    if (!student) return null;
+
+    const studentSubs = (subs || []).filter((sub) => sub.studentId === student.id);
+    const linkedGroups = studentSubs
+      .map((sub) => groupById[sub.groupId])
+      .filter(Boolean)
+      .filter((g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx);
+
+    const activeSub = studentSubs.find((sub) => sub.status !== "expired") || null;
+    const targetSub = activeSub || studentSubs[0] || null;
+
+    const targetDirection = targetSub ? directionById[groupById[targetSub.groupId]?.directionId] : null;
+    const remainingTrainings = targetSub
+      ? Math.max(0, (targetSub.totalTrainings || 0) - (targetSub.usedTrainings || 0))
+      : null;
+
+    const subIdSet = new Set(studentSubs.map((sub) => sub.id));
+    const lastAttendanceDate = (attn || [])
+      .filter((row) => row.subId && subIdSet.has(row.subId))
+      .map((row) => row.date)
+      .filter(Boolean)
+      .sort((a, b) => String(b).localeCompare(String(a)))[0] || null;
+
+    return {
+      student,
+      groups: linkedGroups,
+      direction: targetDirection,
+      sub: targetSub,
+      remainingTrainings,
+      lastAttendanceDate,
+    };
+  }, [selectedDialog, subs, groupById, directionById, attn]);
+
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
 
   return (
@@ -635,9 +674,23 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
             {selectedDialog ? `Чат: ${selectedDialog.title}` : "Оберіть діалог"}
           </div>
 
-          {selectedDialog?.matchedStudent && (
-            <div style={{ color: theme.textMuted, fontSize: 13, marginBottom: 10 }}>
-              Учениця: {getDisplayName(selectedDialog.matchedStudent)}
+          {crmData ? (
+            <div style={{ marginBottom: 12, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.bg }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8 }}>
+                CRM по учениці: {getDisplayName(crmData.student)}
+              </div>
+              <div style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 4 }}>
+                <div><strong>Групи:</strong> {crmData.groups.length ? crmData.groups.map((g) => g.name).join(", ") : "—"}</div>
+                <div><strong>Напрямок:</strong> {crmData.direction?.name || "—"}</div>
+                <div><strong>Статус абонемента:</strong> {crmData.sub?.status || "—"}</div>
+                <div><strong>Залишилось занять:</strong> {crmData.remainingTrainings ?? "—"}</div>
+                <div><strong>Кінець абонемента:</strong> {crmData.sub?.endDate || "—"}</div>
+                <div><strong>Останнє відвідування:</strong> {crmData.lastAttendanceDate || "—"}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: 10, color: theme.textMuted, fontSize: 13 }}>
+              Чат не прив’язаний до учениці — CRM-дані недоступні.
             </div>
           )}
 
