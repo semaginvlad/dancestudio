@@ -34,5 +34,3 @@ cp .env.example .env.local
 # Заповнити .env.local своїми ключами
 npm run dev
 ```
-
-    <!-- trigger preview -->
