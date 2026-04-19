@@ -698,9 +698,9 @@ export default function AttendanceTab({
     return attn.filter((a) => recordMatchesCell(a, student, dateStr));
   };
 
-  const getRecordForCell = (student, dateStr) => {
+  const getCellQuantity = (student, dateStr) => {
     const all = getRecordsForCell(student, dateStr);
-    return all[0] || null;
+    return all.reduce((sum, rec) => sum + (Number(rec.quantity) || 1), 0);
   };
 
   const isCancelledDate = (dateStr) =>
@@ -772,13 +772,35 @@ export default function AttendanceTab({
 
     try {
       const existing = getRecordsForCell(student, dateStr);
+      const currentQty = existing.reduce((sum, rec) => sum + (Number(rec.quantity) || 1), 0);
+      const nextQty = currentQty <= 0 ? 1 : currentQty === 1 ? 2 : 0;
+      const baseRec = existing[0] || null;
 
       if (existing.length) {
         const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
-        for (const rec of existing) {
-          if (rec.id) {
-            await db.deleteAttendance(rec.id);
+        if (nextQty === 0) {
+          for (const rec of existing) {
+            if (rec.id) {
+              await db.deleteAttendance(rec.id);
+            }
           }
+        } else if (nextQty === 2) {
+          for (const rec of existing) {
+            if (rec.id) {
+              await db.deleteAttendance(rec.id);
+            }
+          }
+          await db.insertAttendance({
+            id: `tmp_${uid()}`,
+            subId: baseRec?.subId || null,
+            studentId: student.id,
+            date: dateStr,
+            guestName: baseRec?.guestName || student.name || getDisplayName(student),
+            guestType: baseRec?.guestType || baseRec?.entryType || "subscription",
+            groupId: gid,
+            quantity: 2,
+            entryType: baseRec?.entryType || "subscription",
+          });
         }
         for (const subId of subIdsToSync) {
           await db.syncSubUsedTrainings(subId);
@@ -900,13 +922,15 @@ export default function AttendanceTab({
   };
 
   const getCellView = (student, dateStr) => {
-    const rec = getRecordForCell(student, dateStr);
+    const rec = getRecordsForCell(student, dateStr)[0];
     if (!rec) return { bg: "#ffffff", mark: "" };
 
+    const qty = getCellQuantity(student, dateStr);
+    const mark = qty >= 2 ? "2" : "✓";
     const type = rec.entryType || "subscription";
-    if (type === "single") return { bg: "#f59e0b", mark: "✓" };
-    if (type === "trial") return { bg: "#10b981", mark: "✓" };
-    return { bg: "#2563eb", mark: "✓" };
+    if (type === "single") return { bg: "#f59e0b", mark };
+    if (type === "trial") return { bg: "#10b981", mark };
+    return { bg: "#2563eb", mark };
   };
 
   if (!groups?.length) {
@@ -922,7 +946,9 @@ export default function AttendanceTab({
       acc[dateStr] = 0;
       return acc;
     }
-    acc[dateStr] = attn.filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)).length;
+    acc[dateStr] = attn
+      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
+      .reduce((sum, rec) => sum + (Number(rec.quantity) || 1), 0);
     return acc;
   }, {});
 
@@ -981,6 +1007,9 @@ export default function AttendanceTab({
           <div style={styles.legendItem}>
             <span style={styles.dot("#f3f4f6")} />
             <span>Завершений абонемент</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span>Клік: пусто → ✓ → 2 → пусто</span>
           </div>
         </div>
       </div>
