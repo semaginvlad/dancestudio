@@ -67,7 +67,8 @@ export default function App() {
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
   const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
-
+  const [selectedMessageStudentId, setSelectedMessageStudentId] = useStickyState("", "ds_messages_selected_student_id"); 
+  
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
 
