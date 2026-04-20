@@ -687,9 +687,9 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "370px 1fr", gap: 18 }}>
-      <div style={{ ...shellCard, padding: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "96px minmax(0, 1fr)", gap: 10 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(410px, 430px) 1fr", gap: 18 }}>
+      <div style={{ ...shellCard, padding: 14, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "96px minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
           <div style={{ border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 13, padding: 8, background: `linear-gradient(180deg, #ffffff 0%, ${uiPalette.cream}55 100%)` }}>
             <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 8, textAlign: "center", letterSpacing: "0.04em", fontWeight: 700 }}>ГРУПИ</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -742,7 +742,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             </div>
           </div>
 
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: uiPalette.black, letterSpacing: "-0.2px" }}>
               Діалоги Telegram
             </div>
@@ -793,7 +793,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             )}
 
             {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflow: "auto", paddingRight: 2 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflowY: "auto", overflowX: "hidden", paddingRight: 4, minWidth: 0 }}>
             {rankedAndFilteredDialogs.map((dialog) => {
               const active = String(selectedChatId) === String(dialog.id);
               const isFavorite = Boolean(favoriteChats[dialog.id]);
