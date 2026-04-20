@@ -115,7 +115,7 @@ async function readJsonSafe(response) {
   }
 }
 
-export default function MessagesTab({ students = [], groups = [], subs = [], attn = [], selectedStudentId = "", onSelectStudent }) {
+export default function MessagesTab({ students = [], groups = [], subs = [], attn = [], studentGrps = [], selectedStudentId = "", onSelectStudent }) {
   const [dialogs, setDialogs] = useState([]);
   const [dialogsLoading, setDialogsLoading] = useState(false);
   const [dialogsError, setDialogsError] = useState("");
@@ -235,6 +235,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const groupIdByStudentId = useMemo(() => {
     const map = {};
 
+    (studentGrps || []).forEach((link) => {
+      if (!link?.studentId || !link?.groupId) return;
+      const studentKey = String(link.studentId);
+      if (!map[studentKey]) map[studentKey] = new Set();
+      map[studentKey].add(String(link.groupId));
+    });
+
     (subs || []).forEach((sub) => {
       if (!sub?.studentId || !sub?.groupId) return;
       const studentKey = String(sub.studentId);
@@ -242,8 +249,23 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       map[studentKey].add(String(sub.groupId));
     });
 
+    (students || []).forEach((student) => {
+      const studentKey = String(student?.id || "");
+      if (!studentKey) return;
+      if (!map[studentKey]) map[studentKey] = new Set();
+
+      if (student.groupId) {
+        map[studentKey].add(String(student.groupId));
+      }
+      if (Array.isArray(student.groupIds)) {
+        student.groupIds.forEach((groupId) => {
+          if (groupId) map[studentKey].add(String(groupId));
+        });
+      }
+    });
+
     return map;
-  }, [subs]);
+  }, [studentGrps, subs, students]);
 
   const groupFilterOptions = useMemo(() => {
     const counts = {};
@@ -653,8 +675,9 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     if (!student) return null;
 
     const studentSubs = (subs || []).filter((sub) => sub.studentId === student.id);
-    const linkedGroups = studentSubs
-      .map((sub) => groupById[sub.groupId])
+    const linkedGroupIds = Array.from(groupIdByStudentId[String(student.id)] || []);
+    const linkedGroups = linkedGroupIds
+      .map((groupId) => groupById[String(groupId)])
       .filter(Boolean)
       .filter((g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx);
 
@@ -681,7 +704,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       remainingTrainings,
       lastAttendanceDate,
     };
-  }, [selectedDialog, subs, groupById, directionById, attn]);
+  }, [selectedDialog, subs, groupById, directionById, attn, groupIdByStudentId]);
 
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
   const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
