@@ -790,6 +790,10 @@ export default function AttendanceTab({
       return { entryType: "trial", subId: null };
     }
 
+    if (entryMode === "debt") {
+      return { entryType: "debt", subId: null };
+    }
+
     const activeSub = getActiveSubOnDate(subs, student.id, gid, dateStr);
     if (activeSub) {
       return { entryType: "subscription", subId: activeSub.id };
@@ -977,6 +981,7 @@ export default function AttendanceTab({
 
     const type = rec.entryType || "subscription";
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
+    if (type === "debt") return { bg: "#dc2626", mark: "!" };
     if (type === "single") return { bg: "#f59e0b", mark };
     if (type === "trial") return { bg: "#10b981", mark };
     return { bg: "#2563eb", mark };
@@ -1029,6 +1034,7 @@ export default function AttendanceTab({
             <option value="subscription">Абонемент</option>
             <option value="single">Разове</option>
             <option value="trial">Пробне</option>
+            <option value="debt">Борг</option>
           </select>
         </div>
 
@@ -1044,6 +1050,10 @@ export default function AttendanceTab({
           <div style={styles.legendItem}>
             <span style={styles.dot("#10b981")} />
             <span>Пробне</span>
+          </div>
+          <div style={styles.legendItem}>
+            <span style={styles.dot("#dc2626")} />
+            <span>Борг</span>
           </div>
           <div style={styles.legendItem}>
             <span style={styles.dot("#fee2e2")} />
