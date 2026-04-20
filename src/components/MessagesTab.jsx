@@ -42,6 +42,52 @@ function normalizeTelegramUsername(value) {
   return String(value || "").replace(/^@/, "").trim().toLowerCase();
 }
 
+function parseFlexibleDate(rawValue) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return null;
+
+  if (rawValue instanceof Date) {
+    return Number.isNaN(rawValue.getTime()) ? null : rawValue;
+  }
+
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    const normalized = rawValue < 1e12 ? rawValue * 1000 : rawValue;
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+
+    if (/^\d+$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) {
+        const normalized = numeric < 1e12 ? numeric * 1000 : numeric;
+        const date = new Date(normalized);
+        if (!Number.isNaN(date.getTime())) return date;
+      }
+    }
+
+    const date = new Date(trimmed);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  return null;
+}
+
+function formatMessageDateTime(value) {
+  const date = parseFlexibleDate(value);
+  if (!date) return "—";
+
+  return new Intl.DateTimeFormat("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 async function readJsonSafe(response) {
   const rawText = await response.text();
 
@@ -80,6 +126,8 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const [favoriteChats, setFavoriteChats] = useState({});
   const [needsReplyChats, setNeedsReplyChats] = useState({});
   const [chatNotes, setChatNotes] = useState({});
+  const [chatTemplates, setChatTemplates] = useState({});
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
 
   const [selectedTemplateId, setSelectedTemplateId] = useState(TEMPLATE_OPTIONS[0].id);
   const [templateDraft, setTemplateDraft] = useState(TEMPLATE_OPTIONS[0].text);
@@ -173,6 +221,48 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     }
   }, [dialogsWithStudents, selectedStudentId, selectedChatId]);
 
+  const groupById = useMemo(() => Object.fromEntries((groups || []).map((g) => [String(g.id), g])), [groups]);
+
+  const groupIdByStudentId = useMemo(() => {
+    const map = {};
+
+    (subs || []).forEach((sub) => {
+      if (!sub?.studentId || !sub?.groupId) return;
+      const studentKey = String(sub.studentId);
+      if (!map[studentKey]) map[studentKey] = new Set();
+      map[studentKey].add(String(sub.groupId));
+    });
+
+    return map;
+  }, [subs]);
+
+  const groupFilterOptions = useMemo(() => {
+    const counts = {};
+
+    dialogsWithStudents.forEach((dialog) => {
+      const studentId = dialog?.matchedStudent?.id;
+      if (!studentId) return;
+      const groupSet = groupIdByStudentId[String(studentId)];
+      if (!groupSet) return;
+      groupSet.forEach((groupId) => {
+        counts[groupId] = (counts[groupId] || 0) + 1;
+      });
+    });
+
+    return Object.entries(counts)
+      .map(([groupId, count]) => ({ groupId, count, group: groupById[groupId] }))
+      .filter((item) => item.group)
+      .sort((a, b) => String(a.group.name || "").localeCompare(String(b.group.name || ""), "uk"));
+  }, [dialogsWithStudents, groupById, groupIdByStudentId]);
+
+  useEffect(() => {
+    if (selectedGroupFilter === "all") return;
+    const exists = groupFilterOptions.some((item) => String(item.groupId) === String(selectedGroupFilter));
+    if (!exists) {
+      setSelectedGroupFilter("all");
+    }
+  }, [selectedGroupFilter, groupFilterOptions]);
+
   const rankedAndFilteredDialogs = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -181,6 +271,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
       if (quickFilter === "linked" && !isLinked) return false;
       if (quickFilter === "unlinked" && isLinked) return false;
+
+      if (selectedGroupFilter !== "all") {
+        const studentId = dialog?.matchedStudent?.id;
+        const studentGroups = studentId ? groupIdByStudentId[String(studentId)] : null;
+        if (!studentGroups || !studentGroups.has(String(selectedGroupFilter))) return false;
+      }
 
       if (!normalizedQuery) return true;
 
@@ -196,18 +292,37 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     });
 
     return filtered.sort((a, b) => {
-      const aLinked = a.matchedStudent ? 1 : 0;
-      const bLinked = b.matchedStudent ? 1 : 0;
-
-      if (aLinked !== bLinked) return bLinked - aLinked;
-
       const aFav = favoriteChats[a.id] ? 1 : 0;
       const bFav = favoriteChats[b.id] ? 1 : 0;
       if (aFav !== bFav) return bFav - aFav;
 
+      const aActivity = [
+        a.last_message_date,
+        a.lastMessageDate,
+        a.last_activity_at,
+        a.lastActivityAt,
+        a.top_message_date,
+        a.date,
+      ]
+        .map((value) => parseFlexibleDate(value)?.getTime() || 0)
+        .find((value) => value > 0) || 0;
+
+      const bActivity = [
+        b.last_message_date,
+        b.lastMessageDate,
+        b.last_activity_at,
+        b.lastActivityAt,
+        b.top_message_date,
+        b.date,
+      ]
+        .map((value) => parseFlexibleDate(value)?.getTime() || 0)
+        .find((value) => value > 0) || 0;
+
+      if (aActivity !== bActivity) return bActivity - aActivity;
+
       return String(a.title || "").localeCompare(String(b.title || ""), "uk");
     });
-  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats]);
+  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats, selectedGroupFilter, groupIdByStudentId]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -293,17 +408,20 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
         const nextFav = {};
         const nextNeed = {};
         const nextNote = {};
+        const nextTemplate = {};
 
         items.forEach((item) => {
           const chatId = String(item.chat_id);
           nextFav[chatId] = Boolean(item.is_favorite);
           nextNeed[chatId] = Boolean(item.needs_reply);
           nextNote[chatId] = item.internal_note || "";
+          nextTemplate[chatId] = item.custom_template || item.customTemplate || "";
         });
 
         setFavoriteChats((prev) => ({ ...prev, ...nextFav }));
         setNeedsReplyChats((prev) => ({ ...prev, ...nextNeed }));
         setChatNotes((prev) => ({ ...prev, ...nextNote }));
+        setChatTemplates((prev) => ({ ...prev, ...nextTemplate }));
         setMetaSyncError("");
       } catch (error) {
         if (!cancelled) {
@@ -318,6 +436,27 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     };
   }, [dialogs]);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("telegram-chat-custom-templates");
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === "object") {
+        setChatTemplates((prev) => ({ ...parsed, ...prev }));
+      }
+    } catch {
+      // ignore malformed local storage payload
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("telegram-chat-custom-templates", JSON.stringify(chatTemplates));
+    } catch {
+      // ignore storage errors
+    }
+  }, [chatTemplates]);
+
   const persistChatMeta = async (chatId, patch) => {
     const safeChatId = String(chatId || "");
     if (!safeChatId) return;
@@ -327,6 +466,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       isFavorite: patch.isFavorite ?? Boolean(favoriteChats[safeChatId]),
       needsReply: patch.needsReply ?? Boolean(needsReplyChats[safeChatId]),
       internalNote: patch.internalNote ?? (chatNotes[safeChatId] || ""),
+      customTemplate: patch.customTemplate ?? (chatTemplates[safeChatId] || ""),
     };
 
     try {
@@ -487,9 +627,6 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       setSendLoading(false);
     }
   };
-
-
-  const groupById = useMemo(() => Object.fromEntries((groups || []).map((g) => [g.id, g])), [groups]);
   const directionById = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [d.id, d])), []);
 
   const crmData = useMemo(() => {
@@ -528,61 +665,111 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   }, [selectedDialog, subs, groupById, directionById, attn]);
 
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
+  const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "370px 1fr", gap: 18 }}>
       <div style={{ ...shellCard, padding: 14 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: theme.textMain, letterSpacing: "-0.2px" }}>
-          Діалоги Telegram
-        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "78px minmax(0, 1fr)", gap: 10 }}>
+          <div style={{ border: "1px solid rgba(15, 23, 42, 0.08)", borderRadius: 12, padding: 8, background: "#f8faff" }}>
+            <div style={{ fontSize: 10, color: theme.textLight, marginBottom: 8, textAlign: "center" }}>ГРУПИ</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedGroupFilter("all")}
+                style={{
+                  border: "1px solid rgba(15, 23, 42, 0.1)",
+                  borderRadius: 9,
+                  background: selectedGroupFilter === "all" ? "rgba(99, 102, 241, 0.12)" : "#fff",
+                  color: selectedGroupFilter === "all" ? "#4f46e5" : theme.textMain,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "6px 4px",
+                  cursor: "pointer",
+                  lineHeight: 1.2,
+                }}
+              >
+                Усі чати
+              </button>
+              {groupFilterOptions.map((item) => {
+                const active = selectedGroupFilter === String(item.groupId);
+                return (
+                  <button
+                    key={item.groupId}
+                    type="button"
+                    onClick={() => setSelectedGroupFilter(String(item.groupId))}
+                    title={`${item.group.name} (${item.count})`}
+                    style={{
+                      border: "1px solid rgba(15, 23, 42, 0.1)",
+                      borderRadius: 9,
+                      background: active ? "rgba(99, 102, 241, 0.12)" : "#fff",
+                      color: active ? "#4f46e5" : theme.textMain,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "6px 4px",
+                      cursor: "pointer",
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {item.group.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-        <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Пошук: title, username, учениця..."
-          style={{
-            width: "100%",
-            border: "1px solid rgba(15, 23, 42, 0.1)",
-            borderRadius: 12,
-            padding: "11px 12px",
-            marginBottom: 12,
-            outline: "none",
-            background: "#fbfcff",
-            boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
-          }}
-        />
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: theme.textMain, letterSpacing: "-0.2px" }}>
+              Діалоги Telegram
+            </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {QUICK_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setQuickFilter(f.id)}
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Пошук: title, username, учениця..."
               style={{
-                borderRadius: 999,
-                border: `1px solid ${quickFilter === f.id ? "rgba(99, 102, 241, 0.35)" : "rgba(15, 23, 42, 0.1)"}`,
-                background: quickFilter === f.id ? "rgba(99, 102, 241, 0.08)" : "#ffffff",
-                color: quickFilter === f.id ? "#4f46e5" : theme.textMain,
-                fontWeight: 600,
-                fontSize: 12,
-                padding: "6px 11px",
-                cursor: "pointer",
-                transition: "all .18s ease",
+                width: "100%",
+                border: "1px solid rgba(15, 23, 42, 0.1)",
+                borderRadius: 12,
+                padding: "11px 12px",
+                marginBottom: 12,
+                outline: "none",
+                background: "#fbfcff",
+                boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
               }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+            />
 
-        {dialogsLoading && <div style={{ color: theme.textMuted }}>Завантаження діалогів…</div>}
-        {!dialogsLoading && dialogsError && <div style={{ color: theme.danger }}>{dialogsError}</div>}
-        {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length === 0 && (
-          <div style={{ color: theme.textMuted }}>Нічого не знайдено за поточним фільтром.</div>
-        )}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              {QUICK_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setQuickFilter(f.id)}
+                  style={{
+                    borderRadius: 999,
+                    border: `1px solid ${quickFilter === f.id ? "rgba(99, 102, 241, 0.35)" : "rgba(15, 23, 42, 0.1)"}`,
+                    background: quickFilter === f.id ? "rgba(99, 102, 241, 0.08)" : "#ffffff",
+                    color: quickFilter === f.id ? "#4f46e5" : theme.textMain,
+                    fontWeight: 600,
+                    fontSize: 12,
+                    padding: "6px 11px",
+                    cursor: "pointer",
+                    transition: "all .18s ease",
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
 
-        {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflow: "auto", paddingRight: 2 }}>
+            {dialogsLoading && <div style={{ color: theme.textMuted }}>Завантаження діалогів…</div>}
+            {!dialogsLoading && dialogsError && <div style={{ color: theme.danger }}>{dialogsError}</div>}
+            {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length === 0 && (
+              <div style={{ color: theme.textMuted }}>Нічого не знайдено за поточним фільтром.</div>
+            )}
+
+            {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflow: "auto", paddingRight: 2 }}>
             {rankedAndFilteredDialogs.map((dialog) => {
               const active = String(selectedChatId) === String(dialog.id);
               const isFavorite = Boolean(favoriteChats[dialog.id]);
@@ -758,8 +945,10 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 </div>
               );
             })}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 18 }}>
@@ -777,13 +966,26 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
               <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8, letterSpacing: "-0.1px" }}>
                 CRM по учениці: {getDisplayName(crmData.student)}
               </div>
-              <div style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 5, lineHeight: 1.35 }}>
-                <div><strong>Групи:</strong> {crmData.groups.length ? crmData.groups.map((g) => g.name).join(", ") : "—"}</div>
-                <div><strong>Напрямок:</strong> {crmData.direction?.name || "—"}</div>
-                <div><strong>Статус абонемента:</strong> {crmData.sub?.status || "—"}</div>
-                <div><strong>Залишилось занять:</strong> {crmData.remainingTrainings ?? "—"}</div>
-                <div><strong>Кінець абонемента:</strong> {crmData.sub?.endDate || "—"}</div>
-                <div><strong>Останнє відвідування:</strong> {crmData.lastAttendanceDate || "—"}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(crmData.groups || []).slice(0, 3).map((groupItem) => (
+                  <span key={groupItem.id} style={{ border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                    {groupItem.name}
+                  </span>
+                ))}
+                {crmData.direction?.name && (
+                  <span style={{ border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                    {crmData.direction.name}
+                  </span>
+                )}
+                <span style={{ border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                  Залишок: {crmData.remainingTrainings ?? "—"}
+                </span>
+                <span style={{ border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                  До: {crmData.sub?.endDate || "—"}
+                </span>
+                <span style={{ border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                  Останній візит: {crmData.lastAttendanceDate || "—"}
+                </span>
               </div>
             </div>
           ) : (
@@ -854,7 +1056,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                     {m.text || "(без тексту)"}
                   </div>
                   <div style={{ color: theme.textLight, fontSize: 11, marginTop: 7, letterSpacing: "0.1px" }}>
-                    {m.date ? new Date(m.date).toLocaleString("uk-UA") : "—"}
+                    {formatMessageDateTime(m.date)}
                   </div>
                 </div>
               ))}
@@ -865,20 +1067,66 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             <div style={{ borderTop: "1px solid rgba(15, 23, 42, 0.08)", marginTop: 14, paddingTop: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>Повідомлення</div>
-                <button
-                  type="button"
-                  onClick={handleInsertTemplateToComposer}
-                  style={{
-                    border: "1px solid rgba(15, 23, 42, 0.1)",
-                    borderRadius: 10,
-                    padding: "5px 10px",
-                    background: "#f8faff",
-                    cursor: "pointer",
-                    fontSize: 12,
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleInsertTemplateToComposer}
+                    style={{
+                      border: "1px solid rgba(15, 23, 42, 0.1)",
+                      borderRadius: 10,
+                      padding: "5px 10px",
+                      background: "#f8faff",
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    Вставити шаблон
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerText((prev) => (prev ? `${prev}\n${selectedChatTemplate}` : selectedChatTemplate))}
+                    disabled={!selectedChatTemplate}
+                    style={{
+                      border: "1px solid rgba(15, 23, 42, 0.1)",
+                      borderRadius: 10,
+                      padding: "5px 10px",
+                      background: "#f8faff",
+                      cursor: selectedChatTemplate ? "pointer" : "not-allowed",
+                      fontSize: 12,
+                      opacity: selectedChatTemplate ? 1 : 0.65,
+                    }}
+                  >
+                    Вставити персональний
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: "block", color: theme.textLight, fontSize: 12, marginBottom: 4 }}>
+                  Персональний шаблон для цього чату
+                </label>
+                <textarea
+                  rows={2}
+                  value={selectedChatTemplate}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setChatTemplates((prev) => ({ ...prev, [selectedDialog.id]: value }));
                   }}
-                >
-                  Вставити шаблон
-                </button>
+                  onBlur={() => {
+                    if (selectedDialog?.id) {
+                      persistChatMeta(selectedDialog.id, { customTemplate: selectedChatTemplate });
+                    }
+                  }}
+                  placeholder="Ваш шаблон для цього діалогу..."
+                  style={{
+                    width: "100%",
+                    border: "1px solid rgba(15, 23, 42, 0.12)",
+                    borderRadius: 12,
+                    padding: "8px 10px",
+                    resize: "vertical",
+                    background: "#fbfcff",
+                  }}
+                />
               </div>
 
               <textarea
