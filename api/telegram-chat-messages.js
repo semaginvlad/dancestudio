@@ -13,6 +13,58 @@ function sendJsonError(res, status, error, details) {
   });
 }
 
+function normalizeTelegramMessageDate(rawValue) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return null;
+
+  if (rawValue instanceof Date) {
+    return Number.isNaN(rawValue.getTime()) ? null : rawValue.toISOString();
+  }
+
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    const normalized = rawValue < 1e12 ? rawValue * 1000 : rawValue;
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+
+    if (/^\d+$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) {
+        const normalized = numeric < 1e12 ? numeric * 1000 : numeric;
+        const date = new Date(normalized);
+        if (!Number.isNaN(date.getTime())) return date.toISOString();
+      }
+    }
+
+    const date = new Date(trimmed);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+
+  if (typeof rawValue === "object") {
+    const nestedSeconds = rawValue.seconds ?? rawValue.sec ?? rawValue.epoch ?? rawValue.timestamp;
+    const nestedMs = rawValue.milliseconds ?? rawValue.ms;
+    const nestedIso = rawValue.iso ?? rawValue.isoString ?? rawValue.value;
+
+    if (nestedSeconds !== undefined) {
+      const parsed = normalizeTelegramMessageDate(nestedSeconds);
+      if (parsed) return parsed;
+    }
+    if (nestedMs !== undefined) {
+      const parsed = normalizeTelegramMessageDate(nestedMs);
+      if (parsed) return parsed;
+    }
+    if (nestedIso !== undefined) {
+      const parsed = normalizeTelegramMessageDate(nestedIso);
+      if (parsed) return parsed;
+    }
+  }
+
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return sendJsonError(res, 405, "Method not allowed");
@@ -38,7 +90,7 @@ export default async function handler(req, res) {
           id: String(m.id),
           chatId: String(chatId),
           text: m.message || "",
-          date: m.date ? new Date(m.date).toISOString() : null,
+          date: normalizeTelegramMessageDate(m.date),
           out: Boolean(m.out),
           fromId: normalizePeerId(m.fromId),
           replyToMsgId: m.replyTo?.replyToMsgId ? String(m.replyTo.replyToMsgId) : null,

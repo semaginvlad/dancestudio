@@ -32,21 +32,67 @@ const TEMPLATE_OPTIONS = [
 ];
 
 const shellCard = {
-  background: "#fffdf7",
-  border: "1px solid rgba(8, 8, 8, 0.09)",
-  borderRadius: 22,
-  boxShadow: "0 20px 40px rgba(8, 8, 8, 0.06)",
+  background: "linear-gradient(180deg, #ffffff 0%, #fffdf8 100%)",
+  border: "1px solid rgba(0, 0, 0, 0.08)",
+  borderRadius: 18,
+  boxShadow: "0 10px 28px rgba(0, 0, 0, 0.06)",
 };
 
-const palette = {
-  red: "#cb2d3e",
-  black: "#111111",
-  sky: "#dff4ff",
-  cream: "#fffaf0",
+const uiPalette = {
+  red: "#e30613",
+  lightBlue: "#b8dcec",
+  black: "#000000",
+  cream: "#ece4d2",
 };
 
 function normalizeTelegramUsername(value) {
   return String(value || "").replace(/^@/, "").trim().toLowerCase();
+}
+
+function parseFlexibleDate(rawValue) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return null;
+
+  if (rawValue instanceof Date) {
+    return Number.isNaN(rawValue.getTime()) ? null : rawValue;
+  }
+
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    const normalized = rawValue < 1e12 ? rawValue * 1000 : rawValue;
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+
+    if (/^\d+$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) {
+        const normalized = numeric < 1e12 ? numeric * 1000 : numeric;
+        const date = new Date(normalized);
+        if (!Number.isNaN(date.getTime())) return date;
+      }
+    }
+
+    const date = new Date(trimmed);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  return null;
+}
+
+function formatMessageDateTime(value) {
+  const date = parseFlexibleDate(value);
+  if (!date) return "—";
+
+  return new Intl.DateTimeFormat("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 async function readJsonSafe(response) {
@@ -69,7 +115,7 @@ async function readJsonSafe(response) {
   }
 }
 
-export default function MessagesTab({ students = [], groups = [], subs = [], attn = [], selectedStudentId = "", onSelectStudent }) {
+export default function MessagesTab({ students = [], groups = [], subs = [], attn = [], studentGrps = [], selectedStudentId = "", onSelectStudent }) {
   const [dialogs, setDialogs] = useState([]);
   const [dialogsLoading, setDialogsLoading] = useState(false);
   const [dialogsError, setDialogsError] = useState("");
@@ -87,6 +133,8 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const [favoriteChats, setFavoriteChats] = useState({});
   const [needsReplyChats, setNeedsReplyChats] = useState({});
   const [chatNotes, setChatNotes] = useState({});
+  const [chatTemplates, setChatTemplates] = useState({});
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
 
   const [selectedTemplateId, setSelectedTemplateId] = useState(TEMPLATE_OPTIONS[0].id);
   const [templateDraft, setTemplateDraft] = useState(TEMPLATE_OPTIONS[0].text);
@@ -101,6 +149,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const [sendLoading, setSendLoading] = useState(false);
   const [sendError, setSendError] = useState("");
   const [sendInfo, setSendInfo] = useState("");
+  const [templateInfo, setTemplateInfo] = useState("");
   const [metaSyncError, setMetaSyncError] = useState("");
 
   useEffect(() => {
@@ -180,6 +229,75 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     }
   }, [dialogsWithStudents, selectedStudentId, selectedChatId]);
 
+  const groupById = useMemo(() => Object.fromEntries((groups || []).map((g) => [String(g.id), g])), [groups]);
+  const directionById = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [String(d.id), d])), []);
+
+  const groupIdByStudentId = useMemo(() => {
+    const map = {};
+
+    (studentGrps || []).forEach((link) => {
+      if (!link?.studentId || !link?.groupId) return;
+      const studentKey = String(link.studentId);
+      if (!map[studentKey]) map[studentKey] = new Set();
+      map[studentKey].add(String(link.groupId));
+    });
+
+    (subs || []).forEach((sub) => {
+      if (!sub?.studentId || !sub?.groupId) return;
+      const studentKey = String(sub.studentId);
+      if (!map[studentKey]) map[studentKey] = new Set();
+      map[studentKey].add(String(sub.groupId));
+    });
+
+    (students || []).forEach((student) => {
+      const studentKey = String(student?.id || "");
+      if (!studentKey) return;
+      if (!map[studentKey]) map[studentKey] = new Set();
+
+      if (student.groupId) {
+        map[studentKey].add(String(student.groupId));
+      }
+      if (Array.isArray(student.groupIds)) {
+        student.groupIds.forEach((groupId) => {
+          if (groupId) map[studentKey].add(String(groupId));
+        });
+      }
+    });
+
+    return map;
+  }, [studentGrps, subs, students]);
+
+  const groupFilterOptions = useMemo(() => {
+    const counts = {};
+
+    dialogsWithStudents.forEach((dialog) => {
+      const studentId = dialog?.matchedStudent?.id;
+      if (!studentId) return;
+      const groupSet = groupIdByStudentId[String(studentId)];
+      if (!groupSet) return;
+      groupSet.forEach((groupId) => {
+        counts[groupId] = (counts[groupId] || 0) + 1;
+      });
+    });
+
+    return Object.entries(counts)
+      .map(([groupId, count]) => {
+        const group = groupById[groupId];
+        const direction = directionById[String(group?.directionId)] || null;
+        return { groupId, count, group, direction };
+      })
+      .filter((item) => item.group)
+      .sort((a, b) => String(a.group.name || "").localeCompare(String(b.group.name || ""), "uk"));
+  }, [dialogsWithStudents, groupById, groupIdByStudentId, directionById]);
+
+  useEffect(() => {
+    if (selectedGroupFilter === "all") return;
+    const exists = groupFilterOptions.some((item) => String(item.groupId) === String(selectedGroupFilter));
+    if (!exists) {
+      setSelectedGroupFilter("all");
+    }
+  }, [selectedGroupFilter, groupFilterOptions]);
+
   const rankedAndFilteredDialogs = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -188,6 +306,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
       if (quickFilter === "linked" && !isLinked) return false;
       if (quickFilter === "unlinked" && isLinked) return false;
+
+      if (selectedGroupFilter !== "all") {
+        const studentId = dialog?.matchedStudent?.id;
+        const studentGroups = studentId ? groupIdByStudentId[String(studentId)] : null;
+        if (!studentGroups || !studentGroups.has(String(selectedGroupFilter))) return false;
+      }
 
       if (!normalizedQuery) return true;
 
@@ -203,18 +327,37 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     });
 
     return filtered.sort((a, b) => {
-      const aLinked = a.matchedStudent ? 1 : 0;
-      const bLinked = b.matchedStudent ? 1 : 0;
-
-      if (aLinked !== bLinked) return bLinked - aLinked;
-
       const aFav = favoriteChats[a.id] ? 1 : 0;
       const bFav = favoriteChats[b.id] ? 1 : 0;
       if (aFav !== bFav) return bFav - aFav;
 
+      const aActivity = [
+        a.last_message_date,
+        a.lastMessageDate,
+        a.last_activity_at,
+        a.lastActivityAt,
+        a.top_message_date,
+        a.date,
+      ]
+        .map((value) => parseFlexibleDate(value)?.getTime() || 0)
+        .find((value) => value > 0) || 0;
+
+      const bActivity = [
+        b.last_message_date,
+        b.lastMessageDate,
+        b.last_activity_at,
+        b.lastActivityAt,
+        b.top_message_date,
+        b.date,
+      ]
+        .map((value) => parseFlexibleDate(value)?.getTime() || 0)
+        .find((value) => value > 0) || 0;
+
+      if (aActivity !== bActivity) return bActivity - aActivity;
+
       return String(a.title || "").localeCompare(String(b.title || ""), "uk");
     });
-  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats]);
+  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats, selectedGroupFilter, groupIdByStudentId]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -300,17 +443,20 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
         const nextFav = {};
         const nextNeed = {};
         const nextNote = {};
+        const nextTemplate = {};
 
         items.forEach((item) => {
           const chatId = String(item.chat_id);
           nextFav[chatId] = Boolean(item.is_favorite);
           nextNeed[chatId] = Boolean(item.needs_reply);
           nextNote[chatId] = item.internal_note || "";
+          nextTemplate[chatId] = item.custom_template || item.customTemplate || "";
         });
 
         setFavoriteChats((prev) => ({ ...prev, ...nextFav }));
         setNeedsReplyChats((prev) => ({ ...prev, ...nextNeed }));
         setChatNotes((prev) => ({ ...prev, ...nextNote }));
+        setChatTemplates((prev) => ({ ...prev, ...nextTemplate }));
         setMetaSyncError("");
       } catch (error) {
         if (!cancelled) {
@@ -325,6 +471,27 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     };
   }, [dialogs]);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("telegram-chat-custom-templates");
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === "object") {
+        setChatTemplates((prev) => ({ ...parsed, ...prev }));
+      }
+    } catch {
+      // ignore malformed local storage payload
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("telegram-chat-custom-templates", JSON.stringify(chatTemplates));
+    } catch {
+      // ignore storage errors
+    }
+  }, [chatTemplates]);
+
   const persistChatMeta = async (chatId, patch) => {
     const safeChatId = String(chatId || "");
     if (!safeChatId) return;
@@ -334,6 +501,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       isFavorite: patch.isFavorite ?? Boolean(favoriteChats[safeChatId]),
       needsReply: patch.needsReply ?? Boolean(needsReplyChats[safeChatId]),
       internalNote: patch.internalNote ?? (chatNotes[safeChatId] || ""),
+      customTemplate: patch.customTemplate ?? (chatTemplates[safeChatId] || ""),
     };
 
     try {
@@ -354,6 +522,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
   const handleSelectDialog = (dialog) => {
     setSelectedChatId(String(dialog.id));
+    setTemplateInfo("");
     if (dialog.matchedStudent?.id) {
       onSelectStudent?.(dialog.matchedStudent.id);
     }
@@ -446,6 +615,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
     setComposerText((prev) => (prev ? `${prev}\n${templateDraft}` : templateDraft));
   };
 
+  const handleSaveChatTemplate = async () => {
+    if (!selectedDialog?.id) return;
+    await persistChatMeta(selectedDialog.id, { customTemplate: selectedChatTemplate });
+    setTemplateInfo("Персональний шаблон збережено.");
+    setTimeout(() => setTemplateInfo(""), 2200);
+  };
+
   const handleSendMessage = async () => {
     if (!selectedDialog) return;
 
@@ -494,18 +670,14 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       setSendLoading(false);
     }
   };
-
-
-  const groupById = useMemo(() => Object.fromEntries((groups || []).map((g) => [g.id, g])), [groups]);
-  const directionById = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [d.id, d])), []);
-
   const crmData = useMemo(() => {
     const student = selectedDialog?.matchedStudent;
     if (!student) return null;
 
     const studentSubs = (subs || []).filter((sub) => sub.studentId === student.id);
-    const linkedGroups = studentSubs
-      .map((sub) => groupById[sub.groupId])
+    const linkedGroupIds = Array.from(groupIdByStudentId[String(student.id)] || []);
+    const linkedGroups = linkedGroupIds
+      .map((groupId) => groupById[String(groupId)])
       .filter(Boolean)
       .filter((g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx);
 
@@ -532,66 +704,141 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       remainingTrainings,
       lastAttendanceDate,
     };
-  }, [selectedDialog, subs, groupById, directionById, attn]);
+  }, [selectedDialog, subs, groupById, directionById, attn, groupIdByStudentId]);
 
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
+  const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 22, alignItems: "start" }}>
-      <div style={{ ...shellCard, padding: 18, position: "sticky", top: 8 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: palette.black, letterSpacing: "0.02em", textTransform: "uppercase" }}>
-          Діалоги Telegram
-        </div>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(440px, 470px) 1fr", gap: 18 }}>
+      <div style={{ ...shellCard, padding: 14, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "122px minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
+          <div style={{ border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 13, padding: 8, background: `linear-gradient(180deg, #ffffff 0%, ${uiPalette.cream}55 100%)` }}>
+            <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 8, textAlign: "center", letterSpacing: "0.04em", fontWeight: 700 }}>ГРУПИ</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedGroupFilter("all")}
+                style={{
+                  border: "1px solid rgba(0, 0, 0, 0.12)",
+                  borderRadius: 10,
+                  background: selectedGroupFilter === "all" ? `${uiPalette.lightBlue}88` : "#fff",
+                  color: selectedGroupFilter === "all" ? uiPalette.black : theme.textMain,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "7px 5px",
+                  cursor: "pointer",
+                  lineHeight: 1.2,
+                }}
+              >
+                Усі чати
+              </button>
+              {groupFilterOptions.map((item) => {
+                const active = selectedGroupFilter === String(item.groupId);
+                return (
+                  <button
+                    key={item.groupId}
+                    type="button"
+                    onClick={() => setSelectedGroupFilter(String(item.groupId))}
+                    title={`${item.group.name}${item.direction?.name ? ` • ${item.direction.name}` : ""} (${item.count})`}
+                    style={{
+                      border: "1px solid rgba(0, 0, 0, 0.12)",
+                      borderRadius: 10,
+                      background: active ? `${uiPalette.lightBlue}aa` : "#fff",
+                      color: active ? uiPalette.black : theme.textMain,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "6px 6px",
+                      cursor: "pointer",
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    <div
+                      style={{
+                        overflow: "hidden",
+                        display: "-webkit-box",
+                        WebkitBoxOrient: "vertical",
+                        WebkitLineClamp: 2,
+                        lineHeight: 1.2,
+                        minHeight: "2.4em",
+                        textAlign: "left",
+                      }}
+                    >
+                      {item.group.name}
+                    </div>
+                    {item.direction?.name && (
+                      <div
+                        style={{
+                          fontSize: 8.5,
+                          color: theme.textLight,
+                          marginTop: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          textAlign: "left",
+                        }}
+                      >
+                        {item.direction.name}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-        <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Пошук: title, username, учениця..."
-          style={{
-            width: "100%",
-            border: "1px solid rgba(17, 17, 17, 0.12)",
-            borderRadius: 14,
-            padding: "12px 13px",
-            marginBottom: 14,
-            outline: "none",
-            background: "#ffffff",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85)",
-            fontSize: 13,
-          }}
-        />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: uiPalette.black, letterSpacing: "-0.2px" }}>
+              Діалоги Telegram
+            </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {QUICK_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setQuickFilter(f.id)}
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Пошук: title, username, учениця..."
               style={{
-                borderRadius: 9999,
-                border: `1px solid ${quickFilter === f.id ? "rgba(203, 45, 62, 0.45)" : "rgba(17, 17, 17, 0.16)"}`,
-                background: quickFilter === f.id ? "rgba(203, 45, 62, 0.08)" : "rgba(255,255,255,0.88)",
-                color: quickFilter === f.id ? palette.red : palette.black,
-                fontWeight: 700,
-                fontSize: 12,
-                letterSpacing: "0.02em",
-                padding: "6px 12px",
-                cursor: "pointer",
-                transition: "all .18s ease",
+                width: "100%",
+                border: "1px solid rgba(15, 23, 42, 0.1)",
+                borderRadius: 12,
+                padding: "11px 12px",
+                marginBottom: 12,
+                outline: "none",
+                background: "#fbfcff",
+                boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
               }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+            />
 
-        {dialogsLoading && <div style={{ color: theme.textMuted }}>Завантаження діалогів…</div>}
-        {!dialogsLoading && dialogsError && <div style={{ color: theme.danger }}>{dialogsError}</div>}
-        {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length === 0 && (
-          <div style={{ color: theme.textMuted }}>Нічого не знайдено за поточним фільтром.</div>
-        )}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              {QUICK_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setQuickFilter(f.id)}
+                  style={{
+                    borderRadius: 999,
+                    border: `1px solid ${quickFilter === f.id ? "rgba(227, 6, 19, 0.4)" : "rgba(0, 0, 0, 0.12)"}`,
+                    background: quickFilter === f.id ? "rgba(227, 6, 19, 0.08)" : "#ffffff",
+                    color: quickFilter === f.id ? uiPalette.red : theme.textMain,
+                    fontWeight: 600,
+                    fontSize: 12,
+                    padding: "6px 11px",
+                    cursor: "pointer",
+                    transition: "all .18s ease",
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
 
-        {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 640, overflow: "auto", paddingRight: 2 }}>
+            {dialogsLoading && <div style={{ color: theme.textMuted }}>Завантаження діалогів…</div>}
+            {!dialogsLoading && dialogsError && <div style={{ color: theme.danger }}>{dialogsError}</div>}
+            {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length === 0 && (
+              <div style={{ color: theme.textMuted }}>Нічого не знайдено за поточним фільтром.</div>
+            )}
+
+            {!dialogsLoading && !dialogsError && rankedAndFilteredDialogs.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 610, overflowY: "auto", overflowX: "hidden", paddingRight: 4, minWidth: 0 }}>
             {rankedAndFilteredDialogs.map((dialog) => {
               const active = String(selectedChatId) === String(dialog.id);
               const isFavorite = Boolean(favoriteChats[dialog.id]);
@@ -602,11 +849,11 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 <div
                   key={dialog.id}
                   style={{
-                    borderRadius: 18,
-                    border: `1px solid ${active ? "rgba(203, 45, 62, 0.38)" : "rgba(17, 17, 17, 0.12)"}`,
-                    background: active ? "linear-gradient(180deg, #fff7f7 0%, #ffffff 100%)" : "#ffffff",
-                    padding: 12,
-                    boxShadow: active ? "0 10px 26px rgba(203, 45, 62, 0.12)" : "0 8px 18px rgba(17, 17, 17, 0.05)",
+                    borderRadius: 14,
+                    border: `1px solid ${active ? "rgba(227, 6, 19, 0.35)" : "rgba(0, 0, 0, 0.08)"}`,
+                    background: active ? "linear-gradient(180deg, rgba(184,220,236,0.26) 0%, #ffffff 100%)" : "#ffffff",
+                    padding: 10,
+                    boxShadow: active ? "0 8px 20px rgba(227, 6, 19, 0.10)" : "0 5px 14px rgba(0, 0, 0, 0.05)",
                     transition: "all .2s ease",
                   }}
                 >
@@ -622,13 +869,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       padding: 4,
                     }}
                   >
-                    <div style={{ color: palette.black, fontSize: 14, fontWeight: 700, letterSpacing: "0.01em" }}>
+                    <div style={{ color: theme.textMain, fontSize: 14, fontWeight: 700 }}>
                       {dialog.title || "Без назви"}
                     </div>
-                    <div style={{ color: "#5c5c5c", fontSize: 11, marginTop: 4, letterSpacing: "0.03em", textTransform: "uppercase" }}>
+                    <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
                       {dialog.username || `chatId: ${dialog.id}`}
                     </div>
-                    <div style={{ color: dialog.matchedStudent ? "#0b5d7e" : "#8f8f8f", fontSize: 12, marginTop: 6 }}>
+                    <div style={{ color: dialog.matchedStudent ? "#0f5470" : theme.textLight, fontSize: 12, marginTop: 4 }}>
                       {dialog.matchedStudent ? `👤 ${getDisplayName(dialog.matchedStudent)}` : "👤 Не прив’язано"}
                     </div>
                   </button>
@@ -642,12 +889,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         persistChatMeta(dialog.id, { isFavorite: next });
                       }}
                       style={{
-                        border: "1px solid rgba(17, 17, 17, 0.12)",
-                        borderRadius: 999,
+                        border: "1px solid rgba(0, 0, 0, 0.12)",
+                        borderRadius: 8,
                         fontSize: 12,
-                        padding: "4px 10px",
+                        padding: "4px 8px",
                         cursor: "pointer",
-                        background: isFavorite ? "#fff1d9" : "#fff",
+                        background: isFavorite ? `${uiPalette.cream}` : "#fff",
                       }}
                     >
                       {isFavorite ? "★ Pin" : "☆ Pin"}
@@ -660,13 +907,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         persistChatMeta(dialog.id, { needsReply: next });
                       }}
                       style={{
-                        border: "1px solid rgba(17, 17, 17, 0.12)",
-                        borderRadius: 999,
+                        border: "1px solid rgba(0, 0, 0, 0.12)",
+                        borderRadius: 8,
                         fontSize: 12,
-                        padding: "4px 10px",
+                        padding: "4px 8px",
                         cursor: "pointer",
-                        background: needsReply ? "rgba(203, 45, 62, 0.1)" : "#fff",
-                        color: needsReply ? palette.red : palette.black,
+                        background: needsReply ? "rgba(227, 6, 19, 0.08)" : "#fff",
+                        color: needsReply ? uiPalette.red : theme.textMain,
                       }}
                     >
                       {needsReply ? "Потрібна відповідь" : "Без мітки"}
@@ -675,10 +922,10 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       type="button"
                       onClick={() => handleStartLink(dialog.id)}
                       style={{
-                        border: "1px solid rgba(17, 17, 17, 0.12)",
-                        borderRadius: 999,
+                        border: "1px solid rgba(0, 0, 0, 0.12)",
+                        borderRadius: 8,
                         fontSize: 12,
-                        padding: "4px 10px",
+                        padding: "4px 8px",
                         cursor: "pointer",
                         background: "#fff",
                       }}
@@ -691,13 +938,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         onClick={() => handleUnlink(dialog)}
                         disabled={linkSaving}
                         style={{
-                          border: "1px solid rgba(17, 17, 17, 0.12)",
-                          borderRadius: 999,
+                          border: "1px solid rgba(0, 0, 0, 0.12)",
+                          borderRadius: 8,
                           fontSize: 12,
-                          padding: "4px 10px",
+                          padding: "4px 8px",
                           cursor: linkSaving ? "not-allowed" : "pointer",
                           background: "#fff",
-                          color: palette.red,
+                          color: uiPalette.red,
                         }}
                       >
                         Відв’язати
@@ -706,8 +953,8 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   </div>
 
                   {isLinking && (
-                    <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(17, 17, 17, 0.12)", borderRadius: 14, background: palette.cream }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: palette.black }}>
+                    <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(15, 23, 42, 0.1)", borderRadius: 12, background: "#fbfcff" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: theme.textMain }}>
                         Прив’язка чату до учениці
                       </div>
                       <input
@@ -716,11 +963,10 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                         placeholder="Пошук учениці..."
                         style={{
                           width: "100%",
-                          border: "1px solid rgba(17, 17, 17, 0.12)",
-                          borderRadius: 10,
+                          border: "1px solid rgba(15, 23, 42, 0.1)",
+                          borderRadius: 8,
                           padding: "8px 10px",
                           marginBottom: 8,
-                          background: "#fff",
                         }}
                       />
                       <div style={{ maxHeight: 150, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -731,8 +977,8 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                             onClick={() => handleSaveLink(dialog, student)}
                             disabled={linkSaving}
                             style={{
-                              border: "1px solid rgba(17, 17, 17, 0.1)",
-                              borderRadius: 10,
+                              border: "1px solid rgba(15, 23, 42, 0.1)",
+                              borderRadius: 8,
                               padding: "6px 8px",
                               textAlign: "left",
                               cursor: linkSaving ? "not-allowed" : "pointer",
@@ -751,7 +997,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                           style={{
                             border: "none",
                             background: "transparent",
-                            color: "#737373",
+                            color: theme.textLight,
                             fontSize: 12,
                             cursor: "pointer",
                           }}
@@ -768,13 +1014,15 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 </div>
               );
             })}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 22 }}>
-        <div style={{ ...shellCard, padding: 24, background: "linear-gradient(180deg, #fffefb 0%, #ffffff 48%, #fbfeff 100%)" }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: palette.black, marginBottom: 12, letterSpacing: "0.01em" }}>
+      <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 18 }}>
+        <div style={{ ...shellCard, padding: 22 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: theme.textMain, marginBottom: 10, letterSpacing: "-0.2px" }}>
             {selectedDialog ? `Чат: ${selectedDialog.title}` : "Оберіть діалог"}
           </div>
 
@@ -783,28 +1031,41 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
 
           {crmData ? (
-            <div style={{ marginBottom: 14, border: "1px solid rgba(17, 17, 17, 0.12)", borderRadius: 16, padding: 14, background: "linear-gradient(180deg, #f3fbff 0%, #fffdf7 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.8)" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: "#5a5a5a", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            <div style={{ marginBottom: 14, maxWidth: 620, border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 14, padding: 11, background: "linear-gradient(180deg, #ffffff 0%, rgba(184,220,236,0.20) 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: uiPalette.black, marginBottom: 8, letterSpacing: "-0.1px" }}>
                 CRM по учениці: {getDisplayName(crmData.student)}
               </div>
-              <div style={{ fontSize: 12, color: "#454545", display: "grid", gap: 6, lineHeight: 1.45 }}>
-                <div><strong>Групи:</strong> {crmData.groups.length ? crmData.groups.map((g) => g.name).join(", ") : "—"}</div>
-                <div><strong>Напрямок:</strong> {crmData.direction?.name || "—"}</div>
-                <div><strong>Статус абонемента:</strong> {crmData.sub?.status || "—"}</div>
-                <div><strong>Залишилось занять:</strong> {crmData.remainingTrainings ?? "—"}</div>
-                <div><strong>Кінець абонемента:</strong> {crmData.sub?.endDate || "—"}</div>
-                <div><strong>Останнє відвідування:</strong> {crmData.lastAttendanceDate || "—"}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(crmData.groups || []).slice(0, 3).map((groupItem) => (
+                  <span key={groupItem.id} style={{ border: "1px solid rgba(0, 0, 0, 0.12)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                    {groupItem.name}
+                  </span>
+                ))}
+                {crmData.direction?.name && (
+                  <span style={{ border: "1px solid rgba(0, 0, 0, 0.12)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: `${uiPalette.lightBlue}55` }}>
+                    {crmData.direction.name}
+                  </span>
+                )}
+                <span style={{ border: "1px solid rgba(0, 0, 0, 0.12)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                  Залишок: {crmData.remainingTrainings ?? "—"}
+                </span>
+                <span style={{ border: "1px solid rgba(0, 0, 0, 0.12)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: `${uiPalette.cream}66` }}>
+                  До: {crmData.sub?.endDate || "—"}
+                </span>
+                <span style={{ border: "1px solid rgba(0, 0, 0, 0.12)", borderRadius: 999, padding: "4px 8px", fontSize: 11, color: theme.textMuted, background: "#fff" }}>
+                  Останній візит: {crmData.lastAttendanceDate || "—"}
+                </span>
               </div>
             </div>
           ) : (
-            <div style={{ marginBottom: 14, border: "1px dashed rgba(17, 17, 17, 0.28)", borderRadius: 14, padding: 12, color: "#666", fontSize: 13, background: "#fffef8" }}>
+            <div style={{ marginBottom: 14, border: "1px dashed rgba(15, 23, 42, 0.18)", borderRadius: 14, padding: 12, color: theme.textMuted, fontSize: 13, background: "#fafcff" }}>
               Чат не прив’язаний до учениці — CRM-дані недоступні.
             </div>
           )}
 
           {selectedDialog && (
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", color: "#666", fontSize: 11, marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              <label style={{ display: "block", color: theme.textLight, fontSize: 12, marginBottom: 4 }}>
                 Внутрішня нотатка (локально)
               </label>
               <textarea
@@ -824,13 +1085,77 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 rows={2}
                 style={{
                   width: "100%",
-                  border: "1px solid rgba(17, 17, 17, 0.13)",
-                  borderRadius: 14,
-                  padding: "10px 11px",
+                  border: "1px solid rgba(15, 23, 42, 0.1)",
+                  borderRadius: 12,
+                  padding: "9px 10px",
                   resize: "vertical",
-                  background: "#fff",
+                  background: "#fbfcff",
                 }}
               />
+            </div>
+          )}
+
+          {selectedDialog && (
+            <div style={{ marginBottom: 12, border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 13, padding: 10, background: "linear-gradient(180deg, #ffffff 0%, rgba(236,228,210,0.42) 100%)" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: uiPalette.black, marginBottom: 6, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                Персональний шаблон цього чату
+              </div>
+              <textarea
+                rows={2}
+                value={selectedChatTemplate}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setChatTemplates((prev) => ({ ...prev, [selectedDialog.id]: value }));
+                  setTemplateInfo("");
+                }}
+                placeholder="Ваш шаблон для цього діалогу..."
+                style={{
+                  width: "100%",
+                  border: "1px solid rgba(0, 0, 0, 0.12)",
+                  borderRadius: 12,
+                  padding: "8px 10px",
+                  resize: "vertical",
+                  background: "#fff",
+                  marginBottom: 7,
+                }}
+              />
+              <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={handleSaveChatTemplate}
+                  style={{
+                    border: "1px solid rgba(0, 0, 0, 0.12)",
+                    borderRadius: 10,
+                    padding: "6px 12px",
+                    background: "linear-gradient(180deg, #eb3440 0%, #e30613 100%)",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  Зберегти
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComposerText((prev) => (prev ? `${prev}\n${selectedChatTemplate}` : selectedChatTemplate))}
+                  disabled={!selectedChatTemplate}
+                  style={{
+                    border: "1px solid rgba(0, 0, 0, 0.12)",
+                    borderRadius: 10,
+                    padding: "6px 12px",
+                    background: `${uiPalette.lightBlue}80`,
+                    color: uiPalette.black,
+                    fontWeight: 600,
+                    fontSize: 12,
+                    cursor: selectedChatTemplate ? "pointer" : "not-allowed",
+                    opacity: selectedChatTemplate ? 1 : 0.6,
+                  }}
+                >
+                  Вставити в повідомлення
+                </button>
+                {templateInfo && <span style={{ fontSize: 12, color: "#0f5470" }}>{templateInfo}</span>}
+              </div>
             </div>
           )}
 
@@ -846,25 +1171,25 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
 
           {selectedDialog && !messagesLoading && !messagesError && messages.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 380, overflow: "auto", paddingRight: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11, maxHeight: 360, overflow: "auto", paddingRight: 6 }}>
               {messages.map((m) => (
                 <div
                   key={m.id}
                   style={{
                     alignSelf: m.out ? "flex-end" : "flex-start",
-                    maxWidth: "78%",
-                    padding: "11px 14px",
-                    borderRadius: m.out ? "18px 18px 6px 18px" : "18px 18px 18px 6px",
-                    border: `1px solid ${m.out ? "rgba(203, 45, 62, 0.24)" : "rgba(17, 17, 17, 0.12)"}`,
-                    background: m.out ? "linear-gradient(180deg, #fff1f3 0%, #ffe8ed 100%)" : "linear-gradient(180deg, #f2fbff 0%, #ffffff 100%)",
-                    boxShadow: "0 8px 18px rgba(17, 17, 17, 0.06)",
+                    maxWidth: "82%",
+                    padding: "10px 13px",
+                    borderRadius: 16,
+                    border: "1px solid rgba(15, 23, 42, 0.08)",
+                    background: m.out ? "linear-gradient(180deg, #eef2ff 0%, #e9efff 100%)" : "#f7f9fd",
+                    boxShadow: "0 3px 10px rgba(15, 23, 42, 0.05)",
                   }}
                 >
-                  <div style={{ color: palette.black, fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                  <div style={{ color: theme.textMain, fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
                     {m.text || "(без тексту)"}
                   </div>
-                  <div style={{ color: "#6f6f6f", fontSize: 10, marginTop: 8, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                    {m.date ? new Date(m.date).toLocaleString("uk-UA") : "—"}
+                  <div style={{ color: theme.textLight, fontSize: 11, marginTop: 7, letterSpacing: "0.1px" }}>
+                    {formatMessageDateTime(m.date)}
                   </div>
                 </div>
               ))}
@@ -872,20 +1197,20 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
 
           {selectedDialog && (
-            <div style={{ borderTop: "1px solid rgba(17, 17, 17, 0.12)", marginTop: 16, paddingTop: 16 }}>
+            <div style={{ borderTop: "1px solid rgba(15, 23, 42, 0.08)", marginTop: 14, paddingTop: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#5b5b5b", letterSpacing: "0.06em", textTransform: "uppercase" }}>Повідомлення</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>Повідомлення</div>
                 <button
                   type="button"
                   onClick={handleInsertTemplateToComposer}
                   style={{
-                    border: "1px solid rgba(17, 17, 17, 0.12)",
-                    borderRadius: 999,
-                    padding: "6px 12px",
-                    background: palette.sky,
+                    border: "1px solid rgba(0, 0, 0, 0.12)",
+                    borderRadius: 10,
+                    padding: "5px 10px",
+                    background: `${uiPalette.lightBlue}66`,
                     cursor: "pointer",
                     fontSize: 12,
-                    color: palette.black,
+                    color: uiPalette.black,
                   }}
                 >
                   Вставити шаблон
@@ -899,17 +1224,17 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 placeholder="Введіть повідомлення..."
                 style={{
                   width: "100%",
-                  border: "1px solid rgba(17, 17, 17, 0.14)",
-                  borderRadius: 16,
-                  padding: "11px 13px",
+                  border: "1px solid rgba(15, 23, 42, 0.12)",
+                  borderRadius: 14,
+                  padding: "10px 12px",
                   resize: "vertical",
-                  background: "#fff",
-                  boxShadow: "inset 0 1px 2px rgba(17, 17, 17, 0.04)",
+                  background: "#fbfcff",
+                  boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.04)",
                 }}
               />
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                <div style={{ fontSize: 11, color: "#707070", maxWidth: "70%" }}>
+                <div style={{ fontSize: 12, color: theme.textLight }}>
                   Надсилання виконується через `/api/send-test-telegram` для чатів з `@username`.
                 </div>
                 <button
@@ -918,14 +1243,13 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   disabled={sendLoading}
                   style={{
                     border: "none",
-                    borderRadius: 14,
-                    padding: "10px 16px",
-                    background: sendLoading ? "#9b9b9b" : "linear-gradient(180deg, #cb2d3e 0%, #9b1c2a 100%)",
+                    borderRadius: 12,
+                    padding: "9px 14px",
+                    background: sendLoading ? theme.textLight : "linear-gradient(180deg, #eb3440 0%, #e30613 100%)",
                     color: "#fff",
                     cursor: sendLoading ? "not-allowed" : "pointer",
                     fontWeight: 700,
-                    letterSpacing: "0.02em",
-                    boxShadow: sendLoading ? "none" : "0 10px 20px rgba(203, 45, 62, 0.3)",
+                    boxShadow: sendLoading ? "none" : "0 8px 18px rgba(227, 6, 19, 0.28)",
                   }}
                 >
                   {sendLoading ? "Надсилання..." : "Надіслати"}
@@ -938,12 +1262,12 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
           )}
         </div>
 
-        <div style={{ ...shellCard, padding: 18, background: "linear-gradient(180deg, #ffffff 0%, #f7fcff 100%)" }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#5b5b5b", marginBottom: 12, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        <div style={{ ...shellCard, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: theme.textMain, marginBottom: 12, letterSpacing: "-0.2px" }}>
             Шаблони повідомлень (UI)
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 9, marginBottom: 10 }}>
             {TEMPLATE_OPTIONS.map((tpl) => (
               <button
                 key={tpl.id}
@@ -953,16 +1277,14 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   setTemplateDraft(tpl.text);
                 }}
                 style={{
-                  borderRadius: 14,
-                  border: `1px solid ${selectedTemplateId === tpl.id ? "rgba(203, 45, 62, 0.42)" : "rgba(17, 17, 17, 0.12)"}`,
-                  background: selectedTemplateId === tpl.id ? "linear-gradient(180deg, #fff1f3 0%, #fff8f9 100%)" : "#fff",
+                  borderRadius: 12,
+                  border: `1px solid ${selectedTemplateId === tpl.id ? "rgba(99, 102, 241, 0.35)" : "rgba(15, 23, 42, 0.09)"}`,
+                  background: selectedTemplateId === tpl.id ? "rgba(99, 102, 241, 0.08)" : "#fbfcff",
                   textAlign: "left",
-                  padding: "10px 11px",
+                  padding: "9px 10px",
                   cursor: "pointer",
                   fontSize: 13,
-                  fontWeight: 700,
-                  color: palette.black,
-                  boxShadow: selectedTemplateId === tpl.id ? "0 8px 18px rgba(203, 45, 62, 0.12)" : "none",
+                  fontWeight: 600,
                 }}
               >
                 {tpl.label}
@@ -976,14 +1298,14 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
             onChange={(e) => setTemplateDraft(e.target.value)}
             style={{
               width: "100%",
-              border: "1px solid rgba(17, 17, 17, 0.14)",
-              borderRadius: 14,
-              padding: "10px 11px",
+              border: "1px solid rgba(15, 23, 42, 0.12)",
+              borderRadius: 12,
+              padding: "9px 10px",
               resize: "vertical",
-              background: "#ffffff",
+              background: "#fbfcff",
             }}
           />
-          <div style={{ color: "#707070", fontSize: 11, marginTop: 7, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          <div style={{ color: theme.textLight, fontSize: 12, marginTop: 6 }}>
             Шаблон можна вставити у нижню панель і надіслати кнопкою “Надіслати”.
           </div>
         </div>

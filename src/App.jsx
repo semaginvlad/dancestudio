@@ -539,6 +539,7 @@ export default function App() {
             groups={groups}
             subs={subsExt}
             attn={attn}
+            studentGrps={studentGrps}
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
           />

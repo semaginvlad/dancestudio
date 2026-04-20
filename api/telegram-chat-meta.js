@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
       let query = supabase
         .from("telegram_chat_meta")
-        .select("chat_id, is_favorite, needs_reply, internal_note, updated_at")
+        .select("chat_id, is_favorite, needs_reply, internal_note, custom_template, updated_at")
         .order("updated_at", { ascending: false });
 
       if (chatIds.length > 0) {
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      const { chatId, isFavorite, needsReply, internalNote } = req.body || {};
+      const { chatId, isFavorite, needsReply, internalNote, customTemplate } = req.body || {};
 
       if (!chatId) {
         return sendJsonError(res, 400, "chatId is required");
@@ -59,6 +59,7 @@ export default async function handler(req, res) {
         is_favorite: Boolean(isFavorite),
         needs_reply: Boolean(needsReply),
         internal_note: internalNote || "",
+        custom_template: customTemplate || "",
         updated_at: new Date().toISOString(),
       };
 
