@@ -710,9 +710,9 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
   const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(410px, 430px) 1fr", gap: 18 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(440px, 470px) 1fr", gap: 18 }}>
       <div style={{ ...shellCard, padding: 14, minWidth: 0, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "96px minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "122px minmax(0, 1fr)", gap: 10, minWidth: 0 }}>
           <div style={{ border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 13, padding: 8, background: `linear-gradient(180deg, #ffffff 0%, ${uiPalette.cream}55 100%)` }}>
             <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 8, textAlign: "center", letterSpacing: "0.04em", fontWeight: 700 }}>ГРУПИ</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -746,16 +746,38 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                       borderRadius: 10,
                       background: active ? `${uiPalette.lightBlue}aa` : "#fff",
                       color: active ? uiPalette.black : theme.textMain,
-                      fontSize: 10.5,
+                      fontSize: 10,
                       fontWeight: 600,
-                      padding: "6px 5px",
+                      padding: "6px 6px",
                       cursor: "pointer",
                       lineHeight: 1.2,
                     }}
                   >
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.group.name}</div>
+                    <div
+                      style={{
+                        overflow: "hidden",
+                        display: "-webkit-box",
+                        WebkitBoxOrient: "vertical",
+                        WebkitLineClamp: 2,
+                        lineHeight: 1.2,
+                        minHeight: "2.4em",
+                        textAlign: "left",
+                      }}
+                    >
+                      {item.group.name}
+                    </div>
                     {item.direction?.name && (
-                      <div style={{ fontSize: 9, color: theme.textLight, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div
+                        style={{
+                          fontSize: 8.5,
+                          color: theme.textLight,
+                          marginTop: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          textAlign: "left",
+                        }}
+                      >
                         {item.direction.name}
                       </div>
                     )}
