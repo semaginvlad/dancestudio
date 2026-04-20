@@ -754,15 +754,10 @@ export default function AttendanceTab({
   const isCancelledDate = (dateStr) =>
     cancelled.some((c) => c.groupId === gid && c.date === dateStr);
 
-  const hasTrialInDirection = (student) => {
-    if (!currentDirectionId) return false;
-    const directionGroupIds = groups
-      .filter((g) => g.directionId === currentDirectionId)
-      .map((g) => g.id);
-
+  const hasTrialEver = (student) => {
     return attn.some((a) => {
-      if (!directionGroupIds.includes(a.groupId)) return false;
-      if ((a.entryType || "subscription") !== "trial") return false;
+      const type = a.entryType || a.guestType || "subscription";
+      if (type !== "trial") return false;
       return sameStudentByRecord(a, student);
     });
   };
@@ -781,8 +776,8 @@ export default function AttendanceTab({
     }
 
     if (entryMode === "trial") {
-      if (hasTrialInDirection(student)) {
-        throw new Error("Пробне по цьому напрямку вже використане.");
+      if (hasTrialEver(student)) {
+        throw new Error("Пробне заняття вже було.");
       }
       return { entryType: "trial", subId: null };
     }
@@ -792,7 +787,7 @@ export default function AttendanceTab({
       return { entryType: "subscription", subId: activeSub.id };
     }
 
-    if (!hasTrialInDirection(student)) {
+    if (!hasTrialEver(student)) {
       return { entryType: "trial", subId: null };
     }
 
