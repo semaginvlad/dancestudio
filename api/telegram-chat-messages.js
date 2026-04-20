@@ -1,13 +1,21 @@
-import { withTelegramUserClient } from "./_lib/telegram-user-client";
+import { withTelegramUserClient } from "./_lib/telegram-user-client.js";
 
 function normalizePeerId(peer) {
   if (!peer) return null;
   return String(peer.userId || peer.channelId || peer.chatId || "");
 }
 
+function sendJsonError(res, status, error, details) {
+  return res.status(status).json({
+    success: false,
+    error,
+    ...(details ? { details: String(details) } : {}),
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return sendJsonError(res, 405, "Method not allowed");
   }
 
   try {
@@ -18,7 +26,7 @@ export default async function handler(req, res) {
       : 60;
 
     if (!chatId) {
-      return res.status(400).json({ error: "chatId is required" });
+      return sendJsonError(res, 400, "chatId is required");
     }
 
     const payload = await withTelegramUserClient(async (client) => {
@@ -48,9 +56,11 @@ export default async function handler(req, res) {
     return res.status(200).json(payload);
   } catch (error) {
     console.error("telegram-chat-messages error:", error);
-    return res.status(error?.statusCode || 500).json({
-      error: "Failed to load telegram chat messages",
-      details: String(error?.message || error),
-    });
+    return sendJsonError(
+      res,
+      error?.statusCode || 500,
+      "Failed to load telegram chat messages",
+      error?.message || error,
+    );
   }
 }

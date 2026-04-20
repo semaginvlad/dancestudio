@@ -6,6 +6,26 @@ function normalizeTelegramUsername(value) {
   return String(value || "").replace(/^@/, "").trim().toLowerCase();
 }
 
+async function readJsonSafe(response) {
+  const rawText = await response.text();
+
+  if (!rawText) {
+    return { ok: response.ok, status: response.status, data: null, parseError: false };
+  }
+
+  try {
+    return { ok: response.ok, status: response.status, data: JSON.parse(rawText), parseError: false };
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      data: null,
+      parseError: true,
+      rawText,
+    };
+  }
+}
+
 export default function MessagesTab({ students = [], selectedStudentId = "", onSelectStudent }) {
   const [dialogs, setDialogs] = useState([]);
   const [dialogsLoading, setDialogsLoading] = useState(false);
@@ -26,14 +46,18 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
 
       try {
         const resp = await fetch("/api/telegram-list-dialogs");
-        const data = await resp.json();
+        const parsed = await readJsonSafe(resp);
 
-        if (!resp.ok) {
-          throw new Error(data?.error || "Не вдалося завантажити діалоги");
+        if (parsed.parseError) {
+          throw new Error("Сервер повернув не-JSON відповідь для списку діалогів.");
+        }
+
+        if (!parsed.ok) {
+          throw new Error(parsed.data?.error || "Не вдалося завантажити діалоги");
         }
 
         if (!cancelled) {
-          setDialogs(Array.isArray(data?.dialogs) ? data.dialogs : []);
+          setDialogs(Array.isArray(parsed.data?.dialogs) ? parsed.data.dialogs : []);
         }
       } catch (error) {
         if (!cancelled) {
@@ -87,14 +111,18 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
 
       try {
         const resp = await fetch(`/api/telegram-chat-messages?chatId=${encodeURIComponent(selectedChatId)}&limit=60`);
-        const data = await resp.json();
+        const parsed = await readJsonSafe(resp);
 
-        if (!resp.ok) {
-          throw new Error(data?.error || "Не вдалося завантажити повідомлення");
+        if (parsed.parseError) {
+          throw new Error("Сервер повернув не-JSON відповідь для повідомлень чату.");
+        }
+
+        if (!parsed.ok) {
+          throw new Error(parsed.data?.error || "Не вдалося завантажити повідомлення");
         }
 
         if (!cancelled) {
-          setMessages(Array.isArray(data?.messages) ? data.messages : []);
+          setMessages(Array.isArray(parsed.data?.messages) ? parsed.data.messages : []);
         }
       } catch (error) {
         if (!cancelled) {
