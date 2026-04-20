@@ -532,7 +532,7 @@ export default function App() {
           />
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
+        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} onActionEditSub={(sub) => { setEditItem(sub); setModal("editSub"); }} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}

@@ -421,6 +421,7 @@ export default function AttendanceTab({
   setCancelled,
   customOrders,
   onActionAddSub,
+  onActionEditSub,
   onActionEditStudent,
   onActionMessageStudent,
 }) {
@@ -577,6 +578,21 @@ export default function AttendanceTab({
     setOpenMenuState(null);
   };
 
+  const handleEditSub = (student) => {
+    const activeSub = getActiveSubOnDate(subs, student.id, gid, today());
+    if (!activeSub) {
+      alert("Для цієї учениці немає активного абонемента в поточній групі.");
+      setOpenMenuState(null);
+      return;
+    }
+    if (typeof onActionEditSub === "function") {
+      onActionEditSub(activeSub);
+    } else {
+      alert("Редагування абонемента недоступне в цьому екрані");
+    }
+    setOpenMenuState(null);
+  };
+
   const handleMessageStudent = (student) => {
     if (typeof onActionMessageStudent === "function") {
       onActionMessageStudent(student);
@@ -587,7 +603,7 @@ export default function AttendanceTab({
   const openStudentMenu = (student, btnEl) => {
     const rect = btnEl.getBoundingClientRect();
     const menuWidth = 170;
-    const menuHeight = 164;
+    const menuHeight = 196;
     const margin = 8;
 
     let left = rect.right - menuWidth;
@@ -1147,6 +1163,7 @@ export default function AttendanceTab({
             return (
               <>
                 <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
+                <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
                 <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                 <button type="button" style={styles.menuItem} onClick={() => handleMessageStudent(student)}>Написати учениці</button>
                 <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
