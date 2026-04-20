@@ -58,6 +58,10 @@ const styles = {
     fontSize: 13,
     color: "#374151",
   },
+  hint: {
+    fontSize: 12,
+    color: "#6b7280",
+  },
   legendItem: {
     display: "flex",
     alignItems: "center",
@@ -774,6 +778,27 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
+        if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
+          const rec = existing[0];
+          await db.deleteAttendance(rec.id);
+          await db.insertAttendance({
+            id: `tmp_${uid()}`,
+            subId: rec.subId,
+            studentId: student.id,
+            date: dateStr,
+            guestName: rec.guestName || student.name || getDisplayName(student),
+            guestType: rec.guestType || rec.entryType || "subscription",
+            groupId: gid,
+            quantity: 2,
+            entryType: rec.entryType || rec.guestType || "subscription",
+          });
+          if (rec.subId) {
+            await db.syncSubUsedTrainings(rec.subId);
+          }
+          await reloadFromDb();
+          return;
+        }
+
         const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
         for (const rec of existing) {
           if (rec.id) {
@@ -904,9 +929,10 @@ export default function AttendanceTab({
     if (!rec) return { bg: "#ffffff", mark: "" };
 
     const type = rec.entryType || "subscription";
-    if (type === "single") return { bg: "#f59e0b", mark: "✓" };
-    if (type === "trial") return { bg: "#10b981", mark: "✓" };
-    return { bg: "#2563eb", mark: "✓" };
+    const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
+    if (type === "single") return { bg: "#f59e0b", mark };
+    if (type === "trial") return { bg: "#10b981", mark };
+    return { bg: "#2563eb", mark };
   };
 
   if (!groups?.length) {
@@ -922,7 +948,9 @@ export default function AttendanceTab({
       acc[dateStr] = 0;
       return acc;
     }
-    acc[dateStr] = attn.filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)).length;
+    acc[dateStr] = attn
+      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
+      .reduce((sum, a) => sum + (a.quantity || 1), 0);
     return acc;
   }, {});
 
@@ -982,6 +1010,7 @@ export default function AttendanceTab({
             <span style={styles.dot("#f3f4f6")} />
             <span>Завершений абонемент</span>
           </div>
+          <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
 
