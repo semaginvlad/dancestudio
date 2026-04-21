@@ -76,6 +76,12 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
   const [selectedTemplateId, setSelectedTemplateId] = useState(TEMPLATE_OPTIONS[0].id);
   const [templateDraft, setTemplateDraft] = useState(TEMPLATE_OPTIONS[0].text);
 
+  const [linkOverrides, setLinkOverrides] = useState({});
+  const [linkDialogId, setLinkDialogId] = useState("");
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkError, setLinkError] = useState("");
+
   useEffect(() => {
     let cancelled = false;
 
@@ -116,18 +122,35 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
     };
   }, []);
 
+  const studentsByTelegramUserId = useMemo(() => {
+    const map = {};
+    students.forEach((s) => {
+      if (s.telegram_user_id) {
+        map[String(s.telegram_user_id)] = s;
+      }
+    });
+    return map;
+  }, [students]);
+
   const dialogsWithStudents = useMemo(() => {
     return dialogs.map((dialog) => {
-      const matchedStudent = students.find(
+      const override = Object.prototype.hasOwnProperty.call(linkOverrides, dialog.id)
+        ? linkOverrides[dialog.id]
+        : undefined;
+
+      const matchedById = studentsByTelegramUserId[String(dialog.id)] || null;
+      const matchedByUsername = students.find(
         (s) => normalizeTelegramUsername(s.telegram) === normalizeTelegramUsername(dialog.username),
       ) || null;
+
+      const matchedStudent = override === undefined ? (matchedById || matchedByUsername) : override;
 
       return {
         ...dialog,
         matchedStudent,
       };
     });
-  }, [dialogs, students]);
+  }, [dialogs, linkOverrides, studentsByTelegramUserId, students]);
 
   useEffect(() => {
     if (!dialogsWithStudents.length || !selectedStudentId || selectedChatId) {
@@ -227,10 +250,100 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
     [dialogsWithStudents, selectedChatId],
   );
 
+  const linkDialog = useMemo(
+    () => dialogsWithStudents.find((d) => String(d.id) === String(linkDialogId)) || null,
+    [dialogsWithStudents, linkDialogId],
+  );
+
+  const filteredStudentsForLink = useMemo(() => {
+    const normalized = studentSearchQuery.trim().toLowerCase();
+    if (!normalized) return students;
+
+    return students.filter((s) => getDisplayName(s).toLowerCase().includes(normalized));
+  }, [students, studentSearchQuery]);
+
   const handleSelectDialog = (dialog) => {
     setSelectedChatId(String(dialog.id));
     if (dialog.matchedStudent?.id) {
       onSelectStudent?.(dialog.matchedStudent.id);
+    }
+  };
+
+  const handleStartLink = (dialogId) => {
+    setLinkDialogId(String(dialogId));
+    setStudentSearchQuery("");
+    setLinkError("");
+  };
+
+  const handleSaveLink = async (dialog, student) => {
+    if (!dialog?.id || !student?.id) return;
+
+    setLinkSaving(true);
+    setLinkError("");
+
+    try {
+      const resp = await fetch("/api/link-student-telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: student.id,
+          telegramUserId: String(dialog.id),
+          telegramDisplayName: dialog.title || dialog.username || null,
+        }),
+      });
+
+      const parsed = await readJsonSafe(resp);
+
+      if (parsed.parseError) {
+        throw new Error("Сервер повернув не-JSON відповідь під час прив’язки.");
+      }
+
+      if (!parsed.ok) {
+        throw new Error(parsed.data?.error || "Не вдалося зберегти прив’язку.");
+      }
+
+      setLinkOverrides((prev) => ({ ...prev, [String(dialog.id)]: student }));
+      onSelectStudent?.(student.id);
+      setLinkDialogId("");
+      setStudentSearchQuery("");
+    } catch (error) {
+      setLinkError(String(error?.message || error));
+    } finally {
+      setLinkSaving(false);
+    }
+  };
+
+  const handleUnlink = async (dialog) => {
+    if (!dialog?.matchedStudent?.id) return;
+
+    setLinkSaving(true);
+    setLinkError("");
+
+    try {
+      const resp = await fetch("/api/link-student-telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: dialog.matchedStudent.id,
+          unlink: true,
+        }),
+      });
+
+      const parsed = await readJsonSafe(resp);
+
+      if (parsed.parseError) {
+        throw new Error("Сервер повернув не-JSON відповідь під час відв’язки.");
+      }
+
+      if (!parsed.ok) {
+        throw new Error(parsed.data?.error || "Не вдалося виконати відв’язку.");
+      }
+
+      setLinkOverrides((prev) => ({ ...prev, [String(dialog.id)]: null }));
+    } catch (error) {
+      setLinkError(String(error?.message || error));
+    } finally {
+      setLinkSaving(false);
     }
   };
 
@@ -291,6 +404,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
               const active = String(selectedChatId) === String(dialog.id);
               const isFavorite = Boolean(favoriteChats[dialog.id]);
               const needsReply = Boolean(needsReplyChats[dialog.id]);
+              const isLinking = String(linkDialogId) === String(dialog.id);
 
               return (
                 <div
@@ -325,7 +439,7 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
                     </div>
                   </button>
 
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => setFavoriteChats((prev) => ({ ...prev, [dialog.id]: !prev[dialog.id] }))}
@@ -355,7 +469,99 @@ export default function MessagesTab({ students = [], selectedStudentId = "", onS
                     >
                       {needsReply ? "Потрібна відповідь" : "Без мітки"}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartLink(dialog.id)}
+                      style={{
+                        border: `1px solid ${theme.border}`,
+                        borderRadius: 8,
+                        fontSize: 12,
+                        padding: "4px 8px",
+                        cursor: "pointer",
+                        background: "#fff",
+                      }}
+                    >
+                      Прив’язати до учениці
+                    </button>
+                    {dialog.matchedStudent && (
+                      <button
+                        type="button"
+                        onClick={() => handleUnlink(dialog)}
+                        disabled={linkSaving}
+                        style={{
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: 8,
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          cursor: linkSaving ? "not-allowed" : "pointer",
+                          background: "#fff",
+                          color: theme.danger,
+                        }}
+                      >
+                        Відв’язати
+                      </button>
+                    )}
                   </div>
+
+                  {isLinking && (
+                    <div style={{ marginTop: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 10, background: "#fff" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: theme.textMain }}>
+                        Прив’язка чату до учениці
+                      </div>
+                      <input
+                        value={studentSearchQuery}
+                        onChange={(e) => setStudentSearchQuery(e.target.value)}
+                        placeholder="Пошук учениці..."
+                        style={{
+                          width: "100%",
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: 8,
+                          padding: "8px 10px",
+                          marginBottom: 8,
+                        }}
+                      />
+                      <div style={{ maxHeight: 150, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                        {filteredStudentsForLink.slice(0, 20).map((student) => (
+                          <button
+                            key={student.id}
+                            type="button"
+                            onClick={() => handleSaveLink(dialog, student)}
+                            disabled={linkSaving}
+                            style={{
+                              border: `1px solid ${theme.border}`,
+                              borderRadius: 8,
+                              padding: "6px 8px",
+                              textAlign: "left",
+                              cursor: linkSaving ? "not-allowed" : "pointer",
+                              background: "#fff",
+                              fontSize: 12,
+                            }}
+                          >
+                            {getDisplayName(student)}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setLinkDialogId("")}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: theme.textLight,
+                            fontSize: 12,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Закрити
+                        </button>
+                        {linkSaving && <span style={{ fontSize: 12, color: theme.textMuted }}>Зберігаємо...</span>}
+                      </div>
+                      {linkError && linkDialog?.id === dialog.id && (
+                        <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{linkError}</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

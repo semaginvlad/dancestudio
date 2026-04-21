@@ -1,39 +1,56 @@
 import { createClient } from "@supabase/supabase-js";
 
+function sendJsonError(res, status, error, details) {
+  return res.status(status).json({
+    success: false,
+    error,
+    ...(details ? { details: String(details) } : {}),
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return sendJsonError(res, 405, "Method not allowed");
   }
 
   try {
-    const { studentId, telegramUserId, telegramDisplayName } = req.body;
+    const { studentId, telegramUserId, telegramDisplayName, unlink } = req.body || {};
 
-    if (!studentId || !telegramUserId) {
-      return res.status(400).json({
-        error: "studentId and telegramUserId are required"
-      });
+    if (!studentId) {
+      return sendJsonError(res, 400, "studentId is required");
+    }
+
+    if (!unlink && !telegramUserId) {
+      return sendJsonError(res, 400, "telegramUserId is required for link action");
     }
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      return res.status(500).json({
-        error: "Missing Supabase server environment variables"
-      });
+      return sendJsonError(res, 500, "Missing Supabase server environment variables");
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
+    const updatePayload = unlink
+      ? {
+          telegram_user_id: null,
+          telegram_display_name: null,
+          telegram_linked_at: null,
+        }
+      : {
+          telegram_user_id: String(telegramUserId),
+          telegram_display_name: telegramDisplayName || null,
+          telegram_linked_at: new Date().toISOString(),
+        };
+
     const { data, error } = await supabase
       .from("students")
-      .update({
-        telegram_user_id: String(telegramUserId),
-        telegram_display_name: telegramDisplayName || null,
-        telegram_linked_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq("id", studentId)
-      .select();
+      .select()
+      .single();
 
     if (error) {
       throw error;
@@ -41,13 +58,16 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      updated: data
+      mode: unlink ? "unlink" : "link",
+      updated: data,
     });
   } catch (error) {
     console.error("link-student-telegram error:", error);
-    return res.status(500).json({
-      error: "Failed to link telegram to student",
-      details: String(error?.message || error)
-    });
+    return sendJsonError(
+      res,
+      500,
+      "Failed to update telegram link for student",
+      error?.message || error,
+    );
   }
 }
