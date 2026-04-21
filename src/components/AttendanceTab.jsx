@@ -645,13 +645,23 @@ export default function AttendanceTab({
 
   const handleEditSub = (student) => {
     const activeSub = getActiveSubOnDate(subs, student.id, gid, today());
-    if (!activeSub) {
-      alert("Для цієї учениці немає активного абонемента в поточній групі.");
+    const lastSub = [...subs]
+      .filter((s) => s.studentId === student.id && s.groupId === gid)
+      .sort((a, b) => {
+        const aKey = a.activationDate || a.startDate || a.created_at || "";
+        const bKey = b.activationDate || b.startDate || b.created_at || "";
+        if (aKey !== bKey) return bKey.localeCompare(aKey);
+        return (b.created_at || "").localeCompare(a.created_at || "");
+      })[0];
+    const targetSub = activeSub || lastSub;
+
+    if (!targetSub) {
+      alert("Абонемент не знайдено.");
       setOpenMenuState(null);
       return;
     }
     if (typeof onActionEditSub === "function") {
-      onActionEditSub(activeSub);
+      onActionEditSub(targetSub);
     } else {
       alert("Редагування абонемента недоступне в цьому екрані");
     }
