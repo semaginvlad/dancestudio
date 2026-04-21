@@ -443,6 +443,7 @@ export default function AttendanceTab({
   setSubs,
   attn,
   setAttn,
+  students,
   studentMap,
   studentGrps,
   setStudentGrps,
@@ -461,6 +462,8 @@ export default function AttendanceTab({
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
+  const [addStudentId, setAddStudentId] = useState("");
+  const [addingStudent, setAddingStudent] = useState(false);
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
   const menuPopupRef = useRef(null);
@@ -558,6 +561,37 @@ export default function AttendanceTab({
       return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
     });
   }, [studentIdsInGroup, studentMap, customOrders, localOrders, gid]);
+
+  const availableStudentsToAdd = useMemo(() => {
+    const inGroup = new Set(studentIdsInGroup);
+    return (students || [])
+      .filter((s) => s?.id && !inGroup.has(s.id))
+      .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b), "uk"));
+  }, [students, studentIdsInGroup]);
+
+  const handleAddStudentToGroup = async () => {
+    if (!gid || !addStudentId) return;
+    if (studentIdsInGroup.includes(addStudentId)) {
+      alert("Учениця вже є в цій групі.");
+      return;
+    }
+    setAddingStudent(true);
+    try {
+      const link = await db.addStudentGroup(addStudentId, gid);
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => {
+          const list = prev || [];
+          if (list.some((sg) => sg.studentId === addStudentId && sg.groupId === gid)) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: addStudentId, groupId: gid }];
+        });
+      }
+      setAddStudentId("");
+    } catch (err) {
+      alert(err?.message || "Не вдалося додати ученицю в групу.");
+    } finally {
+      setAddingStudent(false);
+    }
+  };
 
   const moveStudent = (studentId, direction) => {
     setLocalOrders((prev) => {
@@ -1036,6 +1070,25 @@ export default function AttendanceTab({
             <option value="trial">Пробне</option>
             <option value="debt">Борг</option>
           </select>
+
+          <select
+            value={addStudentId}
+            onChange={(e) => setAddStudentId(e.target.value)}
+            style={styles.control}
+          >
+            <option value="">Додати ученицю в групу</option>
+            {availableStudentsToAdd.map((s) => (
+              <option key={s.id} value={s.id}>{getDisplayName(s)}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            style={styles.control}
+            disabled={!addStudentId || addingStudent}
+            onClick={handleAddStudentToGroup}
+          >
+            Додати
+          </button>
         </div>
 
         <div style={styles.legend}>
