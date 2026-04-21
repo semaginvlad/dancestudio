@@ -287,11 +287,26 @@ export async function syncSubUsedTrainings(subId) {
 
 // ─── ATTENDANCE ───
 export async function fetchAttendance() {
-  const { data, error } = await supabase.from('attendance').select('*')
-  if (error) throw error
-  return data.map(a => ({
+  const chunk = 1000;
+  let from = 0;
+  let rows = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .range(from, from + chunk - 1);
+    if (error) throw error;
+    const part = data || [];
+    rows = rows.concat(part);
+    if (part.length < chunk) break;
+    from += chunk;
+  }
+
+  return rows.map(a => ({
     id: a.id,
     subId: a.sub_id,
+    studentId: a.student_id,
     date: a.date,
     guestName: a.guest_name,
     guestType: a.guest_type,
@@ -304,6 +319,7 @@ export async function fetchAttendance() {
 export async function insertAttendance(a) {
   const { data, error } = await supabase.from('attendance').insert({
     sub_id: a.subId || null,
+    student_id: a.studentId || null,
     date: a.date,
     guest_name: a.guestName || null,
     guest_type: a.guestType || null,
@@ -315,6 +331,7 @@ export async function insertAttendance(a) {
   return {
     id: data.id,
     subId: data.sub_id,
+    studentId: data.student_id,
     date: data.date,
     guestName: data.guest_name,
     guestType: data.guest_type,
@@ -345,9 +362,11 @@ export async function insertCancelled(c) {
     group_id: c.groupId,
     date: c.date,
     reason: c.originalEnds ? JSON.stringify(c.originalEnds) : null,
-  }).select().single()
+  }).select()
   if (error) throw error
-  return { id: data.id, groupId: data.group_id, date: data.date, originalEnds: data.reason ? JSON.parse(data.reason) : null }
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return { id: c.id, groupId: c.groupId, date: c.date, originalEnds: c.originalEnds || null }
+  return { id: row.id, groupId: row.group_id, date: row.date, originalEnds: row.reason ? JSON.parse(row.reason) : null }
 }
 
 export async function deleteCancelled(id) {
