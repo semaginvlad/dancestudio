@@ -323,7 +323,6 @@ const styles = {
   }),
   monthDivider: {
     borderRight: "2px solid #94a3b8",
-    boxShadow: "inset -1px 0 0 rgba(15, 23, 42, 0.08)",
   },
   totalsRow: {
     background: "#f3f7fc",
