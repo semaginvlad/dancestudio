@@ -849,6 +849,10 @@ export default function AttendanceTab({
     }
 
     if (entryMode === "debt") {
+      const activeSub = getActiveSubOnDate(subs, student.id, gid, dateStr);
+      if (activeSub) {
+        throw new Error("У учениці є активний абонемент, борг ставити не можна.");
+      }
       return { entryType: "debt", subId: null };
     }
 
