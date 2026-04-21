@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DIRECTIONS, theme } from "../shared/constants";
-import { getDisplayName } from "../shared/utils";
+import { getDisplayName, getSubStatus } from "../shared/utils";
 
 const QUICK_FILTERS = [
   { id: "all", label: "Усі" },
@@ -44,6 +44,34 @@ const uiPalette = {
   black: "#000000",
   cream: "#ece4d2",
 };
+
+const TRAINER_FILTER_ID = "trainers";
+
+function parseTrainerGroupsFromNote(note) {
+  const normalizedNote = String(note || "");
+  const line = normalizedNote
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => /^trainer_groups\s*:/i.test(entry));
+
+  if (!line) return [];
+
+  const rawGroups = line.replace(/^trainer_groups\s*:/i, "").trim();
+  if (!rawGroups) return [];
+
+  return rawGroups
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isTrainerChatByNote(note) {
+  const noteText = String(note || "");
+  if (!noteText.trim()) return false;
+  if (/\btrainer\b/i.test(noteText)) return true;
+  if (/тренер/i.test(noteText)) return true;
+  return parseTrainerGroupsFromNote(noteText).length > 0;
+}
 
 function normalizeTelegramUsername(value) {
   return String(value || "").replace(/^@/, "").trim().toLowerCase();
@@ -290,8 +318,19 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       .sort((a, b) => String(a.group.name || "").localeCompare(String(b.group.name || ""), "uk"));
   }, [dialogsWithStudents, groupById, groupIdByStudentId, directionById]);
 
+  const trainerChatIds = useMemo(() => {
+    const set = new Set();
+    dialogsWithStudents.forEach((dialog) => {
+      const note = chatNotes[String(dialog.id)] || "";
+      if (isTrainerChatByNote(note)) {
+        set.add(String(dialog.id));
+      }
+    });
+    return set;
+  }, [dialogsWithStudents, chatNotes]);
+
   useEffect(() => {
-    if (selectedGroupFilter === "all") return;
+    if (selectedGroupFilter === "all" || selectedGroupFilter === TRAINER_FILTER_ID) return;
     const exists = groupFilterOptions.some((item) => String(item.groupId) === String(selectedGroupFilter));
     if (!exists) {
       setSelectedGroupFilter("all");
@@ -308,6 +347,9 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
       if (quickFilter === "unlinked" && isLinked) return false;
 
       if (selectedGroupFilter !== "all") {
+        if (selectedGroupFilter === TRAINER_FILTER_ID) {
+          return trainerChatIds.has(String(dialog.id));
+        }
         const studentId = dialog?.matchedStudent?.id;
         const studentGroups = studentId ? groupIdByStudentId[String(studentId)] : null;
         if (!studentGroups || !studentGroups.has(String(selectedGroupFilter))) return false;
@@ -357,7 +399,7 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
       return String(a.title || "").localeCompare(String(b.title || ""), "uk");
     });
-  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats, selectedGroupFilter, groupIdByStudentId]);
+  }, [dialogsWithStudents, searchQuery, quickFilter, favoriteChats, selectedGroupFilter, groupIdByStudentId, trainerChatIds]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -708,6 +750,109 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
 
   const selectedChatNote = selectedDialog ? chatNotes[selectedDialog.id] || "" : "";
   const selectedChatTemplate = selectedDialog ? chatTemplates[selectedDialog.id] || "" : "";
+  const selectedDialogIsTrainer = selectedDialog ? isTrainerChatByNote(selectedChatNote) : false;
+
+  const studentsById = useMemo(
+    () => Object.fromEntries((students || []).map((student) => [String(student.id), student])),
+    [students],
+  );
+
+  const studentIdsByGroupId = useMemo(() => {
+    const map = {};
+
+    (studentGrps || []).forEach((link) => {
+      if (!link?.groupId || !link?.studentId) return;
+      const groupKey = String(link.groupId);
+      if (!map[groupKey]) map[groupKey] = new Set();
+      map[groupKey].add(String(link.studentId));
+    });
+
+    (students || []).forEach((student) => {
+      if (!student?.id) return;
+      const studentId = String(student.id);
+      if (student.groupId) {
+        const groupKey = String(student.groupId);
+        if (!map[groupKey]) map[groupKey] = new Set();
+        map[groupKey].add(studentId);
+      }
+      if (Array.isArray(student.groupIds)) {
+        student.groupIds.forEach((groupId) => {
+          if (!groupId) return;
+          const groupKey = String(groupId);
+          if (!map[groupKey]) map[groupKey] = new Set();
+          map[groupKey].add(studentId);
+        });
+      }
+    });
+
+    return map;
+  }, [studentGrps, students]);
+
+  const trainerTemplateData = useMemo(() => {
+    if (!selectedDialogIsTrainer) {
+      return { groups: [], draft: "" };
+    }
+
+    const noteGroups = parseTrainerGroupsFromNote(selectedChatNote);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const normalizeName = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+    const groupsByNormalizedName = {};
+    (groups || []).forEach((group) => {
+      const key = normalizeName(group?.name);
+      if (!key) return;
+      if (!groupsByNormalizedName[key]) groupsByNormalizedName[key] = group;
+    });
+
+    const rows = noteGroups.map((groupNameFromNote) => {
+      const matchedGroup = groupsByNormalizedName[normalizeName(groupNameFromNote)] || null;
+      const memberIds = matchedGroup ? Array.from(studentIdsByGroupId[String(matchedGroup.id)] || []) : [];
+
+      const problematicStudents = memberIds
+        .map((studentId) => {
+          const student = studentsById[String(studentId)];
+          if (!student) return null;
+
+          const studentSubsInGroup = (subs || []).filter(
+            (sub) => String(sub?.studentId) === String(student.id) && String(sub?.groupId) === String(matchedGroup.id),
+          );
+
+          if (studentSubsInGroup.length === 0) return student;
+
+          const hasValidSubscription = studentSubsInGroup.some((sub) => {
+            const status = sub?.status || getSubStatus(sub);
+            const totalTrainings = Number(sub?.totalTrainings || 0);
+            const usedTrainings = Number(sub?.usedTrainings || 0);
+            const endDate = String(sub?.endDate || "");
+            const hasTrainingsLeft = usedTrainings < (totalTrainings || 1);
+            const byDateActive = !endDate || endDate >= todayIso;
+            const planType = String(sub?.planType || "").toLowerCase();
+            const isTrialOrSingle = planType === "trial" || planType === "single";
+
+            return status !== "expired" && hasTrainingsLeft && byDateActive && !isTrialOrSingle;
+          });
+
+          return hasValidSubscription ? null : student;
+        })
+        .filter(Boolean);
+
+      return {
+        requestedGroupName: groupNameFromNote,
+        resolvedGroupName: matchedGroup?.name || groupNameFromNote,
+        missingInSystem: !matchedGroup,
+        problematicStudents,
+      };
+    });
+
+    const draft = rows
+      .map((row) => {
+        const studentList = row.problematicStudents.map((student) => getDisplayName(student)).join(", ") || "—";
+        return `Привіт. Немає абонементів в групі ${row.resolvedGroupName} у: ${studentList}.`;
+      })
+      .join("\n\n");
+
+    return { groups: rows, draft };
+  }, [selectedDialogIsTrainer, selectedChatNote, groups, studentIdsByGroupId, studentsById, subs]);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(440px, 470px) 1fr", gap: 18 }}>
@@ -732,6 +877,23 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                 }}
               >
                 Усі чати
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedGroupFilter(TRAINER_FILTER_ID)}
+                style={{
+                  border: "1px solid rgba(0, 0, 0, 0.12)",
+                  borderRadius: 10,
+                  background: selectedGroupFilter === TRAINER_FILTER_ID ? `${uiPalette.lightBlue}88` : "#fff",
+                  color: selectedGroupFilter === TRAINER_FILTER_ID ? uiPalette.black : theme.textMain,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "7px 5px",
+                  cursor: "pointer",
+                  lineHeight: 1.2,
+                }}
+              >
+                Тренери
               </button>
               {groupFilterOptions.map((item) => {
                 const active = selectedGroupFilter === String(item.groupId);
@@ -1092,6 +1254,61 @@ export default function MessagesTab({ students = [], groups = [], subs = [], att
                   background: "#fbfcff",
                 }}
               />
+            </div>
+          )}
+
+          {selectedDialog && selectedDialogIsTrainer && (
+            <div style={{ marginBottom: 12, border: "1px solid rgba(0, 0, 0, 0.1)", borderRadius: 13, padding: 10, background: "linear-gradient(180deg, #ffffff 0%, rgba(184,220,236,0.25) 100%)" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: uiPalette.black, marginBottom: 6, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                Динамічний шаблон для тренера
+              </div>
+              {trainerTemplateData.groups.length === 0 ? (
+                <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
+                  Додайте в internal note рядок `trainer_groups: Назва групи 1 | Назва групи 2`.
+                </div>
+              ) : (
+                <div style={{ fontSize: 11.5, color: theme.textMuted, marginBottom: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {trainerTemplateData.groups.map((item) => (
+                    <div key={item.requestedGroupName}>
+                      {item.resolvedGroupName}: {item.problematicStudents.length}
+                      {item.missingInSystem ? " (групу не знайдено в системі)" : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <textarea
+                rows={Math.max(2, trainerTemplateData.groups.length * 2)}
+                value={trainerTemplateData.draft}
+                readOnly
+                placeholder="Тут з’явиться динамічний шаблон для тренера."
+                style={{
+                  width: "100%",
+                  border: "1px solid rgba(0, 0, 0, 0.12)",
+                  borderRadius: 12,
+                  padding: "8px 10px",
+                  resize: "vertical",
+                  background: "#fff",
+                  marginBottom: 7,
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setComposerText((prev) => (prev ? `${prev}\n${trainerTemplateData.draft}` : trainerTemplateData.draft))}
+                disabled={!trainerTemplateData.draft}
+                style={{
+                  border: "1px solid rgba(0, 0, 0, 0.12)",
+                  borderRadius: 10,
+                  padding: "6px 12px",
+                  background: `${uiPalette.lightBlue}80`,
+                  color: uiPalette.black,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: trainerTemplateData.draft ? "pointer" : "not-allowed",
+                  opacity: trainerTemplateData.draft ? 1 : 0.6,
+                }}
+              >
+                Вставити
+              </button>
             </div>
           )}
 
