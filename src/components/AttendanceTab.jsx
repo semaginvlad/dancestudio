@@ -32,10 +32,11 @@ const styles = {
     gap: 10,
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 12,
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    background: "#fff",
+    padding: "14px 16px",
+    border: "1px solid #d6e0ec",
+    borderRadius: 14,
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+    boxShadow: "0 6px 20px rgba(15, 23, 42, 0.05)",
   },
   toolbarLeft: {
     display: "flex",
@@ -46,10 +47,12 @@ const styles = {
   control: {
     height: 38,
     borderRadius: 10,
-    border: "1px solid #d1d5db",
+    border: "1px solid #c9d5e3",
     padding: "0 12px",
     background: "#fff",
     fontSize: 14,
+    color: "#111827",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
   },
   legend: {
     display: "flex",
@@ -77,11 +80,11 @@ const styles = {
   tableWrap: {
     overflowX: "auto",
     overflowY: "visible",
-    border: "1px solid #cbd5e1",
-    borderRadius: 12,
+    border: "1px solid #bfcddd",
+    borderRadius: 14,
     background: "#fff",
     position: "relative",
-    boxShadow: "0 2px 12px rgba(15, 23, 42, 0.06)",
+    boxShadow: "0 10px 28px rgba(15, 23, 42, 0.08)",
   },
   table: {
     borderCollapse: "separate",
@@ -105,17 +108,17 @@ const styles = {
     zIndex: 5,
     background: "#f9fafb",
   },
-  monthHead: {
+  monthHead: (isCurrent) => ({
     textAlign: "center",
     fontWeight: 700,
-    fontSize: 13,
-    color: "#111827",
-    borderBottom: "1px solid #d8e1ec",
+    fontSize: isCurrent ? 14 : 13,
+    color: isCurrent ? "#0f172a" : "#475569",
+    borderBottom: isCurrent ? "2px solid #2563eb" : "1px solid #d8e1ec",
     borderRight: "1px solid #d8e1ec",
-    padding: "10px 6px",
-    background: "#f9fafb",
+    padding: "10px 6px 9px",
+    background: isCurrent ? "#eef6ff" : "#f6f8fb",
     whiteSpace: "nowrap",
-  },
+  }),
   studentHead: {
     padding: "10px 12px",
     textAlign: "left",
@@ -125,28 +128,34 @@ const styles = {
     borderBottom: "1px solid #d8e1ec",
     background: "#f9fafb",
   },
-  dayHead: (isCancelled) => ({
+  dayHead: (isCancelled, isMutedMonth, isCurrentMonth) => ({
     minWidth: 58,
     maxWidth: 58,
     width: 58,
     textAlign: "center",
     verticalAlign: "top",
-    borderRight: "1px solid #dde6f0",
+    borderRight: "1px solid #d5dfeb",
     borderBottom: "1px solid #d8e1ec",
     padding: "8px 4px",
-    background: isCancelled ? "#fef2f2" : "#fff",
+    background: isCancelled
+      ? "#ffe9e9"
+      : isCurrentMonth
+        ? "#ffffff"
+        : isMutedMonth
+          ? "#f7f9fc"
+          : "#fff",
   }),
-  dayNum: {
-    fontSize: 15,
+  dayNum: (isCurrentMonth, isMutedMonth) => ({
+    fontSize: isCurrentMonth ? 15 : 14,
     fontWeight: 700,
-    color: "#111827",
+    color: isCurrentMonth ? "#111827" : (isMutedMonth ? "#94a3b8" : "#1f2937"),
     lineHeight: 1.1,
-  },
-  dayName: {
+  }),
+  dayName: (isCurrentMonth, isMutedMonth) => ({
     fontSize: 11,
-    color: "#6b7280",
+    color: isCurrentMonth ? "#475569" : (isMutedMonth ? "#a3afbf" : "#64748b"),
     marginTop: 2,
-  },
+  }),
   cancelBtn: (isCancelled) => ({
     marginTop: 6,
     width: 22,
@@ -165,7 +174,7 @@ const styles = {
     position: "sticky",
     left: 0,
     zIndex: 3,
-    background: "#fff",
+    background: "#fcfdff",
     borderRight: "1px solid #d8e1ec",
     borderBottom: "1px solid #e2e8f0",
     padding: "8px 10px",
@@ -272,16 +281,22 @@ const styles = {
     marginTop: 2,
     lineHeight: 1.2,
   },
-  cell: (isCancelled) => ({
+  cell: (isCancelled, isMutedMonth, isCurrentMonth) => ({
     width: 58,
     minWidth: 58,
     maxWidth: 58,
     height: 54,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRight: "1px solid #e2e8f0",
-    borderBottom: "1px solid #e2e8f0",
-    background: isCancelled ? "#fef2f2" : "#fff",
+    borderRight: "1px solid #dfe7f1",
+    borderBottom: "1px solid #dde6f0",
+    background: isCancelled
+      ? "#ffe9e9"
+      : isCurrentMonth
+        ? "#ffffff"
+        : isMutedMonth
+          ? "#f8fafd"
+          : "#fff",
   }),
   cellBtn: (bg, disabled, saving) => ({
     width: 32,
@@ -307,7 +322,12 @@ const styles = {
       .join(", "),
   }),
   monthDivider: {
-    borderRight: "1px solid #d1d5db",
+    borderRight: "2px solid #94a3b8",
+    boxShadow: "inset -1px 0 0 rgba(15, 23, 42, 0.08)",
+  },
+  totalsRow: {
+    background: "#f3f7fc",
+    boxShadow: "inset 0 1px 0 #c9d6e5",
   },
   emptyState: {
     padding: 18,
@@ -1145,7 +1165,7 @@ export default function AttendanceTab({
                 <th
                   key={m.month}
                   colSpan={m.span}
-                  style={{ ...styles.headTop, ...styles.monthHead }}
+                  style={{ ...styles.headTop, ...styles.monthHead(m.month === centerMonth) }}
                 >
                   {m.label}
                 </th>
@@ -1160,12 +1180,15 @@ export default function AttendanceTab({
                 const cancelledDay = isCancelledDate(dateStr);
                 const dow = getDayOfWeek(dateStr);
                 const isBusy = busyCancelDate === dateStr;
+                const monthKey = dateStr.slice(0, 7);
+                const isCurrentMonth = monthKey === centerMonth;
+                const isMutedMonth = monthKey !== centerMonth;
                 const dayIdx = visibleDayIndex[dateStr];
                 const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                 const headStyle = {
                   ...styles.headTop,
-                  ...styles.dayHead(cancelledDay),
+                  ...styles.dayHead(cancelledDay, isMutedMonth, isCurrentMonth),
                   ...(isMonthBoundary ? styles.monthDivider : {}),
                 };
 
@@ -1174,8 +1197,8 @@ export default function AttendanceTab({
                     key={dateStr}
                     style={headStyle}
                   >
-                    <div style={styles.dayNum}>{dateStr.slice(8, 10)}</div>
-                    <div style={styles.dayName}>{WEEKDAYS_SHORT[dow]}</div>
+                    <div style={styles.dayNum(isCurrentMonth, isMutedMonth)}>{dateStr.slice(8, 10)}</div>
+                    <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
                     <button
                       type="button"
                       disabled={isBusy}
@@ -1194,13 +1217,16 @@ export default function AttendanceTab({
           <tbody>
             {orderedStudents.map((student) => {
               const statusInfo = getStudentStatusText(subs, student.id, gid);
+              const warnedDone = isWarned(student.id);
               const metaColor = statusInfo.tone === "danger"
-                ? "#dc2626"
+                ? (warnedDone ? "#b06a6a" : "#c81e1e")
                 : statusInfo.tone === "warning"
                   ? "#d97706"
                   : styles.studentMeta.color;
               const rowHighlightStyle = statusInfo.tone === "danger"
-                ? { background: "#fef2f2", borderLeft: "3px solid #dc2626" }
+                ? (warnedDone
+                    ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
+                    : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" })
                 : statusInfo.tone === "warning"
                   ? { background: "#fff7ed", borderLeft: "3px solid #f59e0b" }
                   : {};
@@ -1240,6 +1266,9 @@ export default function AttendanceTab({
 
                 {visibleDays.map((dateStr) => {
                   const cancelledDay = isCancelledDate(dateStr);
+                  const monthKey = dateStr.slice(0, 7);
+                  const isCurrentMonth = monthKey === centerMonth;
+                  const isMutedMonth = monthKey !== centerMonth;
                   const cellKey = `${student.id}_${dateStr}`;
                   const saving = busyCell === cellKey;
                   const cellView = getCellView(student, dateStr);
@@ -1255,12 +1284,12 @@ export default function AttendanceTab({
                   const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                   const cellStyle = subPeriod
                     ? {
-                        ...styles.cell(cancelledDay),
+                        ...styles.cell(cancelledDay, isMutedMonth, isCurrentMonth),
                         ...styles.subPeriodCell(tone, border, isStart, isEnd, cancelledDay),
                         ...(isMonthBoundary ? styles.monthDivider : {}),
                       }
                     : {
-                        ...styles.cell(cancelledDay),
+                        ...styles.cell(cancelledDay, isMutedMonth, isCurrentMonth),
                         ...(isMonthBoundary ? styles.monthDivider : {}),
                       };
 
@@ -1313,10 +1342,18 @@ export default function AttendanceTab({
               <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: "#fafafa" }} />
             </tr>
 
-            <tr>
-              <td style={{ ...styles.rowHead, ...styles.totalsHead }}>Всього присутніх:</td>
+            <tr style={styles.totalsRow}>
+              <td style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
               {visibleDays.map((dateStr) => (
-                <td key={`total_${dateStr}`} style={{ ...styles.cell(isCancelledDate(dateStr)), fontWeight: 700, color: "#111827" }}>
+                <td
+                  key={`total_${dateStr}`}
+                  style={{
+                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                    ...styles.totalsRow,
+                    fontWeight: 700,
+                    color: "#111827",
+                  }}
+                >
                   {totalPresentByDate[dateStr] || 0}
                 </td>
               ))}
