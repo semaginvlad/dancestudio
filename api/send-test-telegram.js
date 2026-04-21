@@ -1,5 +1,4 @@
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions/index.js";
+import { withTelegramClient } from "./_lib/telegram-user-client.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -7,33 +6,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { username, message } = req.body;
+    const { chatId, username, message } = req.body || {};
+    const peer = chatId || username;
 
-    if (!username || !message) {
-      return res.status(400).json({ error: "username and message are required" });
+    if (!peer || !message) {
+      return res.status(400).json({ error: "chatId|username and message are required" });
     }
 
-    const apiId = Number(process.env.TELEGRAM_API_ID);
-    const apiHash = process.env.TELEGRAM_API_HASH;
-    const session = process.env.TELEGRAM_SESSION;
-
-    if (!apiId || !apiHash || !session) {
-      return res.status(500).json({ error: "Missing Telegram environment variables" });
-    }
-
-    const client = new TelegramClient(
-      new StringSession(session),
-      apiId,
-      apiHash,
-      { connectionRetries: 5 }
-    );
-
-    await client.connect();
-
-    const normalizedUsername = username.replace(/^@/, "");
-    await client.sendMessage(normalizedUsername, { message });
-
-    await client.disconnect();
+    await withTelegramClient(async (client) => {
+      await client.sendMessage(peer, { message });
+    });
 
     return res.status(200).json({ success: true });
   } catch (error) {
