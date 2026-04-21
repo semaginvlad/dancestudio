@@ -1068,6 +1068,11 @@ export default function AttendanceTab({
     return { bg: "#2563eb", mark };
   };
 
+  const groupStudentIdSet = useMemo(
+    () => new Set(studentIdsInGroup.map((id) => String(id))),
+    [studentIdsInGroup]
+  );
+
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
   }
@@ -1075,11 +1080,6 @@ export default function AttendanceTab({
   if (!currentGroup) {
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
-
-  const groupStudentIdSet = useMemo(
-    () => new Set(studentIdsInGroup.map((id) => String(id))),
-    [studentIdsInGroup]
-  );
 
   const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
