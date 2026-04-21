@@ -444,6 +444,7 @@ export default function AttendanceTab({
   attn,
   setAttn,
   students,
+  setStudents,
   studentMap,
   studentGrps,
   setStudentGrps,
@@ -462,8 +463,8 @@ export default function AttendanceTab({
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
-  const [addStudentId, setAddStudentId] = useState("");
-  const [addingStudent, setAddingStudent] = useState(false);
+  const [newStudentName, setNewStudentName] = useState("");
+  const [creatingStudent, setCreatingStudent] = useState(false);
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
   const menuPopupRef = useRef(null);
@@ -562,34 +563,47 @@ export default function AttendanceTab({
     });
   }, [studentIdsInGroup, studentMap, customOrders, localOrders, gid]);
 
-  const availableStudentsToAdd = useMemo(() => {
-    const inGroup = new Set(studentIdsInGroup);
-    return (students || [])
-      .filter((s) => s?.id && !inGroup.has(s.id))
-      .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b), "uk"));
-  }, [students, studentIdsInGroup]);
-
-  const handleAddStudentToGroup = async () => {
-    if (!gid || !addStudentId) return;
-    if (studentIdsInGroup.includes(addStudentId)) {
-      alert("Учениця вже є в цій групі.");
+  const handleCreateStudentInGroup = async () => {
+    const name = (newStudentName || "").trim();
+    if (!gid) return;
+    if (!name) {
+      alert("Введи ім'я учениці.");
       return;
     }
-    setAddingStudent(true);
+
+    const duplicateInGroup = orderedStudents.some(
+      (s) => normalizeName(getDisplayName(s)) === normalizeName(name)
+    );
+    if (duplicateInGroup) {
+      alert("Учениця з таким ім'ям уже є в цій групі.");
+      return;
+    }
+
+    setCreatingStudent(true);
     try {
-      const link = await db.addStudentGroup(addStudentId, gid);
+      const createdStudent = await db.insertStudent({ name });
+      const link = await db.addStudentGroup(createdStudent.id, gid);
+
+      if (typeof setStudents === "function") {
+        setStudents((prev) => [...(prev || []), createdStudent]);
+      }
       if (typeof setStudentGrps === "function") {
         setStudentGrps((prev) => {
           const list = prev || [];
-          if (list.some((sg) => sg.studentId === addStudentId && sg.groupId === gid)) return list;
-          return [...list, link || { id: `sg_${uid()}`, studentId: addStudentId, groupId: gid }];
+          if (list.some((sg) => sg.studentId === createdStudent.id && sg.groupId === gid)) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid }];
         });
       }
-      setAddStudentId("");
+      setLocalOrders((prev) => {
+        const arr = prev?.[gid] || customOrders?.[gid] || [];
+        if (arr.includes(createdStudent.id)) return prev;
+        return { ...(prev || {}), [gid]: [...arr, createdStudent.id] };
+      });
+      setNewStudentName("");
     } catch (err) {
-      alert(err?.message || "Не вдалося додати ученицю в групу.");
+      alert(err?.message || "Не вдалося створити ученицю.");
     } finally {
-      setAddingStudent(false);
+      setCreatingStudent(false);
     }
   };
 
@@ -1081,24 +1095,6 @@ export default function AttendanceTab({
             <option value="debt">Борг</option>
           </select>
 
-          <select
-            value={addStudentId}
-            onChange={(e) => setAddStudentId(e.target.value)}
-            style={styles.control}
-          >
-            <option value="">Додати ученицю в групу</option>
-            {availableStudentsToAdd.map((s) => (
-              <option key={s.id} value={s.id}>{getDisplayName(s)}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            style={styles.control}
-            disabled={!addStudentId || addingStudent}
-            onClick={handleAddStudentToGroup}
-          >
-            Додати
-          </button>
         </div>
 
         <div style={styles.legend}>
@@ -1289,6 +1285,29 @@ export default function AttendanceTab({
                 </td>
               </tr>
             )}
+
+            <tr>
+              <td style={styles.rowHead}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Додати ученицю</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    value={newStudentName}
+                    onChange={(e) => setNewStudentName(e.target.value)}
+                    placeholder="Ім'я учениці"
+                    style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}
+                  />
+                  <button
+                    type="button"
+                    style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                    onClick={handleCreateStudentInGroup}
+                    disabled={creatingStudent}
+                  >
+                    Додати
+                  </button>
+                </div>
+              </td>
+              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: "#fafafa" }} />
+            </tr>
 
             <tr>
               <td style={{ ...styles.rowHead, ...styles.totalsHead }}>Всього присутніх:</td>
