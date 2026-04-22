@@ -269,19 +269,25 @@ export default function MessagesTab({
     if (!chatId) return;
     const draftId = linkUiByChat[chatId]?.draftId || null;
     setLinkSavingChatId(chatId);
-    await saveMeta(chatId, { studentId: draftId });
-    setLinkSavingChatId("");
+    try {
+      await saveMeta(chatId, { studentId: draftId });
+    } finally {
+      setLinkSavingChatId("");
+    }
   };
 
   const handleClearLink = async (chatId) => {
     if (!chatId) return;
     setLinkSavingChatId(chatId);
-    await saveMeta(chatId, { studentId: null });
-    setLinkUiByChat((prev) => ({
-      ...prev,
-      [chatId]: { ...(prev[chatId] || {}), draftId: "" },
-    }));
-    setLinkSavingChatId("");
+    try {
+      await saveMeta(chatId, { studentId: null });
+      setLinkUiByChat((prev) => ({
+        ...prev,
+        [chatId]: { ...(prev[chatId] || {}), draftId: "" },
+      }));
+    } finally {
+      setLinkSavingChatId("");
+    }
   };
 
   const refreshMessages = async (chatId) => {
@@ -341,19 +347,6 @@ export default function MessagesTab({
             return (
               <div
                 key={dlg.id}
-                onClick={() => {
-                  onSelectStudent?.(dlg.id);
-                  setDraft("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelectStudent?.(dlg.id);
-                    setDraft("");
-                  }
-                }}
-                role="button"
-                tabIndex={0}
                 style={{
                   textAlign: "left",
                   padding: "12px 13px",
@@ -364,42 +357,47 @@ export default function MessagesTab({
                   boxShadow: active ? "0 10px 24px rgba(255, 94, 74, 0.28)" : "0 4px 14px rgba(0, 0, 0, 0.24)",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ color: "#eef2f7", fontSize: 14, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dlg.title}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                    <div style={{ color: "#8893a4", fontSize: 11, fontWeight: 600 }}>{dlg.lastMessageDate?.slice(0, 10) || "—"}</div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const panel = linkUiByChat[dlg.id];
-                        if (panel?.open) {
-                          setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), open: false } }));
-                          return;
-                        }
-                        openLinkPanel(dlg.id, dlg.linkedStudent?.id || metaByChat[dlg.id]?.student_id || "");
-                      }}
-                      style={{ border: "1px solid #3f4b5d", borderRadius: 10, background: "rgba(32, 41, 54, 0.85)", color: "#cfe0fb", fontSize: 11, fontWeight: 700, padding: "4px 7px", cursor: "pointer" }}
-                    >
-                      🔗
-                    </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectStudent?.(dlg.id);
+                    setDraft("");
+                  }}
+                  style={{ border: "none", background: "transparent", width: "100%", padding: 0, textAlign: "left", cursor: "pointer" }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ color: "#eef2f7", fontSize: 14, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dlg.title}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <div style={{ color: "#8893a4", fontSize: 11, fontWeight: 600 }}>{dlg.lastMessageDate?.slice(0, 10) || "—"}</div>
+                    </div>
                   </div>
-                </div>
-                <div style={{ color: "#a5aebc", fontSize: 12, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {dlg.lastMessageText || dlg.username || "Порожній діалог"}
-                </div>
+                  <div style={{ color: "#a5aebc", fontSize: 12, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {dlg.lastMessageText || dlg.username || "Порожній діалог"}
+                  </div>
+                </button>
                 <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, minHeight: 18 }}>
                   <span style={{ fontSize: 11, color: "#8fa1b8" }}>CRM:</span>
                   <span style={{ fontSize: 11, color: dlg.linkedStudent ? "#bfe7d0" : "#96a3b8", fontWeight: 600 }}>
                     {dlg.linkedStudent ? getDisplayName(dlg.linkedStudent) : "не прив'язано"}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const panel = linkUiByChat[dlg.id];
+                      if (panel?.open) {
+                        setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), open: false } }));
+                        return;
+                      }
+                      openLinkPanel(dlg.id, dlg.linkedStudent?.id || metaByChat[dlg.id]?.student_id || "");
+                    }}
+                    style={{ marginLeft: "auto", border: "1px solid #3f4b5d", borderRadius: 10, background: "rgba(32, 41, 54, 0.85)", color: "#cfe0fb", fontSize: 11, fontWeight: 700, padding: "4px 7px", cursor: "pointer" }}
+                  >
+                    🔗
+                  </button>
                 </div>
 
                 {linkUiByChat[dlg.id]?.open && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ marginTop: 8, padding: 8, borderRadius: 12, border: "1px solid #3a4658", background: "#111821" }}
-                  >
+                  <div style={{ marginTop: 8, padding: 8, borderRadius: 12, border: "1px solid #3a4658", background: "#111821" }}>
                     <input
                       value={linkSearchByChat[dlg.id] || ""}
                       onChange={(e) => setLinkSearchByChat((prev) => ({ ...prev, [dlg.id]: e.target.value }))}
@@ -431,7 +429,11 @@ export default function MessagesTab({
                     <div style={{ display: "flex", gap: 6 }}>
                       <button
                         type="button"
-                        onClick={() => handleSaveLink(dlg.id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSaveLink(dlg.id);
+                        }}
                         disabled={linkSavingChatId === dlg.id}
                         style={{ border: "1px solid #ff6a58", borderRadius: 9, background: "rgba(255, 106, 88, 0.16)", color: "#ffd5ce", padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
                       >
@@ -439,7 +441,11 @@ export default function MessagesTab({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleClearLink(dlg.id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleClearLink(dlg.id);
+                        }}
                         disabled={linkSavingChatId === dlg.id}
                         style={{ border: "1px solid #546279", borderRadius: 9, background: "#182230", color: "#c2cddd", padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
                       >
