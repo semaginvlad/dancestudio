@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
 
@@ -43,14 +43,15 @@ export default function MessagesTab({
   const [railFilter, setRailFilter] = useState("all");
   const [searchQ, setSearchQ] = useState("");
   const [draft, setDraft] = useState("");
-  const [pendingLinkByChat, setPendingLinkByChat] = useState({});
-  const [noteDraftByChat, setNoteDraftByChat] = useState({});
+  const [studentSearchQ, setStudentSearchQ] = useState("");
+  const [studentLinkDraftId, setStudentLinkDraftId] = useState("");
+  const [internalNoteDraft, setInternalNoteDraft] = useState("");
+  const [customTemplateDraft, setCustomTemplateDraft] = useState("");
 
   const [dialogs, setDialogs] = useState([]);
   const [dialogsError, setDialogsError] = useState("");
   const [messagesByChat, setMessagesByChat] = useState({});
   const [metaByChat, setMetaByChat] = useState({});
-  const metaSaveTimersRef = useRef({});
 
   const membershipByStudent = useMemo(
     () =>
@@ -78,12 +79,6 @@ export default function MessagesTab({
   const groupMap = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g])), [groups]);
   const directionMap = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [d.id, d])), []);
 
-  useEffect(() => {
-    return () => {
-      Object.values(metaSaveTimersRef.current).forEach((timerId) => clearTimeout(timerId));
-      metaSaveTimersRef.current = {};
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,7 +224,7 @@ export default function MessagesTab({
   const resolvedDraft = draft || trainerDraft || templateText || "";
 
   const saveMeta = async (chatId, patch) => {
-    if (!chatId) return false;
+    if (!chatId) return null;
     const current = metaByChat[chatId] || {};
     const body = {
       chatId,
@@ -246,53 +241,33 @@ export default function MessagesTab({
     const payload = await res.json();
     if (res.ok) {
       setMetaByChat((prev) => ({ ...prev, [chatId]: payload.meta }));
-      setPendingLinkByChat((prev) => {
-        const next = { ...prev };
-        delete next[chatId];
-        return next;
-      });
-      return true;
+      return payload.meta;
     }
-    return false;
+    return null;
   };
 
-  const queueMetaSave = (chatId, patch) => {
+  useEffect(() => {
+    const chatId = activeDialog?.id;
     if (!chatId) return;
-    if (metaSaveTimersRef.current[chatId]) {
-      clearTimeout(metaSaveTimersRef.current[chatId]);
-    }
-    metaSaveTimersRef.current[chatId] = setTimeout(() => {
-      saveMeta(chatId, patch);
-      delete metaSaveTimersRef.current[chatId];
-    }, 500);
-  };
+    const meta = metaByChat[chatId] || {};
+    setStudentLinkDraftId(meta.student_id || "");
+    setInternalNoteDraft(meta.internal_note || "");
+    setCustomTemplateDraft(meta.custom_template || "");
+    setStudentSearchQ("");
+  }, [activeDialog?.id, metaByChat]);
 
-  const handleLinkStudent = async (chatId, studentIdRaw) => {
-    const studentId = studentIdRaw || null;
-    setMetaByChat((prev) => ({
-      ...prev,
-      [chatId]: { ...(prev[chatId] || {}), student_id: studentId },
-    }));
+  const matchedStudents = useMemo(() => {
+    const q = studentSearchQ.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((st) => getDisplayName(st).toLowerCase().includes(q));
+  }, [studentSearchQ, students]);
 
-    if (!studentId) {
-      await saveMeta(chatId, { studentId: null });
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/link-student-telegram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId, chatId }),
-      });
-      const payload = await res.json();
-      if (res.ok && payload?.meta) {
-        setMetaByChat((prev) => ({ ...prev, [chatId]: payload.meta }));
-      } else {
-        await saveMeta(chatId, { studentId });
-      }
-    } catch {
-      await saveMeta(chatId, { studentId });
+  const handleSaveLink = async () => {
+    if (!activeDialog?.id) return;
+    const saved = await saveMeta(activeDialog.id, { studentId: studentLinkDraftId || null });
+    if (saved?.student_id) {
+      const st = studentMap[saved.student_id];
+      if (st) setStudentSearchQ(getDisplayName(st));
     }
   };
 
@@ -394,19 +369,25 @@ export default function MessagesTab({
 
             <div style={{ marginBottom: 10, padding: 12, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
               <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 8, fontSize: 13, letterSpacing: "0.01em" }}>CRM block</div>
+              <input
+                value={studentSearchQ}
+                onChange={(e) => setStudentSearchQ(e.target.value)}
+                placeholder="Пошук учениці..."
+                style={{ width: "100%", borderRadius: 12, border: "1px solid #465062", padding: "9px 10px", marginBottom: 8, background: "#0f1319", color: "#e5ecf8" }}
+              />
               <select
-                value={pendingLinkByChat[activeDialog.id] ?? metaByChat[activeDialog.id]?.student_id ?? ""}
+                value={studentLinkDraftId}
                 onChange={(e) => {
-                  setPendingLinkByChat((prev) => ({ ...prev, [activeDialog.id]: e.target.value || null }));
+                  setStudentLinkDraftId(e.target.value || "");
                 }}
                 style={{ width: "100%", borderRadius: 12, border: "1px solid #465062", padding: "9px 10px", marginBottom: 8, background: "#0f1319", color: "#e5ecf8" }}
               >
                 <option value="">Не прив'язано до учениці</option>
-                {students.map((st) => <option key={st.id} value={st.id}>{getDisplayName(st)}</option>)}
+                {matchedStudents.map((st) => <option key={st.id} value={st.id}>{getDisplayName(st)}</option>)}
               </select>
               <button
                 type="button"
-                onClick={() => handleLinkStudent(activeDialog.id, pendingLinkByChat[activeDialog.id] ?? metaByChat[activeDialog.id]?.student_id ?? null)}
+                onClick={handleSaveLink}
                 style={{ border: "1px solid #ff6a58", borderRadius: 11, background: "rgba(255, 106, 88, 0.16)", color: "#ffd5ce", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12, marginBottom: 8 }}
               >
                 Зберегти прив’язку
@@ -426,22 +407,15 @@ export default function MessagesTab({
             <div style={{ marginBottom: 10, padding: 12, border: "1px solid #374458", borderRadius: 16, background: "#182130" }}>
               <div style={{ fontWeight: 800, color: "#f5f8ff", marginBottom: 6, fontSize: 13 }}>Внутрішня нотатка</div>
               <textarea
-                value={noteDraftByChat[activeDialog.id] ?? metaByChat[activeDialog.id]?.internal_note ?? ""}
-                onChange={(e) => {
-                  const nextNote = e.target.value;
-                  setNoteDraftByChat((prev) => ({ ...prev, [activeDialog.id]: nextNote }));
-                }}
+                value={internalNoteDraft}
+                onChange={(e) => setInternalNoteDraft(e.target.value)}
                 rows={3}
                 style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 9, resize: "vertical", background: "#0f141b", color: "#e8eef7" }}
               />
               <button
                 type="button"
                 onClick={async () => {
-                  const nextNote = noteDraftByChat[activeDialog.id] ?? "";
-                  const ok = await saveMeta(activeDialog.id, { internalNote: nextNote });
-                  if (ok) {
-                    setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: { ...(prev[activeDialog.id] || {}), internal_note: nextNote } }));
-                  }
+                  await saveMeta(activeDialog.id, { internalNote: internalNoteDraft });
                 }}
                 style={{ marginTop: 8, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
               >
@@ -452,15 +426,18 @@ export default function MessagesTab({
             <div style={{ marginBottom: 10, padding: 12, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
               <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 6, fontSize: 13 }}>Персональний шаблон чату</div>
               <textarea
-                value={metaByChat[activeDialog.id]?.custom_template || ""}
-                onChange={(e) => {
-                  setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: { ...(prev[activeDialog.id] || {}), custom_template: e.target.value } }));
-                  queueMetaSave(activeDialog.id, { customTemplate: e.target.value });
-                }}
-                onBlur={(e) => saveMeta(activeDialog.id, { customTemplate: e.target.value })}
+                value={customTemplateDraft}
+                onChange={(e) => setCustomTemplateDraft(e.target.value)}
                 rows={2}
                 style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 9, resize: "vertical", background: "#0f141b", color: "#e8eef7" }}
               />
+              <button
+                type="button"
+                onClick={() => saveMeta(activeDialog.id, { customTemplate: customTemplateDraft })}
+                style={{ marginTop: 8, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
+              >
+                Зберегти шаблон
+              </button>
             </div>
 
             {activeDialog.trainer && (
