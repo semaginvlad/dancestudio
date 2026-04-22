@@ -217,6 +217,69 @@ export default function MessagesTab({
     return parts.join("\n\n");
   }, [activeDialog, groups, membershipByStudent, students, subsByStudent]);
 
+  const crmSummary = useMemo(() => {
+    const st = activeDialog?.linkedStudent;
+    if (!st) return null;
+
+    const groupIds = normalizeStudentGroupIds(st, membershipByStudent[st.id] || []);
+    const groupNames = groupIds.map((gid) => groupMap[gid]?.name || gid);
+    const directionNames = Array.from(
+      new Set(
+        groupIds
+          .map((gid) => {
+            const g = groupMap[gid];
+            const d = g ? directionMap[g.directionId] : null;
+            return d?.name || null;
+          })
+          .filter(Boolean)
+      )
+    );
+
+    const studentSubs = subsByStudent[st.id] || [];
+    const sortedSubs = [...studentSubs].sort((a, b) => {
+      const aKey = a.endDate || a.activationDate || a.startDate || a.created_at || "";
+      const bKey = b.endDate || b.activationDate || b.startDate || b.created_at || "";
+      return bKey.localeCompare(aKey);
+    });
+    const activeSub = sortedSubs.find((s) => {
+      const status = getSubStatus(s);
+      return status === "active" || status === "warning";
+    }) || null;
+    const summarySub = activeSub || sortedSubs[0] || null;
+    const summarySubStatus = summarySub ? getSubStatus(summarySub) : null;
+    const remainingTrainings = summarySub
+      ? Math.max(0, Number(summarySub.totalTrainings || 0) - Number(summarySub.usedTrainings || 0))
+      : null;
+    const endDate = summarySub?.endDate || null;
+
+    const subIds = new Set(studentSubs.map((s) => s.id).filter(Boolean));
+    const lastAttendance = attn
+      .filter((a) => String(a.studentId || "") === String(st.id) || (a.subId && subIds.has(a.subId)))
+      .map((a) => a.date)
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0] || null;
+
+    return {
+      studentName: getDisplayName(st),
+      groupNames,
+      directionNames,
+      summarySubStatus,
+      remainingTrainings,
+      endDate,
+      lastAttendance,
+    };
+  }, [activeDialog, attn, directionMap, groupMap, membershipByStudent, subsByStudent]);
+
+  const orderedMessages = useMemo(() => {
+    const list = [...(messagesByChat[activeDialog?.id] || [])];
+    return list.sort((a, b) => {
+      const at = new Date(a?.date || 0).getTime() || 0;
+      const bt = new Date(b?.date || 0).getTime() || 0;
+      if (at !== bt) return at - bt;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+  }, [activeDialog?.id, messagesByChat]);
+
   const templateText =
     activeDialog?.linkedStudent?.messageTemplate ||
     activeDialog?.linkedStudent?.message_template ||
@@ -480,13 +543,15 @@ export default function MessagesTab({
                 </span>
               </div>
               <div style={{ color: "#7f8ea3", fontSize: 11, marginBottom: 6 }}>Керування привʼязкою — в картці чату ліворуч (кнопка 🔗).</div>
-              {activeDialog.linkedStudent && (
-                <div style={{ color: "#a5b2c5", fontSize: 12 }}>
-                  Групи: {normalizeStudentGroupIds(activeDialog.linkedStudent, membershipByStudent[activeDialog.linkedStudent.id] || []).map((gid) => {
-                    const g = groupMap[gid];
-                    const d = g ? directionMap[g.directionId] : null;
-                    return g ? `${g.name}${d ? ` (${d.name})` : ""}` : gid;
-                  }).join(", ") || "—"}
+              {crmSummary && (
+                <div style={{ color: "#a5b2c5", fontSize: 12, display: "grid", gap: 2 }}>
+                  <div>Учениця: <b style={{ color: "#d6e6fa" }}>{crmSummary.studentName}</b></div>
+                  <div>Групи: {crmSummary.groupNames.join(", ") || "—"}</div>
+                  <div>Напрямки: {crmSummary.directionNames.join(", ") || "—"}</div>
+                  <div>Статус абонемента: {crmSummary.summarySubStatus || "—"}</div>
+                  <div>Залишок занять: {crmSummary.remainingTrainings ?? "—"}</div>
+                  <div>Дата завершення: {crmSummary.endDate || "—"}</div>
+                  <div>Останнє відвідування: {crmSummary.lastAttendance || "—"}</div>
                 </div>
               )}
             </div>
@@ -544,7 +609,7 @@ export default function MessagesTab({
             )}
 
             <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: "1px solid #323a45", paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
-              {(messagesByChat[activeDialog.id] || []).map((m) => (
+              {orderedMessages.map((m) => (
                 <div key={m.id} style={{ marginBottom: 8, textAlign: m.out ? "right" : "left" }}>
                   <div style={{ display: "inline-block", background: m.out ? "#2b3e57" : "#1f2732", borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: "1px solid #3a4759" }}>
                     <div style={{ fontSize: 13, color: "#e8eef7", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text || "—"}</div>
