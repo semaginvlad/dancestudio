@@ -66,7 +66,7 @@ export default function App() {
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
-  const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
+  const [warnedStudents, setWarnedStudents] = useState({});
   const [restoreGroupByStudent, setRestoreGroupByStudent] = useState({});
   const [selectedMessageStudentId, setSelectedMessageStudentId] = useState("");
 
@@ -117,10 +117,10 @@ export default function App() {
   }
 };
 
-      const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
+      const [st, gr, su, at, ca, sg, wl, ord, warned] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist), fetchCustomOrders()
+        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents)
       ]);
 
       if (st) setStudents(st);
@@ -130,8 +130,8 @@ export default function App() {
       if (ca) setCancelled(ca);
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
-      
-    setCustomOrders(ord || {});
+      setCustomOrders(ord || {});
+      setWarnedStudents(warned || {});
     } catch (e) {
       console.error("Global load error", e);
     } finally {

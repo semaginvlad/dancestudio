@@ -702,11 +702,6 @@ export default function AttendanceTab({
   };
 
   const handleMessageStudent = (student) => {
-    if (!student?.telegram) {
-      alert("Для цієї учениці не вказано Telegram.");
-      setOpenMenuState(null);
-      return;
-    }
     if (typeof onActionMessageStudent === "function") {
       onActionMessageStudent(student);
     }
@@ -717,12 +712,16 @@ export default function AttendanceTab({
 
   const isWarned = (studentId) => !!warnedStudents?.[warnedKey(studentId)];
 
-  const toggleWarned = (studentId, checked) => {
+  const toggleWarned = async (studentId, checked) => {
     if (typeof setWarnedStudents !== "function") return;
-    setWarnedStudents((prev) => ({
-      ...(prev || {}),
-      [warnedKey(studentId)]: !!checked,
-    }));
+    const key = warnedKey(studentId);
+    setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !!checked }));
+    try {
+      await db.upsertWarnedStudent(gid, studentId, checked);
+    } catch (err) {
+      setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !checked }));
+      alert(err?.message || "Не вдалося зберегти статус сповіщення");
+    }
   };
 
   const openStudentMenu = (student, btnEl) => {
@@ -1398,10 +1397,8 @@ export default function AttendanceTab({
                 <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                 <button
                   type="button"
-                  style={{ ...styles.menuItem, ...(!student.telegram ? styles.menuItemDisabled : {}) }}
+                  style={styles.menuItem}
                   onClick={() => handleMessageStudent(student)}
-                  disabled={!student.telegram}
-                  title={!student.telegram ? "Telegram не вказано" : ""}
                 >
                   Написати повідомлення
                 </button>

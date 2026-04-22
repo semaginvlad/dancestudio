@@ -374,6 +374,38 @@ export async function deleteCancelled(id) {
   if (error) throw error;
 }
 
+// ─── ATTENDANCE WARNED FLAGS ───
+const warnedKey = (groupId, studentId) => `${groupId}:${studentId}`;
+
+export async function fetchWarnedStudents() {
+  const { data, error } = await supabase.from('attendance_warned_students').select('*');
+  if (error) {
+    console.warn('attendance_warned_students:', error.message);
+    return {};
+  }
+  return (data || []).reduce((acc, row) => {
+    const key = warnedKey(row.group_id, row.student_id);
+    acc[key] = !!row.warned;
+    return acc;
+  }, {});
+}
+
+export async function upsertWarnedStudent(groupId, studentId, warned) {
+  const payload = {
+    group_id: String(groupId),
+    student_id: String(studentId),
+    warned: !!warned,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('attendance_warned_students')
+    .upsert(payload, { onConflict: 'group_id,student_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // ─── WAITLIST ───
 export async function fetchWaitlist() {
   const { data, error } = await supabase.from('waitlist').select('*');
