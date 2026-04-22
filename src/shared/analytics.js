@@ -4,6 +4,10 @@ const PAID_PLAN_TYPES = new Set(['4pack', '8pack', '12pack']);
 
 const asDate = (value) => {
   if (!value) return null;
+  if (value instanceof Date) {
+    const copy = new Date(value.getTime());
+    return Number.isNaN(copy.getTime()) ? null : copy;
+  }
   const d = new Date(`${String(value).slice(0, 10)}T12:00:00`);
   return Number.isNaN(d.getTime()) ? null : d;
 };

@@ -575,6 +575,7 @@ export default function App() {
             subs={subsExt}
             attn={attn}
             analyticsFoundation={analytics.foundation}
+            cancelled={cancelled}
           />
         )}
         

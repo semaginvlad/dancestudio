@@ -2,38 +2,51 @@ import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { buildAnalyticsFoundation, getTrainerAnalyticsCard } from "../shared/analytics";
 
-const card = {
-  border: "1px solid #dde5f0",
-  borderRadius: 18,
-  background: "#fff",
-  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)",
+const theme = {
+  bg: "#0f131a",
+  panel: "#171d27",
+  panelSoft: "#1e2633",
+  border: "#2b3546",
+  text: "#e7eefc",
+  textSoft: "#9fb0ca",
+  primary: "#ff6f61",
+  secondary: "#4d7cff",
+  good: "#25b87a",
+  warn: "#f59f3a",
+  bad: "#ea5455",
 };
 
-const tileCard = {
+const card = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 18,
+  background: theme.panel,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+};
+
+const tile = {
   ...card,
   padding: 14,
   cursor: "pointer",
-  transition: "all 0.2s ease",
+  textAlign: "left",
 };
 
 const PAID_PACKS = new Set(["4pack", "8pack", "12pack"]);
 
 const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1, 12);
-const monthEnd = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0, 12);
 const pad = (n) => String(n).padStart(2, "0");
 const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const monthLabel = (d) => d.toLocaleDateString("uk-UA", { month: "long", year: "numeric" });
+const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const inRange = (dateStr, start, end) => !!dateStr && dateStr >= start && dateStr <= end;
-const getSubRefDate = (s) => s.startDate || String(s.created_at || "").slice(0, 10);
 const pct = (v, total) => (total > 0 ? Math.round((v / total) * 100) : 0);
+const getSubRefDate = (s) => s.startDate || String(s.created_at || "").slice(0, 10);
 
 const Delta = ({ value = 0 }) => (
   <span style={{
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 700,
-    color: value >= 0 ? "#12805c" : "#b42318",
-    background: value >= 0 ? "#e8f7ef" : "#fdecec",
+    color: value >= 0 ? theme.good : theme.bad,
+    background: value >= 0 ? "rgba(37,184,122,0.15)" : "rgba(234,84,85,0.15)",
     borderRadius: 999,
     padding: "3px 8px",
   }}>
@@ -41,66 +54,65 @@ const Delta = ({ value = 0 }) => (
   </span>
 );
 
-const DetailStat = ({ label, value, tone = "#1f2b3d" }) => (
-  <div style={{ border: "1px solid #dfe7f3", borderRadius: 12, padding: "10px 12px", background: "#fff" }}>
-    <div style={{ fontSize: 12, color: "#7b8ca5" }}>{label}</div>
-    <div style={{ fontSize: 22, fontWeight: 800, color: tone }}>{value}</div>
+const DetailMetric = ({ label, value, tone = theme.text }) => (
+  <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "10px 12px", background: theme.panelSoft }}>
+    <div style={{ fontSize: 11, color: theme.textSoft }}>{label}</div>
+    <div style={{ fontSize: 21, fontWeight: 800, color: tone }}>{value}</div>
   </div>
 );
 
-function ProgressRing({ value = 0, label, sublabel, onClick }) {
-  const radius = 38;
+function ProgressRing({ value = 0, label, sublabel, color = theme.secondary, onClick }) {
+  const radius = 34;
   const circumference = 2 * Math.PI * radius;
   const safe = Math.max(0, Math.min(100, value));
   const dash = `${(safe / 100) * circumference} ${circumference}`;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{ ...card, padding: 14, textAlign: "left", border: "1px solid #dde6f2", cursor: "pointer", background: "#fff" }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <svg width="90" height="90" viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r={radius} stroke="#ebf0f7" strokeWidth="10" fill="none" />
+    <button type="button" onClick={onClick} style={{ ...tile, padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <svg width="84" height="84" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r={radius} stroke="#273143" strokeWidth="10" fill="none" />
           <circle
             cx="50"
             cy="50"
             r={radius}
-            stroke="#3867d6"
+            stroke={color}
             strokeWidth="10"
             fill="none"
             strokeDasharray={dash}
             transform="rotate(-90 50 50)"
             strokeLinecap="round"
           />
-          <text x="50" y="55" textAnchor="middle" fontSize="16" fontWeight="800" fill="#1f2b3d">{safe}%</text>
+          <text x="50" y="55" textAnchor="middle" fontSize="16" fontWeight="800" fill={theme.text}>{safe}%</text>
         </svg>
         <div>
-          <div style={{ fontSize: 13, color: "#5e6f89", marginBottom: 4 }}>{label}</div>
-          <div style={{ fontSize: 12, color: "#8b9bb2" }}>{sublabel}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>{label}</div>
+          <div style={{ fontSize: 12, color: "#7f93b2", marginTop: 2 }}>{sublabel}</div>
         </div>
       </div>
     </button>
   );
 }
 
-function MiniBars({ rows = [], onClick }) {
-  const max = Math.max(...rows.map((r) => r.value), 1);
-  return (
-    <button type="button" onClick={onClick} style={{ ...card, width: "100%", padding: 14, border: "1px solid #dde6f2", cursor: "pointer", background: "#fff", textAlign: "left" }}>
-      <div style={{ fontWeight: 700, marginBottom: 10, color: "#24364d" }}>Trial / Single / Paid mix</div>
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", height: 100 }}>
-        {rows.map((r) => (
-          <div key={r.key} style={{ flex: 1, minWidth: 40 }}>
-            <div style={{ fontSize: 11, color: "#5c6d86", marginBottom: 4, textAlign: "center" }}>{r.value}</div>
-            <div style={{ height: `${Math.max(8, (r.value / max) * 70)}px`, borderRadius: 10, background: r.color }} />
-            <div style={{ fontSize: 11, color: "#8b9bb2", marginTop: 6, textAlign: "center" }}>{r.label}</div>
-          </div>
-        ))}
-      </div>
-    </button>
-  );
+function parseScheduleDays(schedule) {
+  if (!Array.isArray(schedule)) return [];
+  return schedule
+    .map((s) => Number(s?.day))
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+}
+
+function countHeldSessions(group, start, end, cancelledSet) {
+  const days = parseScheduleDays(group?.schedule);
+  if (!days.length) return 0;
+  const d = new Date(`${start}T12:00:00`);
+  const endDate = new Date(`${end}T12:00:00`);
+  let count = 0;
+  while (d <= endDate) {
+    const iso = toISO(d);
+    if (days.includes(d.getDay()) && !cancelledSet.has(`${group.id}:${iso}`)) count += 1;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
 }
 
 export default function TrainersTab({
@@ -113,6 +125,7 @@ export default function TrainersTab({
   studentGrps = [],
   subs = [],
   attn = [],
+  cancelled = [],
 }) {
   const [selectedTrainerId, setSelectedTrainerId] = useState(trainers[0]?.id || "");
   const [isCreateMode, setIsCreateMode] = useState(false);
@@ -166,6 +179,10 @@ export default function TrainersTab({
 
   const trainerGroupSet = useMemo(() => new Set(trainerGroupIds.map(String)), [trainerGroupIds]);
   const trainerBoundGroups = useMemo(() => groups.filter((g) => trainerGroupSet.has(String(g.id))), [groups, trainerGroupSet]);
+  const cancelledSet = useMemo(
+    () => new Set((cancelled || []).map((c) => `${c.groupId}:${c.date}`)),
+    [cancelled],
+  );
 
   const scopedData = useMemo(() => {
     const scopedStudentGrps = studentGrps.filter((sg) => trainerGroupSet.has(String(sg.groupId)));
@@ -183,7 +200,6 @@ export default function TrainersTab({
       scopedAttn,
       scopedTrainer,
       scopedTrainerGroups,
-      scopedStudentIdSet,
     };
   }, [attn, selectedTrainer, selectedTrainerId, studentGrps, students, subs, trainerGroupSet, trainerGroups]);
 
@@ -200,8 +216,7 @@ export default function TrainersTab({
   }), [periodDate, scopedData, trainerBoundGroups]);
 
   const foundationPrev = useMemo(() => {
-    const d = monthStart(periodDate);
-    d.setMonth(d.getMonth() - 1);
+    const d = monthStart(new Date(periodDate.getFullYear(), periodDate.getMonth() - 1, 1));
     return buildAnalyticsFoundation({
       students: scopedData.scopedStudents,
       groups: trainerBoundGroups,
@@ -221,6 +236,44 @@ export default function TrainersTab({
   const range = foundationCurrent.period;
   const rangePrev = foundationPrev.period;
 
+  const groupCards = useMemo(() => trainerBoundGroups.map((g) => {
+    const groupStudentIds = new Set(
+      studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).map((sg) => String(sg.studentId)),
+    );
+    const groupStudents = groupStudentIds.size;
+    const groupActiveSubs = subs.filter((s) => String(s.groupId) === String(g.id) && s.status !== "expired").length;
+    const groupAttnRows = attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, range.start, range.end));
+    const groupAttnCount = groupAttnRows.reduce((sum, row) => sum + (row.quantity || 1), 0);
+    const heldSessions = countHeldSessions(g, range.start, range.end, cancelledSet);
+    const avgAttendancePerSession = heldSessions > 0 ? Number((groupAttnCount / heldSessions).toFixed(2)) : 0;
+    const problemNoActive = Array.from(groupStudentIds).filter((studentId) => !subs.some((s) => String(s.groupId) === String(g.id) && String(s.studentId) === studentId && s.status !== "expired")).length;
+
+    const trialCount = groupAttnRows.filter((a) => a.entryType === "trial" || a.guestType === "trial").length;
+    const singleCount = groupAttnRows.filter((a) => a.entryType === "single" || a.guestType === "single").length;
+    const paidCount = groupAttnRows.filter((a) => !a.entryType || a.entryType === "subscription").length;
+
+    return {
+      groupId: g.id,
+      groupName: g.name,
+      students: groupStudents,
+      activeSubs: groupActiveSubs,
+      attendance: groupAttnCount,
+      heldSessions,
+      avgAttendancePerSession,
+      noActive: problemNoActive,
+      fillPct: pct(groupActiveSubs, Math.max(groupStudents, 1)),
+      trialCount,
+      singleCount,
+      paidCount,
+    };
+  }), [attn, cancelledSet, range.end, range.start, studentGrps, subs, trainerBoundGroups]);
+
+  const trainerAggregateAvg = useMemo(() => {
+    const totalAttendance = groupCards.reduce((s, g) => s + g.attendance, 0);
+    const totalSessions = groupCards.reduce((s, g) => s + g.heldSessions, 0);
+    return totalSessions > 0 ? Number((totalAttendance / totalSessions).toFixed(2)) : 0;
+  }, [groupCards]);
+
   const trainerKpis = useMemo(() => {
     const studentsCount = trainerCard?.studentCount || 0;
     const studentsPrev = trainerCardPrev?.studentCount || 0;
@@ -236,65 +289,47 @@ export default function TrainersTab({
     const singlesPrev = trainerCardPrev?.singleCount || 0;
 
     return [
-      { id: "students", title: "Учениць", value: studentsCount, delta: studentsCount - studentsPrev },
-      { id: "activeSubs", title: "Активні абонементи", value: activeSubs, delta: activeSubs - activeSubsPrev },
-      { id: "newSubs", title: "Нові абонементи", value: newSubs, delta: newSubs - newSubsPrev },
-      { id: "renewals", title: "Продовження", value: renewals, delta: renewals - renewalsPrev },
-      { id: "trials", title: "Пробні", value: trials, delta: trials - trialsPrev },
-      { id: "singles", title: "Разові", value: singles, delta: singles - singlesPrev },
+      { id: "students", title: "Учениць", value: studentsCount, delta: studentsCount - studentsPrev, color: theme.secondary },
+      { id: "activeSubs", title: "Активні абонементи", value: activeSubs, delta: activeSubs - activeSubsPrev, color: theme.good },
+      { id: "newSubs", title: "Нові абонементи", value: newSubs, delta: newSubs - newSubsPrev, color: theme.primary },
+      { id: "renewals", title: "Продовження", value: renewals, delta: renewals - renewalsPrev, color: theme.warn },
+      { id: "trials", title: "Пробні", value: trials, delta: trials - trialsPrev, color: "#8b7bff" },
+      { id: "singles", title: "Разові", value: singles, delta: singles - singlesPrev, color: "#51c4d3" },
+      { id: "avgSession", title: "Сер. відвідуваність/заняття", value: trainerAggregateAvg, delta: Number((trainerAggregateAvg - (foundationPrev.domains.attendance.count / Math.max(1, groupCards.reduce((s, g) => s + g.heldSessions, 0)))).toFixed(2)), color: theme.secondary },
     ];
-  }, [foundationCurrent.metrics.newSubscriptions, foundationCurrent.metrics.renewals, foundationPrev.metrics.newSubscriptions, foundationPrev.metrics.renewals, trainerCard, trainerCardPrev]);
+  }, [foundationCurrent, foundationPrev, groupCards, trainerAggregateAvg, trainerCard, trainerCardPrev]);
 
-  const trendSeries = foundationCurrent.domains.attendance.line;
+  const trendCurrent = foundationCurrent.domains.attendance.line;
+  const prevLineMap = useMemo(() => {
+    const rows = foundationPrev.domains.attendance.line || [];
+    return Object.fromEntries(rows.map((r) => [r.x, r.y]));
+  }, [foundationPrev.domains.attendance.line]);
 
   const monthBreakdown = useMemo(() => {
     const trialVal = foundationCurrent.domains.subscriptions.byPlan.find((x) => x.plan === "trial")?.value || 0;
     const singleVal = foundationCurrent.domains.subscriptions.byPlan.find((x) => x.plan === "single")?.value || 0;
     const paidVal = (foundationCurrent.metrics.newSubscriptions || 0) + (foundationCurrent.metrics.renewals || 0);
     return [
-      { key: "trial", label: "Пробні", value: trialVal, color: "#7e57c2" },
-      { key: "single", label: "Разові", value: singleVal, color: "#0097a7" },
-      { key: "paid", label: "Оплачені", value: paidVal, color: "#2e7d32" },
+      { key: "trial", label: "Пробні", value: trialVal, color: "#8b7bff" },
+      { key: "single", label: "Разові", value: singleVal, color: "#51c4d3" },
+      { key: "paid", label: "Оплачені", value: paidVal, color: theme.good },
     ];
   }, [foundationCurrent]);
 
-  const groupCards = useMemo(() => trainerBoundGroups.map((g) => {
-    const groupStudentIds = new Set(
-      studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).map((sg) => String(sg.studentId)),
-    );
-    const groupStudents = groupStudentIds.size;
-    const groupActiveSubs = subs.filter((s) => String(s.groupId) === String(g.id) && s.status !== "expired").length;
-    const groupAttnRows = attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, range.start, range.end));
-    const groupAttnCount = groupAttnRows.reduce((sum, row) => sum + (row.quantity || 1), 0);
-    const avgAttendance = groupStudents ? Number((groupAttnCount / groupStudents).toFixed(2)) : 0;
-    const problemNoActive = Array.from(groupStudentIds).filter((studentId) => !subs.some((s) => String(s.groupId) === String(g.id) && String(s.studentId) === studentId && s.status !== "expired")).length;
-
-    return {
-      groupId: g.id,
-      groupName: g.name,
-      students: groupStudents,
-      activeSubs: groupActiveSubs,
-      avgAttendance,
-      attendance: groupAttnCount,
-      noActive: problemNoActive,
-      fillPct: pct(groupActiveSubs, Math.max(groupStudents, 1)),
-    };
-  }), [attn, range.end, range.start, studentGrps, subs, trainerBoundGroups]);
+  const renewalsRiskBlock = useMemo(() => {
+    const renewals = foundationCurrent.metrics.renewals || 0;
+    const expired = scopedData.scopedSubs.filter((s) => s.endDate && inRange(s.endDate, range.start, range.end)).length;
+    const noRenewal = scopedData.scopedSubs.filter((s) => PAID_PACKS.has(s.planType) && s.endDate && inRange(s.endDate, range.start, range.end) && !scopedData.scopedSubs.some((n) => PAID_PACKS.has(n.planType) && String(n.studentId) === String(s.studentId) && getSubRefDate(n) > s.endDate)).length;
+    return { renewals, expired, noRenewal };
+  }, [foundationCurrent.metrics.renewals, range.end, range.start, scopedData.scopedSubs]);
 
   const insights = useMemo(() => {
     if (!groupCards.length) return [];
-    const strongest = [...groupCards].sort((a, b) => b.attendance - a.attendance)[0];
-    const weak = [...groupCards].sort((a, b) => a.attendance - b.attendance)[0];
+    const strongest = [...groupCards].sort((a, b) => b.avgAttendancePerSession - a.avgAttendancePerSession)[0];
+    const weak = [...groupCards].sort((a, b) => a.avgAttendancePerSession - b.avgAttendancePerSession)[0];
 
     const renewalsNow = foundationCurrent.metrics.renewals || 0;
     const renewalsPrev = foundationPrev.metrics.renewals || 0;
-
-    const expiredNoRenewal = scopedData.scopedSubs.filter((s) => (
-      PAID_PACKS.has(s.planType)
-      && s.endDate
-      && inRange(s.endDate, range.start, range.end)
-      && !scopedData.scopedSubs.some((n) => PAID_PACKS.has(n.planType) && String(n.studentId) === String(s.studentId) && getSubRefDate(n) > s.endDate)
-    )).length;
 
     const trialStudentsThisMonth = new Set(
       scopedData.scopedAttn
@@ -305,17 +340,14 @@ export default function TrainersTab({
       PAID_PACKS.has(s.planType) && String(s.studentId) === studentId && getSubRefDate(s) >= range.start
     ))).length;
 
-    const followUpStudents = scopedData.scopedSubs.filter((s) => s.endDate && inRange(s.endDate, range.start, range.end)).length;
-
     return [
-      { id: "strongest", title: "Найсильніша група", value: strongest?.groupName || "—", note: `${strongest?.attendance || 0} відвідувань` },
-      { id: "weak", title: "Слабка група", value: weak?.groupName || "—", note: `${weak?.attendance || 0} відвідувань` },
+      { id: "strongest", title: "Найсильніша група", value: strongest?.groupName || "—", note: `${strongest?.avgAttendancePerSession || 0} осіб/заняття` },
+      { id: "weak", title: "Слабка група", value: weak?.groupName || "—", note: `${weak?.avgAttendancePerSession || 0} осіб/заняття` },
       { id: "renewalsRisk", title: "Динаміка продовжень", value: renewalsNow - renewalsPrev, note: `Було ${renewalsPrev}, стало ${renewalsNow}` },
-      { id: "expiredNoRenewal", title: "Expired без продовження", value: expiredNoRenewal, note: "Поточний місяць" },
+      { id: "expiredNoRenewal", title: "Expired без продовження", value: renewalsRiskBlock.noRenewal, note: "Поточний місяць" },
       { id: "trialNoConv", title: "Пробні без конверсії", value: trialNotConverted, note: "Поточний місяць" },
-      { id: "followUp", title: "Потрібен follow-up", value: followUpStudents, note: "Абонементи, що завершуються" },
     ];
-  }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+  }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, renewalsRiskBlock.noRenewal, scopedData.scopedAttn, scopedData.scopedSubs]);
 
   const beginCreate = () => {
     setIsCreateMode(true);
@@ -383,230 +415,208 @@ export default function TrainersTab({
     }
   };
 
-  const trendMax = Math.max(...trendSeries.map((x) => x.y), 1);
-
-  const detailMonthLabel = monthLabel(periodDate);
-  const prevMonthDate = monthStart(new Date(periodDate.getFullYear(), periodDate.getMonth() - 1, 1));
-  const prevMonthLabel = monthLabel(prevMonthDate);
-
   const renderDetailBody = () => {
-    if (detailState.type === "overview") {
-      return (
-        <div style={{ fontSize: 13, color: "#5f718c" }}>
-          Обери будь-який блок вище (KPI / ring / chart / heatmap / group / insight / communication),
-          щоб отримати деталізацію з поясненням.
-        </div>
-      );
-    }
+    if (detailState.type === "overview") return <div style={{ color: theme.textSoft, fontSize: 13 }}>Натисни будь-який блок з центральної колонки для деталізації.</div>;
+    const p = detailState.payload || {};
 
-    if (detailState.type === "kpi" && detailState.payload) {
-      const k = detailState.payload;
-      const prev = k.value - k.delta;
-      const explainMap = {
-        students: "Кількість учениць, прив'язаних до груп тренера.",
-        activeSubs: "Кількість активних абонементів у групах тренера.",
-        newSubs: "Нові платні абонементи за календарний місяць.",
-        renewals: "Платні продовження за календарний місяць.",
-        trials: "Пробні активності у групах тренера за місяць.",
-        singles: "Разові тренування у групах тренера за місяць",
-      };
+    if (detailState.type === "kpi") {
+      const prev = Number((p.value - p.delta).toFixed?.(2) || p.value - p.delta);
       return (
         <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel} vs {prevMonthLabel}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(140px,1fr))", gap: 8 }}>
-            <DetailStat label={`Поточний (${detailMonthLabel})`} value={k.value} />
-            <DetailStat label={`Попередній (${prevMonthLabel})`} value={prev} />
-            <DetailStat label="Delta" value={`${k.delta >= 0 ? "+" : ""}${k.delta}`} tone={k.delta >= 0 ? "#14805f" : "#b42318"} />
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Що це: {p.definition}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(90px,1fr))", gap: 8 }}>
+            <DetailMetric label={`Current (${monthLabel(periodDate)})`} value={p.value} />
+            <DetailMetric label={`Previous (${monthLabel(monthStart(new Date(periodDate.getFullYear(), periodDate.getMonth() - 1, 1)))})`} value={prev} />
+            <DetailMetric label="Delta" value={`${p.delta >= 0 ? "+" : ""}${p.delta}`} tone={p.delta >= 0 ? theme.good : theme.bad} />
           </div>
-          <div style={{ fontSize: 13, color: "#4f607a" }}>{explainMap[k.id] || "Показник для поточного тренера за вибраний місяць."}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Інтерпретація: {p.interpretation}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Дія: {p.action}</div>
         </div>
       );
     }
 
-    if (detailState.type === "ring" && detailState.payload) {
-      const p = detailState.payload;
+    if (detailState.type === "ring") {
       return (
         <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(140px,1fr))", gap: 8 }}>
-            <DetailStat label="Відсоток" value={`${p.percent}%`} />
-            <DetailStat label="Чисельник" value={p.numerator ?? "—"} />
-            <DetailStat label="Знаменник" value={p.denominator ?? "—"} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(90px,1fr))", gap: 8 }}>
+            <DetailMetric label="Відсоток" value={`${p.percent}%`} />
+            <DetailMetric label="Чисельник" value={p.numerator ?? "—"} />
+            <DetailMetric label="Знаменник" value={p.denominator ?? "—"} />
           </div>
-          <div style={{ fontSize: 13, color: "#4f607a" }}>{p.explanation}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Як рахується: {p.definition}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Інтерпретація: {p.interpretation}</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Дія: {p.action}</div>
         </div>
       );
     }
 
-    if (detailState.type === "chart" && detailState.payload) {
-      const p = detailState.payload;
-      if (p.kind === "attendanceTrend") {
-        const max = Math.max(...p.series.map((x) => x.y), 1);
+    if (detailState.type === "chart") {
+      if (p.kind === "lineCompare") {
+        const max = Math.max(...p.series.map((x) => Math.max(x.current, x.previous)), 1);
         return (
           <div style={{ display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Відвідуваність по днях.</div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 180, border: "1px solid #e2eaf4", borderRadius: 12, padding: 10 }}>
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Поточний vs попередній місяць (відвідуваність по днях)</div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, display: "flex", alignItems: "flex-end", gap: 3, height: 180 }}>
               {p.series.map((d) => (
-                <div key={d.date} style={{ flex: 1, minWidth: 8 }}>
-                  <div style={{ height: `${Math.max(6, (d.y / max) * 145)}px`, background: "#4f7ddb", borderRadius: 6 }} />
+                <div key={d.day} style={{ flex: 1 }}>
+                  <div style={{ height: `${Math.max(3, (d.previous / max) * 140)}px`, background: "rgba(77,124,255,0.35)", borderRadius: 4 }} />
+                  <div style={{ height: `${Math.max(3, (d.current / max) * 140)}px`, background: theme.primary, borderRadius: 4, marginTop: 2 }} />
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: 12, color: "#6f819b" }}>Піки показують дні з найвищим навантаженням тренера.</div>
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Coral = current, Blue = previous.</div>
           </div>
         );
       }
-      if (p.kind === "breakdown") {
-        const max = Math.max(...p.rows.map((r) => r.value), 1);
+      if (p.kind === "groupBars") {
         return (
-          <div style={{ display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Розклад активностей.</div>
-            {p.rows.map((r) => (
-              <div key={r.key}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#53657f", marginBottom: 4 }}>
-                  <span>{r.label}</span><span>{r.value}</span>
+          <div style={{ display: "grid", gap: 8 }}>
+            {p.rows.map((r) => {
+              const total = Math.max(1, r.trial + r.single + r.paid);
+              return (
+                <div key={r.groupId} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8 }}>
+                  <div style={{ fontSize: 12, color: theme.text }}>{r.groupName}</div>
+                  <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", marginTop: 6 }}>
+                    <div style={{ width: `${(r.trial / total) * 100}%`, background: "#8b7bff" }} />
+                    <div style={{ width: `${(r.single / total) * 100}%`, background: "#51c4d3" }} />
+                    <div style={{ width: `${(r.paid / total) * 100}%`, background: theme.good }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 4 }}>Trial {r.trial} · Single {r.single} · Paid {r.paid}</div>
                 </div>
-                <div style={{ height: 10, borderRadius: 999, background: "#ebf1f8" }}>
-                  <div style={{ width: `${(r.value / max) * 100}%`, height: "100%", borderRadius: 999, background: r.color }} />
-                </div>
+              );
+            })}
+          </div>
+        );
+      }
+      if (p.kind === "renewalRisk") {
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+            <DetailMetric label="Renewals" value={p.renewals} tone={theme.good} />
+            <DetailMetric label="Expired" value={p.expired} tone={theme.warn} />
+            <DetailMetric label="No renewal" value={p.noRenewal} tone={theme.bad} />
+          </div>
+        );
+      }
+      if (p.kind === "funnel") {
+        return (
+          <div style={{ display: "grid", gap: 8 }}>
+            {p.steps.map((s) => (
+              <div key={s.key} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: theme.textSoft }}>{s.label}</span>
+                <strong style={{ color: theme.text }}>{s.value}</strong>
               </div>
             ))}
-            <div style={{ fontSize: 12, color: "#6f819b" }}>Порівняй співвідношення trial/single/paid для рішень по конверсії.</div>
           </div>
         );
       }
     }
 
-    if (detailState.type === "heatmap" && detailState.payload) {
+    if (detailState.type === "heatmap") {
       return (
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Weekday heatmap.</div>
-          {detailState.payload.cells.map((c) => (
-            <div key={c.weekday} style={{ display: "grid", gridTemplateColumns: "110px 1fr 60px", alignItems: "center", gap: 8 }}>
-              <div style={{ fontSize: 12, color: "#43556f", fontWeight: 700 }}>{c.label}</div>
-              <div style={{ height: 8, borderRadius: 999, background: "#ecf1f8" }}>
-                <div style={{ width: `${Math.min(100, c.value * 10)}%`, height: "100%", borderRadius: 999, background: "#4f7ddb" }} />
+        <div style={{ display: "grid", gap: 8 }}>
+          {p.cells.map((c) => (
+            <div key={c.weekday} style={{ display: "grid", gridTemplateColumns: "90px 1fr 40px", gap: 8, alignItems: "center" }}>
+              <span style={{ color: theme.textSoft, fontSize: 12 }}>{c.label}</span>
+              <div style={{ height: 9, borderRadius: 999, background: "#2a3446" }}>
+                <div style={{ height: "100%", width: `${Math.min(100, c.value * 10)}%`, borderRadius: 999, background: theme.secondary }} />
               </div>
-              <div style={{ fontSize: 12, color: "#43556f", textAlign: "right" }}>{c.value}</div>
+              <span style={{ color: theme.text, fontSize: 12, textAlign: "right" }}>{c.value}</span>
             </div>
           ))}
-          <div style={{ fontSize: 12, color: "#6f819b" }}>Використовуй для оптимізації розкладу/нагадувань по днях тижня.</div>
         </div>
       );
     }
 
-    if (detailState.type === "group" && detailState.payload) {
-      const g = detailState.payload;
+    if (detailState.type === "group") {
       return (
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Деталі групи.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(120px,1fr))", gap: 8 }}>
-            <DetailStat label="Учениць" value={g.students} />
-            <DetailStat label="Активні абон." value={g.activeSubs} />
-            <DetailStat label="Сер. відвідуваність" value={g.avgAttendance} />
-            <DetailStat label="Без активного" value={g.noActive} tone={g.noActive > 0 ? "#b42318" : "#14805f"} />
-            <DetailStat label="Заповненість" value={`${g.fillPct}%`} />
-          </div>
-          <div style={{ fontSize: 13, color: "#4f607a" }}>Високий показник “Без активного” = зона для фоллоуапу/продовження.</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <DetailMetric label="Учениць" value={p.students} />
+          <DetailMetric label="Активні абон." value={p.activeSubs} />
+          <DetailMetric label="Held sessions" value={p.heldSessions} />
+          <DetailMetric label="Attendance total" value={p.attendance} />
+          <DetailMetric label="Avg / session" value={p.avgAttendancePerSession} />
+          <DetailMetric label="Без активного" value={p.noActive} tone={p.noActive > 0 ? theme.bad : theme.good} />
+          <div style={{ color: theme.textSoft, fontSize: 12 }}>Як рахується average: total attendance marks / held sessions (schedule-based, cancelled excluded).</div>
         </div>
       );
     }
 
-    if (detailState.type === "insight" && detailState.payload) {
-      const ins = detailState.payload;
+    if (detailState.type === "insight") {
       return (
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Insight trigger.</div>
-          <DetailStat label="Поточне значення" value={ins.value} />
-          <div style={{ fontSize: 13, color: "#4f607a" }}>{ins.note}</div>
-          <div style={{ fontSize: 12, color: "#6f819b" }}>
-            Інтерпретація: цей інсайт показує точку росту/ризику для тренера за обраний календарний місяць.
-          </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <DetailMetric label="Trigger value" value={p.value} />
+          <div style={{ color: theme.textSoft, fontSize: 12 }}>Причина: {p.note}</div>
+          <div style={{ color: theme.textSoft, fontSize: 12 }}>Дія: {p.action || "Переглянути проблемні групи/учениць та зробити follow-up."}</div>
         </div>
       );
     }
 
-    if (detailState.type === "communication" && detailState.payload) {
+    if (detailState.type === "communication") {
       return (
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "#7a8ba4" }}>Communication analytics foundation</div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {Object.entries(detailState.payload).map(([key, cfg]) => (
-              <div key={key} style={{ border: "1px solid #e1e8f4", borderRadius: 12, padding: 10, background: "#fff" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#2a3d57" }}>{key}</div>
-                <div style={{ fontSize: 12, color: "#6f819b", marginTop: 2 }}>Status: {cfg.status}</div>
-                {Array.isArray(cfg.requiredFields) && (
-                  <div style={{ fontSize: 11, color: "#8a9bb2", marginTop: 6 }}>
-                    Required fields: {cfg.requiredFields.join(", ")}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 12, color: "#6f819b" }}>
-            Модуль готовий до підключення реальних Telegram/Instagram/AI подій без переробки UI-контейнера.
-          </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {Object.entries(p).map(([key, cfg]) => (
+            <div key={key} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8 }}>
+              <div style={{ color: theme.text, fontWeight: 700, fontSize: 13 }}>{key}</div>
+              <div style={{ color: theme.textSoft, fontSize: 12 }}>Status: {cfg.status}</div>
+              {Array.isArray(cfg.requiredFields) && <div style={{ color: "#8093b1", fontSize: 11 }}>Fields: {cfg.requiredFields.join(", ")}</div>}
+            </div>
+          ))}
         </div>
       );
     }
 
-    return <div style={{ fontSize: 12, color: "#6f819b" }}>Деталі недоступні для цього типу блоку.</div>;
+    return <div style={{ color: theme.textSoft, fontSize: 12 }}>Немає деталізації для цього блоку.</div>;
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px minmax(0,1fr)", gap: 16 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "320px minmax(0,1fr) 360px", gap: 14, color: theme.text, background: theme.bg, padding: 10, borderRadius: 16 }}>
       <aside style={{ ...card, padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 800, color: "#22324a" }}>Тренери</div>
-          <button type="button" onClick={beginCreate} style={{ border: "1px solid #cfd8e5", borderRadius: 10, background: "#f7f9fc", padding: "6px 9px", cursor: "pointer" }}>+ Додати</button>
+          <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
+          <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>+ Додати</button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 230, overflow: "auto", paddingRight: 2 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflow: "auto", paddingRight: 2 }}>
           {trainers.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }}
-              style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? "#4e7cd1" : "#d3dbe8"}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? "#edf4ff" : "#fff", padding: "9px 10px", cursor: "pointer" }}
-            >
-              <div style={{ fontWeight: 700, color: "#1f2a3d" }}>{getTrainerDisplayName(t)}</div>
-              <div style={{ fontSize: 11, color: t.isActive ? "#228b59" : "#8a97aa" }}>{t.isActive ? "Активний" : "Неактивний"}</div>
+            <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? "rgba(255,111,97,0.2)" : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
+              <div style={{ fontWeight: 700 }}>{getTrainerDisplayName(t)}</div>
+              <div style={{ fontSize: 11, color: t.isActive ? theme.good : theme.textSoft }}>{t.isActive ? "Активний" : "Неактивний"}</div>
             </button>
           ))}
         </div>
 
-        <div style={{ borderTop: "1px solid #e2e8f3", paddingTop: 10 }}>
+        <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
           <div style={{ fontWeight: 700, marginBottom: 8 }}>{isCreateMode ? "Новий тренер" : "Профіль"}</div>
           <div style={{ display: "grid", gap: 8 }}>
-            <input value={draft.firstName} onChange={(e) => setDraft((p) => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
-            <input value={draft.lastName} onChange={(e) => setDraft((p) => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
-            <input value={draft.phone} onChange={(e) => setDraft((p) => ({ ...p, phone: e.target.value }))} placeholder="Телефон" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
-            <input value={draft.telegram} onChange={(e) => setDraft((p) => ({ ...p, telegram: e.target.value }))} placeholder="Telegram" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
-            <input value={draft.instagramHandle} onChange={(e) => setDraft((p) => ({ ...p, instagramHandle: e.target.value }))} placeholder="Instagram" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155" }}>
+            <input value={draft.firstName} onChange={(e) => setDraft((p) => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <input value={draft.lastName} onChange={(e) => setDraft((p) => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <input value={draft.phone} onChange={(e) => setDraft((p) => ({ ...p, phone: e.target.value }))} placeholder="Телефон" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <input value={draft.telegram} onChange={(e) => setDraft((p) => ({ ...p, telegram: e.target.value }))} placeholder="Telegram" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <input value={draft.instagramHandle} onChange={(e) => setDraft((p) => ({ ...p, instagramHandle: e.target.value }))} placeholder="Instagram" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textSoft }}>
               <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft((p) => ({ ...p, isActive: e.target.checked }))} /> Активний
             </label>
-            <textarea value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Нотатки" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px", resize: "vertical" }} />
+            <textarea value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Нотатки" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", resize: "vertical", background: theme.panelSoft, color: theme.text }} />
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" disabled={saving} onClick={saveTrainer} style={{ border: "none", borderRadius: 10, background: "#3568c6", color: "#fff", padding: "9px 14px", cursor: "pointer", fontWeight: 700, flex: 1 }}>{saving ? "Збереження..." : "Зберегти"}</button>
-              {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: "1px solid #cfd8e5", borderRadius: 10, background: "#f7f9fc", padding: "9px 12px", cursor: "pointer" }}>Ред.</button>}
+              <button type="button" disabled={saving} onClick={saveTrainer} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "9px 14px", cursor: "pointer", fontWeight: 700, flex: 1 }}>{saving ? "Збереження..." : "Зберегти"}</button>
+              {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "9px 12px", cursor: "pointer" }}>Ред.</button>}
             </div>
           </div>
         </div>
 
         {selectedTrainer && !isCreateMode && (
           <>
-            <div style={{ borderTop: "1px solid #e2e8f3", paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {selectedTrainer.telegram && <a href={`https://t.me/${String(selectedTrainer.telegram).replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#1f4da3", fontSize: 12, fontWeight: 700 }}>Telegram</a>}
-              {selectedTrainer.instagramHandle && <a href={`https://instagram.com/${normalizeInstagramHandle(selectedTrainer.instagramHandle)}`} target="_blank" rel="noreferrer" style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#8a2160", fontSize: 12, fontWeight: 700 }}>Instagram</a>}
-              {selectedTrainer.phone && <a href={`tel:${selectedTrainer.phone}`} style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#0f5132", fontSize: 12, fontWeight: 700 }}>Call</a>}
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {selectedTrainer.telegram && <a href={`https://t.me/${String(selectedTrainer.telegram).replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.secondary, fontSize: 12, fontWeight: 700 }}>Telegram</a>}
+              {selectedTrainer.instagramHandle && <a href={`https://instagram.com/${normalizeInstagramHandle(selectedTrainer.instagramHandle)}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.primary, fontSize: 12, fontWeight: 700 }}>Instagram</a>}
+              {selectedTrainer.phone && <a href={`tel:${selectedTrainer.phone}`} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.good, fontSize: 12, fontWeight: 700 }}>Call</a>}
             </div>
 
-            <div style={{ borderTop: "1px solid #e2e8f3", paddingTop: 10 }}>
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Прив'язані групи</div>
               <div style={{ display: "grid", gap: 6 }}>
                 {groups.map((g) => (
-                  <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #dde5f0", borderRadius: 9, padding: "6px 8px" }}>
+                  <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 8px", color: theme.textSoft }}>
                     <input type="checkbox" checked={trainerGroupIds.includes(g.id)} onChange={(e) => toggleGroup(g.id, e.target.checked)} />
                     <span style={{ fontSize: 12 }}>{g.name}</span>
                   </label>
@@ -617,34 +627,45 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#ffffff 0%,#f7faff 100%)" }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#1f2d42" }}>{isCreateMode ? "Новий тренер" : getTrainerDisplayName(selectedTrainer)}</div>
-              <div style={{ fontSize: 13, color: "#7587a2", marginTop: 4 }}>
-                Trainer analytics dashboard · календарний місяць · {foundationCurrent.period.key}
+              <div style={{ fontSize: 24, fontWeight: 800 }}>{isCreateMode ? "Новий тренер" : getTrainerDisplayName(selectedTrainer)}</div>
+              <div style={{ fontSize: 13, color: theme.textSoft, marginTop: 4 }}>
+                Calendar month analytics · Label {monthKey(periodDate)} · Range {range.start} → {range.end}
               </div>
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button type="button" onClick={() => setPeriodDate((p) => monthStart(new Date(p.getFullYear(), p.getMonth() - 1, 1)))} style={{ border: "1px solid #d8e1ef", borderRadius: 10, background: "#fff", padding: "8px 10px", cursor: "pointer" }}>◀</button>
-              <div style={{ border: "1px solid #d8e1ef", borderRadius: 10, padding: "8px 12px", minWidth: 180, textAlign: "center", fontWeight: 700, color: "#2a3a52" }}>{monthLabel(periodDate)}</div>
-              <button type="button" onClick={() => setPeriodDate((p) => monthStart(new Date(p.getFullYear(), p.getMonth() + 1, 1)))} style={{ border: "1px solid #d8e1ef", borderRadius: 10, background: "#fff", padding: "8px 10px", cursor: "pointer" }}>▶</button>
+              <button type="button" onClick={() => setPeriodDate((p) => monthStart(new Date(p.getFullYear(), p.getMonth() - 1, 1)))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "8px 10px", cursor: "pointer" }}>◀</button>
+              <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 12px", minWidth: 180, textAlign: "center", fontWeight: 700 }}>{monthLabel(periodDate)}</div>
+              <button type="button" onClick={() => setPeriodDate((p) => monthStart(new Date(p.getFullYear(), p.getMonth() + 1, 1)))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "8px 10px", cursor: "pointer" }}>▶</button>
             </div>
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(140px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 10 }}>
           {trainerKpis.map((k) => (
             <button
               key={k.id}
               type="button"
-              onClick={() => setDetailState({ type: "kpi", title: `Деталі: ${k.title}`, payload: k })}
-              style={tileCard}
+              onClick={() => setDetailState({
+                type: "kpi",
+                title: `KPI: ${k.title}`,
+                payload: {
+                  ...k,
+                  definition: k.id === "avgSession"
+                    ? "total attendance marks / held sessions (тільки scheduled дати, cancelled виключено)."
+                    : "метрика за вибраний календарний місяць у межах груп тренера.",
+                  interpretation: k.delta >= 0 ? "Позитивна динаміка до попереднього місяця." : "Негативна динаміка — потрібна увага.",
+                  action: k.id === "renewals" ? "Запусти кампейн на продовження у групах з ризиком." : "Перевір групи/учениць у блоці Insights.",
+                },
+              })}
+              style={{ ...tile, borderColor: k.color }}
             >
-              <div style={{ fontSize: 12, color: "#5e708a", marginBottom: 8 }}>{k.title}</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#1f2b3d" }}>{k.value}</div>
+              <div style={{ fontSize: 12, color: theme.textSoft }}>{k.title}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
               <div style={{ marginTop: 8 }}><Delta value={k.delta} /></div>
             </button>
           ))}
@@ -654,32 +675,36 @@ export default function TrainersTab({
           <ProgressRing
             value={Math.round(foundationCurrent.metrics.trialToPaidConversion || 0)}
             label="Пробне → абонемент"
-            sublabel="конверсія місяця"
+            sublabel="конверсія"
+            color={theme.primary}
             onClick={() => setDetailState({
               type: "ring",
               title: "Trial conversion",
               payload: {
-                kind: "trialConversion",
                 percent: Math.round(foundationCurrent.metrics.trialToPaidConversion || 0),
                 numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial_paid")?.value || 0,
                 denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial")?.value || 0,
-                explanation: "Частка trial-учениць, які перейшли в платний абонемент.",
+                definition: "trial_paid / trial * 100",
+                interpretation: "Вища конверсія = краща якість доведення пробних до продажу.",
+                action: "Сфокусуй follow-up протягом 24-48 годин після trial.",
               },
             })}
           />
           <ProgressRing
             value={Math.round(foundationCurrent.metrics.singleToPaidConversion || 0)}
             label="Разове → абонемент"
-            sublabel="конверсія місяця"
+            sublabel="конверсія"
+            color={theme.secondary}
             onClick={() => setDetailState({
               type: "ring",
               title: "Single conversion",
               payload: {
-                kind: "singleConversion",
                 percent: Math.round(foundationCurrent.metrics.singleToPaidConversion || 0),
                 numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single_paid")?.value || 0,
                 denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single")?.value || 0,
-                explanation: "Частка single-учениць, які перейшли в платний абонемент.",
+                definition: "single_paid / single * 100",
+                interpretation: "Показує ефективність конвертації разових у пакети.",
+                action: "Додай offer на пакет одразу після single-візиту.",
               },
             })}
           />
@@ -687,152 +712,194 @@ export default function TrainersTab({
             value={pct(foundationCurrent.metrics.renewals, Math.max(1, foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals))}
             label="Рівень продовжень"
             sublabel="частка renewals"
+            color={theme.warn}
             onClick={() => setDetailState({
               type: "ring",
               title: "Renewals rate",
               payload: {
-                kind: "renewalsRate",
                 percent: pct(foundationCurrent.metrics.renewals, Math.max(1, foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals)),
                 numerator: foundationCurrent.metrics.renewals,
                 denominator: foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals,
-                explanation: "Частка продовжень серед усіх нових+продовжених абонементів за місяць.",
+                definition: "renewals / (new + renewals) * 100",
+                interpretation: "Високе значення означає стабільне утримання учениць.",
+                action: "Для груп з low renewal запусти персональні follow-up повідомлення.",
               },
             })}
           />
           <ProgressRing
             value={pct(groupCards.reduce((s, g) => s + g.activeSubs, 0), Math.max(1, groupCards.reduce((s, g) => s + g.students, 0)))}
             label="Заповненість груп"
-            sublabel="активні/усі учениці"
+            sublabel="active / students"
+            color={theme.good}
             onClick={() => setDetailState({
               type: "ring",
               title: "Group occupancy",
               payload: {
-                kind: "groupOccupancy",
                 percent: pct(groupCards.reduce((s, g) => s + g.activeSubs, 0), Math.max(1, groupCards.reduce((s, g) => s + g.students, 0))),
                 numerator: groupCards.reduce((s, g) => s + g.activeSubs, 0),
                 denominator: groupCards.reduce((s, g) => s + g.students, 0),
-                explanation: "Частка учениць із активними абонементами у групах тренера.",
+                definition: "active subscriptions / total students * 100",
+                interpretation: "Відображає покриття груп активними пакетами.",
+                action: "Працюй з no-active списком у групових картках.",
               },
             })}
           />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10 }}>
           <button
             type="button"
-            onClick={() => setDetailState({ type: "chart", title: "Attendance trend", payload: { kind: "attendanceTrend", series: trendSeries } })}
-            style={{ ...card, width: "100%", padding: 14, border: "1px solid #dde6f2", cursor: "pointer", background: "#fff", textAlign: "left" }}
+            onClick={() => setDetailState({
+              type: "chart",
+              title: "Current vs previous attendance",
+              payload: {
+                kind: "lineCompare",
+                series: trendCurrent.map((r) => ({ day: r.x, current: r.y, previous: prevLineMap[r.x] || 0 })),
+              },
+            })}
+            style={{ ...tile, width: "100%" }}
           >
-            <div style={{ fontWeight: 800, color: "#24364d", marginBottom: 12 }}>Attendance trend ({monthKey(periodDate)})</div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 120 }}>
-              {trendSeries.map((d) => (
-                <div key={d.date} style={{ flex: 1, minWidth: 8 }}>
-                  <div style={{ height: `${Math.max(4, (d.y / trendMax) * 95)}px`, background: "#4f7ddb", borderRadius: 6 }} />
-                </div>
-              ))}
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Current vs previous month attendance</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 90 }}>
+              {trendCurrent.map((r) => {
+                const prev = prevLineMap[r.x] || 0;
+                const max = Math.max(1, ...trendCurrent.map((x) => x.y), ...Object.values(prevLineMap));
+                return (
+                  <div key={r.x} style={{ flex: 1 }}>
+                    <div style={{ height: `${Math.max(2, (prev / max) * 60)}px`, background: "rgba(77,124,255,0.5)", borderRadius: 3 }} />
+                    <div style={{ height: `${Math.max(2, (r.y / max) * 60)}px`, background: theme.primary, borderRadius: 3, marginTop: 2 }} />
+                  </div>
+                );
+              })}
             </div>
-            <div style={{ fontSize: 12, color: "#8192aa", marginTop: 8 }}>Клік відкриє детальний перегляд метрики</div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 6 }}>Coral=current · Blue=previous</div>
           </button>
 
-          <div style={{ display: "grid", gap: 10 }}>
-            <MiniBars rows={monthBreakdown} onClick={() => setDetailState({ type: "chart", title: "Breakdown", payload: { kind: "breakdown", rows: monthBreakdown } })} />
-            <button
-              type="button"
-              onClick={() => setDetailState({ type: "heatmap", title: "Heatmap preview", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
-              style={{ ...card, width: "100%", padding: 14, border: "1px solid #dde6f2", cursor: "pointer", background: "#fff", textAlign: "left" }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 8, color: "#24364d" }}>Heatmap preview</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
-                {foundationCurrent.domains.attendance.heatmap.map((c) => (
-                  <div key={c.weekday} style={{ borderRadius: 8, background: `rgba(58,111,220,${Math.min(0.15 + (c.value / 10), 0.9)})`, color: "#1f2c43", textAlign: "center", padding: "8px 2px", fontSize: 11, fontWeight: 700 }}>
-                    <div>{c.label}</div>
-                    <div>{c.value}</div>
-                  </div>
-                ))}
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Renewals / expired / no-renewal", payload: { kind: "renewalRisk", ...renewalsRiskBlock } })}
+            style={{ ...tile, width: "100%" }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Renewals / expired / no-renewal</div>
+            {[{k:"renewals",v:renewalsRiskBlock.renewals,c:theme.good},{k:"expired",v:renewalsRiskBlock.expired,c:theme.warn},{k:"noRenewal",v:renewalsRiskBlock.noRenewal,c:theme.bad}].map((x) => (
+              <div key={x.k} style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: theme.textSoft }}><span>{x.k}</span><span>{x.v}</span></div>
+                <div style={{ height: 8, borderRadius: 999, background: "#2a3446" }}><div style={{ width: `${Math.min(100, x.v * 12)}%`, height: "100%", borderRadius: 999, background: x.c }} /></div>
               </div>
-            </button>
-          </div>
+            ))}
+          </button>
         </div>
 
-        <div style={{ ...card, padding: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontWeight: 800, color: "#24364d" }}>Аналітика груп тренера</div>
-            <div style={{ fontSize: 12, color: "#8192aa" }}>Клік по картці відкриває drill-down</div>
-          </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Group stacked bars", payload: { kind: "groupBars", rows: groupCards.map((g) => ({ groupId: g.groupId, groupName: g.groupName, trial: g.trialCount, single: g.singleCount, paid: g.paidCount })) } })}
+            style={{ ...tile, width: "100%" }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Stacked/group bar by groups</div>
+            {groupCards.slice(0, 4).map((g) => {
+              const total = Math.max(1, g.trialCount + g.singleCount + g.paidCount);
+              return (
+                <div key={g.groupId} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: theme.textSoft }}>{g.groupName}</div>
+                  <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", marginTop: 4 }}>
+                    <div style={{ width: `${(g.trialCount / total) * 100}%`, background: "#8b7bff" }} />
+                    <div style={{ width: `${(g.singleCount / total) * 100}%`, background: "#51c4d3" }} />
+                    <div style={{ width: `${(g.paidCount / total) * 100}%`, background: theme.good }} />
+                  </div>
+                </div>
+              );
+            })}
+          </button>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Conversion funnel", payload: { kind: "funnel", steps: foundationCurrent.ui.charts.funnel.steps } })}
+            style={{ ...tile, width: "100%" }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Funnel / conversion block</div>
+            {foundationCurrent.ui.charts.funnel.steps.map((s) => (
+              <div key={s.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: theme.textSoft, padding: "5px 0", borderBottom: `1px solid ${theme.border}` }}>
+                <span>{s.label}</span>
+                <strong style={{ color: theme.text }}>{s.value}</strong>
+              </div>
+            ))}
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "heatmap", title: "Heatmap (weekday)", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
+            style={{ ...tile, width: "100%" }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Readable heatmap</div>
+            {foundationCurrent.domains.attendance.heatmap.map((c) => (
+              <div key={c.weekday} style={{ display: "grid", gridTemplateColumns: "35px 1fr 24px", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <span style={{ fontSize: 11, color: theme.textSoft }}>{c.label}</span>
+                <div style={{ height: 8, borderRadius: 999, background: "#2a3446" }}>
+                  <div style={{ height: "100%", width: `${Math.min(100, c.value * 10)}%`, borderRadius: 999, background: theme.secondary }} />
+                </div>
+                <span style={{ fontSize: 11, color: theme.text }}>{c.value}</span>
+              </div>
+            ))}
+          </button>
+
+          <div style={{ ...card, padding: 12 }}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Mini comparison by groups</div>
             {groupCards.map((g) => (
               <button
                 key={g.groupId}
                 type="button"
                 onClick={() => setDetailState({ type: "group", title: `Група: ${g.groupName}`, payload: g })}
-                style={{ ...card, padding: 12, cursor: "pointer", textAlign: "left" }}
+                style={{ width: "100%", textAlign: "left", border: `1px solid ${theme.border}`, background: theme.panelSoft, color: theme.text, borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
               >
-                <div style={{ fontWeight: 800, color: "#22344d", marginBottom: 8 }}>{g.groupName}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 6 }}>
-                  <div><div style={{ fontSize: 11, color: "#8798b1" }}>Учениць</div><div style={{ fontWeight: 800 }}>{g.students}</div></div>
-                  <div><div style={{ fontSize: 11, color: "#8798b1" }}>Активні</div><div style={{ fontWeight: 800 }}>{g.activeSubs}</div></div>
-                  <div><div style={{ fontSize: 11, color: "#8798b1" }}>Сер. відвідуваність</div><div style={{ fontWeight: 800 }}>{g.avgAttendance}</div></div>
-                  <div><div style={{ fontSize: 11, color: "#8798b1" }}>Без активного</div><div style={{ fontWeight: 800, color: g.noActive > 0 ? "#b42318" : "#157347" }}>{g.noActive}</div></div>
-                </div>
-                <div style={{ marginTop: 8, height: 8, borderRadius: 999, background: "#ecf0f7" }}>
-                  <div style={{ width: `${g.fillPct}%`, height: "100%", borderRadius: 999, background: "#3f72dd" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span>{g.groupName}</span>
+                  <span style={{ color: theme.textSoft }}>Avg/session: {g.avgAttendancePerSession}</span>
                 </div>
               </button>
             ))}
-            {!groupCards.length && <div style={{ fontSize: 13, color: "#8192aa" }}>Групи не прив'язані.</div>}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
-          <div style={{ ...card, padding: 14 }}>
-            <div style={{ fontWeight: 800, color: "#24364d", marginBottom: 10 }}>Insights / Risk / Action</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(180px,1fr))", gap: 10 }}>
-              {insights.map((ins) => (
-                <button
-                  key={ins.id}
-                  type="button"
-                  onClick={() => setDetailState({ type: "insight", title: ins.title, payload: ins })}
-                  style={{ ...card, padding: 12, cursor: "pointer", textAlign: "left" }}
-                >
-                  <div style={{ fontSize: 12, color: "#72849f" }}>{ins.title}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#23344d", marginTop: 4 }}>{ins.value}</div>
-                  <div style={{ fontSize: 12, color: "#8798b1", marginTop: 4 }}>{ins.note}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setDetailState({ type: "communication", title: "Communication analytics", payload: foundationCurrent.domains.integrations })}
-            style={{ ...card, padding: 14, textAlign: "left", cursor: "pointer", background: "linear-gradient(180deg,#fff 0%, #f9fbff 100%)" }}
-          >
-            <div style={{ fontWeight: 800, color: "#24364d", marginBottom: 8 }}>Комунікації (foundation)</div>
-            <div style={{ fontSize: 12, color: "#7386a1", marginBottom: 8 }}>Telegram/Instagram/AI blocks ready</div>
-            {Object.entries(foundationCurrent.domains.integrations).map(([key, cfg]) => (
-              <div key={key} style={{ border: "1px solid #e1e8f4", borderRadius: 10, padding: "8px 10px", marginBottom: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#2a3d57" }}>{key}</div>
-                <div style={{ fontSize: 11, color: "#8395af" }}>{cfg.status}</div>
-              </div>
+        <div style={{ ...card, padding: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>Insights / Risk / Action</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8 }}>
+            {insights.map((ins) => (
+              <button key={ins.id} type="button" onClick={() => setDetailState({ type: "insight", title: ins.title, payload: { ...ins, action: "Перевір деталі групи та запусти targeted follow-up." } })} style={{ ...tile, padding: 10 }}>
+                <div style={{ fontSize: 12, color: theme.textSoft }}>{ins.title}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: theme.text, marginTop: 4 }}>{ins.value}</div>
+                <div style={{ fontSize: 11, color: "#7f93b2", marginTop: 3 }}>{ins.note}</div>
+              </button>
             ))}
-          </button>
+          </div>
         </div>
 
-        <div style={{ ...card, padding: 14, border: "1px solid #ccd9ef", background: "#f8fbff" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontWeight: 800, color: "#22344d" }}>Drill-down panel</div>
-            <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: "1px solid #d3deef", background: "#fff", borderRadius: 10, padding: "6px 10px", cursor: "pointer" }}>Скинути</button>
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#2b3f5c", marginBottom: 6 }}>{detailState.title}</div>
-          <div style={{ border: "1px solid #dce5f2", borderRadius: 12, background: "#fdfefe", padding: 12 }}>
-            {renderDetailBody()}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: "#7f90a9" }}>
-            Поточний період: {range.start} → {range.end} · Попередній: {rangePrev.start} → {rangePrev.end}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => setDetailState({ type: "communication", title: "Communication analytics", payload: foundationCurrent.domains.integrations })}
+          style={{ ...tile }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>Communication block foundation</div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>Telegram / Instagram / AI integrations placeholder-ready.</div>
+        </button>
       </section>
+
+      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 800 }}>Drill-down details</div>
+          <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
+        </div>
+        <div style={{ fontSize: 12, color: theme.textSoft }}>{detailState.title}</div>
+        <div style={{ fontSize: 11, color: "#7f93b2" }}>
+          Period current: {range.start} → {range.end}<br />
+          Period previous: {rangePrev.start} → {rangePrev.end}
+        </div>
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.panelSoft, padding: 10 }}>
+          {renderDetailBody()}
+        </div>
+      </aside>
     </div>
   );
 }
