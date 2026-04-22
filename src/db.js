@@ -140,6 +140,69 @@ export async function updateGroup(id, g) {
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
 }
 
+// ─── TRAINERS ───
+const mapTrainer = (t) => ({
+  id: t.id,
+  name: t.name || "",
+  phone: t.phone || "",
+  telegram: t.telegram || "",
+  notes: t.notes || "",
+  isActive: t.is_active !== false,
+});
+
+export async function fetchTrainers() {
+  const { data, error } = await supabase.from('trainers').select('*').order('name', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapTrainer);
+}
+
+export async function insertTrainer(trainer) {
+  const payload = {
+    name: trainer.name || "",
+    phone: trainer.phone || null,
+    telegram: trainer.telegram || null,
+    notes: trainer.notes || null,
+    is_active: trainer.isActive !== false,
+  };
+  const { data, error } = await supabase.from('trainers').insert(payload).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function updateTrainer(id, trainer) {
+  const payload = {};
+  if (trainer.name !== undefined) payload.name = trainer.name;
+  if (trainer.phone !== undefined) payload.phone = trainer.phone || null;
+  if (trainer.telegram !== undefined) payload.telegram = trainer.telegram || null;
+  if (trainer.notes !== undefined) payload.notes = trainer.notes || null;
+  if (trainer.isActive !== undefined) payload.is_active = !!trainer.isActive;
+  const { data, error } = await supabase.from('trainers').update(payload).eq('id', id).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function fetchTrainerGroups() {
+  const { data, error } = await supabase.from('trainer_groups').select('*');
+  if (error) throw error;
+  return (data || []).map((row) => ({ id: row.id, trainerId: row.trainer_id, groupId: row.group_id }));
+}
+
+export async function upsertTrainerGroup(trainerId, groupId) {
+  const payload = { trainer_id: trainerId, group_id: groupId };
+  const { data, error } = await supabase
+    .from('trainer_groups')
+    .upsert(payload, { onConflict: 'trainer_id,group_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { id: data.id, trainerId: data.trainer_id, groupId: data.group_id };
+}
+
+export async function deleteTrainerGroup(trainerId, groupId) {
+  const { error } = await supabase.from('trainer_groups').delete().eq('trainer_id', trainerId).eq('group_id', groupId);
+  if (error) throw error;
+}
+
 // ─── SUBSCRIPTIONS ───
 export async function fetchSubs() {
   const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })

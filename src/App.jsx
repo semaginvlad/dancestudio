@@ -33,6 +33,7 @@ import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
 import MessagesTab from "./components/MessagesTab";
+import TrainersTab from "./components/TrainersTab";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -47,6 +48,8 @@ export default function App() {
   const [cancelled, setCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
+  const [trainers, setTrainers] = useState([]);
+  const [trainerGroups, setTrainerGroups] = useState([]);
   
   const [tab, setTab] = useStickyState("dashboard", "ds_danceStudioTab");
   const [modal, setModal] = useState(null);
@@ -117,10 +120,11 @@ export default function App() {
   }
 };
 
-      const [st, gr, su, at, ca, sg, wl, ord, warned] = await Promise.all([
+      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents)
+        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
+        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups)
       ]);
 
       if (st) setStudents(st);
@@ -132,6 +136,8 @@ export default function App() {
       if (wl) setWaitlist(wl);
       setCustomOrders(ord || {});
       setWarnedStudents(warned || {});
+      setTrainers(tr || []);
+      setTrainerGroups(trg || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -510,6 +516,7 @@ export default function App() {
               {id:"subs", label:"Абонементи"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
+              {id:"trainers", label:"Тренери"},
               {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
               {id:"finance", label:"Фінанси"},
               {id:"pro_analytics", label:"📈 Про-Аналітика"},
@@ -542,6 +549,19 @@ export default function App() {
             attn={attn}
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
+          />
+        )}
+        {isAdmin && tab==="trainers" && (
+          <TrainersTab
+            trainers={trainers}
+            setTrainers={setTrainers}
+            trainerGroups={trainerGroups}
+            setTrainerGroups={setTrainerGroups}
+            groups={groups}
+            students={students}
+            studentGrps={studentGrps}
+            subs={subsExt}
+            attn={attn}
           />
         )}
         
