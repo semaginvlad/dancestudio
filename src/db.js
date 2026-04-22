@@ -140,6 +140,94 @@ export async function updateGroup(id, g) {
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
 }
 
+// ─── TRAINERS ───
+const mapTrainer = (t) => ({
+  id: t.id,
+  name: t.name || "",
+  firstName: t.first_name || "",
+  lastName: t.last_name || "",
+  phone: t.phone || "",
+  telegram: t.telegram || "",
+  instagramHandle: t.instagram_handle || "",
+  notes: t.notes || "",
+  isActive: t.is_active !== false,
+});
+
+export async function fetchTrainers() {
+  const { data, error } = await supabase.from('trainers').select('*').order('name', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapTrainer);
+}
+
+export async function insertTrainer(trainer) {
+  const firstName = trainer.firstName || "";
+  const lastName = trainer.lastName || "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim() || trainer.name || "";
+  const payload = {
+    name: fullName,
+    first_name: firstName || null,
+    last_name: lastName || null,
+    phone: trainer.phone || null,
+    telegram: trainer.telegram || null,
+    instagram_handle: trainer.instagramHandle || null,
+    notes: trainer.notes || null,
+    is_active: trainer.isActive !== false,
+  };
+  const { data, error } = await supabase.from('trainers').insert(payload).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function updateTrainer(id, trainer) {
+  const payload = {};
+  const nextFirstName = trainer.firstName;
+  const nextLastName = trainer.lastName;
+  if (nextFirstName !== undefined) payload.first_name = nextFirstName || null;
+  if (nextLastName !== undefined) payload.last_name = nextLastName || null;
+  if (nextFirstName !== undefined || nextLastName !== undefined || trainer.name !== undefined) {
+    const fallbackName = trainer.name || "";
+    payload.name = [nextFirstName || "", nextLastName || ""].filter(Boolean).join(" ").trim() || fallbackName || null;
+  }
+  if (trainer.phone !== undefined) payload.phone = trainer.phone || null;
+  if (trainer.telegram !== undefined) payload.telegram = trainer.telegram || null;
+  if (trainer.instagramHandle !== undefined) payload.instagram_handle = trainer.instagramHandle || null;
+  if (trainer.notes !== undefined) payload.notes = trainer.notes || null;
+  if (trainer.isActive !== undefined) payload.is_active = !!trainer.isActive;
+  const { data, error } = await supabase.from('trainers').update(payload).eq('id', id).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function fetchTrainerGroups() {
+  const { data, error } = await supabase.from('trainer_groups').select('*');
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    trainerId: row.trainer_id,
+    groupId: row.group_id,
+    isPrimary: !!row.is_primary,
+  }));
+}
+
+export async function upsertTrainerGroup(trainerId, groupId) {
+  const payload = { trainer_id: trainerId, group_id: groupId };
+  const { data, error } = await supabase
+    .from('trainer_groups')
+    .upsert(payload, { onConflict: 'trainer_id,group_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return {
+    trainerId: data.trainer_id,
+    groupId: data.group_id,
+    isPrimary: !!data.is_primary,
+  };
+}
+
+export async function deleteTrainerGroup(trainerId, groupId) {
+  const { error } = await supabase.from('trainer_groups').delete().eq('trainer_id', trainerId).eq('group_id', groupId);
+  if (error) throw error;
+}
+
 // ─── SUBSCRIPTIONS ───
 export async function fetchSubs() {
   const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })
@@ -372,6 +460,38 @@ export async function insertCancelled(c) {
 export async function deleteCancelled(id) {
   const { error } = await supabase.from('cancelled_trainings').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ─── ATTENDANCE WARNED FLAGS ───
+const warnedKey = (groupId, studentId) => `${groupId}:${studentId}`;
+
+export async function fetchWarnedStudents() {
+  const { data, error } = await supabase.from('attendance_warned_students').select('*');
+  if (error) {
+    console.warn('attendance_warned_students:', error.message);
+    return {};
+  }
+  return (data || []).reduce((acc, row) => {
+    const key = warnedKey(row.group_id, row.student_id);
+    acc[key] = !!row.warned;
+    return acc;
+  }, {});
+}
+
+export async function upsertWarnedStudent(groupId, studentId, warned) {
+  const payload = {
+    group_id: String(groupId),
+    student_id: String(studentId),
+    warned: !!warned,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('attendance_warned_students')
+    .upsert(payload, { onConflict: 'group_id,student_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 // ─── WAITLIST ───
