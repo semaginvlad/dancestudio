@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
+import { getTrainerAnalyticsCard } from "../shared/analytics";
 
 const card = {
   border: "1px solid #d7dfeb",
@@ -18,6 +19,7 @@ export default function TrainersTab({
   studentGrps = [],
   subs = [],
   attn = [],
+  analyticsFoundation = null,
 }) {
   const [selectedTrainerId, setSelectedTrainerId] = useState(trainers[0]?.id || "");
   const [isCreateMode, setIsCreateMode] = useState(false);
@@ -63,6 +65,18 @@ export default function TrainersTab({
 
   const metrics = useMemo(() => {
     if (!selectedTrainerId) return null;
+    const foundationCard = getTrainerAnalyticsCard(analyticsFoundation, selectedTrainerId);
+    if (foundationCard) {
+      return {
+        groups: foundationCard.groupCount,
+        students: foundationCard.studentCount,
+        activeSubs: foundationCard.activeSubscriptions,
+        trials: foundationCard.trialCount,
+        singles: foundationCard.singleCount,
+        noActiveSub: Math.max(foundationCard.studentCount - foundationCard.activeSubscriptions, 0),
+        month: analyticsFoundation?.period?.key || "",
+      };
+    }
     const groupSet = new Set(trainerGroupIds.map(String));
     const studentIds = new Set(
       studentGrps.filter((sg) => groupSet.has(String(sg.groupId))).map((sg) => String(sg.studentId))
@@ -85,7 +99,7 @@ export default function TrainersTab({
       noActiveSub,
       month,
     };
-  }, [attn, selectedTrainerId, studentGrps, subs, trainerGroupIds]);
+  }, [analyticsFoundation, attn, selectedTrainerId, studentGrps, subs, trainerGroupIds]);
 
   const beginCreate = () => {
     setIsCreateMode(true);
