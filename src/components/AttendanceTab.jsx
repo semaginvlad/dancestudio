@@ -1068,6 +1068,11 @@ export default function AttendanceTab({
     return { bg: "#2563eb", mark };
   };
 
+  const groupStudentIdSet = useMemo(
+    () => new Set(studentIdsInGroup.map((id) => String(id))),
+    [studentIdsInGroup]
+  );
+
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
   }
@@ -1076,14 +1081,25 @@ export default function AttendanceTab({
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
 
-  const totalPresentByDate = visibleDays.reduce((acc, dateStr) => {
+  const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
-      acc[dateStr] = 0;
+      acc[dateStr] = { total: 0, removed: 0 };
       return acc;
     }
-    acc[dateStr] = attn
-      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
-      .reduce((sum, a) => sum + (a.quantity || 1), 0);
+
+    const records = attn.filter(
+      (a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)
+    );
+
+    const total = records.reduce((sum, a) => sum + (a.quantity || 1), 0);
+    const removed = records.reduce((sum, a) => {
+      const resolvedStudentId = a.studentId || subsById[a.subId]?.studentId || null;
+      if (!resolvedStudentId) return sum;
+      if (groupStudentIdSet.has(String(resolvedStudentId))) return sum;
+      return sum + (a.quantity || 1);
+    }, 0);
+
+    acc[dateStr] = { total, removed };
     return acc;
   }, {});
 
@@ -1353,7 +1369,14 @@ export default function AttendanceTab({
                     color: "#111827",
                   }}
                 >
-                  {totalPresentByDate[dateStr] || 0}
+                  <div style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                    <span>{totalsByDate[dateStr]?.total || 0}</span>
+                    {!!totalsByDate[dateStr]?.removed && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>
+                        (+{totalsByDate[dateStr].removed} видал.)
+                      </span>
+                    )}
+                  </div>
                 </td>
               ))}
             </tr>

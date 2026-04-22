@@ -536,6 +536,10 @@ export default function App() {
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
+            groups={groups}
+            studentGrps={studentGrps}
+            subs={subsExt}
+            attn={attn}
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
           />

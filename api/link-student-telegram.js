@@ -6,48 +6,41 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { studentId, telegramUserId, telegramDisplayName } = req.body;
-
-    if (!studentId || !telegramUserId) {
-      return res.status(400).json({
-        error: "studentId and telegramUserId are required"
-      });
+    const { studentId, chatId } = req.body || {};
+    if (!studentId || !chatId) {
+      return res.status(400).json({ error: "studentId and chatId are required" });
     }
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      return res.status(500).json({
-        error: "Missing Supabase server environment variables"
-      });
+      return res.status(500).json({ error: "Missing Supabase server environment variables" });
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const { data, error } = await supabase
-      .from("students")
-      .update({
-        telegram_user_id: String(telegramUserId),
-        telegram_display_name: telegramDisplayName || null,
-        telegram_linked_at: new Date().toISOString()
-      })
-      .eq("id", studentId)
-      .select();
+      .from("telegram_chat_meta")
+      .upsert(
+        {
+          chat_id: String(chatId),
+          student_id: studentId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "chat_id" }
+      )
+      .select("*")
+      .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    return res.status(200).json({
-      success: true,
-      updated: data
-    });
+    return res.status(200).json({ success: true, meta: data });
   } catch (error) {
     console.error("link-student-telegram error:", error);
     return res.status(500).json({
       error: "Failed to link telegram to student",
-      details: String(error?.message || error)
+      details: String(error?.message || error),
     });
   }
 }
