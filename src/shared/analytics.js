@@ -1,4 +1,9 @@
-import { getSubStatus, toLocalISO } from './utils';
+import {
+  getEffectiveEndDate,
+  getSubStatus,
+  isSubExhausted,
+  toLocalISO,
+} from './utils';
 
 const PAID_PLAN_TYPES = new Set(['4pack', '8pack', '12pack']);
 
@@ -96,6 +101,28 @@ const getSubscriptionReferenceDate = (sub) => sub.startDate || String(sub.create
 
 const isPaidPack = (sub) => PAID_PLAN_TYPES.has(sub.planType);
 
+const getAttendanceBaseType = (attendanceRow) => attendanceRow.entryType || attendanceRow.guestType || 'subscription';
+
+const hasSubscriptionCoverageOnDate = (attendanceRow, subs = []) => {
+  if (!attendanceRow?.studentId || !attendanceRow?.groupId || !attendanceRow?.date) return false;
+  return subs.some((sub) => {
+    if (String(sub.studentId) !== String(attendanceRow.studentId)) return false;
+    if (String(sub.groupId) !== String(attendanceRow.groupId)) return false;
+    if ((sub.usedTrainings || 0) >= (sub.totalTrainings || 0)) return false;
+    if (isSubExhausted(sub)) return false;
+    const start = sub.startDate || '0000-00-00';
+    const end = getEffectiveEndDate(sub) || '2099-12-31';
+    return start <= attendanceRow.date && end >= attendanceRow.date;
+  });
+};
+
+export const getAttendanceEffectiveType = (attendanceRow, subs = []) => {
+  const baseType = getAttendanceBaseType(attendanceRow);
+  if (baseType === 'debt') return 'debt';
+  if (hasSubscriptionCoverageOnDate(attendanceRow, subs)) return 'subscription';
+  return baseType;
+};
+
 const buildCommunicationMetrics = (events = [], range, prevRange) => {
   const inCurr = events.filter((e) => inRange(e.date, range.start, range.end));
   const inPrev = events.filter((e) => inRange(e.date, prevRange.start, prevRange.end));
@@ -177,12 +204,14 @@ export function buildAnalyticsFoundation({
 
   const attendanceInPeriod = attn.filter((a) => inRange(a.date, range.start, range.end));
   const attendancePrev = attn.filter((a) => inRange(a.date, prevRange.start, prevRange.end));
+  const attendanceInPeriodWithType = attendanceInPeriod.map((a) => ({ ...a, effectiveType: getAttendanceEffectiveType(a, subs) }));
+  const attendancePrevWithType = attendancePrev.map((a) => ({ ...a, effectiveType: getAttendanceEffectiveType(a, subs) }));
   const attendanceCount = attendanceInPeriod.reduce((sum, row) => sum + (row.quantity || 1), 0);
   const attendedDays = new Set(attendanceInPeriod.map((a) => a.date)).size;
   const averageAttendance = attendedDays ? Number((attendanceCount / attendedDays).toFixed(2)) : 0;
 
-  const trialEvents = attendanceInPeriod.filter((a) => a.entryType === 'trial' || a.guestType === 'trial');
-  const singleEvents = attendanceInPeriod.filter((a) => a.entryType === 'single' || a.guestType === 'single');
+  const trialEvents = attendanceInPeriodWithType.filter((a) => a.effectiveType === 'trial');
+  const singleEvents = attendanceInPeriodWithType.filter((a) => a.effectiveType === 'single');
   const trialSubs = subscriptionsInPeriod.filter((s) => s.planType === 'trial');
   const singleSubs = subscriptionsInPeriod.filter((s) => s.planType === 'single');
   const trialCount = trialEvents.length + trialSubs.length;
@@ -222,7 +251,7 @@ export function buildAnalyticsFoundation({
     const groupStudents = new Set(
       studentGrps.filter((sg) => groupSet.has(String(sg.groupId))).map((sg) => String(sg.studentId)),
     );
-    const groupAttendance = attendanceInPeriod.filter((a) => groupSet.has(String(a.groupId)));
+    const groupAttendance = attendanceInPeriodWithType.filter((a) => groupSet.has(String(a.groupId)));
     return {
       trainerId: trainer.id,
       trainerName: trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(' ').trim() || 'Без імені',
@@ -230,8 +259,8 @@ export function buildAnalyticsFoundation({
       studentCount: groupStudents.size,
       activeSubscriptions: activeSubs.filter((s) => groupSet.has(String(s.groupId))).length,
       attendanceCount: groupAttendance.reduce((sum, row) => sum + (row.quantity || 1), 0),
-      trialCount: groupAttendance.filter((a) => a.entryType === 'trial' || a.guestType === 'trial').length,
-      singleCount: groupAttendance.filter((a) => a.entryType === 'single' || a.guestType === 'single').length,
+      trialCount: groupAttendance.filter((a) => a.effectiveType === 'trial').length,
+      singleCount: groupAttendance.filter((a) => a.effectiveType === 'single').length,
       chartCard: {
         subtitle: `${range.key} · груп ${groupSet.size}`,
         progress: groupStudents.size ? Math.round((groupAttendance.length / groupStudents.size) * 100) : 0,
@@ -264,8 +293,8 @@ export function buildAnalyticsFoundation({
       activeStudents: 'Unique students with at least one non-expired subscription on anchor date.',
       newSubscriptions: 'Paid pack subscriptions in period where this is the student first paid pack ever.',
       renewals: 'Paid pack subscriptions in period for students that already had paid pack history.',
-      trialCount: 'Trial entries in attendance plus trial subscriptions started in period.',
-      singleCount: 'Single entries in attendance plus single subscriptions started in period.',
+      trialCount: 'Attendance entries classified as trial by effective Attendance logic plus trial subscriptions started in period.',
+      singleCount: 'Attendance entries classified as single by effective Attendance logic plus single subscriptions started in period.',
       attendanceCount: 'Sum of attendance quantity values in period.',
       averageAttendance: 'Attendance count divided by number of days with attendance in period.',
       expiredWithoutRenewal: 'Paid subscriptions ended in period without any next paid pack for same student.',
@@ -290,8 +319,8 @@ export function buildAnalyticsFoundation({
     deltas: {
       attendanceCount: compareWithPrevious(attendanceCount, attendancePrev.reduce((sum, row) => sum + (row.quantity || 1), 0)),
       newSubscriptions: compareWithPrevious(newSubscriptions, paidPackSubsPrev.length),
-      trialCount: compareWithPrevious(trialCount, attendancePrev.filter((a) => a.entryType === 'trial' || a.guestType === 'trial').length),
-      singleCount: compareWithPrevious(singleCount, attendancePrev.filter((a) => a.entryType === 'single' || a.guestType === 'single').length),
+      trialCount: compareWithPrevious(trialCount, attendancePrevWithType.filter((a) => a.effectiveType === 'trial').length),
+      singleCount: compareWithPrevious(singleCount, attendancePrevWithType.filter((a) => a.effectiveType === 'single').length),
     },
     ui: {
       kpiTiles: [
@@ -312,10 +341,10 @@ export function buildAnalyticsFoundation({
         ring: {
           id: 'entry_mix',
           slices: [
-            { key: 'subscription', value: attendanceInPeriod.filter((a) => !a.entryType || a.entryType === 'subscription').length },
+            { key: 'subscription', value: attendanceInPeriodWithType.filter((a) => a.effectiveType === 'subscription').length },
             { key: 'trial', value: trialEvents.length },
             { key: 'single', value: singleEvents.length },
-            { key: 'unpaid', value: attendanceInPeriod.filter((a) => a.entryType === 'unpaid').length },
+            { key: 'unpaid', value: attendanceInPeriodWithType.filter((a) => a.effectiveType === 'unpaid').length },
           ],
         },
         heatmap: { id: 'attendance_heatmap_weekday', cells: byWeekday },

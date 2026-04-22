@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
-import { buildAnalyticsFoundation, getTrainerAnalyticsCard } from "../shared/analytics";
+import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard } from "../shared/analytics";
 
 const theme = {
   bg: "#0f131a",
@@ -248,9 +248,9 @@ export default function TrainersTab({
     const avgAttendancePerSession = heldSessions > 0 ? Number((groupAttnCount / heldSessions).toFixed(2)) : 0;
     const problemNoActive = Array.from(groupStudentIds).filter((studentId) => !subs.some((s) => String(s.groupId) === String(g.id) && String(s.studentId) === studentId && s.status !== "expired")).length;
 
-    const trialCount = groupAttnRows.filter((a) => a.entryType === "trial" || a.guestType === "trial").length;
-    const singleCount = groupAttnRows.filter((a) => a.entryType === "single" || a.guestType === "single").length;
-    const paidCount = groupAttnRows.filter((a) => !a.entryType || a.entryType === "subscription").length;
+    const trialCount = groupAttnRows.filter((a) => getAttendanceEffectiveType(a, subs) === "trial").length;
+    const singleCount = groupAttnRows.filter((a) => getAttendanceEffectiveType(a, subs) === "single").length;
+    const paidCount = groupAttnRows.filter((a) => getAttendanceEffectiveType(a, subs) === "subscription").length;
 
     return {
       groupId: g.id,
@@ -333,7 +333,7 @@ export default function TrainersTab({
 
     const trialStudentsThisMonth = new Set(
       scopedData.scopedAttn
-        .filter((a) => inRange(a.date, range.start, range.end) && (a.entryType === "trial" || a.guestType === "trial") && a.studentId)
+        .filter((a) => inRange(a.date, range.start, range.end) && getAttendanceEffectiveType(a, scopedData.scopedSubs) === "trial" && a.studentId)
         .map((a) => String(a.studentId)),
     );
     const trialNotConverted = Array.from(trialStudentsThisMonth).filter((studentId) => !scopedData.scopedSubs.some((s) => (
