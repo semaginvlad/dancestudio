@@ -53,18 +53,6 @@ export default function MessagesTab({
   const [dialogsError, setDialogsError] = useState("");
   const [messagesByChat, setMessagesByChat] = useState({});
   const [metaByChat, setMetaByChat] = useState({});
-  const [debugState, setDebugState] = useState({
-    ts: "",
-    action: "",
-    chatId: "",
-    payload: null,
-    fetchCalled: false,
-    status: null,
-    ok: false,
-    responseBody: null,
-    error: "",
-    activeMeta: null,
-  });
 
   const membershipByStudent = useMemo(
     () =>
@@ -236,24 +224,8 @@ export default function MessagesTab({
     "";
   const resolvedDraft = draft || trainerDraft || templateText || "";
 
-  const saveMeta = async (chatId, patch, action = "unknown") => {
-    if (!chatId) {
-      const noFetchDebug = {
-        ts: new Date().toISOString(),
-        action,
-        chatId: chatId || "",
-        payload: patch || null,
-        fetchCalled: false,
-        status: null,
-        ok: false,
-        responseBody: null,
-        error: "saveMeta aborted: missing chatId",
-        activeMeta: metaByChat[activeDialog?.id || ""] || null,
-      };
-      console.log("[MessagesTab DEBUG] saveMeta aborted (no chatId)", noFetchDebug);
-      setDebugState(noFetchDebug);
-      return null;
-    }
+  const saveMeta = async (chatId, patch) => {
+    if (!chatId) return null;
     const body = { chatId };
     if (Object.prototype.hasOwnProperty.call(patch || {}, "studentId")) {
       body.studentId = patch.studentId ?? null;
@@ -264,71 +236,17 @@ export default function MessagesTab({
     if (Object.prototype.hasOwnProperty.call(patch || {}, "customTemplate")) {
       body.customTemplate = patch.customTemplate ?? null;
     }
-    const debugBase = {
-      ts: new Date().toISOString(),
-      action,
-      chatId,
-      payload: body,
-      fetchCalled: true,
-      status: null,
-      ok: false,
-      responseBody: null,
-      error: "",
-      activeMeta: metaByChat[activeDialog?.id || ""] || null,
-    };
-
-    console.log("[MessagesTab DEBUG] saveMeta -> before fetch", { action, chatId, payload: body });
-
-    try {
-      const res = await fetch("/api/telegram-chat-meta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      let payload = null;
-      try {
-        payload = await res.json();
-      } catch {
-        payload = { parseError: "Failed to parse JSON response" };
-      }
-      console.log("[MessagesTab DEBUG] saveMeta -> response status", res.status);
-      console.log("[MessagesTab DEBUG] saveMeta -> response body", payload);
-
-      let nextMeta = null;
-      if (res.ok) {
-        setMetaByChat((prev) => {
-          const updated = { ...prev, [chatId]: payload.meta };
-          nextMeta = updated[chatId] || null;
-          return updated;
-        });
-      }
-
-      const debugSnapshot = {
-        ...debugBase,
-        status: res.status,
-        ok: !!res.ok,
-        responseBody: payload,
-        error: res.ok ? "" : "Response not ok",
-        activeMeta: chatId === activeDialog?.id ? (payload?.meta || nextMeta || metaByChat[chatId] || null) : (metaByChat[activeDialog?.id || ""] || null),
-      };
-      console.log("[MessagesTab DEBUG] saveMeta -> metaByChat(active)", debugSnapshot.activeMeta);
-      setDebugState(debugSnapshot);
-
-      if (res.ok) return payload.meta;
-      return null;
-    } catch (e) {
-      const failDebug = {
-        ...debugBase,
-        status: null,
-        ok: false,
-        responseBody: null,
-        error: String(e?.message || e || "Unknown error"),
-        activeMeta: metaByChat[activeDialog?.id || ""] || null,
-      };
-      console.log("[MessagesTab DEBUG] saveMeta -> fetch failed", failDebug);
-      setDebugState(failDebug);
-      return null;
+    const res = await fetch("/api/telegram-chat-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json();
+    if (res.ok) {
+      setMetaByChat((prev) => ({ ...prev, [chatId]: payload.meta }));
+      return payload.meta;
     }
+    return null;
   };
 
   useEffect(() => {
@@ -351,7 +269,7 @@ export default function MessagesTab({
     const draftId = linkUiByChat[chatId]?.draftId || null;
     setLinkSavingChatId(chatId);
     try {
-      await saveMeta(chatId, { studentId: draftId }, "link");
+      await saveMeta(chatId, { studentId: draftId });
     } finally {
       setLinkSavingChatId("");
     }
@@ -361,7 +279,7 @@ export default function MessagesTab({
     if (!chatId) return;
     setLinkSavingChatId(chatId);
     try {
-      await saveMeta(chatId, { studentId: null }, "link");
+      await saveMeta(chatId, { studentId: null });
       setLinkUiByChat((prev) => ({
         ...prev,
         [chatId]: { ...(prev[chatId] || {}), draftId: "" },
@@ -585,7 +503,7 @@ export default function MessagesTab({
                 <button
                   type="button"
                   onClick={async () => {
-                    await saveMeta(activeDialog.id, { internalNote: internalNoteDraft }, "note");
+                    await saveMeta(activeDialog.id, { internalNote: internalNoteDraft });
                   }}
                   style={{ marginTop: 7, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
                 >
@@ -603,7 +521,7 @@ export default function MessagesTab({
                 />
                 <button
                   type="button"
-                  onClick={() => saveMeta(activeDialog.id, { customTemplate: customTemplateDraft }, "template")}
+                  onClick={() => saveMeta(activeDialog.id, { customTemplate: customTemplateDraft })}
                   style={{ marginTop: 7, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
                 >
                   Зберегти
@@ -664,26 +582,6 @@ export default function MessagesTab({
                 >
                   Надіслати
                 </button>
-              </div>
-            </div>
-            <div style={{ marginTop: 10, border: "1px dashed #4a5a73", borderRadius: 12, padding: 10, background: "rgba(10, 14, 21, 0.72)" }}>
-              <div style={{ color: "#f8c96b", fontWeight: 800, fontSize: 12, marginBottom: 6 }}>TEMP DEBUG MODE (link/note/template)</div>
-              <div style={{ color: "#a9bad2", fontSize: 11, lineHeight: 1.45 }}>
-                <div><b>action:</b> {debugState.action || "—"}</div>
-                <div><b>chatId:</b> {debugState.chatId || "—"}</div>
-                <div><b>fetchCalled:</b> {String(debugState.fetchCalled)}</div>
-                <div><b>status:</b> {debugState.status ?? "—"} | <b>ok:</b> {String(debugState.ok)}</div>
-                <div><b>error:</b> {debugState.error || "—"}</div>
-                <div><b>payload:</b> <code>{JSON.stringify(debugState.payload || null)}</code></div>
-                <div><b>response:</b> <code>{JSON.stringify(debugState.responseBody || null)}</code></div>
-                <div><b>active meta:</b>{" "}
-                  <code>{JSON.stringify({
-                    student_id: metaByChat[activeDialog?.id || ""]?.student_id ?? null,
-                    internal_note: metaByChat[activeDialog?.id || ""]?.internal_note ?? null,
-                    custom_template: metaByChat[activeDialog?.id || ""]?.custom_template ?? null,
-                  })}</code>
-                </div>
-                <div><b>debug ts:</b> {debugState.ts || "—"}</div>
               </div>
             </div>
           </>
