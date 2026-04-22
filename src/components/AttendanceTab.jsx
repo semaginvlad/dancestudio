@@ -702,11 +702,6 @@ export default function AttendanceTab({
   };
 
   const handleMessageStudent = (student) => {
-    if (!student?.telegram) {
-      alert("Для цієї учениці не вказано Telegram.");
-      setOpenMenuState(null);
-      return;
-    }
     if (typeof onActionMessageStudent === "function") {
       onActionMessageStudent(student);
     }
@@ -717,12 +712,16 @@ export default function AttendanceTab({
 
   const isWarned = (studentId) => !!warnedStudents?.[warnedKey(studentId)];
 
-  const toggleWarned = (studentId, checked) => {
+  const toggleWarned = async (studentId, checked) => {
     if (typeof setWarnedStudents !== "function") return;
-    setWarnedStudents((prev) => ({
-      ...(prev || {}),
-      [warnedKey(studentId)]: !!checked,
-    }));
+    const key = warnedKey(studentId);
+    setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !!checked }));
+    try {
+      await db.upsertWarnedStudent(gid, studentId, checked);
+    } catch (err) {
+      setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !checked }));
+      alert(err?.message || "Не вдалося зберегти статус сповіщення");
+    }
   };
 
   const openStudentMenu = (student, btnEl) => {
@@ -1068,6 +1067,11 @@ export default function AttendanceTab({
     return { bg: "#2563eb", mark };
   };
 
+  const groupStudentIdSet = useMemo(
+    () => new Set(studentIdsInGroup.map((id) => String(id))),
+    [studentIdsInGroup]
+  );
+
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
   }
@@ -1076,14 +1080,25 @@ export default function AttendanceTab({
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
 
-  const totalPresentByDate = visibleDays.reduce((acc, dateStr) => {
+  const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
-      acc[dateStr] = 0;
+      acc[dateStr] = { total: 0, removed: 0 };
       return acc;
     }
-    acc[dateStr] = attn
-      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
-      .reduce((sum, a) => sum + (a.quantity || 1), 0);
+
+    const records = attn.filter(
+      (a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)
+    );
+
+    const total = records.reduce((sum, a) => sum + (a.quantity || 1), 0);
+    const removed = records.reduce((sum, a) => {
+      const resolvedStudentId = a.studentId || subsById[a.subId]?.studentId || null;
+      if (!resolvedStudentId) return sum;
+      if (groupStudentIdSet.has(String(resolvedStudentId))) return sum;
+      return sum + (a.quantity || 1);
+    }, 0);
+
+    acc[dateStr] = { total, removed };
     return acc;
   }, {});
 
@@ -1353,7 +1368,14 @@ export default function AttendanceTab({
                     color: "#111827",
                   }}
                 >
-                  {totalPresentByDate[dateStr] || 0}
+                  <div style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                    <span>{totalsByDate[dateStr]?.total || 0}</span>
+                    {!!totalsByDate[dateStr]?.removed && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>
+                        (+{totalsByDate[dateStr].removed} видал.)
+                      </span>
+                    )}
+                  </div>
                 </td>
               ))}
             </tr>
@@ -1375,10 +1397,8 @@ export default function AttendanceTab({
                 <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                 <button
                   type="button"
-                  style={{ ...styles.menuItem, ...(!student.telegram ? styles.menuItemDisabled : {}) }}
+                  style={styles.menuItem}
                   onClick={() => handleMessageStudent(student)}
-                  disabled={!student.telegram}
-                  title={!student.telegram ? "Telegram не вказано" : ""}
                 >
                   Написати повідомлення
                 </button>
