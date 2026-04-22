@@ -291,7 +291,8 @@ export default function MessagesTab({
         background: "radial-gradient(1200px 500px at 8% -10%, rgba(255, 106, 88, 0.22) 0%, rgba(255, 106, 88, 0) 42%), radial-gradient(900px 420px at 92% -20%, rgba(100, 149, 255, 0.2) 0%, rgba(100, 149, 255, 0) 45%), linear-gradient(180deg, #0f1217 0%, #0b0d12 100%)",
         borderRadius: 30,
         padding: 12,
-        minHeight: 820,
+        height: "min(80vh, 860px)",
+        minHeight: 620,
       }}
     >
       <div style={{ ...shellCard, padding: 12, background: "#151920", borderColor: "#2a3039" }}>
@@ -314,7 +315,7 @@ export default function MessagesTab({
         </div>
       </div>
 
-      <div style={{ ...shellCard, padding: 14, display: "flex", flexDirection: "column", background: "#171d26", minHeight: 790 }}>
+      <div style={{ ...shellCard, padding: 14, display: "flex", flexDirection: "column", background: "#171d26", minHeight: 0, height: "100%" }}>
         <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, color: "#f8fafc", letterSpacing: "-0.01em" }}>Повідомлення / Чати</div>
         <input
           value={searchQ}
@@ -359,7 +360,7 @@ export default function MessagesTab({
         </div>
       </div>
 
-      <div style={{ ...shellCard, padding: 18, display: "flex", flexDirection: "column", minHeight: 790, background: "#161c25", borderColor: "#303846" }}>
+      <div style={{ ...shellCard, padding: 18, display: "flex", flexDirection: "column", minHeight: 0, height: "100%", background: "#161c25", borderColor: "#303846" }}>
         <div style={{ fontSize: 20, fontWeight: 800, color: "#f8fafc", marginBottom: 4, letterSpacing: "-0.02em" }}>
           {activeDialog ? `Чат: ${activeDialog.title}` : "Оберіть діалог"}
         </div>
@@ -457,7 +458,7 @@ export default function MessagesTab({
               </div>
             )}
 
-            <div style={{ flex: 1, minHeight: 280, maxHeight: 360, overflow: "auto", borderTop: "1px solid #323a45", paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: "1px solid #323a45", paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
               {(messagesByChat[activeDialog.id] || []).map((m) => (
                 <div key={m.id} style={{ marginBottom: 8, textAlign: m.out ? "right" : "left" }}>
                   <div style={{ display: "inline-block", background: m.out ? "#2b3e57" : "#1f2732", borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: "1px solid #3a4759" }}>
