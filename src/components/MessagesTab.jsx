@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
 
@@ -39,14 +39,14 @@ export default function MessagesTab({
   selectedStudentId = "",
   onSelectStudent,
 }) {
-  const [groupFilter, setGroupFilter] = useState("all");
-  const [trainerOnly, setTrainerOnly] = useState(false);
+  const [railFilter, setRailFilter] = useState("all");
   const [draft, setDraft] = useState("");
 
   const [dialogs, setDialogs] = useState([]);
   const [dialogsError, setDialogsError] = useState("");
   const [messagesByChat, setMessagesByChat] = useState({});
   const [metaByChat, setMetaByChat] = useState({});
+  const metaSaveTimersRef = useRef({});
 
   const membershipByStudent = useMemo(
     () =>
@@ -75,6 +75,13 @@ export default function MessagesTab({
   const directionMap = useMemo(() => Object.fromEntries(DIRECTIONS.map((d) => [d.id, d])), []);
 
   useEffect(() => {
+    return () => {
+      Object.values(metaSaveTimersRef.current).forEach((timerId) => clearTimeout(timerId));
+      metaSaveTimersRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadDialogs = async () => {
@@ -83,7 +90,27 @@ export default function MessagesTab({
         const res = await fetch("/api/telegram-list-dialogs");
         const payload = await res.json();
         if (!res.ok) throw new Error(payload?.details || payload?.error || "Failed to load dialogs");
-        if (!cancelled) setDialogs(payload.dialogs || []);
+        const loadedDialogs = payload.dialogs || [];
+        if (!cancelled) setDialogs(loadedDialogs);
+
+        const metaRows = await Promise.all(
+          loadedDialogs.map(async (dlg) => {
+            try {
+              const metaRes = await fetch(`/api/telegram-chat-meta?chatId=${encodeURIComponent(dlg.id)}`);
+              const metaPayload = await metaRes.json();
+              if (!metaRes.ok) return [dlg.id, null];
+              return [dlg.id, metaPayload.meta || null];
+            } catch {
+              return [dlg.id, null];
+            }
+          })
+        );
+        if (!cancelled) {
+          setMetaByChat((prev) => ({
+            ...prev,
+            ...Object.fromEntries(metaRows),
+          }));
+        }
       } catch (e) {
         if (!cancelled) {
           setDialogs([]);
@@ -125,7 +152,8 @@ export default function MessagesTab({
       .map((dlg) => {
         const meta = metaByChat[dlg.id] || null;
         const linkedStudent = meta?.student_id ? studentMap[meta.student_id] : null;
-        const note = meta?.internal_note || linkedStudent?.notes || "";
+        const hasStoredNote = !!meta && Object.prototype.hasOwnProperty.call(meta, "internal_note");
+        const note = hasStoredNote ? (meta?.internal_note || "") : (linkedStudent?.notes || "");
         const trainer = isTrainerChatByNote(note);
         const linkedGroupIds = linkedStudent
           ? normalizeStudentGroupIds(linkedStudent, membershipByStudent[linkedStudent.id] || [])
@@ -142,10 +170,17 @@ export default function MessagesTab({
           lastTs,
         };
       })
-      .filter((d) => (trainerOnly ? d.trainer : true))
-      .filter((d) => (groupFilter === "all" ? true : d.linkedGroupIds.includes(groupFilter)))
+      .filter((d) => {
+        if (railFilter === "all") return true;
+        if (railFilter === "trainers") return d.trainer;
+        if (railFilter.startsWith("group:")) {
+          const gid = railFilter.replace("group:", "");
+          return d.linkedGroupIds.includes(gid);
+        }
+        return true;
+      })
       .sort((a, b) => b.lastTs - a.lastTs);
-  }, [dialogs, groupFilter, membershipByStudent, metaByChat, studentMap, trainerOnly]);
+  }, [dialogs, membershipByStudent, metaByChat, railFilter, studentMap]);
 
   const activeDialog = enrichedDialogs.find((d) => d.id === selectedDialog?.id) || enrichedDialogs[0] || null;
 
@@ -172,14 +207,18 @@ export default function MessagesTab({
     return parts.join("\n\n");
   }, [activeDialog, groups, membershipByStudent, students, subsByStudent]);
 
-  const templateText = activeDialog?.linkedStudent?.messageTemplate || activeDialog?.linkedStudent?.message_template || activeDialog?.meta?.custom_template || "";
+  const templateText =
+    activeDialog?.linkedStudent?.messageTemplate ||
+    activeDialog?.linkedStudent?.message_template ||
+    metaByChat[activeDialog?.id || ""]?.custom_template ||
+    "";
   const resolvedDraft = draft || trainerDraft || templateText || "";
 
-  const saveMeta = async (patch) => {
-    if (!activeDialog?.id) return;
-    const current = metaByChat[activeDialog.id] || {};
+  const saveMeta = async (chatId, patch) => {
+    if (!chatId) return;
+    const current = metaByChat[chatId] || {};
     const body = {
-      chatId: activeDialog.id,
+      chatId,
       studentId: patch.studentId ?? current.student_id ?? null,
       internalNote: patch.internalNote ?? current.internal_note ?? null,
       customTemplate: patch.customTemplate ?? current.custom_template ?? null,
@@ -191,27 +230,44 @@ export default function MessagesTab({
       body: JSON.stringify(body),
     });
     const payload = await res.json();
-    if (res.ok) setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: payload.meta }));
+    if (res.ok) setMetaByChat((prev) => ({ ...prev, [chatId]: payload.meta }));
+  };
+
+  const queueMetaSave = (chatId, patch) => {
+    if (!chatId) return;
+    if (metaSaveTimersRef.current[chatId]) {
+      clearTimeout(metaSaveTimersRef.current[chatId]);
+    }
+    metaSaveTimersRef.current[chatId] = setTimeout(() => {
+      saveMeta(chatId, patch);
+      delete metaSaveTimersRef.current[chatId];
+    }, 500);
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "180px 360px 1fr", gap: 16 }}>
+      <div style={{ ...shellCard, padding: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: theme.textMain }}>Фільтри</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <button type="button" onClick={() => setRailFilter("all")} style={{ textAlign: "left", border: `1px solid ${railFilter === "all" ? theme.primary : theme.border}`, borderRadius: 10, padding: "8px 10px", background: railFilter === "all" ? "#eef2ff" : "#fff", cursor: "pointer", fontWeight: 600 }}>
+            Усі чати
+          </button>
+          <button type="button" onClick={() => setRailFilter("trainers")} style={{ textAlign: "left", border: `1px solid ${railFilter === "trainers" ? theme.primary : theme.border}`, borderRadius: 10, padding: "8px 10px", background: railFilter === "trainers" ? "#eef2ff" : "#fff", cursor: "pointer", fontWeight: 600 }}>
+            Тренери
+          </button>
+          {groups.map((g) => {
+            const key = `group:${g.id}`;
+            return (
+              <button key={g.id} type="button" onClick={() => setRailFilter(key)} style={{ textAlign: "left", border: `1px solid ${railFilter === key ? theme.primary : theme.border}`, borderRadius: 10, padding: "8px 10px", background: railFilter === key ? "#eef2ff" : "#fff", cursor: "pointer", fontSize: 13 }}>
+                {g.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div style={{ ...shellCard, padding: 12 }}>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10, color: theme.textMain }}>Повідомлення / Чати</div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-          <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} style={{ borderRadius: 10, border: `1px solid ${theme.border}`, padding: "8px 10px" }}>
-            <option value="all">Усі групи</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", color: theme.textMuted, fontSize: 13 }}>
-            <input type="checkbox" checked={trainerOnly} onChange={(e) => setTrainerOnly(e.target.checked)} />
-            Лише trainer-чати
-          </label>
-        </div>
-
         {dialogsError && <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{dialogsError}</div>}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 640, overflow: "auto" }}>
@@ -270,7 +326,7 @@ export default function MessagesTab({
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ studentId, chatId: activeDialog.id }),
                   });
-                  await saveMeta({ studentId });
+                  await saveMeta(activeDialog.id, { studentId });
                 }}
                 style={{ width: "100%", borderRadius: 10, border: `1px solid ${theme.border}`, padding: "8px 10px", marginBottom: 8 }}
               >
@@ -293,8 +349,12 @@ export default function MessagesTab({
               <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6 }}>Внутрішня нотатка</div>
               <textarea
                 value={metaByChat[activeDialog.id]?.internal_note || ""}
-                onChange={(e) => setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: { ...(prev[activeDialog.id] || {}), internal_note: e.target.value } }))}
-                onBlur={(e) => saveMeta({ internalNote: e.target.value })}
+                onChange={(e) => {
+                  const nextNote = e.target.value;
+                  setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: { ...(prev[activeDialog.id] || {}), internal_note: nextNote } }));
+                  queueMetaSave(activeDialog.id, { internalNote: nextNote });
+                }}
+                onBlur={(e) => saveMeta(activeDialog.id, { internalNote: e.target.value })}
                 rows={3}
                 style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, resize: "vertical" }}
               />
@@ -305,7 +365,7 @@ export default function MessagesTab({
               <textarea
                 value={metaByChat[activeDialog.id]?.custom_template || ""}
                 onChange={(e) => setMetaByChat((prev) => ({ ...prev, [activeDialog.id]: { ...(prev[activeDialog.id] || {}), custom_template: e.target.value } }))}
-                onBlur={(e) => saveMeta({ customTemplate: e.target.value })}
+                onBlur={(e) => saveMeta(activeDialog.id, { customTemplate: e.target.value })}
                 rows={3}
                 style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, resize: "vertical" }}
               />
