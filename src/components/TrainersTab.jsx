@@ -41,6 +41,13 @@ const Delta = ({ value = 0 }) => (
   </span>
 );
 
+const DetailStat = ({ label, value, tone = "#1f2b3d" }) => (
+  <div style={{ border: "1px solid #dfe7f3", borderRadius: 12, padding: "10px 12px", background: "#fff" }}>
+    <div style={{ fontSize: 12, color: "#7b8ca5" }}>{label}</div>
+    <div style={{ fontSize: 22, fontWeight: 800, color: tone }}>{value}</div>
+  </div>
+);
+
 function ProgressRing({ value = 0, label, sublabel, onClick }) {
   const radius = 38;
   const circumference = 2 * Math.PI * radius;
@@ -378,6 +385,174 @@ export default function TrainersTab({
 
   const trendMax = Math.max(...trendSeries.map((x) => x.y), 1);
 
+  const detailMonthLabel = monthLabel(periodDate);
+  const prevMonthDate = monthStart(new Date(periodDate.getFullYear(), periodDate.getMonth() - 1, 1));
+  const prevMonthLabel = monthLabel(prevMonthDate);
+
+  const renderDetailBody = () => {
+    if (detailState.type === "overview") {
+      return (
+        <div style={{ fontSize: 13, color: "#5f718c" }}>
+          Обери будь-який блок вище (KPI / ring / chart / heatmap / group / insight / communication),
+          щоб отримати деталізацію з поясненням.
+        </div>
+      );
+    }
+
+    if (detailState.type === "kpi" && detailState.payload) {
+      const k = detailState.payload;
+      const prev = k.value - k.delta;
+      const explainMap = {
+        students: "Кількість учениць, прив'язаних до груп тренера.",
+        activeSubs: "Кількість активних абонементів у групах тренера.",
+        newSubs: "Нові платні абонементи за календарний місяць.",
+        renewals: "Платні продовження за календарний місяць.",
+        trials: "Пробні активності у групах тренера за місяць.",
+        singles: "Разові тренування у групах тренера за місяць",
+      };
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel} vs {prevMonthLabel}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(140px,1fr))", gap: 8 }}>
+            <DetailStat label={`Поточний (${detailMonthLabel})`} value={k.value} />
+            <DetailStat label={`Попередній (${prevMonthLabel})`} value={prev} />
+            <DetailStat label="Delta" value={`${k.delta >= 0 ? "+" : ""}${k.delta}`} tone={k.delta >= 0 ? "#14805f" : "#b42318"} />
+          </div>
+          <div style={{ fontSize: 13, color: "#4f607a" }}>{explainMap[k.id] || "Показник для поточного тренера за вибраний місяць."}</div>
+        </div>
+      );
+    }
+
+    if (detailState.type === "ring" && detailState.payload) {
+      const p = detailState.payload;
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(140px,1fr))", gap: 8 }}>
+            <DetailStat label="Відсоток" value={`${p.percent}%`} />
+            <DetailStat label="Чисельник" value={p.numerator ?? "—"} />
+            <DetailStat label="Знаменник" value={p.denominator ?? "—"} />
+          </div>
+          <div style={{ fontSize: 13, color: "#4f607a" }}>{p.explanation}</div>
+        </div>
+      );
+    }
+
+    if (detailState.type === "chart" && detailState.payload) {
+      const p = detailState.payload;
+      if (p.kind === "attendanceTrend") {
+        const max = Math.max(...p.series.map((x) => x.y), 1);
+        return (
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Відвідуваність по днях.</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 180, border: "1px solid #e2eaf4", borderRadius: 12, padding: 10 }}>
+              {p.series.map((d) => (
+                <div key={d.date} style={{ flex: 1, minWidth: 8 }}>
+                  <div style={{ height: `${Math.max(6, (d.y / max) * 145)}px`, background: "#4f7ddb", borderRadius: 6 }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "#6f819b" }}>Піки показують дні з найвищим навантаженням тренера.</div>
+          </div>
+        );
+      }
+      if (p.kind === "breakdown") {
+        const max = Math.max(...p.rows.map((r) => r.value), 1);
+        return (
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Розклад активностей.</div>
+            {p.rows.map((r) => (
+              <div key={r.key}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#53657f", marginBottom: 4 }}>
+                  <span>{r.label}</span><span>{r.value}</span>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: "#ebf1f8" }}>
+                  <div style={{ width: `${(r.value / max) * 100}%`, height: "100%", borderRadius: 999, background: r.color }} />
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize: 12, color: "#6f819b" }}>Порівняй співвідношення trial/single/paid для рішень по конверсії.</div>
+          </div>
+        );
+      }
+    }
+
+    if (detailState.type === "heatmap" && detailState.payload) {
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Weekday heatmap.</div>
+          {detailState.payload.cells.map((c) => (
+            <div key={c.weekday} style={{ display: "grid", gridTemplateColumns: "110px 1fr 60px", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 12, color: "#43556f", fontWeight: 700 }}>{c.label}</div>
+              <div style={{ height: 8, borderRadius: 999, background: "#ecf1f8" }}>
+                <div style={{ width: `${Math.min(100, c.value * 10)}%`, height: "100%", borderRadius: 999, background: "#4f7ddb" }} />
+              </div>
+              <div style={{ fontSize: 12, color: "#43556f", textAlign: "right" }}>{c.value}</div>
+            </div>
+          ))}
+          <div style={{ fontSize: 12, color: "#6f819b" }}>Використовуй для оптимізації розкладу/нагадувань по днях тижня.</div>
+        </div>
+      );
+    }
+
+    if (detailState.type === "group" && detailState.payload) {
+      const g = detailState.payload;
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Деталі групи.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(120px,1fr))", gap: 8 }}>
+            <DetailStat label="Учениць" value={g.students} />
+            <DetailStat label="Активні абон." value={g.activeSubs} />
+            <DetailStat label="Сер. відвідуваність" value={g.avgAttendance} />
+            <DetailStat label="Без активного" value={g.noActive} tone={g.noActive > 0 ? "#b42318" : "#14805f"} />
+            <DetailStat label="Заповненість" value={`${g.fillPct}%`} />
+          </div>
+          <div style={{ fontSize: 13, color: "#4f607a" }}>Високий показник “Без активного” = зона для фоллоуапу/продовження.</div>
+        </div>
+      );
+    }
+
+    if (detailState.type === "insight" && detailState.payload) {
+      const ins = detailState.payload;
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>{detailMonthLabel}. Insight trigger.</div>
+          <DetailStat label="Поточне значення" value={ins.value} />
+          <div style={{ fontSize: 13, color: "#4f607a" }}>{ins.note}</div>
+          <div style={{ fontSize: 12, color: "#6f819b" }}>
+            Інтерпретація: цей інсайт показує точку росту/ризику для тренера за обраний календарний місяць.
+          </div>
+        </div>
+      );
+    }
+
+    if (detailState.type === "communication" && detailState.payload) {
+      return (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#7a8ba4" }}>Communication analytics foundation</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {Object.entries(detailState.payload).map(([key, cfg]) => (
+              <div key={key} style={{ border: "1px solid #e1e8f4", borderRadius: 12, padding: 10, background: "#fff" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#2a3d57" }}>{key}</div>
+                <div style={{ fontSize: 12, color: "#6f819b", marginTop: 2 }}>Status: {cfg.status}</div>
+                {Array.isArray(cfg.requiredFields) && (
+                  <div style={{ fontSize: 11, color: "#8a9bb2", marginTop: 6 }}>
+                    Required fields: {cfg.requiredFields.join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: "#6f819b" }}>
+            Модуль готовий до підключення реальних Telegram/Instagram/AI подій без переробки UI-контейнера.
+          </div>
+        </div>
+      );
+    }
+
+    return <div style={{ fontSize: 12, color: "#6f819b" }}>Деталі недоступні для цього типу блоку.</div>;
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px minmax(0,1fr)", gap: 16 }}>
       <aside style={{ ...card, padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
@@ -480,32 +655,72 @@ export default function TrainersTab({
             value={Math.round(foundationCurrent.metrics.trialToPaidConversion || 0)}
             label="Пробне → абонемент"
             sublabel="конверсія місяця"
-            onClick={() => setDetailState({ type: "ring", title: "Trial conversion", payload: foundationCurrent.domains.trialSingle })}
+            onClick={() => setDetailState({
+              type: "ring",
+              title: "Trial conversion",
+              payload: {
+                kind: "trialConversion",
+                percent: Math.round(foundationCurrent.metrics.trialToPaidConversion || 0),
+                numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial_paid")?.value || 0,
+                denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial")?.value || 0,
+                explanation: "Частка trial-учениць, які перейшли в платний абонемент.",
+              },
+            })}
           />
           <ProgressRing
             value={Math.round(foundationCurrent.metrics.singleToPaidConversion || 0)}
             label="Разове → абонемент"
             sublabel="конверсія місяця"
-            onClick={() => setDetailState({ type: "ring", title: "Single conversion", payload: foundationCurrent.domains.trialSingle })}
+            onClick={() => setDetailState({
+              type: "ring",
+              title: "Single conversion",
+              payload: {
+                kind: "singleConversion",
+                percent: Math.round(foundationCurrent.metrics.singleToPaidConversion || 0),
+                numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single_paid")?.value || 0,
+                denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single")?.value || 0,
+                explanation: "Частка single-учениць, які перейшли в платний абонемент.",
+              },
+            })}
           />
           <ProgressRing
             value={pct(foundationCurrent.metrics.renewals, Math.max(1, foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals))}
             label="Рівень продовжень"
             sublabel="частка renewals"
-            onClick={() => setDetailState({ type: "ring", title: "Renewals rate", payload: foundationCurrent.domains.subscriptions })}
+            onClick={() => setDetailState({
+              type: "ring",
+              title: "Renewals rate",
+              payload: {
+                kind: "renewalsRate",
+                percent: pct(foundationCurrent.metrics.renewals, Math.max(1, foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals)),
+                numerator: foundationCurrent.metrics.renewals,
+                denominator: foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals,
+                explanation: "Частка продовжень серед усіх нових+продовжених абонементів за місяць.",
+              },
+            })}
           />
           <ProgressRing
             value={pct(groupCards.reduce((s, g) => s + g.activeSubs, 0), Math.max(1, groupCards.reduce((s, g) => s + g.students, 0)))}
             label="Заповненість груп"
             sublabel="активні/усі учениці"
-            onClick={() => setDetailState({ type: "ring", title: "Group occupancy", payload: groupCards })}
+            onClick={() => setDetailState({
+              type: "ring",
+              title: "Group occupancy",
+              payload: {
+                kind: "groupOccupancy",
+                percent: pct(groupCards.reduce((s, g) => s + g.activeSubs, 0), Math.max(1, groupCards.reduce((s, g) => s + g.students, 0))),
+                numerator: groupCards.reduce((s, g) => s + g.activeSubs, 0),
+                denominator: groupCards.reduce((s, g) => s + g.students, 0),
+                explanation: "Частка учениць із активними абонементами у групах тренера.",
+              },
+            })}
           />
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
           <button
             type="button"
-            onClick={() => setDetailState({ type: "chart", title: "Attendance trend", payload: trendSeries })}
+            onClick={() => setDetailState({ type: "chart", title: "Attendance trend", payload: { kind: "attendanceTrend", series: trendSeries } })}
             style={{ ...card, width: "100%", padding: 14, border: "1px solid #dde6f2", cursor: "pointer", background: "#fff", textAlign: "left" }}
           >
             <div style={{ fontWeight: 800, color: "#24364d", marginBottom: 12 }}>Attendance trend ({monthKey(periodDate)})</div>
@@ -520,10 +735,10 @@ export default function TrainersTab({
           </button>
 
           <div style={{ display: "grid", gap: 10 }}>
-            <MiniBars rows={monthBreakdown} onClick={() => setDetailState({ type: "chart", title: "Breakdown", payload: monthBreakdown })} />
+            <MiniBars rows={monthBreakdown} onClick={() => setDetailState({ type: "chart", title: "Breakdown", payload: { kind: "breakdown", rows: monthBreakdown } })} />
             <button
               type="button"
-              onClick={() => setDetailState({ type: "heatmap", title: "Heatmap preview", payload: foundationCurrent.domains.attendance.heatmap })}
+              onClick={() => setDetailState({ type: "heatmap", title: "Heatmap preview", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
               style={{ ...card, width: "100%", padding: 14, border: "1px solid #dde6f2", cursor: "pointer", background: "#fff", textAlign: "left" }}
             >
               <div style={{ fontWeight: 700, marginBottom: 8, color: "#24364d" }}>Heatmap preview</div>
@@ -610,9 +825,9 @@ export default function TrainersTab({
             <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: "1px solid #d3deef", background: "#fff", borderRadius: 10, padding: "6px 10px", cursor: "pointer" }}>Скинути</button>
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#2b3f5c", marginBottom: 6 }}>{detailState.title}</div>
-          <pre style={{ margin: 0, fontSize: 12, color: "#4b5f7b", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 180, overflow: "auto" }}>
-            {JSON.stringify(detailState.payload, null, 2) || "Натисни будь-який блок (KPI/ring/chart/group/insight), щоб побачити деталізацію."}
-          </pre>
+          <div style={{ border: "1px solid #dce5f2", borderRadius: 12, background: "#fdfefe", padding: 12 }}>
+            {renderDetailBody()}
+          </div>
           <div style={{ marginTop: 8, fontSize: 11, color: "#7f90a9" }}>
             Поточний період: {range.start} → {range.end} · Попередній: {rangePrev.start} → {rangePrev.end}
           </div>
