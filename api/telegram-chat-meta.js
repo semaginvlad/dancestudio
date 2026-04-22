@@ -1,14 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
 
 const buildSupabase = () => {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceRoleKey) throw new Error("Missing Supabase server environment variables");
   return createClient(supabaseUrl, serviceRoleKey);
 };
 
 export default async function handler(req, res) {
-  const supabase = buildSupabase();
+  let supabase;
+  try {
+    supabase = buildSupabase();
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to initialize Supabase client",
+      details: String(error?.message || error),
+    });
+  }
 
   if (req.method === "GET") {
     const chatId = req.query.chatId;
