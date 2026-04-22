@@ -184,7 +184,11 @@ export async function updateTrainer(id, trainer) {
 export async function fetchTrainerGroups() {
   const { data, error } = await supabase.from('trainer_groups').select('*');
   if (error) throw error;
-  return (data || []).map((row) => ({ id: row.id, trainerId: row.trainer_id, groupId: row.group_id }));
+  return (data || []).map((row) => ({
+    trainerId: row.trainer_id,
+    groupId: row.group_id,
+    isPrimary: !!row.is_primary,
+  }));
 }
 
 export async function upsertTrainerGroup(trainerId, groupId) {
@@ -195,7 +199,11 @@ export async function upsertTrainerGroup(trainerId, groupId) {
     .select('*')
     .single();
   if (error) throw error;
-  return { id: data.id, trainerId: data.trainer_id, groupId: data.group_id };
+  return {
+    trainerId: data.trainer_id,
+    groupId: data.group_id,
+    isPrimary: !!data.is_primary,
+  };
 }
 
 export async function deleteTrainerGroup(trainerId, groupId) {
