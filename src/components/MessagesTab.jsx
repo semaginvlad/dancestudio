@@ -127,8 +127,18 @@ export default function MessagesTab({
 
   const selectedDialog = useMemo(() => {
     if (!dialogs.length) return null;
-    return dialogs.find((d) => d.id === selectedStudentId) || dialogs[0];
-  }, [dialogs, selectedStudentId]);
+    if (selectedStudentId) {
+      const directChatMatch = dialogs.find((d) => d.id === selectedStudentId);
+      if (directChatMatch) return directChatMatch;
+
+      const chatIdByStudent = Object.entries(metaByChat).find(([, meta]) => String(meta?.student_id || "") === String(selectedStudentId))?.[0];
+      if (chatIdByStudent) {
+        const matchedByStudent = dialogs.find((d) => d.id === chatIdByStudent);
+        if (matchedByStudent) return matchedByStudent;
+      }
+    }
+    return dialogs[0];
+  }, [dialogs, metaByChat, selectedStudentId]);
 
   useEffect(() => {
     const chatId = selectedDialog?.id;
