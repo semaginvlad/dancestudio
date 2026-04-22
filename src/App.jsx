@@ -27,12 +27,14 @@ import {
   uid,
   useStickyState,
 } from "./shared/utils";
+import { buildAnalyticsFoundation } from "./shared/analytics";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
 import { StudentForm, SubForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
 import MessagesTab from "./components/MessagesTab";
+import TrainersTab from "./components/TrainersTab";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -47,6 +49,8 @@ export default function App() {
   const [cancelled, setCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
+  const [trainers, setTrainers] = useState([]);
+  const [trainerGroups, setTrainerGroups] = useState([]);
   
   const [tab, setTab] = useStickyState("dashboard", "ds_danceStudioTab");
   const [modal, setModal] = useState(null);
@@ -66,7 +70,7 @@ export default function App() {
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
-  const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
+  const [warnedStudents, setWarnedStudents] = useState({});
   const [restoreGroupByStudent, setRestoreGroupByStudent] = useState({});
   const [selectedMessageStudentId, setSelectedMessageStudentId] = useState("");
 
@@ -117,10 +121,11 @@ export default function App() {
   }
 };
 
-      const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
+      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist), fetchCustomOrders()
+        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
+        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups)
       ]);
 
       if (st) setStudents(st);
@@ -130,8 +135,10 @@ export default function App() {
       if (ca) setCancelled(ca);
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
-      
-    setCustomOrders(ord || {});
+      setCustomOrders(ord || {});
+      setWarnedStudents(warned || {});
+      setTrainers(tr || []);
+      setTrainerGroups(trg || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -198,6 +205,17 @@ export default function App() {
   }, [notifications]);
 
   const analytics = useMemo(()=>{
+    const analyticsFoundation = buildAnalyticsFoundation({
+      students,
+      groups,
+      studentGrps,
+      subs,
+      attn,
+      trainers,
+      trainerGroups,
+      periodType: "month",
+      anchorDate: today(),
+    });
     const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
     const unpaid=subs.filter(s=>!s.paid&&getSubStatus(s)!=="expired").reduce((a,s)=>a+(s.amount||0),0);
     const byDir={};DIRECTIONS.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
@@ -227,11 +245,10 @@ export default function App() {
     const currMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(currMonth) || s.startDate?.startsWith(currMonth))).reduce((a,s)=>a+(s.amount||0),0);
     const prevMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(prevMonth) || s.startDate?.startsWith(prevMonth))).reduce((a,s)=>a+(s.amount||0),0);
 
-    const daysInMonth = new Date(parseInt(currMonth.split('-')[0]), parseInt(currMonth.split('-')[1]), 0).getDate();
-    const chartData = Array.from({length: daysInMonth}, (_, i) => {
-      const d = `${currMonth}-${String(i+1).padStart(2,'0')}`;
-      return { day: i+1, count: attn.filter(a => a.date === d).length };
-    });
+    const chartData = analyticsFoundation.ui.charts.line.series.map((row) => ({
+      day: row.x,
+      count: row.y,
+    }));
     const maxChartVal = Math.max(...chartData.map(d => d.count), 1);
 
     const currMonthDetails = {
@@ -249,9 +266,10 @@ export default function App() {
       avgLTV: usersWithPurchases > 0 ? Math.round(totalLTV / usersWithPurchases) : 0, 
       conversionRate: trialUsers > 0 ? Math.round((convertedUsers / trialUsers) * 100) : 0,
       currMonthStats: { trial: currMonthDetails.trial.length, single: currMonthDetails.single.length, pack4: currMonthDetails.pack4.length, pack8: currMonthDetails.pack8.length, pack12: currMonthDetails.pack12.length, cancelledCount: currMonthCancelled, unpaidAttn: currMonthDetails.unpaidAttn.length },
-      currMonthDetails, chartData, maxChartVal
+      currMonthDetails, chartData, maxChartVal,
+      foundation: analyticsFoundation,
     };
-  },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
+  },[students,subs,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
 
   // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
   const proAnalytics = useMemo(() => {
@@ -510,6 +528,7 @@ export default function App() {
               {id:"subs", label:"Абонементи"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
+              {id:"trainers", label:"Тренери"},
               {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
               {id:"finance", label:"Фінанси"},
               {id:"pro_analytics", label:"📈 Про-Аналітика"},
@@ -536,8 +555,27 @@ export default function App() {
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
+            groups={groups}
+            studentGrps={studentGrps}
+            subs={subsExt}
+            attn={attn}
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
+          />
+        )}
+        {isAdmin && tab==="trainers" && (
+          <TrainersTab
+            trainers={trainers}
+            setTrainers={setTrainers}
+            trainerGroups={trainerGroups}
+            setTrainerGroups={setTrainerGroups}
+            groups={groups}
+            students={students}
+            studentGrps={studentGrps}
+            subs={subsExt}
+            attn={attn}
+            analyticsFoundation={analytics.foundation}
+            cancelled={cancelled}
           />
         )}
         

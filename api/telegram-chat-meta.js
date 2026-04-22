@@ -1,0 +1,70 @@
+import { createClient } from "@supabase/supabase-js";
+
+const buildSupabase = () => {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) throw new Error("Missing Supabase server environment variables");
+  return createClient(supabaseUrl, serviceRoleKey);
+};
+
+export default async function handler(req, res) {
+  let supabase;
+  try {
+    supabase = buildSupabase();
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to initialize Supabase client",
+      details: String(error?.message || error),
+    });
+  }
+
+  if (req.method === "GET") {
+    const chatId = req.query.chatId;
+    if (!chatId) return res.status(400).json({ error: "chatId is required" });
+
+    const { data, error } = await supabase
+      .from("telegram_chat_meta")
+      .select("*")
+      .eq("chat_id", String(chatId))
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to load chat meta", details: String(error.message || error) });
+    }
+
+    return res.status(200).json({ success: true, meta: data || null });
+  }
+
+  if (req.method === "POST") {
+    const { chatId } = req.body || {};
+    if (!chatId) return res.status(400).json({ error: "chatId is required" });
+
+    const payload = {
+      chat_id: String(chatId),
+      updated_at: new Date().toISOString(),
+    };
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "studentId")) {
+      payload.student_id = req.body.studentId || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "internalNote")) {
+      payload.internal_note = req.body.internalNote || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "customTemplate")) {
+      payload.custom_template = req.body.customTemplate || null;
+    }
+
+    const { data, error } = await supabase
+      .from("telegram_chat_meta")
+      .upsert(payload, { onConflict: "chat_id" })
+      .select("*")
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: "Failed to save chat meta", details: String(error.message || error) });
+    }
+
+    return res.status(200).json({ success: true, meta: data });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+}
