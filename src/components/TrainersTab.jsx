@@ -25,6 +25,16 @@ export default function TrainersTab({
   const [saving, setSaving] = useState(false);
 
   const selectedTrainer = useMemo(() => trainers.find((t) => t.id === selectedTrainerId) || null, [trainers, selectedTrainerId]);
+  const normalizeInstagramHandle = (raw = "") => {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    const noAt = value.replace(/^@+/, "");
+    const urlMatch = noAt.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+    if (urlMatch?.[1]) return urlMatch[1].replace(/^@+/, "");
+    const slashMatch = noAt.match(/^https?:\/\/[^/]+\/([A-Za-z0-9._]+)/i);
+    if (slashMatch?.[1]) return slashMatch[1].replace(/^@+/, "");
+    return noAt.split(/[/?#]/)[0].replace(/^@+/, "");
+  };
   const getTrainerDisplayName = (t) => {
     if (!t) return "Без імені";
     const name = [t.firstName || "", t.lastName || ""].filter(Boolean).join(" ").trim();
@@ -104,12 +114,16 @@ export default function TrainersTab({
     }
     setSaving(true);
     try {
+      const payload = {
+        ...draft,
+        instagramHandle: normalizeInstagramHandle(draft.instagramHandle),
+      };
       if (selectedTrainer && !isCreateMode) {
-        const updated = await db.updateTrainer(selectedTrainer.id, draft);
+        const updated = await db.updateTrainer(selectedTrainer.id, payload);
         setTrainers((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
         setSelectedTrainerId(updated.id);
       } else {
-        const created = await db.insertTrainer(draft);
+        const created = await db.insertTrainer(payload);
         setTrainers((prev) => [created, ...prev]);
         setSelectedTrainerId(created.id);
       }
@@ -162,6 +176,16 @@ export default function TrainersTab({
           <div>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{isCreateMode ? "Новий тренер" : (getTrainerDisplayName(selectedTrainer) || "Тренер")}</div>
             {!isCreateMode && selectedTrainer && <div style={{ fontSize: 12, color: "#6f7e94" }}>ID: {selectedTrainer.id}</div>}
+            {!isCreateMode && selectedTrainer && (
+              <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12, color: "#4b5c73" }}>
+                {selectedTrainer.phone && <span>📞 {selectedTrainer.phone}</span>}
+                {selectedTrainer.telegram && <span>✈️ {selectedTrainer.telegram}</span>}
+                {selectedTrainer.instagramHandle && <span>📸 @{normalizeInstagramHandle(selectedTrainer.instagramHandle)}</span>}
+                <span style={{ color: selectedTrainer.isActive ? "#228b59" : "#8a97aa", fontWeight: 700 }}>
+                  {selectedTrainer.isActive ? "Активний" : "Неактивний"}
+                </span>
+              </div>
+            )}
           </div>
           {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: "1px solid #cfd8e5", borderRadius: 10, background: "#f7f9fc", padding: "7px 10px", cursor: "pointer" }}>Редагувати</button>}
         </div>
@@ -181,6 +205,23 @@ export default function TrainersTab({
 
         {selectedTrainer && !isCreateMode && (
           <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {selectedTrainer.telegram && (
+                <a href={`https://t.me/${String(selectedTrainer.telegram).replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#1f4da3", fontSize: 12, fontWeight: 700 }}>
+                  Telegram
+                </a>
+              )}
+              {selectedTrainer.instagramHandle && (
+                <a href={`https://instagram.com/${normalizeInstagramHandle(selectedTrainer.instagramHandle)}`} target="_blank" rel="noreferrer" style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#8a2160", fontSize: 12, fontWeight: 700 }}>
+                  Instagram
+                </a>
+              )}
+              {selectedTrainer.phone && (
+                <a href={`tel:${selectedTrainer.phone}`} style={{ border: "1px solid #d7e0ed", borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: "#0f5132", fontSize: 12, fontWeight: 700 }}>
+                  Call
+                </a>
+              )}
+            </div>
             <div style={{ borderTop: "1px solid #e1e7f0", paddingTop: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Прив'язані групи</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 6 }}>
