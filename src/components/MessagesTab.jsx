@@ -534,24 +534,30 @@ export default function MessagesTab({
               {activeDialog.username || `chat_id: ${activeDialog.id}`}
             </div>
 
-            <div style={{ marginBottom: 10, padding: 12, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
-              <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 8, fontSize: 13, letterSpacing: "0.01em" }}>CRM block</div>
-              <div style={{ color: "#9fb0c9", fontSize: 12, marginBottom: 6 }}>
-                Статус привʼязки:{" "}
-                <span style={{ color: activeDialog.linkedStudent ? "#bfe7d0" : "#c3cede", fontWeight: 700 }}>
-                  {activeDialog.linkedStudent ? getDisplayName(activeDialog.linkedStudent) : "не прив'язано"}
-                </span>
+            <div style={{ marginBottom: 10, padding: 10, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 800, color: "#f5f8fd", fontSize: 13, letterSpacing: "0.01em" }}>CRM block</div>
+                <div style={{ color: activeDialog.linkedStudent ? "#bfe7d0" : "#c3cede", fontSize: 11, fontWeight: 700 }}>
+                  {activeDialog.linkedStudent ? "Прив'язано" : "Не прив'язано"}
+                </div>
               </div>
-              <div style={{ color: "#7f8ea3", fontSize: 11, marginBottom: 6 }}>Керування привʼязкою — в картці чату ліворуч (кнопка 🔗).</div>
+              <div style={{ color: "#7f8ea3", fontSize: 11, marginBottom: 8 }}>Керування привʼязкою — в картці чату ліворуч (кнопка 🔗).</div>
               {crmSummary && (
-                <div style={{ color: "#a5b2c5", fontSize: 12, display: "grid", gap: 2 }}>
-                  <div>Учениця: <b style={{ color: "#d6e6fa" }}>{crmSummary.studentName}</b></div>
-                  <div>Групи: {crmSummary.groupNames.join(", ") || "—"}</div>
-                  <div>Напрямки: {crmSummary.directionNames.join(", ") || "—"}</div>
-                  <div>Статус абонемента: {crmSummary.summarySubStatus || "—"}</div>
-                  <div>Залишок занять: {crmSummary.remainingTrainings ?? "—"}</div>
-                  <div>Дата завершення: {crmSummary.endDate || "—"}</div>
-                  <div>Останнє відвідування: {crmSummary.lastAttendance || "—"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+                  {[
+                    { label: "Учениця", value: crmSummary.studentName || "—" },
+                    { label: "Групи", value: crmSummary.groupNames.join(", ") || "—" },
+                    { label: "Напрямки", value: crmSummary.directionNames.join(", ") || "—" },
+                    { label: "Статус абонемента", value: crmSummary.summarySubStatus || "—" },
+                    { label: "Залишок занять", value: crmSummary.remainingTrainings ?? "—" },
+                    { label: "Дата завершення", value: crmSummary.endDate || "—" },
+                    { label: "Останнє відвідування", value: crmSummary.lastAttendance || "—" },
+                  ].map((item) => (
+                    <div key={item.label} style={{ border: "1px solid #324055", borderRadius: 10, padding: "5px 7px", background: "#171f2a", minHeight: 44 }}>
+                      <div style={{ fontSize: 10, color: "#8fa0b7", marginBottom: 2, lineHeight: 1.2 }}>{item.label}</div>
+                      <div style={{ fontSize: 11, color: "#d6e6fa", fontWeight: 600, lineHeight: 1.25, wordBreak: "break-word" }}>{item.value}</div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
