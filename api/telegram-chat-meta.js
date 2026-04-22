@@ -28,16 +28,22 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "POST") {
-    const { chatId, studentId, internalNote, customTemplate } = req.body || {};
+    const { chatId } = req.body || {};
     if (!chatId) return res.status(400).json({ error: "chatId is required" });
 
     const payload = {
       chat_id: String(chatId),
-      student_id: studentId || null,
-      internal_note: internalNote || null,
-      custom_template: customTemplate || null,
       updated_at: new Date().toISOString(),
     };
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "studentId")) {
+      payload.student_id = req.body.studentId || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "internalNote")) {
+      payload.internal_note = req.body.internalNote || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "customTemplate")) {
+      payload.custom_template = req.body.customTemplate || null;
+    }
 
     const { data, error } = await supabase
       .from("telegram_chat_meta")

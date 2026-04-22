@@ -225,13 +225,16 @@ export default function MessagesTab({
 
   const saveMeta = async (chatId, patch) => {
     if (!chatId) return null;
-    const current = metaByChat[chatId] || {};
-    const body = {
-      chatId,
-      studentId: patch.studentId ?? current.student_id ?? null,
-      internalNote: patch.internalNote ?? current.internal_note ?? null,
-      customTemplate: patch.customTemplate ?? current.custom_template ?? null,
-    };
+    const body = { chatId };
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "studentId")) {
+      body.studentId = patch.studentId ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "internalNote")) {
+      body.internalNote = patch.internalNote ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "customTemplate")) {
+      body.customTemplate = patch.customTemplate ?? null;
+    }
 
     const res = await fetch("/api/telegram-chat-meta", {
       method: "POST",
