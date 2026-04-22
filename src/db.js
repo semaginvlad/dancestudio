@@ -144,8 +144,11 @@ export async function updateGroup(id, g) {
 const mapTrainer = (t) => ({
   id: t.id,
   name: t.name || "",
+  firstName: t.first_name || "",
+  lastName: t.last_name || "",
   phone: t.phone || "",
   telegram: t.telegram || "",
+  instagramHandle: t.instagram_handle || "",
   notes: t.notes || "",
   isActive: t.is_active !== false,
 });
@@ -157,10 +160,16 @@ export async function fetchTrainers() {
 }
 
 export async function insertTrainer(trainer) {
+  const firstName = trainer.firstName || "";
+  const lastName = trainer.lastName || "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim() || trainer.name || "";
   const payload = {
-    name: trainer.name || "",
+    name: fullName,
+    first_name: firstName || null,
+    last_name: lastName || null,
     phone: trainer.phone || null,
     telegram: trainer.telegram || null,
+    instagram_handle: trainer.instagramHandle || null,
     notes: trainer.notes || null,
     is_active: trainer.isActive !== false,
   };
@@ -171,9 +180,17 @@ export async function insertTrainer(trainer) {
 
 export async function updateTrainer(id, trainer) {
   const payload = {};
-  if (trainer.name !== undefined) payload.name = trainer.name;
+  const nextFirstName = trainer.firstName;
+  const nextLastName = trainer.lastName;
+  if (nextFirstName !== undefined) payload.first_name = nextFirstName || null;
+  if (nextLastName !== undefined) payload.last_name = nextLastName || null;
+  if (nextFirstName !== undefined || nextLastName !== undefined || trainer.name !== undefined) {
+    const fallbackName = trainer.name || "";
+    payload.name = [nextFirstName || "", nextLastName || ""].filter(Boolean).join(" ").trim() || fallbackName || null;
+  }
   if (trainer.phone !== undefined) payload.phone = trainer.phone || null;
   if (trainer.telegram !== undefined) payload.telegram = trainer.telegram || null;
+  if (trainer.instagramHandle !== undefined) payload.instagram_handle = trainer.instagramHandle || null;
   if (trainer.notes !== undefined) payload.notes = trainer.notes || null;
   if (trainer.isActive !== undefined) payload.is_active = !!trainer.isActive;
   const { data, error } = await supabase.from('trainers').update(payload).eq('id', id).select('*').single();

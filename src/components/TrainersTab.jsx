@@ -20,23 +20,31 @@ export default function TrainersTab({
   attn = [],
 }) {
   const [selectedTrainerId, setSelectedTrainerId] = useState(trainers[0]?.id || "");
-  const [draft, setDraft] = useState({ name: "", phone: "", telegram: "", notes: "", isActive: true });
+  const [isCreateMode, setIsCreateMode] = useState(false);
+  const [draft, setDraft] = useState({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
   const [saving, setSaving] = useState(false);
 
   const selectedTrainer = useMemo(() => trainers.find((t) => t.id === selectedTrainerId) || null, [trainers, selectedTrainerId]);
+  const getTrainerDisplayName = (t) => {
+    if (!t) return "Без імені";
+    const name = [t.firstName || "", t.lastName || ""].filter(Boolean).join(" ").trim();
+    return name || t.name || "Без імені";
+  };
 
   useEffect(() => {
-    if (!selectedTrainerId && trainers[0]?.id) {
+    if (!isCreateMode && !selectedTrainerId && trainers[0]?.id) {
       setSelectedTrainerId(trainers[0].id);
       setDraft({
-        name: trainers[0].name || "",
+        firstName: trainers[0].firstName || "",
+        lastName: trainers[0].lastName || "",
         phone: trainers[0].phone || "",
         telegram: trainers[0].telegram || "",
+        instagramHandle: trainers[0].instagramHandle || "",
         notes: trainers[0].notes || "",
         isActive: trainers[0].isActive !== false,
       });
     }
-  }, [selectedTrainerId, trainers]);
+  }, [isCreateMode, selectedTrainerId, trainers]);
 
   const trainerGroupIds = useMemo(
     () => trainerGroups.filter((tg) => tg.trainerId === selectedTrainerId).map((tg) => tg.groupId),
@@ -70,36 +78,42 @@ export default function TrainersTab({
   }, [attn, selectedTrainerId, studentGrps, subs, trainerGroupIds]);
 
   const beginCreate = () => {
+    setIsCreateMode(true);
     setSelectedTrainerId("");
-    setDraft({ name: "", phone: "", telegram: "", notes: "", isActive: true });
+    setDraft({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
   };
 
   const beginEdit = () => {
     if (!selectedTrainer) return;
+    setIsCreateMode(false);
     setDraft({
-      name: selectedTrainer.name || "",
+      firstName: selectedTrainer.firstName || "",
+      lastName: selectedTrainer.lastName || "",
       phone: selectedTrainer.phone || "",
       telegram: selectedTrainer.telegram || "",
+      instagramHandle: selectedTrainer.instagramHandle || "",
       notes: selectedTrainer.notes || "",
       isActive: selectedTrainer.isActive !== false,
     });
   };
 
   const saveTrainer = async () => {
-    if (!draft.name.trim()) {
-      alert("Вкажи ім'я тренера");
+    if (!draft.firstName.trim() && !draft.lastName.trim()) {
+      alert("Вкажи ім'я або прізвище тренера");
       return;
     }
     setSaving(true);
     try {
-      if (selectedTrainer) {
+      if (selectedTrainer && !isCreateMode) {
         const updated = await db.updateTrainer(selectedTrainer.id, draft);
         setTrainers((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        setSelectedTrainerId(updated.id);
       } else {
         const created = await db.insertTrainer(draft);
         setTrainers((prev) => [created, ...prev]);
         setSelectedTrainerId(created.id);
       }
+      setIsCreateMode(false);
     } catch (e) {
       alert(e?.message || "Не вдалося зберегти тренера");
     } finally {
@@ -134,8 +148,8 @@ export default function TrainersTab({
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 560, overflow: "auto", paddingRight: 2 }}>
           {trainers.map((t) => (
-            <button key={t.id} type="button" onClick={() => setSelectedTrainerId(t.id)} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id ? "#4e7cd1" : "#d3dbe8"}`, borderRadius: 12, background: selectedTrainerId === t.id ? "#edf4ff" : "#fff", padding: "9px 10px", cursor: "pointer" }}>
-              <div style={{ fontWeight: 700, color: "#1f2a3d" }}>{t.name || "Без імені"}</div>
+            <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? "#4e7cd1" : "#d3dbe8"}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? "#edf4ff" : "#fff", padding: "9px 10px", cursor: "pointer" }}>
+              <div style={{ fontWeight: 700, color: "#1f2a3d" }}>{getTrainerDisplayName(t)}</div>
               <div style={{ fontSize: 11, color: t.isActive ? "#228b59" : "#8a97aa" }}>{t.isActive ? "Активний" : "Неактивний"}</div>
             </button>
           ))}
@@ -146,16 +160,18 @@ export default function TrainersTab({
       <div style={{ ...card, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>{selectedTrainer?.name || "Новий тренер"}</div>
-            {selectedTrainer && <div style={{ fontSize: 12, color: "#6f7e94" }}>ID: {selectedTrainer.id}</div>}
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{isCreateMode ? "Новий тренер" : (getTrainerDisplayName(selectedTrainer) || "Тренер")}</div>
+            {!isCreateMode && selectedTrainer && <div style={{ fontSize: 12, color: "#6f7e94" }}>ID: {selectedTrainer.id}</div>}
           </div>
-          {selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: "1px solid #cfd8e5", borderRadius: 10, background: "#f7f9fc", padding: "7px 10px", cursor: "pointer" }}>Редагувати</button>}
+          {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: "1px solid #cfd8e5", borderRadius: 10, background: "#f7f9fc", padding: "7px 10px", cursor: "pointer" }}>Редагувати</button>}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 10 }}>
-          <input value={draft.name} onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Ім'я" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
+          <input value={draft.firstName} onChange={(e) => setDraft((p) => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
+          <input value={draft.lastName} onChange={(e) => setDraft((p) => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
           <input value={draft.phone} onChange={(e) => setDraft((p) => ({ ...p, phone: e.target.value }))} placeholder="Телефон" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
           <input value={draft.telegram} onChange={(e) => setDraft((p) => ({ ...p, telegram: e.target.value }))} placeholder="Telegram" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
+          <input value={draft.instagramHandle} onChange={(e) => setDraft((p) => ({ ...p, instagramHandle: e.target.value }))} placeholder="Instagram" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px" }} />
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155" }}>
             <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft((p) => ({ ...p, isActive: e.target.checked }))} /> Активний
           </label>
@@ -163,7 +179,7 @@ export default function TrainersTab({
         <textarea value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Нотатки" style={{ border: "1px solid #d2dbe8", borderRadius: 10, padding: "9px 10px", resize: "vertical" }} />
         <div><button type="button" disabled={saving} onClick={saveTrainer} style={{ border: "none", borderRadius: 10, background: "#3568c6", color: "#fff", padding: "9px 14px", cursor: "pointer", fontWeight: 700 }}>{saving ? "Збереження..." : "Зберегти тренера"}</button></div>
 
-        {selectedTrainer && (
+        {selectedTrainer && !isCreateMode && (
           <>
             <div style={{ borderTop: "1px solid #e1e7f0", paddingTop: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Прив'язані групи</div>
