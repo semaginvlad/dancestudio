@@ -43,10 +43,11 @@ export default function MessagesTab({
   const [railFilter, setRailFilter] = useState("all");
   const [searchQ, setSearchQ] = useState("");
   const [draft, setDraft] = useState("");
-  const [studentSearchQ, setStudentSearchQ] = useState("");
-  const [studentLinkDraftId, setStudentLinkDraftId] = useState("");
   const [internalNoteDraft, setInternalNoteDraft] = useState("");
   const [customTemplateDraft, setCustomTemplateDraft] = useState("");
+  const [linkUiByChat, setLinkUiByChat] = useState({});
+  const [linkSearchByChat, setLinkSearchByChat] = useState({});
+  const [linkSavingChatId, setLinkSavingChatId] = useState("");
 
   const [dialogs, setDialogs] = useState([]);
   const [dialogsError, setDialogsError] = useState("");
@@ -253,25 +254,34 @@ export default function MessagesTab({
     const chatId = activeDialog?.id;
     if (!chatId) return;
     const meta = metaByChat[chatId] || {};
-    setStudentLinkDraftId(meta.student_id || "");
     setInternalNoteDraft(meta.internal_note || "");
     setCustomTemplateDraft(meta.custom_template || "");
-    setStudentSearchQ("");
   }, [activeDialog?.id, metaByChat]);
 
-  const matchedStudents = useMemo(() => {
-    const q = studentSearchQ.trim().toLowerCase();
-    if (!q) return students;
-    return students.filter((st) => getDisplayName(st).toLowerCase().includes(q));
-  }, [studentSearchQ, students]);
+  const openLinkPanel = (chatId, currentStudentId = "") => {
+    setLinkUiByChat((prev) => ({
+      ...prev,
+      [chatId]: { open: true, draftId: currentStudentId || "" },
+    }));
+  };
 
-  const handleSaveLink = async () => {
-    if (!activeDialog?.id) return;
-    const saved = await saveMeta(activeDialog.id, { studentId: studentLinkDraftId || null });
-    if (saved?.student_id) {
-      const st = studentMap[saved.student_id];
-      if (st) setStudentSearchQ(getDisplayName(st));
-    }
+  const handleSaveLink = async (chatId) => {
+    if (!chatId) return;
+    const draftId = linkUiByChat[chatId]?.draftId || null;
+    setLinkSavingChatId(chatId);
+    await saveMeta(chatId, { studentId: draftId });
+    setLinkSavingChatId("");
+  };
+
+  const handleClearLink = async (chatId) => {
+    if (!chatId) return;
+    setLinkSavingChatId(chatId);
+    await saveMeta(chatId, { studentId: null });
+    setLinkUiByChat((prev) => ({
+      ...prev,
+      [chatId]: { ...(prev[chatId] || {}), draftId: "" },
+    }));
+    setLinkSavingChatId("");
   };
 
   const refreshMessages = async (chatId) => {
@@ -329,13 +339,21 @@ export default function MessagesTab({
           {enrichedDialogs.map((dlg) => {
             const active = activeDialog?.id === dlg.id;
             return (
-              <button
+              <div
                 key={dlg.id}
-                type="button"
                 onClick={() => {
                   onSelectStudent?.(dlg.id);
                   setDraft("");
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelectStudent?.(dlg.id);
+                    setDraft("");
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 style={{
                   textAlign: "left",
                   padding: "12px 13px",
@@ -347,13 +365,90 @@ export default function MessagesTab({
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ color: "#eef2f7", fontSize: 14, fontWeight: 700 }}>{dlg.title}</div>
-                  <div style={{ color: "#8893a4", fontSize: 11, fontWeight: 600 }}>{dlg.lastMessageDate?.slice(0, 10) || "—"}</div>
+                  <div style={{ color: "#eef2f7", fontSize: 14, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dlg.title}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    <div style={{ color: "#8893a4", fontSize: 11, fontWeight: 600 }}>{dlg.lastMessageDate?.slice(0, 10) || "—"}</div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const panel = linkUiByChat[dlg.id];
+                        if (panel?.open) {
+                          setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), open: false } }));
+                          return;
+                        }
+                        openLinkPanel(dlg.id, dlg.linkedStudent?.id || metaByChat[dlg.id]?.student_id || "");
+                      }}
+                      style={{ border: "1px solid #3f4b5d", borderRadius: 10, background: "rgba(32, 41, 54, 0.85)", color: "#cfe0fb", fontSize: 11, fontWeight: 700, padding: "4px 7px", cursor: "pointer" }}
+                    >
+                      🔗
+                    </button>
+                  </div>
                 </div>
                 <div style={{ color: "#a5aebc", fontSize: 12, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {dlg.lastMessageText || dlg.username || "Порожній діалог"}
                 </div>
-              </button>
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, minHeight: 18 }}>
+                  <span style={{ fontSize: 11, color: "#8fa1b8" }}>CRM:</span>
+                  <span style={{ fontSize: 11, color: dlg.linkedStudent ? "#bfe7d0" : "#96a3b8", fontWeight: 600 }}>
+                    {dlg.linkedStudent ? getDisplayName(dlg.linkedStudent) : "не прив'язано"}
+                  </span>
+                </div>
+
+                {linkUiByChat[dlg.id]?.open && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ marginTop: 8, padding: 8, borderRadius: 12, border: "1px solid #3a4658", background: "#111821" }}
+                  >
+                    <input
+                      value={linkSearchByChat[dlg.id] || ""}
+                      onChange={(e) => setLinkSearchByChat((prev) => ({ ...prev, [dlg.id]: e.target.value }))}
+                      placeholder="Пошук учениці..."
+                      style={{ width: "100%", borderRadius: 10, border: "1px solid #445369", padding: "7px 8px", marginBottom: 7, background: "#0e141d", color: "#e5ecf8", fontSize: 12 }}
+                    />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 96, overflow: "auto", marginBottom: 8 }}>
+                      {students
+                        .filter((st) => {
+                          const q = (linkSearchByChat[dlg.id] || "").trim().toLowerCase();
+                          if (!q) return true;
+                          return getDisplayName(st).toLowerCase().includes(q);
+                        })
+                        .slice(0, 6)
+                        .map((st) => {
+                          const selected = (linkUiByChat[dlg.id]?.draftId || "") === st.id;
+                          return (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() => setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), draftId: st.id } }))}
+                              style={{ border: `1px solid ${selected ? "#ff8a7b" : "#415168"}`, borderRadius: 999, background: selected ? "rgba(255, 106, 88, 0.2)" : "#18202b", color: selected ? "#ffe3de" : "#c8d5e9", fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
+                            >
+                              {getDisplayName(st)}
+                            </button>
+                          );
+                        })}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveLink(dlg.id)}
+                        disabled={linkSavingChatId === dlg.id}
+                        style={{ border: "1px solid #ff6a58", borderRadius: 9, background: "rgba(255, 106, 88, 0.16)", color: "#ffd5ce", padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+                      >
+                        Прив'язати
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleClearLink(dlg.id)}
+                        disabled={linkSavingChatId === dlg.id}
+                        style={{ border: "1px solid #546279", borderRadius: 9, background: "#182230", color: "#c2cddd", padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+                      >
+                        Відв'язати
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
           {!enrichedDialogs.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Немає діалогів.</div>}
@@ -373,30 +468,13 @@ export default function MessagesTab({
 
             <div style={{ marginBottom: 10, padding: 12, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
               <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 8, fontSize: 13, letterSpacing: "0.01em" }}>CRM block</div>
-              <input
-                value={studentSearchQ}
-                onChange={(e) => setStudentSearchQ(e.target.value)}
-                placeholder="Пошук учениці..."
-                style={{ width: "100%", borderRadius: 12, border: "1px solid #465062", padding: "9px 10px", marginBottom: 8, background: "#0f1319", color: "#e5ecf8" }}
-              />
-              <select
-                value={studentLinkDraftId}
-                onChange={(e) => {
-                  setStudentLinkDraftId(e.target.value || "");
-                }}
-                style={{ width: "100%", borderRadius: 12, border: "1px solid #465062", padding: "9px 10px", marginBottom: 8, background: "#0f1319", color: "#e5ecf8" }}
-              >
-                <option value="">Не прив'язано до учениці</option>
-                {matchedStudents.map((st) => <option key={st.id} value={st.id}>{getDisplayName(st)}</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={handleSaveLink}
-                style={{ border: "1px solid #ff6a58", borderRadius: 11, background: "rgba(255, 106, 88, 0.16)", color: "#ffd5ce", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12, marginBottom: 8 }}
-              >
-                Зберегти прив’язку
-              </button>
-
+              <div style={{ color: "#9fb0c9", fontSize: 12, marginBottom: 6 }}>
+                Статус привʼязки:{" "}
+                <span style={{ color: activeDialog.linkedStudent ? "#bfe7d0" : "#c3cede", fontWeight: 700 }}>
+                  {activeDialog.linkedStudent ? getDisplayName(activeDialog.linkedStudent) : "не прив'язано"}
+                </span>
+              </div>
+              <div style={{ color: "#7f8ea3", fontSize: 11, marginBottom: 6 }}>Керування привʼязкою — в картці чату ліворуч (кнопка 🔗).</div>
               {activeDialog.linkedStudent && (
                 <div style={{ color: "#a5b2c5", fontSize: 12 }}>
                   Групи: {normalizeStudentGroupIds(activeDialog.linkedStudent, membershipByStudent[activeDialog.linkedStudent.id] || []).map((gid) => {
@@ -408,40 +486,42 @@ export default function MessagesTab({
               )}
             </div>
 
-            <div style={{ marginBottom: 10, padding: 12, border: "1px solid #374458", borderRadius: 16, background: "#182130" }}>
-              <div style={{ fontWeight: 800, color: "#f5f8ff", marginBottom: 6, fontSize: 13 }}>Внутрішня нотатка</div>
-              <textarea
-                value={internalNoteDraft}
-                onChange={(e) => setInternalNoteDraft(e.target.value)}
-                rows={3}
-                style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 9, resize: "vertical", background: "#0f141b", color: "#e8eef7" }}
-              />
-              <button
-                type="button"
-                onClick={async () => {
-                  await saveMeta(activeDialog.id, { internalNote: internalNoteDraft });
-                }}
-                style={{ marginTop: 8, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
-              >
-                Зберегти нотатку
-              </button>
-            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 10, marginBottom: 10 }}>
+              <div style={{ padding: 10, border: "1px solid #374458", borderRadius: 16, background: "#182130", minHeight: 0 }}>
+                <div style={{ fontWeight: 800, color: "#f5f8ff", marginBottom: 6, fontSize: 13 }}>Внутрішня нотатка</div>
+                <textarea
+                  value={internalNoteDraft}
+                  onChange={(e) => setInternalNoteDraft(e.target.value)}
+                  rows={2}
+                  style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 8, resize: "vertical", background: "#0f141b", color: "#e8eef7", minHeight: 68 }}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await saveMeta(activeDialog.id, { internalNote: internalNoteDraft });
+                  }}
+                  style={{ marginTop: 7, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+                >
+                  Зберегти
+                </button>
+              </div>
 
-            <div style={{ marginBottom: 10, padding: 12, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b" }}>
-              <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 6, fontSize: 13 }}>Персональний шаблон чату</div>
-              <textarea
-                value={customTemplateDraft}
-                onChange={(e) => setCustomTemplateDraft(e.target.value)}
-                rows={2}
-                style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 9, resize: "vertical", background: "#0f141b", color: "#e8eef7" }}
-              />
-              <button
-                type="button"
-                onClick={() => saveMeta(activeDialog.id, { customTemplate: customTemplateDraft })}
-                style={{ marginTop: 8, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "7px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
-              >
-                Зберегти шаблон
-              </button>
+              <div style={{ padding: 10, border: "1px solid #3a414d", borderRadius: 16, background: "#1b212b", minHeight: 0 }}>
+                <div style={{ fontWeight: 800, color: "#f5f8fd", marginBottom: 6, fontSize: 13 }}>Персональний шаблон</div>
+                <textarea
+                  value={customTemplateDraft}
+                  onChange={(e) => setCustomTemplateDraft(e.target.value)}
+                  rows={2}
+                  style={{ width: "100%", border: "1px solid #48566c", borderRadius: 12, padding: 8, resize: "vertical", background: "#0f141b", color: "#e8eef7", minHeight: 68 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => saveMeta(activeDialog.id, { customTemplate: customTemplateDraft })}
+                  style={{ marginTop: 7, border: "1px solid #6da7ff", borderRadius: 11, background: "rgba(109, 167, 255, 0.14)", color: "#d4e6ff", padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+                >
+                  Зберегти
+                </button>
+              </div>
             </div>
 
             {activeDialog.trainer && (
