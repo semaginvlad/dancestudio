@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
-import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard } from "../shared/analytics";
+import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard, resolveAttendanceClassification } from "../shared/analytics";
+import { useStickyState } from "../shared/utils";
 
 const theme = {
   bg: "#0f131a",
@@ -128,11 +129,20 @@ export default function TrainersTab({
   attn = [],
   cancelled = [],
 }) {
-  const [selectedTrainerId, setSelectedTrainerId] = useState(trainers[0]?.id || "");
+  const [selectedTrainerId, setSelectedTrainerId] = useStickyState(trainers[0]?.id || "", "ds_trainers_selectedTrainerId");
   const [isCreateMode, setIsCreateMode] = useState(false);
   const [draft, setDraft] = useState({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
   const [saving, setSaving] = useState(false);
-  const [periodDate, setPeriodDate] = useState(monthStart(new Date()));
+  const [periodMonthIso, setPeriodMonthIso] = useStickyState(toISO(monthStart(new Date())), "ds_trainers_selectedMonth");
+  const periodDate = useMemo(() => monthStart(new Date(`${String(periodMonthIso || toISO(monthStart(new Date()))).slice(0, 10)}T12:00:00`)), [periodMonthIso]);
+  const setPeriodDate = (nextOrUpdater) => {
+    setPeriodMonthIso((prevIso) => {
+      const prevDate = monthStart(new Date(`${String(prevIso || toISO(monthStart(new Date()))).slice(0, 10)}T12:00:00`));
+      const nextValue = typeof nextOrUpdater === "function" ? nextOrUpdater(prevDate) : nextOrUpdater;
+      const nextDate = nextValue instanceof Date ? nextValue : monthStart(new Date(`${String(nextValue).slice(0, 10)}T12:00:00`));
+      return toISO(monthStart(nextDate));
+    });
+  };
   const [detailState, setDetailState] = useState({ type: "overview", title: "Огляд", payload: null });
 
   const selectedTrainer = useMemo(() => trainers.find((t) => t.id === selectedTrainerId) || null, [trainers, selectedTrainerId]);
@@ -155,7 +165,8 @@ export default function TrainersTab({
   };
 
   useEffect(() => {
-    if (!isCreateMode && !selectedTrainerId && trainers[0]?.id) {
+    const selectedExists = trainers.some((t) => String(t.id) === String(selectedTrainerId));
+    if (!isCreateMode && (!selectedTrainerId || !selectedExists) && trainers[0]?.id) {
       setSelectedTrainerId(trainers[0].id);
       setDraft({
         firstName: trainers[0].firstName || "",
@@ -167,7 +178,7 @@ export default function TrainersTab({
         isActive: trainers[0].isActive !== false,
       });
     }
-  }, [isCreateMode, selectedTrainerId, trainers]);
+  }, [isCreateMode, selectedTrainerId, setSelectedTrainerId, trainers]);
 
   useEffect(() => {
     setDetailState({ type: "overview", title: "Огляд", payload: null });
@@ -236,16 +247,29 @@ export default function TrainersTab({
 
   const range = foundationCurrent.period;
   const rangePrev = foundationPrev.period;
+  const todayIso = toISO(new Date());
+
+  const resolveHeldSessionsEnd = (start, end) => {
+    const periodKey = String(start || "").slice(0, 7);
+    const currentKey = String(todayIso).slice(0, 7);
+    if (periodKey > currentKey) return null;
+    if (periodKey < currentKey) return end;
+    if (todayIso < start) return null;
+    return todayIso < end ? todayIso : end;
+  };
 
   const buildGroupCardsForRange = (start, end) => trainerBoundGroups.map((g) => {
+    const effectiveEnd = resolveHeldSessionsEnd(start, end);
     const groupStudentIds = new Set(
       studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).map((sg) => String(sg.studentId)),
     );
     const groupStudents = groupStudentIds.size;
     const groupActiveSubs = subs.filter((s) => String(s.groupId) === String(g.id) && s.status !== "expired").length;
-    const groupAttnRows = attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, start, end));
+    const groupAttnRows = effectiveEnd
+      ? attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, start, effectiveEnd))
+      : [];
     const groupAttnCount = groupAttnRows.reduce((sum, row) => sum + (row.quantity || 1), 0);
-    const heldSessions = countHeldSessions(g, start, end, cancelledSet);
+    const heldSessions = effectiveEnd ? countHeldSessions(g, start, effectiveEnd, cancelledSet) : 0;
     const avgAttendancePerSession = heldSessions > 0 ? Number((groupAttnCount / heldSessions).toFixed(2)) : 0;
     const problemNoActive = Array.from(groupStudentIds).filter((studentId) => !subs.some((s) => String(s.groupId) === String(g.id) && String(s.studentId) === studentId && s.status !== "expired")).length;
 
@@ -311,6 +335,85 @@ export default function TrainersTab({
       realTrial: realTrialRows.length,
     };
   }, [rangePrev.end, rangePrev.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+  const singleMetricBreakdown = useMemo(() => {
+    const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, range.start, range.end));
+    const rawSingleRows = periodRows.filter((a) => getRawAttendanceType(a) === "single");
+    const coveredBySubscriptionRows = rawSingleRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "subscription");
+    const realSingleRows = rawSingleRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "single");
+    return {
+      rawSingle: rawSingleRows.length,
+      coveredBySubscription: coveredBySubscriptionRows.length,
+      realSingle: realSingleRows.length,
+    };
+  }, [range.end, range.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+  const singleMetricBreakdownPrev = useMemo(() => {
+    const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, rangePrev.start, rangePrev.end));
+    const rawSingleRows = periodRows.filter((a) => getRawAttendanceType(a) === "single");
+    const coveredBySubscriptionRows = rawSingleRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "subscription");
+    const realSingleRows = rawSingleRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "single");
+    return {
+      rawSingle: rawSingleRows.length,
+      coveredBySubscription: coveredBySubscriptionRows.length,
+      realSingle: realSingleRows.length,
+    };
+  }, [rangePrev.end, rangePrev.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+
+  const trialSingleDebugSnapshot = useMemo(() => {
+    const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, range.start, range.end));
+    const classified = periodRows.map((row) => {
+      const resolved = resolveAttendanceClassification(row, scopedData.scopedSubs);
+      return {
+        date: row.date,
+        studentId: row.studentId ?? null,
+        resolvedStudentId: resolved.resolvedStudentId ?? null,
+        groupId: row.groupId ?? null,
+        resolvedGroupId: resolved.resolvedGroupId ?? null,
+        subId: row.subId ?? null,
+        entryType: row.entryType ?? null,
+        guestType: row.guestType ?? null,
+        baseType: resolved.baseType,
+        effectiveType: resolved.effectiveType,
+      };
+    });
+    const rawTrialRows = classified.filter((r) => r.baseType === "trial");
+    const rawSingleRows = classified.filter((r) => r.baseType === "single");
+    return {
+      trial: {
+        rawTrialRowsCount: rawTrialRows.length,
+        rowsWithSubIdCount: rawTrialRows.filter((r) => r.subId != null).length,
+        rowsCoveredBySubscriptionCount: rawTrialRows.filter((r) => r.effectiveType === "subscription").length,
+        effectiveTrialRowsCount: rawTrialRows.filter((r) => r.effectiveType === "trial").length,
+        list: rawTrialRows.map(({ date, studentId, resolvedStudentId, groupId, resolvedGroupId, subId, entryType, guestType, effectiveType }) => ({ date, studentId, resolvedStudentId, groupId, resolvedGroupId, subId, entryType, guestType, effectiveType })),
+      },
+      single: {
+        rawSingleRowsCount: rawSingleRows.length,
+        rowsWithSubIdCount: rawSingleRows.filter((r) => r.subId != null).length,
+        rowsCoveredBySubscriptionCount: rawSingleRows.filter((r) => r.effectiveType === "subscription").length,
+        effectiveSingleRowsCount: rawSingleRows.filter((r) => r.effectiveType === "single").length,
+        list: rawSingleRows.map(({ date, studentId, resolvedStudentId, groupId, resolvedGroupId, subId, entryType, guestType, effectiveType }) => ({ date, studentId, resolvedStudentId, groupId, resolvedGroupId, subId, entryType, guestType, effectiveType })),
+      },
+    };
+  }, [range.end, range.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+
+  useEffect(() => {
+    if (!selectedTrainerId) return;
+    console.groupCollapsed(`[Trainers debug] trainer=${selectedTrainerId} month=${monthKey(periodDate)}`);
+    console.log("trial", {
+      rawTrialRows: trialSingleDebugSnapshot.trial.rawTrialRowsCount,
+      rowsWithSubId: trialSingleDebugSnapshot.trial.rowsWithSubIdCount,
+      rowsCoveredBySubscription: trialSingleDebugSnapshot.trial.rowsCoveredBySubscriptionCount,
+      effectiveTrialRows: trialSingleDebugSnapshot.trial.effectiveTrialRowsCount,
+      list: trialSingleDebugSnapshot.trial.list,
+    });
+    console.log("single", {
+      rawSingleRows: trialSingleDebugSnapshot.single.rawSingleRowsCount,
+      rowsWithSubId: trialSingleDebugSnapshot.single.rowsWithSubIdCount,
+      rowsCoveredBySubscription: trialSingleDebugSnapshot.single.rowsCoveredBySubscriptionCount,
+      effectiveSingleRows: trialSingleDebugSnapshot.single.effectiveSingleRowsCount,
+      list: trialSingleDebugSnapshot.single.list,
+    });
+    console.groupEnd();
+  }, [periodDate, selectedTrainerId, trialSingleDebugSnapshot]);
 
   const trainerKpis = useMemo(() => {
     const studentsCount = trainerCard?.studentCount || 0;
@@ -323,8 +426,8 @@ export default function TrainersTab({
     const renewalsPrev = foundationPrev.metrics.renewals || 0;
     const trials = trialMetricBreakdown.realTrial;
     const trialsPrev = trialMetricBreakdownPrev.realTrial;
-    const singles = trainerCard?.singleCount || 0;
-    const singlesPrev = trainerCardPrev?.singleCount || 0;
+    const singles = singleMetricBreakdown.realSingle;
+    const singlesPrev = singleMetricBreakdownPrev.realSingle;
     const totalAttendance = groupCards.reduce((s, g) => s + g.attendance, 0);
     const totalSessions = groupCards.reduce((s, g) => s + g.heldSessions, 0);
     const totalAttendancePrev = groupCardsPrev.reduce((s, g) => s + g.attendance, 0);
@@ -339,7 +442,7 @@ export default function TrainersTab({
       { id: "singles", title: "Разові", value: singles, delta: singles - singlesPrev, color: "#51c4d3" },
       { id: "avgSession", title: "Сер. відвідуваність/заняття", value: trainerAggregateAvg, delta: Number((trainerAggregateAvg - trainerAggregateAvgPrev).toFixed(2)), color: theme.secondary, currentAttendance: totalAttendance, currentHeldSessions: totalSessions, prevAttendance: totalAttendancePrev, prevHeldSessions: totalSessionsPrev },
     ];
-  }, [foundationCurrent, foundationPrev, groupCards, groupCardsPrev, trainerAggregateAvg, trainerAggregateAvgPrev, trainerCard, trainerCardPrev, trialMetricBreakdown.realTrial, trialMetricBreakdownPrev.realTrial]);
+  }, [foundationCurrent, foundationPrev, groupCards, groupCardsPrev, trainerAggregateAvg, trainerAggregateAvgPrev, trainerCard, trainerCardPrev, trialMetricBreakdown.realTrial, trialMetricBreakdownPrev.realTrial, singleMetricBreakdown.realSingle, singleMetricBreakdownPrev.realSingle]);
 
   const trendCurrent = foundationCurrent.domains.attendance.line;
   const prevLineMap = useMemo(() => {

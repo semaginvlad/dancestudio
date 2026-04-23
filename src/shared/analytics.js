@@ -102,11 +102,45 @@ const isPaidPack = (sub) => PAID_PLAN_TYPES.has(sub.planType);
 
 const getAttendanceBaseType = (attendanceRow) => attendanceRow.entryType || attendanceRow.guestType || 'subscription';
 
-export const getAttendanceEffectiveType = (attendanceRow, subs = []) => {
+const idEq = (a, b) => String(a ?? '') === String(b ?? '');
+
+const resolveSubById = (subs = []) => {
+  const map = {};
+  (subs || []).forEach((s) => {
+    if (s?.id == null) return;
+    map[String(s.id)] = s;
+  });
+  return map;
+};
+
+export const resolveAttendanceClassification = (attendanceRow, subs = []) => {
+  const subById = resolveSubById(subs);
+  const linkedSub = attendanceRow?.subId != null ? subById[String(attendanceRow.subId)] || null : null;
+  const resolvedStudentId = attendanceRow?.studentId || linkedSub?.studentId || null;
+  const resolvedGroupId = attendanceRow?.groupId || linkedSub?.groupId || null;
   const baseType = getAttendanceBaseType(attendanceRow);
-  if (baseType === 'debt') return 'debt';
-  if (hasActiveSubscriptionCoverage(subs, attendanceRow?.studentId, attendanceRow?.groupId, attendanceRow?.date)) return 'subscription';
-  return baseType;
+  if (baseType === 'debt') {
+    return { baseType, effectiveType: 'debt', resolvedStudentId, resolvedGroupId, coveredBySubscription: false, linkedSub };
+  }
+  const coveredByLinkedSub = !!(
+    linkedSub
+    && resolvedStudentId
+    && resolvedGroupId
+    && idEq(linkedSub.studentId, resolvedStudentId)
+    && idEq(linkedSub.groupId, resolvedGroupId)
+  );
+  if (coveredByLinkedSub) {
+    return { baseType, effectiveType: 'subscription', resolvedStudentId, resolvedGroupId, coveredBySubscription: true, linkedSub };
+  }
+  const coveredByActiveSubscription = hasActiveSubscriptionCoverage(subs, resolvedStudentId, resolvedGroupId, attendanceRow?.date);
+  if (coveredByActiveSubscription) {
+    return { baseType, effectiveType: 'subscription', resolvedStudentId, resolvedGroupId, coveredBySubscription: true, linkedSub };
+  }
+  return { baseType, effectiveType: baseType, resolvedStudentId, resolvedGroupId, coveredBySubscription: false, linkedSub };
+};
+
+export const getAttendanceEffectiveType = (attendanceRow, subs = []) => {
+  return resolveAttendanceClassification(attendanceRow, subs).effectiveType;
 };
 
 const buildCommunicationMetrics = (events = [], range, prevRange) => {
@@ -198,8 +232,6 @@ export function buildAnalyticsFoundation({
 
   const trialEvents = attendanceInPeriodWithType.filter((a) => a.effectiveType === 'trial');
   const singleEvents = attendanceInPeriodWithType.filter((a) => a.effectiveType === 'single');
-  const trialSubs = subscriptionsInPeriod.filter((s) => s.planType === 'trial');
-  const singleSubs = subscriptionsInPeriod.filter((s) => s.planType === 'single');
   const trialCount = trialEvents.length;
   const singleCount = singleEvents.length;
 
