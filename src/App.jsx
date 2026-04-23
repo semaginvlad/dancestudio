@@ -9,6 +9,7 @@ import {
   STATUS_COLORS,
   STATUS_LABELS,
   WEEKDAYS,
+  applyThemeBindings,
   btnP,
   btnS,
   cardSt,
@@ -135,6 +136,7 @@ export default function App() {
     };
     const next = themeMode === "light" ? light : dark;
     Object.assign(theme, next);
+    applyThemeBindings();
   }, [themeMode]);
 
   useEffect(() => {

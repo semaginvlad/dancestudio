@@ -22,7 +22,13 @@ const MONTH_NAMES = [
 
 const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
-const makeStyles = () => ({
+const makeStyles = () => {
+  const isDark = theme.bg === "#0F131A";
+  const matrixBase = isDark ? "#131b26" : theme.card;
+  const matrixMuted = isDark ? "#101722" : theme.input;
+  const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
+
+  return ({
   wrap: {
     display: "flex",
     flexDirection: "column",
@@ -51,7 +57,7 @@ const makeStyles = () => ({
     borderRadius: 10,
     border: `1px solid ${theme.border}`,
     padding: "0 12px",
-    background: theme.card,
+    background: matrixBase,
     fontSize: 14,
     color: theme.textMain,
     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
@@ -108,7 +114,7 @@ const makeStyles = () => ({
     position: "sticky",
     top: 0,
     zIndex: 5,
-    background: theme.input,
+    background: matrixMuted,
   },
   monthHead: (isCurrent) => ({
     textAlign: "center",
@@ -118,7 +124,7 @@ const makeStyles = () => ({
     borderBottom: isCurrent ? `2px solid ${theme.primary}` : `1px solid ${theme.border}`,
     borderRight: `1px solid ${theme.border}`,
     padding: "10px 6px 9px",
-    background: isCurrent ? `${theme.primary}1A` : theme.input,
+    background: isCurrent ? (isDark ? "#162742" : `${theme.primary}1A`) : matrixMuted,
     whiteSpace: "nowrap",
   }),
   studentHead: {
@@ -128,7 +134,7 @@ const makeStyles = () => ({
     fontSize: 14,
     color: theme.textMain,
     borderBottom: `1px solid ${theme.border}`,
-    background: theme.input,
+    background: matrixMuted,
   },
   dayHead: (isCancelled, isMutedMonth, isCurrentMonth) => ({
     minWidth: 58,
@@ -140,12 +146,12 @@ const makeStyles = () => ({
     borderBottom: `1px solid ${theme.border}`,
     padding: "8px 4px",
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? theme.card
+        ? matrixBase
         : isMutedMonth
-          ? theme.input
-          : theme.card,
+          ? matrixMuted
+          : matrixBase,
   }),
   dayNum: (isCurrentMonth, isMutedMonth) => ({
     fontSize: isCurrentMonth ? 15 : 14,
@@ -165,7 +171,7 @@ const makeStyles = () => ({
     borderRadius: 999,
     border: "1px solid",
     borderColor: isCancelled ? "#10b981" : "#fca5a5",
-    background: isCancelled ? "#ecfdf5" : theme.card,
+    background: isCancelled ? (isDark ? "#123126" : "#ecfdf5") : matrixBase,
     color: isCancelled ? "#047857" : "#b91c1c",
     cursor: "pointer",
     fontSize: 12,
@@ -176,7 +182,7 @@ const makeStyles = () => ({
     position: "sticky",
     left: 0,
     zIndex: 3,
-    background: theme.card,
+    background: matrixBase,
     borderRight: `1px solid ${theme.border}`,
     borderBottom: `1px solid ${theme.border}`,
     padding: "8px 10px",
@@ -201,7 +207,7 @@ const makeStyles = () => ({
     height: 18,
     borderRadius: 5,
     border: `1px solid ${theme.border}`,
-    background: theme.card,
+    background: matrixBase,
     color: theme.textMuted,
     cursor: "pointer",
     padding: 0,
@@ -216,7 +222,7 @@ const makeStyles = () => ({
     height: 18,
     borderRadius: 5,
     border: `1px solid ${theme.border}`,
-    background: theme.card,
+    background: matrixBase,
     color: theme.textMuted,
     cursor: "pointer",
     padding: 0,
@@ -226,7 +232,7 @@ const makeStyles = () => ({
   menu: {
     position: "fixed",
     minWidth: 160,
-    background: theme.card,
+    background: matrixBase,
     border: `1px solid ${theme.border}`,
     borderRadius: 10,
     boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
@@ -293,12 +299,12 @@ const makeStyles = () => ({
     borderRight: `1px solid ${theme.border}`,
     borderBottom: `1px solid ${theme.border}`,
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? theme.card
+        ? matrixBase
         : isMutedMonth
-          ? theme.input
-          : theme.card,
+          ? matrixMuted
+          : matrixBase,
   }),
   cellBtn: (bg, disabled, saving) => ({
     width: 32,
@@ -313,7 +319,7 @@ const makeStyles = () => ({
     color: bg === theme.card ? theme.textLight : "#fff",
   }),
   subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
-    background: isCancelled ? "#fef2f2" : tone,
+    background: isCancelled ? (isDark ? "#311d23" : "#fef2f2") : tone,
     boxShadow: [
       `inset 0 1px 0 ${border}`,
       `inset 0 -1px 0 ${border}`,
@@ -327,17 +333,18 @@ const makeStyles = () => ({
     borderRight: `2px solid ${theme.textLight}`,
   },
   totalsRow: {
-    background: theme.input,
+    background: matrixMuted,
     boxShadow: `inset 0 1px 0 ${theme.border}`,
   },
   emptyState: {
     padding: 18,
     border: `1px dashed ${theme.border}`,
     borderRadius: 12,
-    background: theme.card,
+    background: matrixBase,
     color: theme.textMuted,
   },
 });
+};
 
 const normalizeName = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 
@@ -1051,14 +1058,15 @@ export default function AttendanceTab({
 
   const getCellView = (student, dateStr) => {
     const rec = getRecordForCell(student, dateStr);
-    if (!rec) return { bg: "#ffffff", mark: "" };
+    const isDark = theme.bg === "#0F131A";
+    if (!rec) return { bg: isDark ? "#182230" : theme.card, mark: "" };
 
     const type = rec.entryType || "subscription";
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
-    if (type === "debt") return { bg: "#dc2626", mark: "!" };
-    if (type === "single") return { bg: "#f59e0b", mark };
-    if (type === "trial") return { bg: "#10b981", mark };
-    return { bg: "#2563eb", mark };
+    if (type === "debt") return { bg: isDark ? "#7f1d1d" : "#dc2626", mark: "!" };
+    if (type === "single") return { bg: isDark ? "#7a4313" : "#f59e0b", mark };
+    if (type === "trial") return { bg: isDark ? "#0f5a43" : "#10b981", mark };
+    return { bg: isDark ? "#1f3e79" : "#2563eb", mark };
   };
 
   const groupStudentIdSet = useMemo(
@@ -1286,9 +1294,10 @@ export default function AttendanceTab({
                   const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                   const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
                   const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
-                  const tone = subPeriod?.completed ? "#ecf1f5" : "#e0edff";
-                  const border = subPeriod?.completed ? "#64748b" : "#2563eb";
-                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const isDark = theme.bg === "#0F131A";
+                  const tone = subPeriod?.completed ? (isDark ? "#2b3647" : "#ecf1f5") : (isDark ? "#1d2f4e" : "#e0edff");
+                  const border = subPeriod?.completed ? (isDark ? "#5f728d" : "#64748b") : (isDark ? "#3f6fc2" : "#2563eb");
+                  const buttonBg = subPeriod?.completed && cellView.mark ? (isDark ? "#4b5b70" : "#9ca3af") : cellView.bg;
                   const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                   const cellStyle = subPeriod
                     ? {
