@@ -200,8 +200,8 @@ export function buildAnalyticsFoundation({
   const singleEvents = attendanceInPeriodWithType.filter((a) => a.effectiveType === 'single');
   const trialSubs = subscriptionsInPeriod.filter((s) => s.planType === 'trial');
   const singleSubs = subscriptionsInPeriod.filter((s) => s.planType === 'single');
-  const trialCount = trialEvents.length + trialSubs.length;
-  const singleCount = singleEvents.length + singleSubs.length;
+  const trialCount = trialEvents.length;
+  const singleCount = singleEvents.length;
 
   const expiredWithoutRenewal = subs.filter((s) => {
     if (!s.endDate || !inRange(s.endDate, range.start, range.end) || !isPaidPack(s)) return false;
@@ -213,7 +213,6 @@ export function buildAnalyticsFoundation({
   }).length;
 
   const studentsWithTrial = new Set(trialEvents.map((a) => String(a.studentId)).filter(Boolean));
-  trialSubs.forEach((s) => studentsWithTrial.add(String(s.studentId)));
   const trialPaidConverted = Array.from(studentsWithTrial).filter((studentId) => subs.some((s) => (
     isPaidPack(s)
     && String(s.studentId) === studentId
@@ -221,7 +220,6 @@ export function buildAnalyticsFoundation({
   ))).length;
 
   const studentsWithSingle = new Set(singleEvents.map((a) => String(a.studentId)).filter(Boolean));
-  singleSubs.forEach((s) => studentsWithSingle.add(String(s.studentId)));
   const singlePaidConverted = Array.from(studentsWithSingle).filter((studentId) => subs.some((s) => (
     isPaidPack(s)
     && String(s.studentId) === studentId
@@ -279,13 +277,13 @@ export function buildAnalyticsFoundation({
       activeStudents: 'Unique students with at least one non-expired subscription on anchor date.',
       newSubscriptions: 'Paid pack subscriptions in period where this is the student first paid pack ever.',
       renewals: 'Paid pack subscriptions in period for students that already had paid pack history.',
-      trialCount: 'Attendance entries classified as trial by effective Attendance logic plus trial subscriptions started in period.',
-      singleCount: 'Attendance entries classified as single by effective Attendance logic plus single subscriptions started in period.',
+      trialCount: 'Attendance entries classified as effective trial in period (attendance-based, coverage-aware).',
+      singleCount: 'Attendance entries classified as effective single in period (attendance-based, coverage-aware).',
       attendanceCount: 'Sum of attendance quantity values in period.',
       averageAttendance: 'Attendance count divided by number of days with attendance in period.',
       expiredWithoutRenewal: 'Paid subscriptions ended in period without any next paid pack for same student.',
-      trialToPaidConversion: 'Share of trial students in period that have paid pack from period start.',
-      singleToPaidConversion: 'Share of single students in period that have paid pack from period start.',
+      trialToPaidConversion: 'Share of students with effective trial attendance in period that have paid pack from period start.',
+      singleToPaidConversion: 'Share of students with effective single attendance in period that have paid pack from period start.',
       trainerGroupMetrics: 'Trainer-level summary over assigned groups within selected period.',
       communicationCounts: 'Message/event totals for channel + direction within selected period.',
       monthlyDelta: 'Current period minus previous period with percent change.',

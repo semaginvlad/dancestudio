@@ -237,15 +237,15 @@ export default function TrainersTab({
   const range = foundationCurrent.period;
   const rangePrev = foundationPrev.period;
 
-  const groupCards = useMemo(() => trainerBoundGroups.map((g) => {
+  const buildGroupCardsForRange = (start, end) => trainerBoundGroups.map((g) => {
     const groupStudentIds = new Set(
       studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).map((sg) => String(sg.studentId)),
     );
     const groupStudents = groupStudentIds.size;
     const groupActiveSubs = subs.filter((s) => String(s.groupId) === String(g.id) && s.status !== "expired").length;
-    const groupAttnRows = attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, range.start, range.end));
+    const groupAttnRows = attn.filter((a) => String(a.groupId) === String(g.id) && inRange(a.date, start, end));
     const groupAttnCount = groupAttnRows.reduce((sum, row) => sum + (row.quantity || 1), 0);
-    const heldSessions = countHeldSessions(g, range.start, range.end, cancelledSet);
+    const heldSessions = countHeldSessions(g, start, end, cancelledSet);
     const avgAttendancePerSession = heldSessions > 0 ? Number((groupAttnCount / heldSessions).toFixed(2)) : 0;
     const problemNoActive = Array.from(groupStudentIds).filter((studentId) => !subs.some((s) => String(s.groupId) === String(g.id) && String(s.studentId) === studentId && s.status !== "expired")).length;
 
@@ -267,38 +267,27 @@ export default function TrainersTab({
       singleCount,
       paidCount,
     };
-  }), [attn, cancelledSet, range.end, range.start, studentGrps, subs, trainerBoundGroups]);
+  });
+
+  const groupCards = useMemo(
+    () => buildGroupCardsForRange(range.start, range.end),
+    [attn, cancelledSet, range.end, range.start, studentGrps, subs, trainerBoundGroups],
+  );
+  const groupCardsPrev = useMemo(
+    () => buildGroupCardsForRange(rangePrev.start, rangePrev.end),
+    [attn, cancelledSet, rangePrev.end, rangePrev.start, studentGrps, subs, trainerBoundGroups],
+  );
 
   const trainerAggregateAvg = useMemo(() => {
     const totalAttendance = groupCards.reduce((s, g) => s + g.attendance, 0);
     const totalSessions = groupCards.reduce((s, g) => s + g.heldSessions, 0);
     return totalSessions > 0 ? Number((totalAttendance / totalSessions).toFixed(2)) : 0;
   }, [groupCards]);
-
-  const trainerKpis = useMemo(() => {
-    const studentsCount = trainerCard?.studentCount || 0;
-    const studentsPrev = trainerCardPrev?.studentCount || 0;
-    const activeSubs = trainerCard?.activeSubscriptions || 0;
-    const activeSubsPrev = trainerCardPrev?.activeSubscriptions || 0;
-    const newSubs = foundationCurrent.metrics.newSubscriptions || 0;
-    const newSubsPrev = foundationPrev.metrics.newSubscriptions || 0;
-    const renewals = foundationCurrent.metrics.renewals || 0;
-    const renewalsPrev = foundationPrev.metrics.renewals || 0;
-    const trials = trainerCard?.trialCount || 0;
-    const trialsPrev = trainerCardPrev?.trialCount || 0;
-    const singles = trainerCard?.singleCount || 0;
-    const singlesPrev = trainerCardPrev?.singleCount || 0;
-
-    return [
-      { id: "students", title: "Учениць", value: studentsCount, delta: studentsCount - studentsPrev, color: theme.secondary },
-      { id: "activeSubs", title: "Активні абонементи", value: activeSubs, delta: activeSubs - activeSubsPrev, color: theme.good },
-      { id: "newSubs", title: "Нові абонементи", value: newSubs, delta: newSubs - newSubsPrev, color: theme.primary },
-      { id: "renewals", title: "Продовження", value: renewals, delta: renewals - renewalsPrev, color: theme.warn },
-      { id: "trials", title: "Пробні", value: trials, delta: trials - trialsPrev, color: "#8b7bff" },
-      { id: "singles", title: "Разові", value: singles, delta: singles - singlesPrev, color: "#51c4d3" },
-      { id: "avgSession", title: "Сер. відвідуваність/заняття", value: trainerAggregateAvg, delta: Number((trainerAggregateAvg - (foundationPrev.domains.attendance.count / Math.max(1, groupCards.reduce((s, g) => s + g.heldSessions, 0)))).toFixed(2)), color: theme.secondary },
-    ];
-  }, [foundationCurrent, foundationPrev, groupCards, trainerAggregateAvg, trainerCard, trainerCardPrev]);
+  const trainerAggregateAvgPrev = useMemo(() => {
+    const totalAttendancePrev = groupCardsPrev.reduce((s, g) => s + g.attendance, 0);
+    const totalSessionsPrev = groupCardsPrev.reduce((s, g) => s + g.heldSessions, 0);
+    return totalSessionsPrev > 0 ? Number((totalAttendancePrev / totalSessionsPrev).toFixed(2)) : 0;
+  }, [groupCardsPrev]);
 
   const trialMetricBreakdown = useMemo(() => {
     const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, range.start, range.end));
@@ -311,6 +300,46 @@ export default function TrainersTab({
       realTrial: realTrialRows.length,
     };
   }, [range.end, range.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+  const trialMetricBreakdownPrev = useMemo(() => {
+    const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, rangePrev.start, rangePrev.end));
+    const rawTrialRows = periodRows.filter((a) => getRawAttendanceType(a) === "trial");
+    const coveredBySubscriptionRows = rawTrialRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "subscription");
+    const realTrialRows = rawTrialRows.filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "trial");
+    return {
+      rawTrial: rawTrialRows.length,
+      coveredBySubscription: coveredBySubscriptionRows.length,
+      realTrial: realTrialRows.length,
+    };
+  }, [rangePrev.end, rangePrev.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+
+  const trainerKpis = useMemo(() => {
+    const studentsCount = trainerCard?.studentCount || 0;
+    const studentsPrev = trainerCardPrev?.studentCount || 0;
+    const activeSubs = trainerCard?.activeSubscriptions || 0;
+    const activeSubsPrev = trainerCardPrev?.activeSubscriptions || 0;
+    const newSubs = foundationCurrent.metrics.newSubscriptions || 0;
+    const newSubsPrev = foundationPrev.metrics.newSubscriptions || 0;
+    const renewals = foundationCurrent.metrics.renewals || 0;
+    const renewalsPrev = foundationPrev.metrics.renewals || 0;
+    const trials = trialMetricBreakdown.realTrial;
+    const trialsPrev = trialMetricBreakdownPrev.realTrial;
+    const singles = trainerCard?.singleCount || 0;
+    const singlesPrev = trainerCardPrev?.singleCount || 0;
+    const totalAttendance = groupCards.reduce((s, g) => s + g.attendance, 0);
+    const totalSessions = groupCards.reduce((s, g) => s + g.heldSessions, 0);
+    const totalAttendancePrev = groupCardsPrev.reduce((s, g) => s + g.attendance, 0);
+    const totalSessionsPrev = groupCardsPrev.reduce((s, g) => s + g.heldSessions, 0);
+
+    return [
+      { id: "students", title: "Учениць", value: studentsCount, delta: studentsCount - studentsPrev, color: theme.secondary },
+      { id: "activeSubs", title: "Активні абонементи", value: activeSubs, delta: activeSubs - activeSubsPrev, color: theme.good },
+      { id: "newSubs", title: "Нові абонементи", value: newSubs, delta: newSubs - newSubsPrev, color: theme.primary },
+      { id: "renewals", title: "Продовження", value: renewals, delta: renewals - renewalsPrev, color: theme.warn },
+      { id: "trials", title: "Пробні", value: trials, delta: trials - trialsPrev, color: "#8b7bff" },
+      { id: "singles", title: "Разові", value: singles, delta: singles - singlesPrev, color: "#51c4d3" },
+      { id: "avgSession", title: "Сер. відвідуваність/заняття", value: trainerAggregateAvg, delta: Number((trainerAggregateAvg - trainerAggregateAvgPrev).toFixed(2)), color: theme.secondary, currentAttendance: totalAttendance, currentHeldSessions: totalSessions, prevAttendance: totalAttendancePrev, prevHeldSessions: totalSessionsPrev },
+    ];
+  }, [foundationCurrent, foundationPrev, groupCards, groupCardsPrev, trainerAggregateAvg, trainerAggregateAvgPrev, trainerCard, trainerCardPrev, trialMetricBreakdown.realTrial, trialMetricBreakdownPrev.realTrial]);
 
   const trendCurrent = foundationCurrent.domains.attendance.line;
   const prevLineMap = useMemo(() => {
@@ -459,6 +488,17 @@ export default function TrainersTab({
               </div>
             </div>
           ) : null}
+          {p.id === "avgSession" ? (
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 10, display: "grid", gap: 6, fontSize: 12 }}>
+              <div style={{ color: theme.text }}>Total attendance marks: <strong>{p.currentAttendance ?? 0}</strong></div>
+              <div style={{ color: theme.text }}>Total held sessions: <strong>{p.currentHeldSessions ?? 0}</strong></div>
+              <div style={{ color: theme.text }}>Average per held session: <strong>{p.value}</strong></div>
+            </div>
+          ) : null}
+          {p.includes ? <div style={{ fontSize: 12, color: theme.textSoft }}>Входить у формулу: {p.includes}</div> : null}
+          {p.excludes ? <div style={{ fontSize: 12, color: theme.textSoft }}>Не входить: {p.excludes}</div> : null}
+          {p.period ? <div style={{ fontSize: 12, color: theme.textSoft }}>Період: {p.period}</div> : null}
+          {p.deltaRule ? <div style={{ fontSize: 12, color: theme.textSoft }}>Delta: {p.deltaRule}</div> : null}
           <div style={{ fontSize: 12, color: theme.textSoft }}>Інтерпретація: {p.interpretation}</div>
           <div style={{ fontSize: 12, color: theme.textSoft }}>Дія: {p.action}</div>
         </div>
@@ -474,6 +514,10 @@ export default function TrainersTab({
             <DetailMetric label="Знаменник" value={p.denominator ?? "—"} />
           </div>
           <div style={{ fontSize: 12, color: theme.textSoft }}>Як рахується: {p.definition}</div>
+          {p.includes ? <div style={{ fontSize: 12, color: theme.textSoft }}>Входить у формулу: {p.includes}</div> : null}
+          {p.excludes ? <div style={{ fontSize: 12, color: theme.textSoft }}>Не входить: {p.excludes}</div> : null}
+          {p.period ? <div style={{ fontSize: 12, color: theme.textSoft }}>Період: {p.period}</div> : null}
+          {p.deltaRule ? <div style={{ fontSize: 12, color: theme.textSoft }}>Delta: {p.deltaRule}</div> : null}
           {p.note ? <div style={{ fontSize: 12, color: theme.textSoft }}>{p.note}</div> : null}
           <div style={{ fontSize: 12, color: theme.textSoft }}>Інтерпретація: {p.interpretation}</div>
           <div style={{ fontSize: 12, color: theme.textSoft }}>Дія: {p.action}</div>
@@ -724,9 +768,49 @@ export default function TrainersTab({
                   definition: k.id === "avgSession"
                     ? "total attendance marks / held sessions (тільки scheduled дати, cancelled виключено)."
                     : k.id === "trials"
-                      ? "Пробні = лише ті відвідування, які після перевірки покриття абонементом лишилися effective trial."
-                    : "метрика за вибраний календарний місяць у межах груп тренера.",
+                      ? "Пробні = лише attendance rows, що після coverage-check мають effectiveType = trial."
+                      : k.id === "students"
+                        ? "Унікальні учениці у групах, прив'язаних до тренера."
+                        : k.id === "activeSubs"
+                          ? "Кількість не-expired абонементів у групах тренера."
+                          : k.id === "newSubs"
+                            ? "Перші в історії paid pack абонементи за період."
+                            : k.id === "renewals"
+                              ? "Paid pack абонементи за період для учениць з paid-історією."
+                              : k.id === "singles"
+                                ? "Лише attendance rows з effectiveType = single."
+                                : "Метрика за вибраний календарний місяць у межах груп тренера.",
                   breakdown: k.id === "trials" ? trialMetricBreakdown : null,
+                  includes: k.id === "students"
+                    ? "унікальні studentId із student_groups у групах тренера."
+                    : k.id === "activeSubs"
+                      ? "усі subscriptions у групах тренера зі статусом не expired."
+                      : k.id === "newSubs"
+                        ? "paid packs (4/8/12), де дата підписки = перша paid дата учениці."
+                        : k.id === "renewals"
+                          ? "paid packs (4/8/12), що не є first paid для учениці."
+                          : k.id === "trials"
+                            ? "attendance rows за період з effectiveType = trial."
+                            : k.id === "singles"
+                              ? "attendance rows за період з effectiveType = single."
+                              : k.id === "avgSession"
+                                ? "sum(attendance.quantity || 1) по групах тренера / sum(heldSessions)."
+                                : null,
+                  excludes: k.id === "students"
+                    ? "дублікати учениць між групами."
+                    : k.id === "activeSubs"
+                      ? "expired абонементи."
+                      : k.id === "newSubs" || k.id === "renewals"
+                        ? "trial/single плани."
+                        : k.id === "trials"
+                          ? "raw trial записи, які на дату заняття покрив активний абонемент."
+                          : k.id === "singles"
+                            ? "single записи, які покриті активним абонементом (стають subscription)."
+                            : k.id === "avgSession"
+                              ? "дні без занять за schedule, cancelled дати, поділ на кількість учениць."
+                              : null,
+                  period: `поточний календарний місяць (${range.start} → ${range.end}) у межах груп тренера.`,
+                  deltaRule: `current (${range.start} → ${range.end}) - previous (${rangePrev.start} → ${rangePrev.end}).`,
                   interpretation: k.delta >= 0 ? "Позитивна динаміка до попереднього місяця." : "Негативна динаміка — потрібна увага.",
                   action: k.id === "renewals" ? "Запусти кампейн на продовження у групах з ризиком." : "Перевір групи/учениць у блоці Insights.",
                 },
@@ -754,6 +838,10 @@ export default function TrainersTab({
                 numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial_paid")?.value || 0,
                 denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "trial")?.value || 0,
                 definition: "trial_paid / trial * 100",
+                includes: "trial_paid = trial-студентки, що взяли paid pack у періоді; trial = унікальні студентки з effective trial attendance.",
+                excludes: "raw trial-відмітки, покриті активним абонементом; trial subscriptions без trial attendance.",
+                period: `поточний календарний місяць (${range.start} → ${range.end}) у межах груп тренера.`,
+                deltaRule: `порівняння через current vs previous month у KPI-тайлах.`,
                 interpretation: "Вища конверсія = краща якість доведення пробних до продажу.",
                 note: "У знаменнику беруться тільки реальні пробні після coverage-check на дату заняття.",
                 action: "Сфокусуй follow-up протягом 24-48 годин після trial.",
@@ -773,6 +861,10 @@ export default function TrainersTab({
                 numerator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single_paid")?.value || 0,
                 denominator: foundationCurrent.domains.trialSingle.funnel.find((x) => x.stage === "single")?.value || 0,
                 definition: "single_paid / single * 100",
+                includes: "single_paid = single-студентки, що взяли paid pack; single = унікальні студентки з effective single attendance.",
+                excludes: "single-відмітки, покриті активним абонементом (effective subscription).",
+                period: `поточний календарний місяць (${range.start} → ${range.end}) у межах груп тренера.`,
+                deltaRule: `порівняння через current vs previous month у KPI-тайлах.`,
                 interpretation: "Показує ефективність конвертації разових у пакети.",
                 action: "Додай offer на пакет одразу після single-візиту.",
               },
@@ -791,6 +883,9 @@ export default function TrainersTab({
                 numerator: foundationCurrent.metrics.renewals,
                 denominator: foundationCurrent.metrics.newSubscriptions + foundationCurrent.metrics.renewals,
                 definition: "renewals / (new + renewals) * 100",
+                includes: "renewals і new paid subscriptions у поточному періоді.",
+                excludes: "trial/single плани та expired без нової paid-покупки.",
+                period: `поточний календарний місяць (${range.start} → ${range.end}) у межах груп тренера.`,
                 interpretation: "Високе значення означає стабільне утримання учениць.",
                 action: "Для груп з low renewal запусти персональні follow-up повідомлення.",
               },
@@ -809,6 +904,9 @@ export default function TrainersTab({
                 numerator: groupCards.reduce((s, g) => s + g.activeSubs, 0),
                 denominator: groupCards.reduce((s, g) => s + g.students, 0),
                 definition: "active subscriptions / total students * 100",
+                includes: "active subscriptions + унікальні студентки у групах тренера.",
+                excludes: "expired subscriptions і студентки поза групами тренера.",
+                period: `поточний календарний місяць (${range.start} → ${range.end}) у межах груп тренера.`,
                 interpretation: "Відображає покриття груп активними пакетами.",
                 action: "Працюй з no-active списком у групових картках.",
               },
