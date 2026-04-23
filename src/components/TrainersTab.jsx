@@ -666,7 +666,7 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, width: "100%", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
         <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
@@ -684,7 +684,7 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           {trainerKpis.map((k) => (
             <button
               key={k.id}
@@ -713,7 +713,7 @@ export default function TrainersTab({
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <ProgressRing
             value={Math.round(foundationCurrent.metrics.trialToPaidConversion || 0)}
             label="Пробне → абонемент"
@@ -789,7 +789,7 @@ export default function TrainersTab({
           />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({
@@ -833,7 +833,7 @@ export default function TrainersTab({
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Стекова структура по групах", payload: { kind: "groupBars", rows: groupCards.map((g) => ({ groupId: g.groupId, groupName: g.groupName, trial: g.trialCount, single: g.singleCount, paid: g.paidCount })) } })}
@@ -873,7 +873,7 @@ export default function TrainersTab({
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({ type: "heatmap", title: "Теплокарта відвідуваності (дні тижня)", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
@@ -909,9 +909,9 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card, padding: 12 }}>
+        <div style={{ ...card, padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box", overflow: "hidden" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Інсайти / Ризики / Дії</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
             {insights.map((ins) => (
               <button key={ins.id} type="button" onClick={() => setDetailState({ type: "insight", title: ins.title, payload: { ...ins, action: "Перевір деталі групи та запусти цільовий follow-up." } })} style={{ ...tile, padding: 10 }}>
                 <div style={{ fontSize: 12, color: theme.textSoft }}>{ins.title}</div>
@@ -932,7 +932,7 @@ export default function TrainersTab({
         </button>
       </section>
 
-      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start" }}>
+      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start", zIndex: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800 }}>Деталізація</div>
           <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
