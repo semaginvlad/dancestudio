@@ -1,4 +1,4 @@
-import { getDisplayName, getSubStatus, today } from "./utils";
+import { getDisplayName, getEffectiveEndDate, getSubStatus, hasActiveSubscriptionCoverage, today } from "./utils";
 
 export const parseTrainerGroups = (note = "") => {
   const match = note.match(/trainer_groups\s*:\s*([^\n\r]+)/i);
@@ -37,6 +37,83 @@ export const patchTrainerAutoSendMapInNote = (note = "", autoSendMap = {}) => {
     return src.replace(/trainer_auto_send\s*:[^\n\r]*/i, trainerAutoSendLine);
   }
   return src.trim() ? `${src.trim()}\n${trainerAutoSendLine}` : trainerAutoSendLine;
+};
+
+export const parseTrainerGroupDraftsMap = (note = "") => {
+  const match = String(note || "").match(/trainer_group_drafts\s*:\s*([^\n\r]+)/i);
+  if (!match?.[1]) return {};
+  return match[1]
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, row) => {
+      const splitIndex = row.indexOf("=");
+      if (splitIndex <= 0) return acc;
+      const groupId = row.slice(0, splitIndex).trim();
+      const encoded = row.slice(splitIndex + 1).trim();
+      if (!groupId) return acc;
+      try {
+        acc[groupId] = decodeURIComponent(encoded);
+      } catch {
+        acc[groupId] = encoded;
+      }
+      return acc;
+    }, {});
+};
+
+export const patchTrainerGroupDraftInNote = (note = "", groupId, draftText = "") => {
+  const nextGroupId = String(groupId || "").trim();
+  if (!nextGroupId) return String(note || "");
+  const map = parseTrainerGroupDraftsMap(note || "");
+  map[nextGroupId] = String(draftText || "");
+  const entries = Object.entries(map)
+    .filter(([gid, text]) => String(gid || "").trim() && String(text || "").trim())
+    .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    .map(([gid, text]) => `${gid}=${encodeURIComponent(text)}`);
+  const line = `trainer_group_drafts: ${entries.join("|")}`;
+  const src = String(note || "");
+  if (!entries.length) {
+    return src.replace(/\n?trainer_group_drafts\s*:[^\n\r]*/gi, "").trim();
+  }
+  if (/trainer_group_drafts\s*:/i.test(src)) {
+    return src.replace(/trainer_group_drafts\s*:[^\n\r]*/i, line);
+  }
+  return src.trim() ? `${src.trim()}\n${line}` : line;
+};
+
+export const parseTrainerLastAutoSendMap = (note = "") => {
+  const match = String(note || "").match(/trainer_last_auto_send\s*:\s*([^\n\r]+)/i);
+  if (!match?.[1]) return {};
+  return match[1]
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, row) => {
+      const [groupIdRaw, dateRaw] = row.split("=");
+      const groupId = String(groupIdRaw || "").trim();
+      const date = String(dateRaw || "").trim().slice(0, 10);
+      if (!groupId || !date) return acc;
+      acc[groupId] = date;
+      return acc;
+    }, {});
+};
+
+export const patchTrainerLastAutoSendInNote = (note = "", groupId, dateStr) => {
+  const map = parseTrainerLastAutoSendMap(note || "");
+  const gid = String(groupId || "").trim();
+  const nextDate = String(dateStr || "").slice(0, 10);
+  if (!gid || !nextDate) return String(note || "");
+  map[gid] = nextDate;
+  const entries = Object.entries(map)
+    .filter(([id, d]) => String(id || "").trim() && String(d || "").trim())
+    .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    .map(([id, d]) => `${id}=${String(d).slice(0, 10)}`);
+  const line = `trainer_last_auto_send: ${entries.join("|")}`;
+  const src = String(note || "");
+  if (/trainer_last_auto_send\s*:/i.test(src)) {
+    return src.replace(/trainer_last_auto_send\s*:[^\n\r]*/i, line);
+  }
+  return src.trim() ? `${src.trim()}\n${line}` : line;
 };
 
 export const isTrainerChatByNote = (note = "") => {
@@ -222,4 +299,139 @@ export const buildGroupScheduleWindows = (group) => {
       };
     })
     .filter(Boolean);
+};
+
+const buildDateFromDayAndTime = (day, time, fromDate) => {
+  const [hh, mm] = String(time || "00:00").split(":").map((n) => Number(n || 0));
+  const current = new Date(fromDate || new Date());
+  const target = new Date(current);
+  target.setSeconds(0, 0);
+  target.setMinutes(mm, 0, 0);
+  target.setHours(hh);
+  const currentDay = current.getDay();
+  let diff = day - currentDay;
+  if (diff < 0) diff += 7;
+  target.setDate(current.getDate() + diff);
+  if (target <= current) target.setDate(target.getDate() + 7);
+  return target;
+};
+
+export const findNextValidTrainingSession = ({ group, cancelled = [], now = new Date(), lookaheadDays = 35 }) => {
+  const windows = buildGroupScheduleWindows(group).map((w) => ({
+    day: w.day,
+    trainingTime: w.trainingTime,
+  }));
+  if (!windows.length) return null;
+  const cancelledSet = new Set(
+    (cancelled || [])
+      .filter((c) => String(c?.groupId) === String(group?.id))
+      .map((c) => String(c?.date || "").slice(0, 10))
+  );
+
+  const candidates = [];
+  windows.forEach((w) => {
+    const first = buildDateFromDayAndTime(w.day, w.trainingTime, now);
+    for (let i = 0; i < Math.ceil(lookaheadDays / 7) + 1; i += 1) {
+      const dt = new Date(first);
+      dt.setDate(first.getDate() + i * 7);
+      const dateStr = dt.toISOString().slice(0, 10);
+      if (cancelledSet.has(dateStr)) continue;
+      candidates.push({
+        date: dateStr,
+        trainingTime: w.trainingTime,
+        trainingAt: dt,
+      });
+    }
+  });
+  candidates.sort((a, b) => a.trainingAt.getTime() - b.trainingAt.getTime());
+  return candidates[0] || null;
+};
+
+export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date() }) => {
+  const nextSession = findNextValidTrainingSession({ group, cancelled, now });
+  if (!nextSession) return null;
+  const sendAt = new Date(nextSession.trainingAt.getTime() - 60 * 60 * 1000);
+  return {
+    groupId: String(group?.id),
+    groupName: group?.name || "",
+    trainingDate: nextSession.date,
+    trainingTime: nextSession.trainingTime,
+    trainingAtIso: nextSession.trainingAt.toISOString(),
+    sendAtIso: sendAt.toISOString(),
+  };
+};
+
+export const isDispatchDueNow = (plan, now = new Date(), toleranceMinutes = 10) => {
+  if (!plan?.sendAtIso) return false;
+  const diffMs = now.getTime() - new Date(plan.sendAtIso).getTime();
+  return diffMs >= 0 && diffMs <= toleranceMinutes * 60 * 1000;
+};
+
+export const buildTrainerGroupDraft = ({
+  group,
+  students = [],
+  membershipByStudent = {},
+  subsByStudent = {},
+  attn = [],
+  targetTrainingDate = today(),
+}) => {
+  if (!group?.id) {
+    return { text: "", studentsList: [], studentsCount: 0, reasonsByStudent: {} };
+  }
+  const debtStudentIds = new Set(
+    (attn || [])
+      .filter((a) => String(a?.entryType || a?.guestType || "") === "debt" && a?.studentId)
+      .map((a) => String(a.studentId))
+  );
+  const members = students.filter((st) => {
+    const linkedGroups = normalizeStudentGroupIds(st, membershipByStudent[st.id] || []).map(String);
+    return linkedGroups.includes(String(group.id));
+  });
+  const reminderRows = members
+    .map((student) => {
+      const sid = String(student.id);
+      const groupSubs = (subsByStudent[sid] || []).filter((s) => String(s.groupId) === String(group.id));
+      const hasCoverage = hasActiveSubscriptionCoverage(groupSubs, sid, String(group.id), targetTrainingDate);
+      if (hasCoverage) return null;
+      let reason = "потрібне продовження";
+      if (debtStudentIds.has(sid)) {
+        reason = "борг";
+      } else if (!groupSubs.length) {
+        reason = "немає абонемента";
+      } else if (groupSubs.every((s) => String(s.planType || "") === "trial")) {
+        reason = "було тільки trial";
+      } else if (groupSubs.every((s) => String(s.planType || "") === "single")) {
+        reason = "були тільки разові";
+      } else if (groupSubs.some((s) => {
+        const end = getEffectiveEndDate(s) || "0000-00-00";
+        return end < targetTrainingDate || getSubStatus(s) === "expired";
+      })) {
+        reason = "абонемент закінчився";
+      }
+      return {
+        studentId: sid,
+        name: getDisplayName(student),
+        reason,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, "uk-UA"));
+
+  const lines = reminderRows.map((x) => `- ${x.name} — ${x.reason}`);
+  const text = lines.length
+    ? [
+      "Зведення для тренера",
+      `Група: ${group.name}`,
+      `Найближче заняття: ${targetTrainingDate}`,
+      "",
+      "Нагадати щодо абонемента:",
+      ...lines,
+    ].join("\n")
+    : "";
+  return {
+    text,
+    studentsList: reminderRows,
+    studentsCount: reminderRows.length,
+    reasonsByStudent: reminderRows.reduce((acc, row) => ({ ...acc, [row.studentId]: row.reason }), {}),
+  };
 };

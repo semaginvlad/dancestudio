@@ -868,6 +868,7 @@ export default function App() {
                 studentGrps={studentGrps}
                 subs={subsExt}
                 attn={attn}
+                cancelled={cancelled}
               />
             )}
           </div>

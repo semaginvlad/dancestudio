@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { theme } from "../shared/constants";
-import { buildGroupScheduleWindows, buildTrainerMessageDraft, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerGroups, patchTrainerAutoSendMapInNote } from "../shared/trainerDigest";
+import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerGroupDraftsMap, parseTrainerGroups, patchTrainerAutoSendMapInNote, patchTrainerGroupDraftInNote } from "../shared/trainerDigest";
 import { today } from "../shared/utils";
 
 export default function TrainersNotificationsTab({
@@ -9,6 +9,7 @@ export default function TrainersNotificationsTab({
   studentGrps = [],
   subs = [],
   attn = [],
+  cancelled = [],
 }) {
   const [dialogs, setDialogs] = useState([]);
   const [metaByChat, setMetaByChat] = useState({});
@@ -17,6 +18,8 @@ export default function TrainersNotificationsTab({
   const [draftByChat, setDraftByChat] = useState({});
   const [lastActions, setLastActions] = useState([]);
   const [sendingNow, setSendingNow] = useState(false);
+  const [selectedGroupIdByChat, setSelectedGroupIdByChat] = useState({});
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const membershipByStudent = useMemo(
     () =>
@@ -91,46 +94,84 @@ export default function TrainersNotificationsTab({
   }, [trainerDialogs, selectedChatId]);
 
   const digest = useMemo(() => {
-    if (!selectedDialog) return { text: "", automationReady: null, groupNames: [] };
+    if (!selectedDialog) return { text: "", groupNames: [], groupsData: [], selectedGroupData: null };
     const trainerGroups = parseTrainerGroups(selectedDialog.note || "");
     const parsedGroups = groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
     const persistedAutoSendMap = parseTrainerAutoSendMap(selectedDialog.note || "");
-    const enabledGroupIds = parsedGroups
-      .filter((g) => persistedAutoSendMap[String(g.id)] !== false)
-      .map((g) => String(g.id));
-    const draft = buildTrainerMessageDraft({
-      groups: parsedGroups,
-      students,
-      membershipByStudent,
-      subsByStudent,
-      attn,
-      enabledGroupIds,
-      referenceDate: today(),
+    const persistedDrafts = parseTrainerGroupDraftsMap(selectedDialog.note || "");
+    const groupsData = parsedGroups.map((g) => {
+      const plan = buildGroupDispatchPlan({ group: g, cancelled, now: new Date() });
+      const generated = buildTrainerGroupDraft({
+        group: g,
+        students,
+        membershipByStudent,
+        subsByStudent,
+        attn,
+        targetTrainingDate: plan?.trainingDate || today(),
+      });
+      const manualDraft = persistedDrafts[String(g.id)] || "";
+      return {
+        groupId: String(g.id),
+        groupName: g.name,
+        plan,
+        generatedText: generated.text,
+        generatedStudentsCount: generated.studentsCount || 0,
+        enabled: persistedAutoSendMap[String(g.id)] !== false,
+        persistedDraft: manualDraft,
+        activeText: (draftByChat[`${selectedDialog.id}:${g.id}`] ?? manualDraft ?? generated.text) || "",
+      };
     });
-    const scheduleByGroup = parsedGroups.map((g) => ({
-      groupId: String(g.id),
-      groupName: g.name,
-      enabled: persistedAutoSendMap[String(g.id)] !== false,
-      windows: buildGroupScheduleWindows(g),
-    }));
+    const chatSelectionKey = selectedDialog.id;
+    const selectedGroupId = selectedGroupIdByChat[chatSelectionKey] || groupsData[0]?.groupId || "";
+    const selectedGroupData = groupsData.find((g) => g.groupId === selectedGroupId) || groupsData[0] || null;
     return {
-      ...draft,
       groupNames: parsedGroups.map((g) => g.name),
-      scheduleByGroup,
-      persistedAutoSendMap,
+      groupsData,
+      selectedGroupData,
     };
-  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion]);
+  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat]);
 
-  const activeDraft = draftByChat[selectedDialog?.id || ""] ?? digest.text;
+  const activeDraft = digest.selectedGroupData?.activeText || "";
+  const activeGroupId = digest.selectedGroupData?.groupId || "";
 
   const updateDraft = (next) => {
-    if (!selectedDialog?.id) return;
-    setDraftByChat((prev) => ({ ...prev, [selectedDialog.id]: next }));
+    if (!selectedDialog?.id || !activeGroupId) return;
+    setDraftByChat((prev) => ({ ...prev, [`${selectedDialog.id}:${activeGroupId}`]: next }));
+  };
+
+  const saveManualDraft = async (groupId, value) => {
+    if (!selectedDialog?.id || !groupId) return;
+    const nextNote = patchTrainerGroupDraftInNote(selectedDialog.note || "", groupId, value);
+    setSavingDraft(true);
+    try {
+      const res = await fetch("/api/telegram-chat-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "save draft failed");
+      setMetaByChat((prev) => ({
+        ...prev,
+        [selectedDialog.id]: {
+          ...(prev[selectedDialog.id] || {}),
+          ...(payload?.meta || {}),
+          internal_note: nextNote,
+        },
+      }));
+    } catch (error) {
+      alert(`Не вдалося зберегти чернетку: ${String(error?.message || error)}`);
+    } finally {
+      setSavingDraft(false);
+    }
   };
 
   const regenerateFromTemplate = () => {
-    if (!selectedDialog?.id) return;
-    setDraftByChat((prev) => ({ ...prev, [selectedDialog.id]: digest.text }));
+    if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
+    if (!window.confirm("Перезаписати ручну чернетку автогенерованим шаблоном для цієї групи?")) return;
+    const regenerated = digest.selectedGroupData.generatedText || "";
+    setDraftByChat((prev) => ({ ...prev, [`${selectedDialog.id}:${activeGroupId}`]: regenerated }));
+    saveManualDraft(activeGroupId, regenerated);
     setRefreshVersion((v) => v + 1);
   };
 
@@ -145,8 +186,8 @@ export default function TrainersNotificationsTab({
   };
 
   const sendNow = async ({ dryRun = false } = {}) => {
-    if (!selectedDialog?.id) return;
-    const text = activeDraft || digest.text;
+    if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
+    const text = activeDraft || digest.selectedGroupData.generatedText || "";
     if (!text) return;
     const nowIso = new Date().toISOString();
     if (dryRun) {
@@ -154,9 +195,9 @@ export default function TrainersNotificationsTab({
         {
           id: `dry_${Date.now()}`,
           status: "dry-run",
-          chatTitle: selectedDialog.title || selectedDialog.id,
+          chatTitle: `${selectedDialog.title || selectedDialog.id} / ${digest.selectedGroupData.groupName}`,
           time: nowIso,
-          students: digest.summaryByGroup?.reduce((s, g) => s + (g.studentsCount || 0), 0) || 0,
+          students: digest.selectedGroupData.generatedStudentsCount || 0,
         },
         ...prev,
       ].slice(0, 20));
@@ -164,6 +205,7 @@ export default function TrainersNotificationsTab({
     }
     setSendingNow(true);
     try {
+      await saveManualDraft(activeGroupId, text);
       const res = await fetch("/api/send-trainer-digest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,8 +213,9 @@ export default function TrainersNotificationsTab({
           chatId: selectedDialog.id,
           message: text,
           chatTitle: selectedDialog.title || selectedDialog.id,
-          groupNames: digest.groupNames || [],
-          studentsCount: digest.summaryByGroup?.reduce((s, g) => s + (g.studentsCount || 0), 0) || 0,
+          groupId: digest.selectedGroupData.groupId,
+          groupNames: [digest.selectedGroupData.groupName],
+          studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
           triggerType: "manual",
         }),
       });
@@ -182,9 +225,9 @@ export default function TrainersNotificationsTab({
         {
           id: `send_${Date.now()}`,
           status: ok ? "sent" : "failed",
-          chatTitle: selectedDialog.title || selectedDialog.id,
+          chatTitle: `${selectedDialog.title || selectedDialog.id} / ${digest.selectedGroupData.groupName}`,
           time: nowIso,
-          students: digest.summaryByGroup?.reduce((s, g) => s + (g.studentsCount || 0), 0) || 0,
+          students: digest.selectedGroupData.generatedStudentsCount || 0,
           details: ok
             ? `admin-log: ${payload?.adminLogStatus || "skipped"}`
             : (payload?.details || payload?.error || "send failed"),
@@ -223,18 +266,6 @@ export default function TrainersNotificationsTab({
     }
   };
 
-  const todaySchedule = useMemo(() => {
-    const day = new Date(`${today()}T12:00:00`).getDay();
-    return (digest.scheduleByGroup || [])
-      .filter((g) => g.enabled)
-      .flatMap((g) => (g.windows || []).filter((w) => w.day === day).map((w) => ({
-        groupName: g.groupName,
-        sendTime: w.sendTime,
-        trainingTime: w.trainingTime,
-      })))
-      .sort((a, b) => a.sendTime.localeCompare(b.sendTime));
-  }, [digest.scheduleByGroup]);
-
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
@@ -268,6 +299,9 @@ export default function TrainersNotificationsTab({
             <div style={{ fontSize: 12, color: theme.textMuted }}>
               Групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}
             </div>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>
+              Admin log: configured Telegram chat id from env (`TELEGRAM_ADMIN_LOG_CHAT_ID` або `TELEGRAM_ADMIN_CHAT_ID`)
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" onClick={regenerateFromTemplate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити з шаблону</button>
@@ -277,18 +311,38 @@ export default function TrainersNotificationsTab({
           </div>
         </div>
 
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label style={{ color: theme.textMuted, fontSize: 12 }}>Група:</label>
+            <select
+              value={activeGroupId}
+              onChange={(e) => setSelectedGroupIdByChat((prev) => ({ ...prev, [selectedDialog?.id || ""]: e.target.value }))}
+              style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "6px 8px" }}
+            >
+              {(digest.groupsData || []).map((g) => <option key={g.groupId} value={g.groupId}>{g.groupName}</option>)}
+            </select>
+            {!!digest.selectedGroupData?.plan && (
+              <span style={{ fontSize: 12, color: isDispatchDueNow(digest.selectedGroupData.plan, new Date(), 15) ? theme.warning : theme.textMuted }}>
+                Next send: {digest.selectedGroupData.plan.sendAtIso.slice(0, 16).replace("T", " ")} (заняття {digest.selectedGroupData.plan.trainingDate} {digest.selectedGroupData.plan.trainingTime})
+              </span>
+            )}
+          </div>
+        </div>
+
         <textarea
           value={activeDraft}
           onChange={(e) => updateDraft(e.target.value)}
+          onBlur={() => saveManualDraft(activeGroupId, activeDraft)}
           rows={14}
           style={{ width: "100%", resize: "vertical", minHeight: 220, maxHeight: 520, overflow: "auto", background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, color: theme.textMain, lineHeight: 1.45, fontSize: 13 }}
           placeholder="Немає даних для дайджесту або не задано trainer_groups."
         />
+        {savingDraft && <div style={{ fontSize: 12, color: theme.textMuted }}>Зберігаємо чернетку…</div>}
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.input }}>
           <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8 }}>Automation per group (день заняття, за 1 годину)</div>
           <div style={{ display: "grid", gap: 8 }}>
-            {(digest.scheduleByGroup || []).map((g) => (
+            {(digest.groupsData || []).map((g) => (
               <label key={g.groupId} style={{ display: "grid", gap: 4, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <input
@@ -299,9 +353,9 @@ export default function TrainersNotificationsTab({
                   <span style={{ color: theme.textMain, fontWeight: 700 }}>{g.groupName}</span>
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
-                  {(g.windows || []).length
-                    ? g.windows.map((w) => `день ${w.day}: send ${w.sendTime} (тренування ${w.trainingTime})`).join(" • ")
-                    : "Немає schedule"}
+                  {g.plan
+                    ? `next send ${g.plan.sendAtIso.slice(0, 16).replace("T", " ")} (заняття ${g.plan.trainingDate} ${g.plan.trainingTime})`
+                    : "Немає валідного schedule"}
                 </div>
               </label>
             ))}
@@ -309,23 +363,17 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6 }}>Що буде надіслано сьогодні</div>
-          {todaySchedule.length ? (
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6 }}>Що буде надіслано зараз (due window)</div>
+          {(digest.groupsData || []).filter((g) => g.enabled && g.plan && isDispatchDueNow(g.plan, new Date(), 15)).length ? (
             <div style={{ display: "grid", gap: 4, fontSize: 12, color: theme.textMain }}>
-              {todaySchedule.map((x, i) => <div key={`${x.groupName}_${x.sendTime}_${i}`}>• {x.groupName}: {x.sendTime} (заняття {x.trainingTime})</div>)}
+              {(digest.groupsData || [])
+                .filter((g) => g.enabled && g.plan && isDispatchDueNow(g.plan, new Date(), 15))
+                .map((x, i) => <div key={`${x.groupName}_${x.plan?.sendAtIso}_${i}`}>• {x.groupName}: {x.plan?.sendAtIso.slice(0, 16).replace("T", " ")} (заняття {x.plan?.trainingDate} {x.plan?.trainingTime})</div>)}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: theme.textMuted }}>На сьогодні активних автосповіщень немає.</div>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>Зараз немає due відправок.</div>
           )}
         </div>
-
-        {digest.automationReady && (
-          <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8, fontSize: 12, color: theme.textMuted, lineHeight: 1.45 }}>
-            <div><strong>Automation-ready:</strong> {digest.automationReady.mode}</div>
-            <div>Schedule: {digest.automationReady.recommendedSchedule}</div>
-            <div>Selection: {digest.automationReady.groupSelection}</div>
-          </div>
-        )}
 
         <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
           <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 12 }}>Лог відправок (UI)</div>
