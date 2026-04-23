@@ -93,6 +93,8 @@ export default function App() {
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
+  const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
+  const [groupEditDraft, setGroupEditDraft] = useState(null);
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
@@ -233,6 +235,73 @@ export default function App() {
     }
   };
 
+  const openEditGroup = (group) => {
+    setGroupEditDraft({
+      id: group.id,
+      name: group.name || "",
+      directionId: group.directionId || directionsList[0]?.id || "",
+      schedule: parseGroupSchedule(group.schedule),
+      trainerPct: String(group.trainerPct ?? 0),
+      trainerId: getGroupPrimaryTrainerId(group.id),
+    });
+  };
+
+  const saveGroupEdit = async () => {
+    if (!groupEditDraft?.id) return;
+    const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(groupEditDraft.trainerPct || "").trim(), 10) || 0));
+    const payload = {
+      name: String(groupEditDraft.name || "").trim(),
+      directionId: groupEditDraft.directionId,
+      schedule: Array.isArray(groupEditDraft.schedule) ? groupEditDraft.schedule : [],
+      trainerPct: trainerPctNum,
+    };
+    try {
+      const updated = await db.updateGroup(groupEditDraft.id, payload);
+      setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+
+      const targetTrainerId = String(groupEditDraft.trainerId || "").trim();
+      const groupRows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupEditDraft.id));
+      if (targetTrainerId) {
+        for (const row of groupRows) {
+          if (String(row.trainerId) !== targetTrainerId && db.deleteTrainerGroup) {
+            await db.deleteTrainerGroup(row.trainerId, row.groupId);
+          }
+        }
+        const binding = await db.upsertTrainerGroup(targetTrainerId, groupEditDraft.id);
+        setTrainerGroups((prev) => {
+          const filtered = prev.filter((x) => !(String(x.groupId) === String(groupEditDraft.id) && String(x.trainerId) !== targetTrainerId));
+          if (filtered.some((x) => String(x.trainerId) === String(binding.trainerId) && String(x.groupId) === String(binding.groupId))) return filtered;
+          return [...filtered, binding];
+        });
+      } else {
+        for (const row of groupRows) {
+          if (db.deleteTrainerGroup) await db.deleteTrainerGroup(row.trainerId, row.groupId);
+        }
+        setTrainerGroups((prev) => prev.filter((x) => String(x.groupId) !== String(groupEditDraft.id)));
+      }
+
+      setGroupEditDraft(null);
+    } catch (e) {
+      alert(e?.message || "Не вдалося зберегти групу");
+    }
+  };
+
+  const archiveGroup = async (group) => {
+    const meta = archiveMetaByGroupId[String(group.id)];
+    if (!meta?.mode) return;
+    const patch = meta.mode === "is_active"
+      ? { is_active: false }
+      : meta.mode === "active"
+        ? { active: false }
+        : { archived_at: today() };
+    try {
+      const updated = await db.updateGroup(group.id, patch);
+      setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося архівувати групу");
+    }
+  };
+
   const visibleGroups = useMemo(() => {
     if (!user) return [];
     if (isAdmin) return groups;
@@ -256,6 +325,43 @@ export default function App() {
     return base;
   }, [groups]);
   const dirMap = useMemo(()=>Object.fromEntries(directionsList.map(d=>[d.id,d])),[directionsList]);
+  const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
+  const parseGroupSchedule = (schedule) => {
+    if (Array.isArray(schedule)) return schedule;
+    if (typeof schedule === "string") {
+      try {
+        const parsed = JSON.parse(schedule);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+  const getGroupPrimaryTrainerId = (groupId) => {
+    const rows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupId));
+    const primary = rows.find((tg) => tg.isPrimary) || rows[0];
+    return primary ? String(primary.trainerId) : "";
+  };
+  const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
+    .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
+    .join(" · ");
+
+  const archiveMetaByGroupId = useMemo(() => {
+    const result = {};
+    groups.forEach((g) => {
+      if (Object.prototype.hasOwnProperty.call(g, "is_active")) {
+        result[String(g.id)] = { mode: "is_active", isArchived: g.is_active === false };
+      } else if (Object.prototype.hasOwnProperty.call(g, "active")) {
+        result[String(g.id)] = { mode: "active", isArchived: g.active === false };
+      } else if (Object.prototype.hasOwnProperty.call(g, "archived_at")) {
+        result[String(g.id)] = { mode: "archived_at", isArchived: !!g.archived_at };
+      } else {
+        result[String(g.id)] = { mode: null, isArchived: false };
+      }
+    });
+    return result;
+  }, [groups]);
 
  const subsExt = useMemo(()=>{
     const usedMap = {};
@@ -656,19 +762,55 @@ export default function App() {
           />
         )}
         {isAdmin && tab==="trainers" && (
-          <TrainersTab
-            trainers={trainers}
-            setTrainers={setTrainers}
-            trainerGroups={trainerGroups}
-            setTrainerGroups={setTrainerGroups}
-            groups={groups}
-            students={students}
-            studentGrps={studentGrps}
-            subs={subsExt}
-            attn={attn}
-            analyticsFoundation={analytics.foundation}
-            cancelled={cancelled}
-          />
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6 }}>
+              <button type="button" onClick={() => setTrainersSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "trainers" ? theme.primary : "transparent", color: trainersSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Тренери</button>
+              <button type="button" onClick={() => setTrainersSubtab("groups")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "groups" ? theme.primary : "transparent", color: trainersSubtab === "groups" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Групи</button>
+            </div>
+
+            {trainersSubtab === "trainers" ? (
+              <TrainersTab
+                trainers={trainers}
+                setTrainers={setTrainers}
+                trainerGroups={trainerGroups}
+                setTrainerGroups={setTrainerGroups}
+                groups={groups}
+                students={students}
+                studentGrps={studentGrps}
+                subs={subsExt}
+                attn={attn}
+                analyticsFoundation={analytics.foundation}
+                cancelled={cancelled}
+              />
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {groups.map((g) => {
+                  const dir = dirMap[g.directionId];
+                  const trainerId = getGroupPrimaryTrainerId(g.id);
+                  const trainer = trainersById[String(trainerId)];
+                  const archiveMeta = archiveMetaByGroupId[String(g.id)] || { mode: null, isArchived: false };
+                  return (
+                    <div key={g.id} style={{ ...cardSt, padding: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div style={{ fontWeight: 800, color: theme.textMain }}>{g.name}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Напрямок: {dir?.name || g.directionId || "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Графік: {formatGroupSchedule(g.schedule) || "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Тренер: {trainer ? (trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.id) : "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Відсоток тренера: {g.trainerPct ?? 0}%</div>
+                          <div style={{ fontSize: 12, color: archiveMeta.isArchived ? theme.danger : theme.success }}>Статус: {archiveMeta.isArchived ? "Архівна" : "Активна"}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
+                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} onClick={() => archiveGroup(g)}>Архівація</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
@@ -1049,6 +1191,58 @@ export default function App() {
             <button type="button" style={btnP} onClick={createGroupAction}>Створити групу</button>
           </div>
         </div>
+      </Modal>
+      <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
+        {groupEditDraft && (
+          <div style={{ display: "grid", gap: 12 }}>
+            <Field label="Назва групи">
+              <input style={inputSt} value={groupEditDraft.name} onChange={(e) => setGroupEditDraft((p) => ({ ...p, name: e.target.value }))} />
+            </Field>
+            <Field label="Напрямок">
+              <select style={inputSt} value={groupEditDraft.directionId} onChange={(e) => setGroupEditDraft((p) => ({ ...p, directionId: e.target.value }))}>
+                {directionsList.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Графік">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {UI_WEEKDAY_ORDER.map((dayIdx) => {
+                  const label = WEEKDAYS[dayIdx];
+                  const active = groupEditDraft.schedule.some((x) => Number(x.day) === dayIdx);
+                  return (
+                    <Pill
+                      key={dayIdx}
+                      active={active}
+                      onClick={() => setGroupEditDraft((p) => ({
+                        ...p,
+                        schedule: active
+                          ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
+                          : [...p.schedule, { day: dayIdx, time: "19:00" }],
+                      }))}
+                    >
+                      {label}
+                    </Pill>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="Відсоток тренера">
+              <input style={inputSt} type="text" inputMode="numeric" value={groupEditDraft.trainerPct} onChange={(e) => {
+                const next = e.target.value.replace(/[^\d]/g, "");
+                if (next === "" || Number(next) <= 100) setGroupEditDraft((p) => ({ ...p, trainerPct: next }));
+              }} />
+            </Field>
+            <Field label="Тренер">
+              <select style={inputSt} value={groupEditDraft.trainerId} onChange={(e) => setGroupEditDraft((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">— Без прив'язки —</option>
+                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+              </select>
+            </Field>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" style={btnS} onClick={() => setGroupEditDraft(null)}>Скасувати</button>
+              <button type="button" style={btnP} onClick={saveGroupEdit}>Зберегти</button>
+            </div>
+          </div>
+        )}
       </Modal>
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>

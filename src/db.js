@@ -131,9 +131,13 @@ export async function fetchGroups() {
 export async function updateGroup(id, g) {
   const payload = {}
   if (g.name !== undefined) payload.name = g.name
+  if (g.directionId !== undefined) payload.direction_id = g.directionId
   if (g.schedule !== undefined) payload.schedule = g.schedule
   if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
   if (g.trainer_id !== undefined) payload.trainer_id = g.trainer_id
+  if (g.is_active !== undefined) payload.is_active = g.is_active
+  if (g.active !== undefined) payload.active = g.active
+  if (g.archived_at !== undefined) payload.archived_at = g.archived_at
 
   const { data, error } = await supabase.from('groups').update(payload).eq('id', id).select().single()
   if (error) throw error
