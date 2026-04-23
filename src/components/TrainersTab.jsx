@@ -597,7 +597,7 @@ export default function TrainersTab({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(280px, 320px) minmax(0, 1fr) minmax(320px, 360px)",
+        gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr) clamp(240px, 24vw, 300px)",
         gap: 14,
         alignItems: "start",
         width: "100%",
@@ -666,7 +666,7 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, width: "100%", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
         <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
@@ -909,7 +909,7 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card, padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box", overflow: "hidden" }}>
+        <div style={{ ...card, padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Інсайти / Ризики / Дії</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
             {insights.map((ins) => (
@@ -932,7 +932,7 @@ export default function TrainersTab({
         </button>
       </section>
 
-      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start", zIndex: 0 }}>
+      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, maxHeight: "calc(100vh - 20px)", overflowY: "auto", overflowX: "hidden", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start", zIndex: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800 }}>Деталізація</div>
           <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
