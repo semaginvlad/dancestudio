@@ -594,7 +594,21 @@ export default function TrainersTab({
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px minmax(0,1fr) 360px", gap: 14, color: theme.text, background: theme.bg, padding: 10, borderRadius: 16 }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(280px, 320px) minmax(0, 1fr) minmax(320px, 360px)",
+        gap: 14,
+        alignItems: "start",
+        width: "100%",
+        maxWidth: "100%",
+        overflow: "hidden",
+        color: theme.text,
+        background: theme.bg,
+        padding: 10,
+        borderRadius: 16,
+      }}
+    >
       <aside style={{ ...card, padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
@@ -652,7 +666,7 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
         <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
@@ -918,7 +932,7 @@ export default function TrainersTab({
         </button>
       </section>
 
-      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10 }}>
+      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, height: "fit-content", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800 }}>Деталізація</div>
           <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
