@@ -429,7 +429,13 @@ export default function TrainersTab({
   };
 
   const renderDetailBody = () => {
-    if (detailState.type === "overview") return <div style={{ color: theme.textSoft, fontSize: 13 }}>Натисни будь-який блок з центральної колонки для деталізації.</div>;
+    if (detailState.type === "overview") {
+      return (
+        <div style={{ color: theme.textSoft, fontSize: 12, lineHeight: 1.35 }}>
+          Натисни будь-який блок з центральної колонки для деталізації.
+        </div>
+      );
+    }
     const p = detailState.payload || {};
 
     if (detailState.type === "kpi") {
@@ -666,7 +672,7 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
         <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
@@ -684,17 +690,23 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card, padding: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <div style={{ fontWeight: 800 }}>Деталізація</div>
-            <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
+        <div style={{ ...card, padding: 10, background: theme.panel, borderColor: theme.border }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: theme.textSoft, letterSpacing: 0.2 }}>Деталізація</div>
+            <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.panelSoft, color: theme.textSoft, padding: "4px 7px", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>Скинути</button>
           </div>
-          <div style={{ fontSize: 12, color: theme.textSoft }}>{detailState.title}</div>
-          <div style={{ fontSize: 11, color: "#7f93b2", marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: theme.textSoft }}>{detailState.title}</div>
+          <div style={{ fontSize: 10, color: "#7f93b2", marginTop: 3, lineHeight: 1.3 }}>
             Поточний період: {range.start} → {range.end}<br />
             Попередній період: {rangePrev.start} → {rangePrev.end}
           </div>
-          <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.panelSoft, padding: 10, marginTop: 8 }}>
+          <div
+            style={
+              detailState.type === "overview"
+                ? { marginTop: 6, padding: "4px 2px 0" }
+                : { border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, padding: 8, marginTop: 6 }
+            }
+          >
             {renderDetailBody()}
           </div>
         </div>
