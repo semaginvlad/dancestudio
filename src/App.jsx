@@ -41,6 +41,7 @@ const toDirectionId = (name = "") => String(name || "")
   .toLowerCase()
   .replace(/[^a-z0-9а-яіїєґ]+/gi, "_")
   .replace(/^_+|_+$/g, "");
+const UI_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -86,7 +87,7 @@ export default function App() {
     directionId: DIRECTIONS[0]?.id || "",
     newDirectionName: "",
     schedule: [],
-    trainerPct: 0,
+    trainerPct: "0",
     trainerId: "",
   });
 
@@ -192,15 +193,18 @@ export default function App() {
         return;
       }
     }
-    const validTrainerId = trainers.some((t) => String(t.id) === String(newGroupDraft.trainerId))
-      ? String(newGroupDraft.trainerId)
+    const latestTrainers = await db.fetchTrainers();
+    const trainerIdRaw = String(newGroupDraft.trainerId || "").trim();
+    const validTrainerId = trainerIdRaw && latestTrainers.some((t) => String(t.id) === trainerIdRaw)
+      ? trainerIdRaw
       : null;
+    const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(newGroupDraft.trainerPct || "").trim(), 10) || 0));
     const payload = {
       id: draftId,
       name,
       directionId,
       schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
-      trainerPct: Number.isFinite(+newGroupDraft.trainerPct) ? Math.max(0, Math.min(100, +newGroupDraft.trainerPct)) : 0,
+      trainerPct: trainerPctNum,
       trainer_id: validTrainerId,
     };
     try {
@@ -213,7 +217,7 @@ export default function App() {
         directionId,
         newDirectionName: "",
         schedule: [],
-        trainerPct: 0,
+        trainerPct: "0",
         trainerId: "",
       });
       setModal(null);
@@ -988,7 +992,8 @@ export default function App() {
           </Field>
           <Field label="Schedule">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {WEEKDAYS.map((label, dayIdx) => {
+              {UI_WEEKDAY_ORDER.map((dayIdx) => {
+                const label = WEEKDAYS[dayIdx];
                 const active = newGroupDraft.schedule.some((x) => Number(x.day) === dayIdx);
                 return (
                   <Pill
@@ -1008,8 +1013,23 @@ export default function App() {
             </div>
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="trainer_pct">
-              <input style={inputSt} type="number" min={0} max={100} value={newGroupDraft.trainerPct} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerPct: e.target.value }))} />
+            <Field label="Відсоток тренера">
+              <div>
+                <input
+                  style={inputSt}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="50"
+                  value={newGroupDraft.trainerPct}
+                  onChange={(e) => {
+                    const next = e.target.value.replace(/[^\d]/g, "");
+                    if (next === "" || Number(next) <= 100) {
+                      setNewGroupDraft((p) => ({ ...p, trainerPct: next }));
+                    }
+                  }}
+                />
+                <div style={{ fontSize: 12, color: theme.textLight, marginTop: 6 }}>Введіть лише число (0-100), без знака %.</div>
+              </div>
             </Field>
             <Field label="Тренер (опційно)">
               <select style={inputSt} value={newGroupDraft.trainerId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerId: e.target.value }))}>
