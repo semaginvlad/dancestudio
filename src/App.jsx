@@ -891,7 +891,7 @@ export default function App() {
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
                         <div style={{display:"flex",gap:8}}>
-                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
+                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
                           <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
                         </div>
                       </div>
@@ -909,7 +909,7 @@ export default function App() {
                   </button>
                   {expandedDirs['archive'] && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
                     {studentsByDirection.inactive.map((st, index) => (
-                      <div key={st.id} style={{background: "#fff", borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
+                      <div key={st.id} style={{background: theme.card, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
                         <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
                           <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
                           <div>
@@ -930,7 +930,7 @@ export default function App() {
                             ))}
                           </select>
                           <button style={{...btnS,padding:"10px 14px",fontSize:13, background:theme.bg}} onClick={()=>restoreStudentToGroup(st.id)}>↩ Відновити</button>
-                          <button style={{...btnS,padding:"10px 12px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
+                          <button style={{...btnS,padding:"10px 12px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
                           <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
                         </div>
                       </div>
@@ -940,7 +940,7 @@ export default function App() {
             )}
           </div>
           {waitlist.length > 0 && (
-            <div style={{background: "#FFF9F0", borderRadius: 28, overflow: 'hidden'}}>
+            <div style={{background: theme.input, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
               <div style={{padding:'24px', display: "flex", justifyContent: "space-between"}}>
                 <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({waitlist.length})</span>
               </div>
@@ -949,7 +949,7 @@ export default function App() {
                   const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
                   if(!st || !gr) return null;
                   return (
-                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#fff", padding: "20px", borderRadius: 20}}>
+                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: theme.card, padding: "20px", borderRadius: 20}}>
                       <div style={{display: "flex", gap: 16, alignItems: "center"}}>
                         <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{i + 1}.</div>
                         <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
