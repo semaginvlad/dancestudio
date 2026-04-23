@@ -1234,17 +1234,28 @@ export default function AttendanceTab({
             {orderedStudents.map((student) => {
               const statusInfo = getStudentStatusText(subs, student.id, gid);
               const warnedDone = isWarned(student.id);
+              const isDark = theme.bg === "#0F131A";
               const metaColor = statusInfo.tone === "danger"
-                ? (warnedDone ? "#b06a6a" : "#c81e1e")
+                ? (isDark
+                    ? (warnedDone ? "#c7767f" : "#ff7b86")
+                    : (warnedDone ? "#b06a6a" : "#c81e1e"))
                 : statusInfo.tone === "warning"
-                  ? "#d97706"
+                  ? (isDark ? (warnedDone ? "#c98a3a" : "#ffb24c") : "#d97706")
                   : styles.studentMeta.color;
               const rowHighlightStyle = statusInfo.tone === "danger"
-                ? (warnedDone
-                    ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
-                    : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" })
+                ? (isDark
+                    ? (warnedDone
+                        ? { background: "#3a171b", borderLeft: "3px solid #b24a54", boxShadow: "inset 0 1px 0 rgba(178,74,84,0.35)" }
+                        : { background: "#5a161d", borderLeft: "3px solid #ef4444", boxShadow: "inset 0 1px 0 rgba(248,113,113,0.35)" })
+                    : (warnedDone
+                        ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
+                        : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" }))
                 : statusInfo.tone === "warning"
-                  ? { background: "#fff7ed", borderLeft: "3px solid #f59e0b" }
+                  ? (isDark
+                      ? (warnedDone
+                          ? { background: "#3f2711", borderLeft: "3px solid #c27a1f", boxShadow: "inset 0 1px 0 rgba(194,122,31,0.35)" }
+                          : { background: "#5a2f08", borderLeft: "3px solid #f59e0b", boxShadow: "inset 0 1px 0 rgba(251,191,36,0.35)" })
+                      : { background: "#fff7ed", borderLeft: "3px solid #f59e0b" })
                   : {};
 
               return (
