@@ -192,13 +192,16 @@ export default function App() {
         return;
       }
     }
+    const validTrainerId = trainers.some((t) => String(t.id) === String(newGroupDraft.trainerId))
+      ? String(newGroupDraft.trainerId)
+      : null;
     const payload = {
       id: draftId,
       name,
       directionId,
       schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
       trainerPct: Number.isFinite(+newGroupDraft.trainerPct) ? Math.max(0, Math.min(100, +newGroupDraft.trainerPct)) : 0,
-      trainer_id: newGroupDraft.trainerId || null,
+      trainer_id: validTrainerId,
     };
     try {
       const created = await db.insertGroup(payload);
@@ -985,18 +988,20 @@ export default function App() {
           </Field>
           <Field label="Schedule">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {WEEKDAYS.map((d) => {
-                const active = newGroupDraft.schedule.some((x) => x.day === d.id);
+              {WEEKDAYS.map((label, dayIdx) => {
+                const active = newGroupDraft.schedule.some((x) => Number(x.day) === dayIdx);
                 return (
                   <Pill
-                    key={d.id}
+                    key={dayIdx}
                     active={active}
                     onClick={() => setNewGroupDraft((p) => ({
                       ...p,
-                      schedule: active ? p.schedule.filter((x) => x.day !== d.id) : [...p.schedule, { day: d.id, time: "19:00" }],
+                      schedule: active
+                        ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
+                        : [...p.schedule, { day: dayIdx, time: "19:00" }],
                     }))}
                   >
-                    {d.label}
+                    {label}
                   </Pill>
                 );
               })}
