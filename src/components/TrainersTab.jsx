@@ -1,35 +1,36 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard, resolveAttendanceClassification } from "../shared/analytics";
+import { theme as appTheme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 
 const theme = {
-  bg: "#0f131a",
-  panel: "#171d27",
-  panelSoft: "#1e2633",
-  border: "#2b3546",
-  text: "#e7eefc",
-  textSoft: "#9fb0ca",
-  primary: "#ff6f61",
-  secondary: "#4d7cff",
-  good: "#25b87a",
-  warn: "#f59f3a",
-  bad: "#ea5455",
+  get bg() { return appTheme.bg; },
+  get panel() { return appTheme.card; },
+  get panelSoft() { return appTheme.input; },
+  get border() { return appTheme.border; },
+  get text() { return appTheme.textMain; },
+  get textSoft() { return appTheme.textMuted; },
+  get primary() { return appTheme.primary; },
+  get secondary() { return appTheme.secondary; },
+  get good() { return appTheme.success; },
+  get warn() { return appTheme.warning; },
+  get bad() { return appTheme.danger; },
 };
 
-const card = {
+const card = () => ({
   border: `1px solid ${theme.border}`,
   borderRadius: 18,
   background: theme.panel,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-};
+  boxShadow: theme.bg === "#0F131A" ? "0 10px 30px rgba(0,0,0,0.25)" : "0 8px 24px rgba(31, 55, 99, 0.12)",
+});
 
-const tile = {
-  ...card,
+const tile = () => ({
+  ...card(),
   padding: 14,
   cursor: "pointer",
   textAlign: "left",
-};
+});
 
 const PAID_PACKS = new Set(["4pack", "8pack", "12pack"]);
 
@@ -70,7 +71,7 @@ function ProgressRing({ value = 0, label, sublabel, color = theme.secondary, onC
   const dash = `${(safe / 100) * circumference} ${circumference}`;
 
   return (
-    <button type="button" onClick={onClick} style={{ ...tile, padding: 12 }}>
+    <button type="button" onClick={onClick} style={{ ...tile(), padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <svg width="84" height="84" viewBox="0 0 100 100">
           <circle cx="50" cy="50" r={radius} stroke="#273143" strokeWidth="10" fill="none" />
@@ -129,6 +130,7 @@ export default function TrainersTab({
   attn = [],
   cancelled = [],
 }) {
+  const isDark = theme.bg === "#0F131A";
   const [selectedTrainerId, setSelectedTrainerId] = useStickyState(trainers[0]?.id || "", "ds_trainers_selectedTrainerId");
   const [isCreateMode, setIsCreateMode] = useState(false);
   const [draft, setDraft] = useState({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
@@ -762,7 +764,7 @@ export default function TrainersTab({
         borderRadius: 16,
       }}
     >
-      <aside style={{ ...card, padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
+      <aside style={{ ...card(), padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
           <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>+ Додати</button>
@@ -770,7 +772,7 @@ export default function TrainersTab({
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflow: "auto", paddingRight: 2 }}>
           {trainers.map((t) => (
-            <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? "rgba(255,111,97,0.2)" : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
+            <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? `${theme.primary}33` : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
               <div style={{ fontWeight: 700 }}>{getTrainerDisplayName(t)}</div>
               <div style={{ fontSize: 11, color: t.isActive ? theme.good : theme.textSoft }}>{t.isActive ? "Активний" : "Неактивний"}</div>
             </button>
@@ -820,7 +822,7 @@ export default function TrainersTab({
       </aside>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-        <div style={{ ...card, padding: 16, background: "linear-gradient(180deg,#171d27 0%,#141922 100%)" }}>
+        <div style={{ ...card(), padding: 16, background: isDark ? "linear-gradient(180deg,#171d27 0%,#141922 100%)" : theme.panel }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
               <div style={{ fontSize: 24, fontWeight: 800 }}>{isCreateMode ? "Новий тренер" : getTrainerDisplayName(selectedTrainer)}</div>
@@ -837,7 +839,7 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card, padding: 10, background: theme.panel, borderColor: theme.border }}>
+        <div style={{ ...card(), padding: 10, background: theme.panel, borderColor: theme.border }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: theme.textSoft, letterSpacing: 0.2 }}>Деталізація</div>
             <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.panelSoft, color: theme.textSoft, padding: "4px 7px", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>Скинути</button>
@@ -918,7 +920,7 @@ export default function TrainersTab({
                   action: k.id === "renewals" ? "Запусти кампейн на продовження у групах з ризиком." : "Перевір групи/учениць у блоці Insights.",
                 },
               })}
-              style={{ ...tile, borderColor: k.color }}
+              style={{ ...tile(), borderColor: k.color }}
             >
               <div style={{ fontSize: 12, color: theme.textSoft }}>{k.title}</div>
               <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
@@ -1028,7 +1030,7 @@ export default function TrainersTab({
                 series: trendCurrent.map((r) => ({ day: r.x, current: r.y, previous: prevLineMap[r.x] || 0 })),
               },
             })}
-            style={{ ...tile, width: "100%" }}
+            style={{ ...tile(), width: "100%" }}
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Відвідуваність: поточний vs попередній місяць</div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 90 }}>
@@ -1049,7 +1051,7 @@ export default function TrainersTab({
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Продовження / завершені / без продовження", payload: { kind: "renewalRisk", ...renewalsRiskBlock } })}
-            style={{ ...tile, width: "100%" }}
+            style={{ ...tile(), width: "100%" }}
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Продовження / завершені / без продовження</div>
             {[{k:"renewals",v:renewalsRiskBlock.renewals,c:theme.good},{k:"expired",v:renewalsRiskBlock.expired,c:theme.warn},{k:"noRenewal",v:renewalsRiskBlock.noRenewal,c:theme.bad}].map((x) => (
@@ -1065,7 +1067,7 @@ export default function TrainersTab({
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Стекова структура по групах", payload: { kind: "groupBars", rows: groupCards.map((g) => ({ groupId: g.groupId, groupName: g.groupName, trial: g.trialCount, single: g.singleCount, paid: g.paidCount })) } })}
-            style={{ ...tile, width: "100%" }}
+            style={{ ...tile(), width: "100%" }}
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Стекова структура trial/single/paid по групах</div>
             {groupCards.slice(0, 4).map((g) => {
@@ -1086,7 +1088,7 @@ export default function TrainersTab({
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Воронка конверсій", payload: { kind: "funnel", steps: foundationCurrent.ui.charts.funnel.steps } })}
-            style={{ ...tile, width: "100%" }}
+            style={{ ...tile(), width: "100%" }}
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Воронка конверсій</div>
             <div style={{ fontSize: 11, color: theme.textSoft, marginBottom: 6 }}>
@@ -1105,7 +1107,7 @@ export default function TrainersTab({
           <button
             type="button"
             onClick={() => setDetailState({ type: "heatmap", title: "Теплокарта відвідуваності (дні тижня)", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
-            style={{ ...tile, width: "100%" }}
+            style={{ ...tile(), width: "100%" }}
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Теплокарта відвідуваності</div>
             {foundationCurrent.domains.attendance.heatmap.map((c) => (
@@ -1119,7 +1121,7 @@ export default function TrainersTab({
             ))}
           </button>
 
-          <div style={{ ...card, padding: 12 }}>
+          <div style={{ ...card(), padding: 12 }}>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Порівняння по групах</div>
             {groupCards.map((g) => (
               <button
@@ -1137,11 +1139,11 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card, padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div style={{ ...card(), padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Інсайти / Ризики / Дії</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
             {insights.map((ins) => (
-              <button key={ins.id} type="button" onClick={() => setDetailState({ type: "insight", title: ins.title, payload: { ...ins, action: "Перевір деталі групи та запусти цільовий follow-up." } })} style={{ ...tile, padding: 10 }}>
+              <button key={ins.id} type="button" onClick={() => setDetailState({ type: "insight", title: ins.title, payload: { ...ins, action: "Перевір деталі групи та запусти цільовий follow-up." } })} style={{ ...tile(), padding: 10 }}>
                 <div style={{ fontSize: 12, color: theme.textSoft }}>{ins.title}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: theme.text, marginTop: 4 }}>{ins.value}</div>
                 <div style={{ fontSize: 11, color: "#7f93b2", marginTop: 3 }}>{ins.note}</div>
@@ -1153,7 +1155,7 @@ export default function TrainersTab({
         <button
           type="button"
           onClick={() => setDetailState({ type: "communication", title: "Аналітика комунікацій", payload: foundationCurrent.domains.integrations })}
-          style={{ ...tile }}
+          style={{ ...tile() }}
         >
           <div style={{ fontWeight: 800, marginBottom: 4 }}>Блок комунікацій (foundation)</div>
           <div style={{ fontSize: 12, color: theme.textSoft }}>Telegram / Instagram / AI інтеграції підготовлені на рівні foundation.</div>
