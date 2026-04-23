@@ -6,6 +6,39 @@ export const parseTrainerGroups = (note = "") => {
   return match[1].split("|").map((s) => s.trim()).filter(Boolean);
 };
 
+export const parseTrainerAutoSendMap = (note = "") => {
+  const match = String(note || "").match(/trainer_auto_send\s*:\s*([^\n\r]+)/i);
+  if (!match?.[1]) return {};
+  return match[1]
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, row) => {
+      const [groupIdRaw, enabledRaw] = row.split("=");
+      const groupId = String(groupIdRaw || "").trim();
+      const enabled = String(enabledRaw || "").trim().toLowerCase();
+      if (!groupId) return acc;
+      acc[groupId] = enabled !== "0" && enabled !== "false" && enabled !== "off";
+      return acc;
+    }, {});
+};
+
+export const patchTrainerAutoSendMapInNote = (note = "", autoSendMap = {}) => {
+  const entries = Object.entries(autoSendMap || {})
+    .filter(([groupId]) => String(groupId || "").trim())
+    .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    .map(([groupId, enabled]) => `${groupId}=${enabled ? "1" : "0"}`);
+  const trainerAutoSendLine = `trainer_auto_send: ${entries.join("|")}`;
+  const src = String(note || "");
+  if (!entries.length) {
+    return src.replace(/\n?trainer_auto_send\s*:[^\n\r]*/gi, "").trim();
+  }
+  if (/trainer_auto_send\s*:/i.test(src)) {
+    return src.replace(/trainer_auto_send\s*:[^\n\r]*/i, trainerAutoSendLine);
+  }
+  return src.trim() ? `${src.trim()}\n${trainerAutoSendLine}` : trainerAutoSendLine;
+};
+
 export const isTrainerChatByNote = (note = "") => {
   const lc = String(note || "").toLowerCase();
   return lc.includes("trainer") || lc.includes("тренер") || /trainer_groups\s*:/i.test(note);

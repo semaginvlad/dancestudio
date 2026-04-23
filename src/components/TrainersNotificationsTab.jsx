@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { theme } from "../shared/constants";
-import { buildGroupScheduleWindows, buildTrainerMessageDraft, isTrainerChatByNote, parseTrainerGroups } from "../shared/trainerDigest";
-import { today, useStickyState } from "../shared/utils";
+import { buildGroupScheduleWindows, buildTrainerMessageDraft, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerGroups, patchTrainerAutoSendMapInNote } from "../shared/trainerDigest";
+import { today } from "../shared/utils";
 
 export default function TrainersNotificationsTab({
   groups = [],
@@ -17,7 +17,6 @@ export default function TrainersNotificationsTab({
   const [draftByChat, setDraftByChat] = useState({});
   const [lastActions, setLastActions] = useState([]);
   const [sendingNow, setSendingNow] = useState(false);
-  const [autoSendByGroup, setAutoSendByGroup] = useStickyState({}, "ds_trainer_auto_send_by_group_v1");
 
   const membershipByStudent = useMemo(
     () =>
@@ -95,8 +94,9 @@ export default function TrainersNotificationsTab({
     if (!selectedDialog) return { text: "", automationReady: null, groupNames: [] };
     const trainerGroups = parseTrainerGroups(selectedDialog.note || "");
     const parsedGroups = groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
+    const persistedAutoSendMap = parseTrainerAutoSendMap(selectedDialog.note || "");
     const enabledGroupIds = parsedGroups
-      .filter((g) => autoSendByGroup[`${selectedDialog.id}:${g.id}`] !== false)
+      .filter((g) => persistedAutoSendMap[String(g.id)] !== false)
       .map((g) => String(g.id));
     const draft = buildTrainerMessageDraft({
       groups: parsedGroups,
@@ -110,15 +110,16 @@ export default function TrainersNotificationsTab({
     const scheduleByGroup = parsedGroups.map((g) => ({
       groupId: String(g.id),
       groupName: g.name,
-      enabled: autoSendByGroup[`${selectedDialog.id}:${g.id}`] !== false,
+      enabled: persistedAutoSendMap[String(g.id)] !== false,
       windows: buildGroupScheduleWindows(g),
     }));
     return {
       ...draft,
       groupNames: parsedGroups.map((g) => g.name),
       scheduleByGroup,
+      persistedAutoSendMap,
     };
-  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, autoSendByGroup]);
+  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion]);
 
   const activeDraft = draftByChat[selectedDialog?.id || ""] ?? digest.text;
 
@@ -163,10 +164,17 @@ export default function TrainersNotificationsTab({
     }
     setSendingNow(true);
     try {
-      const res = await fetch("/api/send-test-telegram", {
+      const res = await fetch("/api/send-trainer-digest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: selectedDialog.id, message: text }),
+        body: JSON.stringify({
+          chatId: selectedDialog.id,
+          message: text,
+          chatTitle: selectedDialog.title || selectedDialog.id,
+          groupNames: digest.groupNames || [],
+          studentsCount: digest.summaryByGroup?.reduce((s, g) => s + (g.studentsCount || 0), 0) || 0,
+          triggerType: "manual",
+        }),
       });
       const payload = await res.json().catch(() => ({}));
       const ok = res.ok;
@@ -177,13 +185,41 @@ export default function TrainersNotificationsTab({
           chatTitle: selectedDialog.title || selectedDialog.id,
           time: nowIso,
           students: digest.summaryByGroup?.reduce((s, g) => s + (g.studentsCount || 0), 0) || 0,
-          details: ok ? "" : (payload?.details || payload?.error || "send failed"),
+          details: ok
+            ? `admin-log: ${payload?.adminLogStatus || "skipped"}`
+            : (payload?.details || payload?.error || "send failed"),
         },
         ...prev,
       ].slice(0, 20));
       if (!ok) alert(payload?.details || payload?.error || "Не вдалося надіслати");
     } finally {
       setSendingNow(false);
+    }
+  };
+
+  const saveAutoSendToggle = async (groupId, nextEnabled) => {
+    if (!selectedDialog?.id) return;
+    const currentMap = parseTrainerAutoSendMap(selectedDialog.note || "");
+    const nextMap = { ...currentMap, [String(groupId)]: !!nextEnabled };
+    const nextNote = patchTrainerAutoSendMapInNote(selectedDialog.note || "", nextMap);
+    try {
+      const res = await fetch("/api/telegram-chat-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "save failed");
+      setMetaByChat((prev) => ({
+        ...prev,
+        [selectedDialog.id]: {
+          ...(prev[selectedDialog.id] || {}),
+          ...(payload?.meta || {}),
+          internal_note: nextNote,
+        },
+      }));
+    } catch (error) {
+      alert(`Не вдалося зберегти toggle: ${String(error?.message || error)}`);
     }
   };
 
@@ -258,7 +294,7 @@ export default function TrainersNotificationsTab({
                   <input
                     type="checkbox"
                     checked={g.enabled}
-                    onChange={(e) => setAutoSendByGroup((prev) => ({ ...prev, [`${selectedDialog?.id}:${g.groupId}`]: e.target.checked }))}
+                    onChange={(e) => saveAutoSendToggle(g.groupId, e.target.checked)}
                   />
                   <span style={{ color: theme.textMain, fontWeight: 700 }}>{g.groupName}</span>
                 </div>
