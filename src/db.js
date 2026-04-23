@@ -222,7 +222,7 @@ export async function fetchTrainerGroups() {
 }
 
 export async function upsertTrainerGroup(trainerId, groupId) {
-  const payload = { trainer_id: trainerId, group_id: groupId };
+  const payload = { trainer_id: trainerId, group_id: groupId, is_primary: true };
   const { data, error } = await supabase
     .from('trainer_groups')
     .upsert(payload, { onConflict: 'trainer_id,group_id' })
