@@ -147,7 +147,6 @@ export async function insertGroup(group) {
     direction_id: group.directionId,
     schedule: Array.isArray(group.schedule) ? group.schedule : [],
     trainer_pct: group.trainerPct ?? 0,
-    trainer_id: group.trainer_id || null,
   };
   const { data, error } = await supabase.from('groups').insert(payload).select().single();
   if (error) throw error;

@@ -193,10 +193,9 @@ export default function App() {
         return;
       }
     }
-    const latestTrainers = await db.fetchTrainers();
-    const trainerIdRaw = String(newGroupDraft.trainerId || "").trim();
-    const validTrainerId = trainerIdRaw && latestTrainers.some((t) => String(t.id) === trainerIdRaw)
-      ? trainerIdRaw
+    const selectedTrainerId = String(newGroupDraft.trainerId || "").trim();
+    const validTrainerId = selectedTrainerId && trainers.some((t) => String(t.id) === selectedTrainerId)
+      ? selectedTrainerId
       : null;
     const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(newGroupDraft.trainerPct || "").trim(), 10) || 0));
     const payload = {
@@ -205,11 +204,18 @@ export default function App() {
       directionId,
       schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
       trainerPct: trainerPctNum,
-      trainer_id: validTrainerId,
     };
     try {
       const created = await db.insertGroup(payload);
       setGroups((prev) => [created, ...prev]);
+      if (validTrainerId && db.upsertTrainerGroup) {
+        const binding = await db.upsertTrainerGroup(validTrainerId, created.id);
+        setTrainerGroups((prev) => (
+          prev.some((x) => String(x.trainerId) === String(binding.trainerId) && String(x.groupId) === String(binding.groupId))
+            ? prev
+            : [...prev, binding]
+        ));
+      }
       setNewGroupDraft({
         id: "",
         name: "",
