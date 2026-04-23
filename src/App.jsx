@@ -95,9 +95,47 @@ export default function App() {
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
   const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
+  const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
+
+  useEffect(() => {
+    const dark = {
+      primary: "#5A81FA",
+      secondary: "#2C3D8F",
+      bg: "#0F131A",
+      card: "#171D27",
+      input: "#1E2633",
+      textMain: "#E7EEFC",
+      textMuted: "#9FB0CA",
+      textLight: "#8093B1",
+      border: "#2B3546",
+      success: "#25B87A",
+      warning: "#F59F3A",
+      danger: "#EA5455",
+      exhausted: "#A8B1CE",
+      archive: "#1A2230",
+    };
+    const light = {
+      primary: "#4A6FE3",
+      secondary: "#2C3D8F",
+      bg: "#F8F9FD",
+      card: "#FFFFFF",
+      input: "#F2F5FF",
+      textMain: "#1F1F1F",
+      textMuted: "#6A6E83",
+      textLight: "#A8B1CE",
+      border: "#C7D2E8",
+      success: "#34C759",
+      warning: "#FF9500",
+      danger: "#FF453A",
+      exhausted: "#A8B1CE",
+      archive: "#E2E8F0",
+    };
+    const next = themeMode === "light" ? light : dark;
+    Object.assign(theme, next);
+  }, [themeMode]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -710,6 +748,9 @@ export default function App() {
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
+          <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
+            {themeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
+          </button>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
@@ -781,6 +822,7 @@ export default function App() {
                 attn={attn}
                 analyticsFoundation={analytics.foundation}
                 cancelled={cancelled}
+                themeMode={themeMode}
               />
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
