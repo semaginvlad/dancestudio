@@ -140,6 +140,20 @@ export async function updateGroup(id, g) {
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
 }
 
+export async function insertGroup(group) {
+  const payload = {
+    id: group.id,
+    name: group.name,
+    direction_id: group.directionId,
+    schedule: Array.isArray(group.schedule) ? group.schedule : [],
+    trainer_pct: group.trainerPct ?? 0,
+    trainer_id: group.trainer_id || null,
+  };
+  const { data, error } = await supabase.from('groups').insert(payload).select().single();
+  if (error) throw error;
+  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id };
+}
+
 // ─── TRAINERS ───
 const mapTrainer = (t) => ({
   id: t.id,

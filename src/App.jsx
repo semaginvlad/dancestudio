@@ -36,6 +36,12 @@ import DashboardTab from "./components/DashboardTab";
 import MessagesTab from "./components/MessagesTab";
 import TrainersTab from "./components/TrainersTab";
 
+const toDirectionId = (name = "") => String(name || "")
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9а-яіїєґ]+/gi, "_")
+  .replace(/^_+|_+$/g, "");
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -73,6 +79,16 @@ export default function App() {
   const [warnedStudents, setWarnedStudents] = useState({});
   const [restoreGroupByStudent, setRestoreGroupByStudent] = useState({});
   const [selectedMessageStudentId, setSelectedMessageStudentId] = useState("");
+  const [newGroupDraft, setNewGroupDraft] = useState({
+    id: "",
+    name: "",
+    directionMode: "existing",
+    directionId: DIRECTIONS[0]?.id || "",
+    newDirectionName: "",
+    schedule: [],
+    trainerPct: 0,
+    trainerId: "",
+  });
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
@@ -156,6 +172,54 @@ export default function App() {
     } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
   };
 
+  const createGroupAction = async () => {
+    const name = String(newGroupDraft.name || "").trim();
+    if (!name) { alert("Вкажіть назву групи."); return; }
+    const directionId = newGroupDraft.directionMode === "new"
+      ? toDirectionId(newGroupDraft.newDirectionName)
+      : String(newGroupDraft.directionId || "").trim();
+    if (!directionId) { alert("Вкажіть напрямок."); return; }
+    const draftId = String(newGroupDraft.id || "").trim() || toDirectionId(name);
+    if (!draftId) { alert("Не вдалося сформувати id групи."); return; }
+    const duplicateName = groups.some((g) => String(g.name || "").trim().toLowerCase() === name.toLowerCase());
+    if (duplicateName) { alert("Група з такою назвою вже існує."); return; }
+    const duplicateId = groups.some((g) => String(g.id) === draftId);
+    if (duplicateId) { alert("Група з таким id вже існує. Змініть назву або id."); return; }
+    if (newGroupDraft.directionMode === "new") {
+      const existingDir = directionsList.find((d) => d.id === directionId);
+      if (existingDir && existingDir.name.toLowerCase() !== String(newGroupDraft.newDirectionName || "").trim().toLowerCase()) {
+        alert("Конфлікт напрямку: такий direction id вже існує з іншою назвою.");
+        return;
+      }
+    }
+    const payload = {
+      id: draftId,
+      name,
+      directionId,
+      schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
+      trainerPct: Number.isFinite(+newGroupDraft.trainerPct) ? Math.max(0, Math.min(100, +newGroupDraft.trainerPct)) : 0,
+      trainer_id: newGroupDraft.trainerId || null,
+    };
+    try {
+      const created = await db.insertGroup(payload);
+      setGroups((prev) => [created, ...prev]);
+      setNewGroupDraft({
+        id: "",
+        name: "",
+        directionMode: "existing",
+        directionId,
+        newDirectionName: "",
+        schedule: [],
+        trainerPct: 0,
+        trainerId: "",
+      });
+      setModal(null);
+    } catch (e) {
+      const msg = e?.message || "Не вдалося створити групу.";
+      alert(msg.includes("duplicate") ? "Конфлікт id/назви: група вже існує." : msg);
+    }
+  };
+
   const visibleGroups = useMemo(() => {
     if (!user) return [];
     if (isAdmin) return groups;
@@ -164,7 +228,21 @@ export default function App() {
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
-  const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
+  const directionsList = useMemo(() => {
+    const base = [...DIRECTIONS];
+    const existingIds = new Set(base.map((d) => d.id));
+    groups.forEach((g) => {
+      if (!g?.directionId || existingIds.has(g.directionId)) return;
+      base.push({
+        id: g.directionId,
+        name: String(g.directionId).replace(/_/g, " "),
+        color: "#7b8ea8",
+      });
+      existingIds.add(g.directionId);
+    });
+    return base;
+  }, [groups]);
+  const dirMap = useMemo(()=>Object.fromEntries(directionsList.map(d=>[d.id,d])),[directionsList]);
 
  const subsExt = useMemo(()=>{
     const usedMap = {};
@@ -218,7 +296,7 @@ export default function App() {
     });
     const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
     const unpaid=subs.filter(s=>!s.paid&&getSubStatus(s)!=="expired").reduce((a,s)=>a+(s.amount||0),0);
-    const byDir={};DIRECTIONS.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
+    const byDir={};directionsList.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
     const splits=[]; groups.forEach(g=>{
       const gSubs=subs.filter(s=>s.groupId===g.id&&s.paid);
       const total=gSubs.reduce((a,s)=>a+(s.amount||0),0);
@@ -368,7 +446,7 @@ export default function App() {
 
   const studentsByDirection = useMemo(() => {
     const result = {}; 
-    DIRECTIONS.forEach(d => { result[d.id] = { direction: d, students: [] }; });
+    directionsList.forEach(d => { result[d.id] = { direction: d, students: [] }; });
     const inactive = [];
 
     filteredStudents.forEach(st => { 
@@ -411,7 +489,7 @@ export default function App() {
   },[subsExt,filterDir,filterGroup,filterStatus,searchQ,groups,studentMap]);
 
   const subsGroupedByDir = useMemo(()=>{
-    const result={}; DIRECTIONS.forEach(d=>{result[d.id]={direction:d,subs:[]}});
+    const result={}; directionsList.forEach(d=>{result[d.id]={direction:d,subs:[]}});
     filteredSubs.forEach(sub=>{ const gr=groupMap[sub.groupId]; if(gr && result[gr.directionId]){result[gr.directionId].subs.push(sub);} });
     return {grouped:Object.values(result).filter(d=>d.subs.length>0)};
   },[filteredSubs, groupMap]);
@@ -514,6 +592,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+          {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -587,7 +666,7 @@ export default function App() {
               <input style={{...inputSt,maxWidth:300}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
               <select style={{...inputSt,width:"auto"}} value={stFilterDir} onChange={e=>{setStFilterDir(e.target.value);setStFilterGroup("all")}}>
                 <option value="all">Усі напрямки</option>
-                {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
               <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
             </div>
@@ -693,7 +772,7 @@ export default function App() {
             <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук за прізвищем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
               <option value="all">Усі напрямки</option>
-              {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+              {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
@@ -821,7 +900,7 @@ export default function App() {
               </div>
               <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
                 <div style={{flex: 1, display: "flex", gap: 12, minWidth: 300, flexWrap: "wrap"}}>
-                  <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
+                  <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
                 </div>
                 <div style={{display: "flex", gap: 12, flexWrap: "wrap"}}>
@@ -881,6 +960,65 @@ export default function App() {
         )}
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
+        <div style={{ display: "grid", gap: 12 }}>
+          <Field label="Назва групи *">
+            <input style={inputSt} value={newGroupDraft.name} onChange={(e) => setNewGroupDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Напр. Beginners 19:00" />
+          </Field>
+          <Field label="ID групи (опційно)">
+            <input style={inputSt} value={newGroupDraft.id} onChange={(e) => setNewGroupDraft((p) => ({ ...p, id: e.target.value }))} placeholder="auto from name if empty" />
+          </Field>
+          <Field label="Напрямок *">
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" style={{ ...btnS, background: newGroupDraft.directionMode === "existing" ? theme.secondary : theme.input, color: newGroupDraft.directionMode === "existing" ? "#fff" : theme.textMain }} onClick={() => setNewGroupDraft((p) => ({ ...p, directionMode: "existing" }))}>Існуючий</button>
+                <button type="button" style={{ ...btnS, background: newGroupDraft.directionMode === "new" ? theme.secondary : theme.input, color: newGroupDraft.directionMode === "new" ? "#fff" : theme.textMain }} onClick={() => setNewGroupDraft((p) => ({ ...p, directionMode: "new" }))}>Новий</button>
+              </div>
+              {newGroupDraft.directionMode === "existing" ? (
+                <select style={inputSt} value={newGroupDraft.directionId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, directionId: e.target.value }))}>
+                  {directionsList.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.id})</option>)}
+                </select>
+              ) : (
+                <input style={inputSt} value={newGroupDraft.newDirectionName} onChange={(e) => setNewGroupDraft((p) => ({ ...p, newDirectionName: e.target.value }))} placeholder="Напр. Heels Pro" />
+              )}
+            </div>
+          </Field>
+          <Field label="Schedule">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {WEEKDAYS.map((d) => {
+                const active = newGroupDraft.schedule.some((x) => x.day === d.id);
+                return (
+                  <Pill
+                    key={d.id}
+                    active={active}
+                    onClick={() => setNewGroupDraft((p) => ({
+                      ...p,
+                      schedule: active ? p.schedule.filter((x) => x.day !== d.id) : [...p.schedule, { day: d.id, time: "19:00" }],
+                    }))}
+                  >
+                    {d.label}
+                  </Pill>
+                );
+              })}
+            </div>
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="trainer_pct">
+              <input style={inputSt} type="number" min={0} max={100} value={newGroupDraft.trainerPct} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerPct: e.target.value }))} />
+            </Field>
+            <Field label="Тренер (опційно)">
+              <select style={inputSt} value={newGroupDraft.trainerId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">— Без прив'язки —</option>
+                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
+            <button type="button" style={btnS} onClick={() => setModal(null)}>Скасувати</button>
+            <button type="button" style={btnP} onClick={createGroupAction}>Створити групу</button>
+          </div>
+        </div>
+      </Modal>
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
