@@ -1,4 +1,4 @@
-import { getDisplayName, getSubStatus } from "./utils";
+import { getDisplayName, getSubStatus, today } from "./utils";
 
 export const parseTrainerGroups = (note = "") => {
   const match = note.match(/trainer_groups\s*:\s*([^\n\r]+)/i);
@@ -24,15 +24,34 @@ export const buildTrainerMessageDraft = ({
   membershipByStudent = {},
   subsByStudent = {},
   attn = [],
+  enabledGroupIds = null,
+  referenceDate = today(),
 }) => {
   const sections = [];
+  const summaryByGroup = [];
   const debtStudentIds = new Set(
     (attn || [])
       .filter((a) => String(a?.entryType || a?.guestType || "") === "debt" && a?.studentId)
       .map((a) => String(a.studentId))
   );
 
-  groups.forEach((g) => {
+  const selectedGroups = Array.isArray(enabledGroupIds) && enabledGroupIds.length
+    ? groups.filter((g) => enabledGroupIds.includes(String(g.id)))
+    : groups;
+
+  const hasValidPaidNowOrFuture = (subs = []) => {
+    const now = String(referenceDate || today());
+    return subs.some((s) => {
+      if (!PAID_PLAN_TYPES.has(String(s.planType || ""))) return false;
+      if (s.paid === false) return false;
+      const status = getSubStatus(s);
+      if (status === "active" || status === "warning") return true;
+      const start = String(s.startDate || s.activationDate || s.created_at || "").slice(0, 10);
+      return !!start && start > now;
+    });
+  };
+
+  selectedGroups.forEach((g) => {
     const members = students.filter((st) =>
       normalizeStudentGroupIds(st, membershipByStudent[st.id] || []).includes(g.id)
     );
@@ -47,7 +66,12 @@ export const buildTrainerMessageDraft = ({
       noSubscription: [],
     };
 
-    members.forEach((m) => {
+    const candidates = members.filter((m) => {
+      const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
+      return !hasValidPaidNowOrFuture(groupSubs);
+    });
+
+    candidates.forEach((m) => {
       const sid = String(m.id);
       if (debtStudentIds.has(sid)) {
         byCategory.debt.push(getDisplayName(m));
@@ -55,7 +79,7 @@ export const buildTrainerMessageDraft = ({
       }
     });
 
-    members.forEach((m) => {
+    candidates.forEach((m) => {
       const sid = String(m.id);
       if (picked.has(sid)) return;
       const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
@@ -67,13 +91,13 @@ export const buildTrainerMessageDraft = ({
         return String(bKey).localeCompare(String(aKey));
       })[0];
       const status = latestPaid ? getSubStatus(latestPaid) : null;
-      if (status === "warning" || status === "expired") {
+      if (status === "warning" || status === "expired" || status === "active") {
         byCategory.expiringOrExpired.push(getDisplayName(m));
         picked.add(sid);
       }
     });
 
-    members.forEach((m) => {
+    candidates.forEach((m) => {
       const sid = String(m.id);
       if (picked.has(sid)) return;
       const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
@@ -85,7 +109,7 @@ export const buildTrainerMessageDraft = ({
       }
     });
 
-    members.forEach((m) => {
+    candidates.forEach((m) => {
       const sid = String(m.id);
       if (picked.has(sid)) return;
       const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
@@ -97,7 +121,7 @@ export const buildTrainerMessageDraft = ({
       }
     });
 
-    members.forEach((m) => {
+    candidates.forEach((m) => {
       const sid = String(m.id);
       if (picked.has(sid)) return;
       const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
@@ -116,6 +140,18 @@ export const buildTrainerMessageDraft = ({
 
     if (groupSections.length) {
       sections.push({ title: `Група: ${g.name}`, items: groupSections });
+      summaryByGroup.push({
+        groupId: String(g.id),
+        groupName: g.name,
+        total: groupSections.length,
+        studentsCount:
+          byCategory.debt.length +
+          byCategory.expiringOrExpired.length +
+          byCategory.trialOnly.length +
+          byCategory.singleOnly.length +
+          byCategory.noSubscription.length,
+        categories: byCategory,
+      });
     }
   });
 
@@ -124,11 +160,33 @@ export const buildTrainerMessageDraft = ({
   return {
     text: body ? `${header}\n\n${body}` : "",
     sections,
+    summaryByGroup,
     automationReady: {
       mode: "trainer_digest_v1",
-      recommendedSchedule: "Щопонеділка о 09:00 (локальний час студії)",
-      groupSelection: "Групи беруться з trainer_groups у note чату (trainer_groups: Group A | Group B)",
+      recommendedSchedule: "В день заняття, за 1 годину до часу заняття (по schedule групи)",
+      groupSelection: "Беруться тільки групи з trainer_groups у note чату + enabled toggles",
       generatedAt: new Date().toISOString(),
     },
   };
+};
+
+export const buildGroupScheduleWindows = (group) => {
+  const schedule = Array.isArray(group?.schedule) ? group.schedule : [];
+  return schedule
+    .map((s) => {
+      const day = Number(s?.day);
+      const time = String(s?.time || "");
+      if (!Number.isInteger(day) || day < 0 || day > 6 || !/^\d{2}:\d{2}$/.test(time)) return null;
+      const [hh, mm] = time.split(":").map(Number);
+      const totalMinutes = hh * 60 + mm - 60;
+      const safeMinutes = ((totalMinutes % 1440) + 1440) % 1440;
+      const sendH = String(Math.floor(safeMinutes / 60)).padStart(2, "0");
+      const sendM = String(safeMinutes % 60).padStart(2, "0");
+      return {
+        day,
+        trainingTime: time,
+        sendTime: `${sendH}:${sendM}`,
+      };
+    })
+    .filter(Boolean);
 };
