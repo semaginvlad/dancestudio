@@ -1,17 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
-
-const parseTrainerGroups = (note = "") => {
-  const match = note.match(/trainer_groups\s*:\s*([^\n\r]+)/i);
-  if (!match?.[1]) return [];
-  return match[1].split("|").map((s) => s.trim()).filter(Boolean);
-};
-
-const isTrainerChatByNote = (note = "") => {
-  const lc = note.toLowerCase();
-  return lc.includes("trainer") || lc.includes("тренер") || /trainer_groups\s*:/i.test(note);
-};
+import { isTrainerChatByNote } from "../shared/trainerDigest";
 
 const normalizeStudentGroupIds = (student, membership) => {
   const inline = [student?.groupId, ...(Array.isArray(student?.groupIds) ? student.groupIds : [])].filter(Boolean);
@@ -24,127 +14,6 @@ const parseIsoDateSafe = (value) => {
   return Number.isNaN(ts) ? 0 : ts;
 };
 
-const PAID_PLAN_TYPES = new Set(["4pack", "8pack", "12pack"]);
-
-const buildTrainerMessageDraft = ({
-  groups = [],
-  students = [],
-  membershipByStudent = {},
-  subsByStudent = {},
-  attn = [],
-}) => {
-  const sections = [];
-
-  const debtStudentIds = new Set(
-    (attn || [])
-      .filter((a) => String(a?.entryType || a?.guestType || "") === "debt" && a?.studentId)
-      .map((a) => String(a.studentId))
-  );
-
-  groups.forEach((g) => {
-    const members = students.filter((st) =>
-      normalizeStudentGroupIds(st, membershipByStudent[st.id] || []).includes(g.id)
-    );
-    if (!members.length) return;
-
-    const picked = new Set();
-    const byCategory = {
-      debt: [],
-      expiringOrExpired: [],
-      trialOnly: [],
-      singleOnly: [],
-      noSubscription: [],
-    };
-
-    members.forEach((m) => {
-      const sid = String(m.id);
-      if (debtStudentIds.has(sid)) {
-        byCategory.debt.push(getDisplayName(m));
-        picked.add(sid);
-      }
-    });
-
-    members.forEach((m) => {
-      const sid = String(m.id);
-      if (picked.has(sid)) return;
-      const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
-      const paidSubs = groupSubs.filter((s) => PAID_PLAN_TYPES.has(String(s.planType || "")));
-      if (!paidSubs.length) return;
-      const latestPaid = [...paidSubs].sort((a, b) => {
-        const aKey = a.endDate || a.activationDate || a.startDate || a.created_at || "";
-        const bKey = b.endDate || b.activationDate || b.startDate || b.created_at || "";
-        return String(bKey).localeCompare(String(aKey));
-      })[0];
-      const status = latestPaid ? getSubStatus(latestPaid) : null;
-      if (status === "warning" || status === "expired") {
-        byCategory.expiringOrExpired.push(getDisplayName(m));
-        picked.add(sid);
-      }
-    });
-
-    members.forEach((m) => {
-      const sid = String(m.id);
-      if (picked.has(sid)) return;
-      const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
-      if (!groupSubs.length) return;
-      const onlyTrial = groupSubs.every((s) => String(s.planType || "") === "trial");
-      if (onlyTrial) {
-        byCategory.trialOnly.push(getDisplayName(m));
-        picked.add(sid);
-      }
-    });
-
-    members.forEach((m) => {
-      const sid = String(m.id);
-      if (picked.has(sid)) return;
-      const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
-      if (!groupSubs.length) return;
-      const onlySingle = groupSubs.every((s) => String(s.planType || "") === "single");
-      if (onlySingle) {
-        byCategory.singleOnly.push(getDisplayName(m));
-        picked.add(sid);
-      }
-    });
-
-    members.forEach((m) => {
-      const sid = String(m.id);
-      if (picked.has(sid)) return;
-      const groupSubs = (subsByStudent[m.id] || []).filter((s) => String(s.groupId) === String(g.id));
-      if (!groupSubs.length) {
-        byCategory.noSubscription.push(getDisplayName(m));
-        picked.add(sid);
-      }
-    });
-
-    const groupSections = [];
-    if (byCategory.debt.length) groupSections.push(`• Боргові / debt:\n${byCategory.debt.map((n) => `- ${n}`).join("\n")}`);
-    if (byCategory.expiringOrExpired.length) groupSections.push(`• Закінчується або закінчився абонемент:\n${byCategory.expiringOrExpired.map((n) => `- ${n}`).join("\n")}`);
-    if (byCategory.trialOnly.length) groupSections.push(`• Було тільки пробне:\n${byCategory.trialOnly.map((n) => `- ${n}`).join("\n")}`);
-    if (byCategory.singleOnly.length) groupSections.push(`• Були тільки разові:\n${byCategory.singleOnly.map((n) => `- ${n}`).join("\n")}`);
-    if (byCategory.noSubscription.length) groupSections.push(`• Без жодного абонемента:\n${byCategory.noSubscription.map((n) => `- ${n}`).join("\n")}`);
-
-    if (groupSections.length) {
-      sections.push({
-        title: `Група: ${g.name}`,
-        items: groupSections,
-      });
-    }
-  });
-
-  const header = "Зведення для тренера";
-  const body = sections.map((s) => `${s.title}\n${s.items.join("\n\n")}`).join("\n\n");
-  return {
-    text: body ? `${header}\n\n${body}` : "",
-    sections,
-    automationReady: {
-      mode: "trainer_digest_v1",
-      recommendedSchedule: "Щопонеділка о 09:00 (локальний час студії)",
-      groupSelection: "Групи беруться з trainer_groups у note чату (trainer_groups: Group A | Group B)",
-      generatedAt: new Date().toISOString(),
-    },
-  };
-};
-
 export default function MessagesTab({
   students = [],
   groups = [],
@@ -153,6 +22,7 @@ export default function MessagesTab({
   studentGrps = [],
   selectedStudentId = "",
   onSelectStudent,
+  onOpenTrainerNotifications,
 }) {
   const isDark = theme.bg === "#0F131A";
   const shellCard = {
@@ -166,7 +36,6 @@ export default function MessagesTab({
   const [draft, setDraft] = useState("");
   const [internalNoteDraft, setInternalNoteDraft] = useState("");
   const [customTemplateDraft, setCustomTemplateDraft] = useState("");
-  const [trainerDraftVersion, setTrainerDraftVersion] = useState(0);
   const [linkUiByChat, setLinkUiByChat] = useState({});
   const [linkSearchByChat, setLinkSearchByChat] = useState({});
   const [linkSavingChatId, setLinkSavingChatId] = useState("");
@@ -326,36 +195,6 @@ export default function MessagesTab({
 
   const activeDialog = enrichedDialogs.find((d) => d.id === selectedDialog?.id) || enrichedDialogs[0] || null;
 
-  const trainerDraft = useMemo(() => {
-    if (!activeDialog?.trainer) return "";
-
-    const trainerGroups = parseTrainerGroups(activeDialog.note || "");
-    const parsedGroups = groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
-    if (!parsedGroups.length) return "";
-
-    return buildTrainerMessageDraft({
-      groups: parsedGroups,
-      students,
-      membershipByStudent,
-      subsByStudent,
-      attn,
-    }).text;
-  }, [activeDialog, groups, membershipByStudent, students, subsByStudent, attn, trainerDraftVersion]);
-
-  const trainerAutomationPreview = useMemo(() => {
-    if (!activeDialog?.trainer) return null;
-    const trainerGroups = parseTrainerGroups(activeDialog.note || "");
-    const parsedGroups = groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
-    if (!parsedGroups.length) return null;
-    return buildTrainerMessageDraft({
-      groups: parsedGroups,
-      students,
-      membershipByStudent,
-      subsByStudent,
-      attn,
-    }).automationReady;
-  }, [activeDialog, groups, membershipByStudent, students, subsByStudent, attn, trainerDraftVersion]);
-
   const crmSummary = useMemo(() => {
     const st = activeDialog?.linkedStudent;
     if (!st) return null;
@@ -424,7 +263,7 @@ export default function MessagesTab({
     activeDialog?.linkedStudent?.message_template ||
     metaByChat[activeDialog?.id || ""]?.custom_template ||
     "";
-  const resolvedDraft = draft || trainerDraft || templateText || "";
+  const resolvedDraft = draft || templateText || "";
 
   const saveMeta = async (chatId, patch) => {
     if (!chatId) return null;
@@ -744,25 +583,15 @@ export default function MessagesTab({
             {activeDialog.trainer && (
               <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 800, color: theme.secondary, fontSize: 12, letterSpacing: "0.02em" }}>Trainer template block</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button type="button" onClick={() => setTrainerDraftVersion((v) => v + 1)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "5px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
-                      Оновити
-                    </button>
-                    <button type="button" onClick={() => setDraft((prev) => (prev ? `${prev}\n\n${trainerDraft}` : trainerDraft))} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "5px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11, boxShadow: "0 8px 16px rgba(255, 94, 74, 0.3)" }}>
-                      Вставити
-                    </button>
-                  </div>
+                  <div style={{ fontWeight: 800, color: theme.secondary, fontSize: 12, letterSpacing: "0.02em" }}>Trainer contact</div>
                 </div>
-                <div style={{ color: theme.textMain, fontSize: 12, whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", lineHeight: 1.45 }}>
-                  {trainerDraft || "Не знайдено trainer_groups або немає учениць у цільових категоріях."}
+                <div style={{ color: theme.textMain, fontSize: 12, lineHeight: 1.45 }}>
+                  Це контакт тренера. Дайджест і сповіщення доступні у вкладці <strong>Тренери → Сповіщення</strong>.
                 </div>
-                {trainerAutomationPreview && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${theme.border}`, fontSize: 11, color: theme.textMuted, lineHeight: 1.4 }}>
-                    <div><strong>Automation-ready:</strong> {trainerAutomationPreview.mode}</div>
-                    <div>Schedule: {trainerAutomationPreview.recommendedSchedule}</div>
-                    <div>Selection: {trainerAutomationPreview.groupSelection}</div>
-                  </div>
+                {onOpenTrainerNotifications && (
+                  <button type="button" onClick={onOpenTrainerNotifications} style={{ marginTop: 8, border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                    Відкрити сповіщення тренерів
+                  </button>
                 )}
               </div>
             )}
