@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import Analytics from "./pages/Analytics";
@@ -97,11 +97,12 @@ export default function App() {
   const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
+  const [themeVersion, setThemeVersion] = useState(0);
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dark = {
       primary: "#5A81FA",
       secondary: "#2C3D8F",
@@ -137,6 +138,7 @@ export default function App() {
     const next = themeMode === "light" ? light : dark;
     Object.assign(theme, next);
     applyThemeBindings();
+    setThemeVersion((v) => v + 1);
   }, [themeMode]);
 
   useEffect(() => {
@@ -726,7 +728,7 @@ export default function App() {
 
 
   return (
-    <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
+    <div key={themeVersion} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
