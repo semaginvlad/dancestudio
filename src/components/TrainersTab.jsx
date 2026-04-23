@@ -597,7 +597,7 @@ export default function TrainersTab({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr) clamp(240px, 24vw, 300px)",
+        gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr)",
         gap: 14,
         alignItems: "start",
         width: "100%",
@@ -681,6 +681,21 @@ export default function TrainersTab({
               <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 12px", minWidth: 180, textAlign: "center", fontWeight: 700 }}>{monthLabel(periodDate)}</div>
               <button type="button" onClick={() => setPeriodDate((p) => monthStart(new Date(p.getFullYear(), p.getMonth() + 1, 1)))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "8px 10px", cursor: "pointer" }}>▶</button>
             </div>
+          </div>
+        </div>
+
+        <div style={{ ...card, padding: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 800 }}>Деталізація</div>
+            <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
+          </div>
+          <div style={{ fontSize: 12, color: theme.textSoft }}>{detailState.title}</div>
+          <div style={{ fontSize: 11, color: "#7f93b2", marginTop: 4 }}>
+            Поточний період: {range.start} → {range.end}<br />
+            Попередній період: {rangePrev.start} → {rangePrev.end}
+          </div>
+          <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.panelSoft, padding: 10, marginTop: 8 }}>
+            {renderDetailBody()}
           </div>
         </div>
 
@@ -931,21 +946,6 @@ export default function TrainersTab({
           <div style={{ fontSize: 12, color: theme.textSoft }}>Telegram / Instagram / AI інтеграції підготовлені на рівні foundation.</div>
         </button>
       </section>
-
-      <aside style={{ ...card, padding: 12, position: "sticky", top: 10, maxHeight: "calc(100vh - 20px)", overflowY: "auto", overflowX: "hidden", display: "grid", gap: 10, minWidth: 0, width: "100%", alignSelf: "start", zIndex: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 800 }}>Деталізація</div>
-          <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "5px 8px", cursor: "pointer" }}>Скинути</button>
-        </div>
-        <div style={{ fontSize: 12, color: theme.textSoft }}>{detailState.title}</div>
-        <div style={{ fontSize: 11, color: "#7f93b2" }}>
-          Поточний період: {range.start} → {range.end}<br />
-          Попередній період: {rangePrev.start} → {rangePrev.end}
-        </div>
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.panelSoft, padding: 10 }}>
-          {renderDetailBody()}
-        </div>
-      </aside>
     </div>
   );
 }
