@@ -24,6 +24,7 @@ export default async function handler(req, res) {
   try {
     const { adminLogStatus, sentAtIso } = await sendTrainerDigestWithAdminLog({
       peer,
+      username,
       message,
       chatTitle,
       groupNames,

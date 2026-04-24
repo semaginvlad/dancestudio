@@ -1,4 +1,4 @@
-import { withTelegramClient } from "./telegram-user-client.js";
+import { resolveTelegramPeer, withTelegramClient } from "./telegram-user-client.js";
 
 export const ADMIN_LOG_CHAT_ID = process.env.TELEGRAM_ADMIN_LOG_CHAT_ID || process.env.TELEGRAM_ADMIN_CHAT_ID || "";
 
@@ -26,6 +26,7 @@ export const renderAdminLogMessage = ({
 
 export const sendTrainerDigestWithAdminLog = async ({
   peer,
+  username = "",
   message,
   chatTitle = "",
   groupNames = [],
@@ -36,7 +37,12 @@ export const sendTrainerDigestWithAdminLog = async ({
   const sentAtIso = new Date().toISOString();
   if (!sendToAdminOnly) {
     await withTelegramClient(async (client) => {
-      await client.sendMessage(peer, { message });
+      const targetEntity = await resolveTelegramPeer(client, {
+        chatId: peer,
+        username,
+        context: "send-trainer-digest:target",
+      });
+      await client.sendMessage(targetEntity, { message });
     });
   }
 
@@ -44,6 +50,10 @@ export const sendTrainerDigestWithAdminLog = async ({
   if (ADMIN_LOG_CHAT_ID) {
     try {
       await withTelegramClient(async (client) => {
+        const adminEntity = await resolveTelegramPeer(client, {
+          chatId: ADMIN_LOG_CHAT_ID,
+          context: "send-trainer-digest:admin-log",
+        });
         const header = renderAdminLogMessage({
           status: sendToAdminOnly ? "test" : "sent",
           chatId: String(peer),
@@ -53,7 +63,7 @@ export const sendTrainerDigestWithAdminLog = async ({
           triggerType,
           sentAtIso,
         });
-        await client.sendMessage(ADMIN_LOG_CHAT_ID, {
+        await client.sendMessage(adminEntity, {
           message: `${header}\n\n--- full message ---\n${message}`,
         });
       });
@@ -78,7 +88,11 @@ export const reportTrainerDigestFailureToAdmin = async ({
   const sentAtIso = new Date().toISOString();
   try {
     await withTelegramClient(async (client) => {
-      await client.sendMessage(ADMIN_LOG_CHAT_ID, {
+      const adminEntity = await resolveTelegramPeer(client, {
+        chatId: ADMIN_LOG_CHAT_ID,
+        context: "send-trainer-digest:failure-report",
+      });
+      await client.sendMessage(adminEntity, {
         message: renderAdminLogMessage({
           status: "failed",
           chatId: String(peer),

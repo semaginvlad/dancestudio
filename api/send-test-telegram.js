@@ -1,4 +1,4 @@
-import { withTelegramClient } from "./_lib/telegram-user-client.js";
+import { resolveTelegramPeer, withTelegramClient } from "./_lib/telegram-user-client.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -14,7 +14,8 @@ export default async function handler(req, res) {
     }
 
     await withTelegramClient(async (client) => {
-      await client.sendMessage(peer, { message });
+      const entity = await resolveTelegramPeer(client, { chatId, username, context: "send-test-telegram" });
+      await client.sendMessage(entity, { message });
     });
 
     return res.status(200).json({ success: true });

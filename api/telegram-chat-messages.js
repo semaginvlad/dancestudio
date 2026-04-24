@@ -1,4 +1,4 @@
-import { withTelegramClient } from "./_lib/telegram-user-client.js";
+import { resolveTelegramPeer, withTelegramClient } from "./_lib/telegram-user-client.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -14,7 +14,7 @@ export default async function handler(req, res) {
 
   try {
     const messages = await withTelegramClient(async (client) => {
-      const entity = await client.getEntity(chatId);
+      const entity = await resolveTelegramPeer(client, { chatId, context: "telegram-chat-messages" });
       const rows = await client.getMessages(entity, { limit });
       return (rows || []).map((m) => ({
         id: String(m.id),
