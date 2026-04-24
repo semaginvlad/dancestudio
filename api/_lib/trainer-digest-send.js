@@ -31,26 +31,30 @@ export const sendTrainerDigestWithAdminLog = async ({
   groupNames = [],
   studentsCount = 0,
   triggerType = "manual",
+  sendToAdminOnly = false,
 }) => {
   const sentAtIso = new Date().toISOString();
-  await withTelegramClient(async (client) => {
-    await client.sendMessage(peer, { message });
-  });
+  if (!sendToAdminOnly) {
+    await withTelegramClient(async (client) => {
+      await client.sendMessage(peer, { message });
+    });
+  }
 
   let adminLogStatus = "skipped";
   if (ADMIN_LOG_CHAT_ID) {
     try {
       await withTelegramClient(async (client) => {
+        const header = renderAdminLogMessage({
+          status: sendToAdminOnly ? "test" : "sent",
+          chatId: String(peer),
+          chatTitle,
+          groupNames,
+          studentsCount,
+          triggerType,
+          sentAtIso,
+        });
         await client.sendMessage(ADMIN_LOG_CHAT_ID, {
-          message: renderAdminLogMessage({
-            status: "sent",
-            chatId: String(peer),
-            chatTitle,
-            groupNames,
-            studentsCount,
-            triggerType,
-            sentAtIso,
-          }),
+          message: `${header}\n\n--- full message ---\n${message}`,
         });
       });
       adminLogStatus = "sent";

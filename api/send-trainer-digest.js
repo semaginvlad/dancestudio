@@ -1,4 +1,4 @@
-import { reportTrainerDigestFailureToAdmin, sendTrainerDigestWithAdminLog } from "./_lib/trainer-digest-send.js";
+import { ADMIN_LOG_CHAT_ID, reportTrainerDigestFailureToAdmin, sendTrainerDigestWithAdminLog } from "./_lib/trainer-digest-send.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -13,6 +13,7 @@ export default async function handler(req, res) {
     groupNames = [],
     studentsCount = 0,
     triggerType = "manual",
+    sendToAdminOnly = false,
   } = req.body || {};
   const peer = chatId || username;
 
@@ -28,12 +29,14 @@ export default async function handler(req, res) {
       groupNames,
       studentsCount,
       triggerType,
+      sendToAdminOnly: !!sendToAdminOnly,
     });
 
     return res.status(200).json({
       success: true,
       status: "sent",
       adminLogStatus,
+      adminLogReason: ADMIN_LOG_CHAT_ID ? adminLogStatus : "missing_admin_log_env",
       sentAt: sentAtIso,
     });
   } catch (error) {

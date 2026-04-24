@@ -6,6 +6,23 @@ export const parseTrainerGroups = (note = "") => {
   return match[1].split("|").map((s) => s.trim()).filter(Boolean);
 };
 
+export const parseTrainerGroupIds = (note = "") => {
+  const match = String(note || "").match(/trainer_group_ids\s*:\s*([^\n\r]+)/i);
+  if (!match?.[1]) return [];
+  return match[1].split("|").map((s) => s.trim()).filter(Boolean);
+};
+
+export const patchTrainerGroupIdsInNote = (note = "", groupIds = []) => {
+  const ids = Array.from(new Set((groupIds || []).map((x) => String(x || "").trim()).filter(Boolean))).sort();
+  const line = `trainer_group_ids: ${ids.join("|")}`;
+  const src = String(note || "");
+  if (!ids.length) return src.replace(/\n?trainer_group_ids\s*:[^\n\r]*/gi, "").trim();
+  if (/trainer_group_ids\s*:/i.test(src)) {
+    return src.replace(/trainer_group_ids\s*:[^\n\r]*/i, line);
+  }
+  return src.trim() ? `${src.trim()}\n${line}` : line;
+};
+
 export const parseTrainerAutoSendMap = (note = "") => {
   const match = String(note || "").match(/trainer_auto_send\s*:\s*([^\n\r]+)/i);
   if (!match?.[1]) return {};
@@ -89,31 +106,63 @@ export const parseTrainerLastAutoSendMap = (note = "") => {
     .map((part) => part.trim())
     .filter(Boolean)
     .reduce((acc, row) => {
-      const [groupIdRaw, dateRaw] = row.split("=");
+      const [groupIdRaw, dedupRaw] = row.split("=");
       const groupId = String(groupIdRaw || "").trim();
-      const date = String(dateRaw || "").trim().slice(0, 10);
-      if (!groupId || !date) return acc;
-      acc[groupId] = date;
+      const dedupKey = String(dedupRaw || "").trim();
+      if (!groupId || !dedupKey) return acc;
+      acc[groupId] = dedupKey;
       return acc;
     }, {});
 };
 
-export const patchTrainerLastAutoSendInNote = (note = "", groupId, dateStr) => {
+export const patchTrainerLastAutoSendInNote = (note = "", groupId, dedupKey) => {
   const map = parseTrainerLastAutoSendMap(note || "");
   const gid = String(groupId || "").trim();
-  const nextDate = String(dateStr || "").slice(0, 10);
-  if (!gid || !nextDate) return String(note || "");
-  map[gid] = nextDate;
+  const nextDedupKey = String(dedupKey || "").trim();
+  if (!gid || !nextDedupKey) return String(note || "");
+  map[gid] = nextDedupKey;
   const entries = Object.entries(map)
     .filter(([id, d]) => String(id || "").trim() && String(d || "").trim())
     .sort(([a], [b]) => String(a).localeCompare(String(b)))
-    .map(([id, d]) => `${id}=${String(d).slice(0, 10)}`);
+    .map(([id, d]) => `${id}=${String(d).trim()}`);
   const line = `trainer_last_auto_send: ${entries.join("|")}`;
   const src = String(note || "");
   if (/trainer_last_auto_send\s*:/i.test(src)) {
     return src.replace(/trainer_last_auto_send\s*:[^\n\r]*/i, line);
   }
   return src.trim() ? `${src.trim()}\n${line}` : line;
+};
+
+export const parseTrainerDispatchHistory = (note = "") => {
+  const match = String(note || "").match(/trainer_dispatch_history\s*:\s*([^\n\r]+)/i);
+  if (!match?.[1]) return [];
+  try {
+    const raw = decodeURIComponent(match[1].trim());
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const patchTrainerDispatchHistoryInNote = (note = "", entries = []) => {
+  const clean = Array.isArray(entries) ? entries.slice(0, 200) : [];
+  if (!clean.length) {
+    return String(note || "").replace(/\n?trainer_dispatch_history\s*:[^\n\r]*/gi, "").trim();
+  }
+  const encoded = encodeURIComponent(JSON.stringify(clean));
+  const line = `trainer_dispatch_history: ${encoded}`;
+  const src = String(note || "");
+  if (/trainer_dispatch_history\s*:/i.test(src)) {
+    return src.replace(/trainer_dispatch_history\s*:[^\n\r]*/i, line);
+  }
+  return src.trim() ? `${src.trim()}\n${line}` : line;
+};
+
+export const appendTrainerDispatchHistoryInNote = (note = "", entry) => {
+  const prev = parseTrainerDispatchHistory(note || "");
+  const next = [entry, ...prev].slice(0, 100);
+  return patchTrainerDispatchHistoryInNote(note || "", next);
 };
 
 export const isTrainerChatByNote = (note = "") => {

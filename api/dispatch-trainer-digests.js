@@ -8,8 +8,10 @@ import {
   parseTrainerGroupDraftsMap,
   parseTrainerGroups,
   parseTrainerLastAutoSendMap,
+  appendTrainerDispatchHistoryInNote,
   patchTrainerLastAutoSendInNote,
 } from "../src/shared/trainerDigest.js";
+import { ADMIN_LOG_CHAT_ID } from "./_lib/trainer-digest-send.js";
 
 const buildSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -104,6 +106,10 @@ export default async function handler(req, res) {
   const results = [];
   for (const meta of metaRows) {
     const chatId = String(meta.chat_id || "");
+    if (!chatId) {
+      results.push({ chatId: "", status: "skipped", reason: "no_valid_trainer_chat" });
+      continue;
+    }
     const note = String(meta.internal_note || "");
     const trainerGroups = parseTrainerGroups(note);
     if (!trainerGroups.length) continue;
@@ -116,20 +122,27 @@ export default async function handler(req, res) {
     for (const group of chatGroups) {
       const groupId = String(group.id);
       if (autoSendMap[groupId] === false) {
-        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "disabled" });
+        const row = { chatId, groupId, groupName: group.name, status: "skipped", reason: "group_disabled", triggerType: "auto", timestamp: new Date().toISOString() };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
         continue;
       }
       const plan = buildGroupDispatchPlan({ group, cancelled, now });
       if (!plan) {
-        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "no_schedule" });
+        const row = { chatId, groupId, groupName: group.name, status: "skipped", reason: "cancelled_training_or_no_schedule", triggerType: "auto", timestamp: new Date().toISOString() };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
         continue;
       }
       if (!isDispatchDueNow(plan, now, toleranceMinutes)) {
-        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "not_due", sendAt: plan.sendAtIso });
+        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "not_due_yet", sendAt: plan.sendAtIso, triggerType: "auto", timestamp: new Date().toISOString() });
         continue;
       }
-      if (lastAutoSendMap[groupId] === plan.trainingDate) {
-        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "already_sent_for_training_date" });
+      const dedupKey = `${chatId}::${groupId}::${plan.trainingDate}T${plan.trainingTime}`;
+      if (lastAutoSendMap[groupId] === dedupKey) {
+        const row = { chatId, groupId, groupName: group.name, status: "skipped", reason: "duplicate_prevented", triggerType: "auto", timestamp: new Date().toISOString() };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
         continue;
       }
 
@@ -142,8 +155,16 @@ export default async function handler(req, res) {
         targetTrainingDate: plan.trainingDate,
       });
       const message = String(draftMap[groupId] || "").trim() || generated.text;
+      if (!generated.studentsCount) {
+        const row = { chatId, groupId, groupName: group.name, status: "skipped", reason: "no_students_to_remind", triggerType: "auto", timestamp: new Date().toISOString(), trainingDate: plan.trainingDate, trainingTime: plan.trainingTime };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
+        continue;
+      }
       if (!message) {
-        results.push({ chatId, groupId, groupName: group.name, status: "skipped", reason: "empty_message" });
+        const row = { chatId, groupId, groupName: group.name, status: "skipped", reason: "no_message_text_or_template_unavailable", triggerType: "auto", timestamp: new Date().toISOString(), trainingDate: plan.trainingDate, trainingTime: plan.trainingTime };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
         continue;
       }
 
@@ -170,17 +191,23 @@ export default async function handler(req, res) {
           studentsCount: generated.studentsCount || 0,
           triggerType: "auto",
         });
-        nextNote = patchTrainerLastAutoSendInNote(nextNote, groupId, plan.trainingDate);
-        results.push({
+        nextNote = patchTrainerLastAutoSendInNote(nextNote, groupId, dedupKey);
+        const row = {
           chatId,
           groupId,
           groupName: group.name,
           status: "sent",
           sendAt: plan.sendAtIso,
           trainingDate: plan.trainingDate,
+          trainingTime: plan.trainingTime,
+          triggerType: "auto",
+          timestamp: new Date().toISOString(),
           adminLogStatus: sent.adminLogStatus,
+          adminLogReason: ADMIN_LOG_CHAT_ID ? sent.adminLogStatus : "missing_admin_log_env",
           studentsCount: generated.studentsCount || 0,
-        });
+        };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
       } catch (error) {
         await reportTrainerDigestFailureToAdmin({
           peer: chatId,
@@ -189,13 +216,17 @@ export default async function handler(req, res) {
           studentsCount: generated.studentsCount || 0,
           triggerType: "auto",
         });
-        results.push({
+        const row = {
           chatId,
           groupId,
           groupName: group.name,
           status: "failed",
+          triggerType: "auto",
+          timestamp: new Date().toISOString(),
           error: String(error?.message || error),
-        });
+        };
+        results.push(row);
+        nextNote = appendTrainerDispatchHistoryInNote(nextNote, row);
       }
     }
 

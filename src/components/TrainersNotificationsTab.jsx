@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { theme } from "../shared/constants";
-import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerGroupDraftsMap, parseTrainerGroups, patchTrainerAutoSendMapInNote, patchTrainerGroupDraftInNote } from "../shared/trainerDigest";
+import { appendTrainerDispatchHistoryInNote, buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerDispatchHistory, parseTrainerGroupDraftsMap, parseTrainerGroupIds, parseTrainerGroups, patchTrainerAutoSendMapInNote, patchTrainerGroupDraftInNote, patchTrainerGroupIdsInNote } from "../shared/trainerDigest";
 import { today } from "../shared/utils";
 
 export default function TrainersNotificationsTab({
@@ -95,10 +95,14 @@ export default function TrainersNotificationsTab({
 
   const digest = useMemo(() => {
     if (!selectedDialog) return { text: "", groupNames: [], groupsData: [], selectedGroupData: null };
+    const trainerGroupIds = parseTrainerGroupIds(selectedDialog.note || "");
     const trainerGroups = parseTrainerGroups(selectedDialog.note || "");
-    const parsedGroups = groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
+    const parsedGroups = trainerGroupIds.length
+      ? groups.filter((g) => trainerGroupIds.includes(String(g.id)))
+      : groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
     const persistedAutoSendMap = parseTrainerAutoSendMap(selectedDialog.note || "");
     const persistedDrafts = parseTrainerGroupDraftsMap(selectedDialog.note || "");
+    const persistedHistory = parseTrainerDispatchHistory(selectedDialog.note || "");
     const groupsData = parsedGroups.map((g) => {
       const plan = buildGroupDispatchPlan({ group: g, cancelled, now: new Date() });
       const generated = buildTrainerGroupDraft({
@@ -128,6 +132,7 @@ export default function TrainersNotificationsTab({
       groupNames: parsedGroups.map((g) => g.name),
       groupsData,
       selectedGroupData,
+      persistedHistory,
     };
   }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat]);
 
@@ -139,26 +144,33 @@ export default function TrainersNotificationsTab({
     setDraftByChat((prev) => ({ ...prev, [`${selectedDialog.id}:${activeGroupId}`]: next }));
   };
 
+  const upsertMetaNote = async (nextNote) => {
+    if (!selectedDialog?.id) return null;
+    const res = await fetch("/api/telegram-chat-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload?.details || payload?.error || "meta save failed");
+    setMetaByChat((prev) => ({
+      ...prev,
+      [selectedDialog.id]: {
+        ...(prev[selectedDialog.id] || {}),
+        ...(payload?.meta || {}),
+        internal_note: nextNote,
+      },
+    }));
+    return payload;
+  };
+
   const saveManualDraft = async (groupId, value) => {
     if (!selectedDialog?.id || !groupId) return;
-    const nextNote = patchTrainerGroupDraftInNote(selectedDialog.note || "", groupId, value);
+    let nextNote = patchTrainerGroupDraftInNote(selectedDialog.note || "", groupId, value);
+    nextNote = patchTrainerGroupIdsInNote(nextNote, (digest.groupsData || []).map((g) => g.groupId));
     setSavingDraft(true);
     try {
-      const res = await fetch("/api/telegram-chat-meta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload?.details || payload?.error || "save draft failed");
-      setMetaByChat((prev) => ({
-        ...prev,
-        [selectedDialog.id]: {
-          ...(prev[selectedDialog.id] || {}),
-          ...(payload?.meta || {}),
-          internal_note: nextNote,
-        },
-      }));
+      await upsertMetaNote(nextNote);
     } catch (error) {
       alert(`Не вдалося зберегти чернетку: ${String(error?.message || error)}`);
     } finally {
@@ -221,6 +233,20 @@ export default function TrainersNotificationsTab({
       });
       const payload = await res.json().catch(() => ({}));
       const ok = res.ok;
+      const historyEntry = {
+        id: `manual_${Date.now()}`,
+        triggerType: "manual",
+        status: ok ? "sent" : "failed",
+        chatId: selectedDialog.id,
+        chatTitle: selectedDialog.title || selectedDialog.id,
+        groupId: digest.selectedGroupData.groupId,
+        groupName: digest.selectedGroupData.groupName,
+        timestamp: nowIso,
+        studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+        details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "send failed"),
+      };
+      const nextNote = appendTrainerDispatchHistoryInNote(selectedDialog.note || "", historyEntry);
+      await upsertMetaNote(nextNote);
       setLastActions((prev) => [
         {
           id: `send_${Date.now()}`,
@@ -244,25 +270,77 @@ export default function TrainersNotificationsTab({
     if (!selectedDialog?.id) return;
     const currentMap = parseTrainerAutoSendMap(selectedDialog.note || "");
     const nextMap = { ...currentMap, [String(groupId)]: !!nextEnabled };
-    const nextNote = patchTrainerAutoSendMapInNote(selectedDialog.note || "", nextMap);
+    let nextNote = patchTrainerAutoSendMapInNote(selectedDialog.note || "", nextMap);
+    nextNote = patchTrainerGroupIdsInNote(nextNote, (digest.groupsData || []).map((g) => g.groupId));
     try {
-      const res = await fetch("/api/telegram-chat-meta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload?.details || payload?.error || "save failed");
-      setMetaByChat((prev) => ({
-        ...prev,
-        [selectedDialog.id]: {
-          ...(prev[selectedDialog.id] || {}),
-          ...(payload?.meta || {}),
-          internal_note: nextNote,
-        },
-      }));
+      await upsertMetaNote(nextNote);
     } catch (error) {
       alert(`Не вдалося зберегти toggle: ${String(error?.message || error)}`);
+    }
+  };
+
+  const todaySends = useMemo(() => {
+    const todayStr = today();
+    const history = digest.persistedHistory || [];
+    return (digest.groupsData || []).map((g) => {
+      if (!g.enabled) return { groupId: g.groupId, groupName: g.groupName, status: "disabled", sendAt: g.plan?.sendAtIso || "", trainingDate: g.plan?.trainingDate || "" };
+      if (!g.plan) return { groupId: g.groupId, groupName: g.groupName, status: "cancelled", sendAt: "", trainingDate: "" };
+      const hist = history.find((h) => String(h.groupId) === String(g.groupId) && String(h.trainingDate || "").slice(0, 10) === String(g.plan.trainingDate || "").slice(0, 10));
+      if (hist?.status === "sent") return { groupId: g.groupId, groupName: g.groupName, status: "sent", sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate, details: hist.details || "" };
+      if (hist?.status === "failed" || hist?.status === "skipped") return { groupId: g.groupId, groupName: g.groupName, status: hist.status, sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate, details: hist.reason || hist.details || "" };
+      if (String(g.plan.trainingDate || "").slice(0, 10) !== todayStr) {
+        return { groupId: g.groupId, groupName: g.groupName, status: "not_today", sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate };
+      }
+      return {
+        groupId: g.groupId,
+        groupName: g.groupName,
+        status: isDispatchDueNow(g.plan, new Date(), 15) ? "due" : "scheduled",
+        sendAt: g.plan.sendAtIso,
+        trainingDate: g.plan.trainingDate,
+      };
+    });
+  }, [digest.groupsData, digest.persistedHistory]);
+
+  const testToAdmin = async () => {
+    if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
+    const text = activeDraft || digest.selectedGroupData.generatedText || "";
+    if (!text) return;
+    const nowIso = new Date().toISOString();
+    setSendingNow(true);
+    try {
+      const res = await fetch("/api/send-trainer-digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: selectedDialog.id,
+          message: text,
+          chatTitle: selectedDialog.title || selectedDialog.id,
+          groupId: digest.selectedGroupData.groupId,
+          groupNames: [digest.selectedGroupData.groupName],
+          studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+          triggerType: "test",
+          sendToAdminOnly: true,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      const ok = res.ok;
+      const historyEntry = {
+        id: `test_${Date.now()}`,
+        triggerType: "test",
+        status: ok ? "sent" : "failed",
+        chatId: selectedDialog.id,
+        chatTitle: selectedDialog.title || selectedDialog.id,
+        groupId: digest.selectedGroupData.groupId,
+        groupName: digest.selectedGroupData.groupName,
+        timestamp: nowIso,
+        studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+        details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "test failed"),
+      };
+      await upsertMetaNote(appendTrainerDispatchHistoryInNote(selectedDialog.note || "", historyEntry));
+      setLastActions((prev) => [historyEntry, ...prev].slice(0, 20));
+      if (!ok) alert(payload?.details || payload?.error || "Не вдалося надіслати тест");
+    } finally {
+      setSendingNow(false);
     }
   };
 
@@ -307,6 +385,7 @@ export default function TrainersNotificationsTab({
             <button type="button" onClick={regenerateFromTemplate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити з шаблону</button>
             <button type="button" onClick={copyToClipboard} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Скопіювати</button>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Dry run</button>
+            <button type="button" disabled={sendingNow} onClick={testToAdmin} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Test to admin</button>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: false })} style={{ border: "none", borderRadius: 10, background: theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{sendingNow ? "Надсилання..." : "Надіслати"}</button>
           </div>
         </div>
@@ -363,24 +442,27 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6 }}>Що буде надіслано зараз (due window)</div>
-          {(digest.groupsData || []).filter((g) => g.enabled && g.plan && isDispatchDueNow(g.plan, new Date(), 15)).length ? (
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6 }}>Today sends / statuses</div>
+          {todaySends.length ? (
             <div style={{ display: "grid", gap: 4, fontSize: 12, color: theme.textMain }}>
-              {(digest.groupsData || [])
-                .filter((g) => g.enabled && g.plan && isDispatchDueNow(g.plan, new Date(), 15))
-                .map((x, i) => <div key={`${x.groupName}_${x.plan?.sendAtIso}_${i}`}>• {x.groupName}: {x.plan?.sendAtIso.slice(0, 16).replace("T", " ")} (заняття {x.plan?.trainingDate} {x.plan?.trainingTime})</div>)}
+              {todaySends.map((x, i) => <div key={`${x.groupName}_${x.sendAt}_${i}`}>• [{x.status}] {x.groupName}: {x.sendAt ? x.sendAt.slice(0, 16).replace("T", " ") : "—"}{x.trainingDate ? ` (заняття ${x.trainingDate})` : ""}{x.details ? ` • ${x.details}` : ""}</div>)}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: theme.textMuted }}>Зараз немає due відправок.</div>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>Немає груп для показу статусів.</div>
           )}
         </div>
 
         <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 12 }}>Лог відправок (UI)</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 12 }}>Лог відправок (persisted + UI recent)</div>
           {!lastActions.length && <div style={{ fontSize: 12, color: theme.textMuted }}>Ще немає дій.</div>}
           {lastActions.map((a) => (
             <div key={a.id} style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
               [{a.status}] {a.chatTitle} • {a.time.slice(0, 16).replace("T", " ")} • учениць: {a.students}{a.details ? ` • ${a.details}` : ""}
+            </div>
+          ))}
+          {(digest.persistedHistory || []).slice(0, 20).map((h) => (
+            <div key={`persisted_${h.id || `${h.timestamp}_${h.groupId}`}`} style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
+              [persisted:{h.status}] {h.chatTitle || h.chatId} / {h.groupName || h.groupId} • {(h.timestamp || "").slice(0, 16).replace("T", " ")} • {h.triggerType} • учениць: {h.studentsCount || 0}{h.details ? ` • ${h.details}` : ""}
             </div>
           ))}
         </div>
