@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { theme } from "../shared/constants";
-import { appendTrainerDispatchHistoryInNote, buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerAutoSendMap, parseTrainerDispatchHistory, parseTrainerGroupDraftsMap, parseTrainerGroupIds, parseTrainerGroups, patchTrainerAutoSendMapInNote, patchTrainerGroupDraftInNote, patchTrainerGroupIdsInNote } from "../shared/trainerDigest";
+import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerGroupIds, parseTrainerGroups } from "../shared/trainerDigest";
 import { today } from "../shared/utils";
 
 export default function TrainersNotificationsTab({
@@ -20,6 +20,8 @@ export default function TrainersNotificationsTab({
   const [sendingNow, setSendingNow] = useState(false);
   const [selectedGroupIdByChat, setSelectedGroupIdByChat] = useState({});
   const [savingDraft, setSavingDraft] = useState(false);
+  const [stateByChatGroup, setStateByChatGroup] = useState({});
+  const [historyByChat, setHistoryByChat] = useState({});
 
   const membershipByStudent = useMemo(
     () =>
@@ -67,10 +69,42 @@ export default function TrainersNotificationsTab({
           })
         );
         if (!cancelled) setMetaByChat(Object.fromEntries(metaRows));
+        const stateRows = await Promise.all(
+          loaded.map(async (dlg) => {
+            try {
+              const stateRes = await fetch(`/api/trainer-notification-state?chatId=${encodeURIComponent(dlg.id)}`);
+              const statePayload = await stateRes.json();
+              if (!stateRes.ok) return [dlg.id, {}];
+              const byGroup = (statePayload.rows || []).reduce((acc, row) => {
+                acc[String(row.group_id)] = row;
+                return acc;
+              }, {});
+              return [dlg.id, byGroup];
+            } catch {
+              return [dlg.id, {}];
+            }
+          })
+        );
+        if (!cancelled) setStateByChatGroup(Object.fromEntries(stateRows));
+        const historyRows = await Promise.all(
+          loaded.map(async (dlg) => {
+            try {
+              const hRes = await fetch(`/api/trainer-dispatch-history?chatId=${encodeURIComponent(dlg.id)}&limit=50`);
+              const hPayload = await hRes.json();
+              if (!hRes.ok) return [dlg.id, []];
+              return [dlg.id, hPayload.rows || []];
+            } catch {
+              return [dlg.id, []];
+            }
+          })
+        );
+        if (!cancelled) setHistoryByChat(Object.fromEntries(historyRows));
       } catch {
         if (!cancelled) {
           setDialogs([]);
           setMetaByChat({});
+          setStateByChatGroup({});
+          setHistoryByChat({});
         }
       }
     };
@@ -100,11 +134,11 @@ export default function TrainersNotificationsTab({
     const parsedGroups = trainerGroupIds.length
       ? groups.filter((g) => trainerGroupIds.includes(String(g.id)))
       : groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
-    const persistedAutoSendMap = parseTrainerAutoSendMap(selectedDialog.note || "");
-    const persistedDrafts = parseTrainerGroupDraftsMap(selectedDialog.note || "");
-    const persistedHistory = parseTrainerDispatchHistory(selectedDialog.note || "");
+    const stateMap = stateByChatGroup[selectedDialog.id] || {};
+    const persistedHistory = historyByChat[selectedDialog.id] || [];
     const groupsData = parsedGroups.map((g) => {
-      const plan = buildGroupDispatchPlan({ group: g, cancelled, now: new Date() });
+      const row = stateMap[String(g.id)] || {};
+      const plan = buildGroupDispatchPlan({ group: g, cancelled, now: new Date(), sendTimeOverride: row.send_time_override || null });
       const generated = buildTrainerGroupDraft({
         group: g,
         students,
@@ -113,15 +147,16 @@ export default function TrainersNotificationsTab({
         attn,
         targetTrainingDate: plan?.trainingDate || today(),
       });
-      const manualDraft = persistedDrafts[String(g.id)] || "";
+      const manualDraft = row.custom_template || "";
       return {
         groupId: String(g.id),
         groupName: g.name,
         plan,
         generatedText: generated.text,
         generatedStudentsCount: generated.studentsCount || 0,
-        enabled: persistedAutoSendMap[String(g.id)] !== false,
+        enabled: row.auto_send_enabled !== false,
         persistedDraft: manualDraft,
+        sendTimeOverride: row.send_time_override || null,
         activeText: (draftByChat[`${selectedDialog.id}:${g.id}`] ?? manualDraft ?? generated.text) || "",
       };
     });
@@ -134,43 +169,56 @@ export default function TrainersNotificationsTab({
       selectedGroupData,
       persistedHistory,
     };
-  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat]);
+  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat, stateByChatGroup, historyByChat]);
 
   const activeDraft = digest.selectedGroupData?.activeText || "";
   const activeGroupId = digest.selectedGroupData?.groupId || "";
+  const isDraftDirty = String(activeDraft || "") !== String(digest.selectedGroupData?.persistedDraft || "");
 
   const updateDraft = (next) => {
     if (!selectedDialog?.id || !activeGroupId) return;
     setDraftByChat((prev) => ({ ...prev, [`${selectedDialog.id}:${activeGroupId}`]: next }));
   };
 
-  const upsertMetaNote = async (nextNote) => {
-    if (!selectedDialog?.id) return null;
-    const res = await fetch("/api/telegram-chat-meta", {
+  const upsertGroupState = async (groupId, patch) => {
+    if (!selectedDialog?.id || !groupId) return null;
+    const res = await fetch("/api/trainer-notification-state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: selectedDialog.id, internalNote: nextNote }),
+      body: JSON.stringify({ chatId: selectedDialog.id, groupId, ...patch }),
     });
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload?.details || payload?.error || "meta save failed");
-    setMetaByChat((prev) => ({
+    if (!res.ok) throw new Error(payload?.details || payload?.error || "state save failed");
+    setStateByChatGroup((prev) => ({
       ...prev,
       [selectedDialog.id]: {
         ...(prev[selectedDialog.id] || {}),
-        ...(payload?.meta || {}),
-        internal_note: nextNote,
+        [String(groupId)]: payload.row,
       },
     }));
-    return payload;
+    return payload.row;
+  };
+
+  const appendHistory = async (entry) => {
+    const res = await fetch("/api/trainer-dispatch-history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload?.details || payload?.error || "history save failed");
+    setHistoryByChat((prev) => ({
+      ...prev,
+      [entry.chatId]: [payload.row, ...(prev[entry.chatId] || [])].slice(0, 100),
+    }));
+    return payload.row;
   };
 
   const saveManualDraft = async (groupId, value) => {
     if (!selectedDialog?.id || !groupId) return;
-    let nextNote = patchTrainerGroupDraftInNote(selectedDialog.note || "", groupId, value);
-    nextNote = patchTrainerGroupIdsInNote(nextNote, (digest.groupsData || []).map((g) => g.groupId));
     setSavingDraft(true);
     try {
-      await upsertMetaNote(nextNote);
+      await upsertGroupState(groupId, { customTemplate: value });
     } catch (error) {
       alert(`Не вдалося зберегти чернетку: ${String(error?.message || error)}`);
     } finally {
@@ -245,8 +293,7 @@ export default function TrainersNotificationsTab({
         studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
         details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "send failed"),
       };
-      const nextNote = appendTrainerDispatchHistoryInNote(selectedDialog.note || "", historyEntry);
-      await upsertMetaNote(nextNote);
+      await appendHistory(historyEntry);
       setLastActions((prev) => [
         {
           id: `send_${Date.now()}`,
@@ -268,12 +315,8 @@ export default function TrainersNotificationsTab({
 
   const saveAutoSendToggle = async (groupId, nextEnabled) => {
     if (!selectedDialog?.id) return;
-    const currentMap = parseTrainerAutoSendMap(selectedDialog.note || "");
-    const nextMap = { ...currentMap, [String(groupId)]: !!nextEnabled };
-    let nextNote = patchTrainerAutoSendMapInNote(selectedDialog.note || "", nextMap);
-    nextNote = patchTrainerGroupIdsInNote(nextNote, (digest.groupsData || []).map((g) => g.groupId));
     try {
-      await upsertMetaNote(nextNote);
+      await upsertGroupState(groupId, { autoSendEnabled: !!nextEnabled });
     } catch (error) {
       alert(`Не вдалося зберегти toggle: ${String(error?.message || error)}`);
     }
@@ -336,7 +379,7 @@ export default function TrainersNotificationsTab({
         studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
         details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "test failed"),
       };
-      await upsertMetaNote(appendTrainerDispatchHistoryInNote(selectedDialog.note || "", historyEntry));
+      await appendHistory(historyEntry);
       setLastActions((prev) => [historyEntry, ...prev].slice(0, 20));
       if (!ok) alert(payload?.details || payload?.error || "Не вдалося надіслати тест");
     } finally {
@@ -377,14 +420,13 @@ export default function TrainersNotificationsTab({
             <div style={{ fontSize: 12, color: theme.textMuted }}>
               Групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}
             </div>
-            <div style={{ fontSize: 12, color: theme.textMuted }}>
-              Admin log: configured Telegram chat id from env (`TELEGRAM_ADMIN_LOG_CHAT_ID` або `TELEGRAM_ADMIN_CHAT_ID`)
-            </div>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>Адмін-сповіщення: статус перевіряється по відповіді відправки (configured / missing)</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button type="button" onClick={regenerateFromTemplate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити з шаблону</button>
+            <button type="button" disabled={savingDraft || !activeGroupId} onClick={() => saveManualDraft(activeGroupId, activeDraft)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Зберегти</button>
             <button type="button" onClick={copyToClipboard} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Скопіювати</button>
-            <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Dry run</button>
+            <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Перевірити без відправки</button>
             <button type="button" disabled={sendingNow} onClick={testToAdmin} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Test to admin</button>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: false })} style={{ border: "none", borderRadius: 10, background: theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{sendingNow ? "Надсилання..." : "Надіслати"}</button>
           </div>
@@ -405,6 +447,14 @@ export default function TrainersNotificationsTab({
                 Next send: {digest.selectedGroupData.plan.sendAtIso.slice(0, 16).replace("T", " ")} (заняття {digest.selectedGroupData.plan.trainingDate} {digest.selectedGroupData.plan.trainingTime})
               </span>
             )}
+            <label style={{ fontSize: 12, color: theme.textMuted }}>Override send time:</label>
+            <input
+              type="time"
+              value={digest.selectedGroupData?.sendTimeOverride || ""}
+              onChange={(e) => upsertGroupState(activeGroupId, { sendTimeOverride: e.target.value || null })}
+              style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "4px 6px" }}
+            />
+            <button type="button" onClick={() => upsertGroupState(activeGroupId, { sendTimeOverride: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "4px 6px", cursor: "pointer", fontSize: 12 }}>Default -60m</button>
           </div>
         </div>
 
@@ -417,6 +467,9 @@ export default function TrainersNotificationsTab({
           placeholder="Немає даних для дайджесту або не задано trainer_groups."
         />
         {savingDraft && <div style={{ fontSize: 12, color: theme.textMuted }}>Зберігаємо чернетку…</div>}
+        <div style={{ fontSize: 12, color: isDraftDirty ? theme.warning : theme.success }}>
+          {isDraftDirty ? "Є незбережені зміни шаблону" : "Шаблон збережено"}
+        </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.input }}>
           <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8 }}>Automation per group (день заняття, за 1 годину)</div>

@@ -396,10 +396,16 @@ export const findNextValidTrainingSession = ({ group, cancelled = [], now = new 
   return candidates[0] || null;
 };
 
-export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date() }) => {
+export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date(), sendTimeOverride = null }) => {
   const nextSession = findNextValidTrainingSession({ group, cancelled, now });
   if (!nextSession) return null;
-  const sendAt = new Date(nextSession.trainingAt.getTime() - 60 * 60 * 1000);
+  let sendAt = new Date(nextSession.trainingAt.getTime() - 60 * 60 * 1000);
+  const override = String(sendTimeOverride || "").trim();
+  if (/^\d{2}:\d{2}$/.test(override)) {
+    const [oh, om] = override.split(":").map(Number);
+    sendAt = new Date(nextSession.trainingAt);
+    sendAt.setHours(oh, om, 0, 0);
+  }
   return {
     groupId: String(group?.id),
     groupName: group?.name || "",
@@ -407,6 +413,7 @@ export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date()
     trainingTime: nextSession.trainingTime,
     trainingAtIso: nextSession.trainingAt.toISOString(),
     sendAtIso: sendAt.toISOString(),
+    sendTimeOverride: override || null,
   };
 };
 
