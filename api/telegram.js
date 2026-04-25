@@ -88,6 +88,10 @@ const handleChatMeta = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "contactPhone")) payload.contact_phone = req.body.contactPhone || null;
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "contactTelegram")) payload.contact_telegram = req.body.contactTelegram || null;
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "contactInstagram")) payload.contact_instagram = req.body.contactInstagram || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "leadStatus")) payload.lead_status = req.body.leadStatus || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "leadSource")) payload.lead_source = req.body.leadSource || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "preferredDirection")) payload.preferred_direction = req.body.preferredDirection || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "preferredGroup")) payload.preferred_group = req.body.preferredGroup || null;
 
     const { data, error } = await supabase
       .from("telegram_chat_meta")

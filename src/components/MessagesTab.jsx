@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
 import { isTrainerChatByNote } from "../shared/trainerDigest";
-import { buildUnifiedContact, CONTACT_TYPES, CRM_STAGES, normalizeContactType, normalizeCrmStage } from "../shared/messagesContacts";
+import { buildUnifiedContact, CONTACT_TYPES, CRM_STAGES, LEAD_STATUSES, normalizeContactType, normalizeCrmStage, normalizeLeadStatus } from "../shared/messagesContacts";
 
 const normalizeStudentGroupIds = (student, membership) => {
   const inline = [student?.groupId, ...(Array.isArray(student?.groupIds) ? student.groupIds : [])].filter(Boolean);
@@ -44,6 +44,8 @@ export default function MessagesTab({
   const [linkSavingChatId, setLinkSavingChatId] = useState("");
   const [activeChannel, setActiveChannel] = useState("telegram");
   const [instagramSelectedId, setInstagramSelectedId] = useState("");
+  const [quickFilter, setQuickFilter] = useState("all");
+  const [instagramCrmOverrides, setInstagramCrmOverrides] = useState({});
 
   const [dialogs, setDialogs] = useState([]);
   const [dialogsError, setDialogsError] = useState("");
@@ -52,6 +54,10 @@ export default function MessagesTab({
   const [contactTypeDraft, setContactTypeDraft] = useState("other");
   const [crmStageDraft, setCrmStageDraft] = useState("");
   const [shortTagDraft, setShortTagDraft] = useState("");
+  const [leadStatusDraft, setLeadStatusDraft] = useState("");
+  const [leadSourceDraft, setLeadSourceDraft] = useState("");
+  const [preferredDirectionDraft, setPreferredDirectionDraft] = useState("");
+  const [preferredGroupDraft, setPreferredGroupDraft] = useState("");
 
   const membershipByStudent = useMemo(
     () =>
@@ -180,6 +186,8 @@ export default function MessagesTab({
           : [];
         const contactType = normalizeContactType(meta?.contact_type, linkedStudent ? "student" : trainer ? "trainer" : "other");
         const crmStage = normalizeCrmStage(meta?.crm_stage);
+        const inferredLeadStatus = linkedStudent ? "student" : crmStage === "waitlist_ready" ? "waitlist" : contactType === "lead" ? "new_lead" : "";
+        const leadStatus = normalizeLeadStatus(meta?.lead_status, inferredLeadStatus);
         const contact = buildUnifiedContact({
           id: dlg.id,
           channel: "telegram",
@@ -190,6 +198,10 @@ export default function MessagesTab({
           linkedStudentId: meta?.student_id || linkedStudent?.id || "",
           contactType,
           crmStage,
+          leadStatus,
+          source: meta?.lead_source || "",
+          preferredDirection: meta?.preferred_direction || "",
+          preferredGroup: meta?.preferred_group || "",
           shortTag: meta?.short_tag || "",
         });
 
@@ -227,13 +239,15 @@ export default function MessagesTab({
       .sort((a, b) => b.lastTs - a.lastTs);
   }, [dialogs, membershipByStudent, metaByChat, railFilter, searchQ, studentMap, trainerMapByTelegram]);
 
-  const activeDialog = enrichedDialogs.find((d) => d.id === selectedDialog?.id) || enrichedDialogs[0] || null;
   const instagramContacts = useMemo(() => {
     const waitlistStudents = new Set((waitlist || []).map((w) => String(w.studentId || "")));
     const rows = [];
     students.forEach((st) => {
       const studentId = String(st.id || "");
       const hasGroups = (membershipByStudent[studentId] || []).length > 0;
+      const baseStatus = hasGroups ? "student" : waitlistStudents.has(studentId) ? "waitlist" : "new_lead";
+      const baseCrmStage = waitlistStudents.has(studentId) ? "waitlist_ready" : (!hasGroups ? "potential_lead" : "");
+      const override = instagramCrmOverrides[`instagram:student:${studentId}`] || {};
       rows.push(buildUnifiedContact({
         id: `instagram:student:${studentId}`,
         channel: "instagram",
@@ -242,20 +256,33 @@ export default function MessagesTab({
         telegram: st.telegram || "",
         instagram: st.instagram || "",
         linkedStudentId: studentId,
-        contactType: hasGroups ? "student" : "lead",
-        crmStage: waitlistStudents.has(studentId) ? "waitlist_ready" : (!hasGroups ? "potential_lead" : ""),
+        contactType: override.contactType || (hasGroups ? "student" : "lead"),
+        crmStage: override.crmStage ?? baseCrmStage,
+        leadStatus: override.leadStatus || baseStatus,
+        source: override.source || "",
+        preferredDirection: override.preferredDirection || "",
+        preferredGroup: override.preferredGroup || "",
+        shortTag: override.shortTag || "",
       }));
     });
     trainers.forEach((tr) => {
       const trainerName = [tr.firstName, tr.lastName].filter(Boolean).join(" ").trim() || tr.name || tr.id;
+      const id = `instagram:trainer:${tr.id}`;
+      const override = instagramCrmOverrides[id] || {};
       rows.push(buildUnifiedContact({
-        id: `instagram:trainer:${tr.id}`,
+        id,
         channel: "instagram",
         name: trainerName,
         phone: tr.phone || "",
         telegram: tr.telegram || "",
         instagram: tr.instagramHandle || "",
-        contactType: "trainer",
+        contactType: override.contactType || "trainer",
+        crmStage: override.crmStage || "",
+        leadStatus: override.leadStatus || "",
+        source: override.source || "",
+        preferredDirection: override.preferredDirection || "",
+        preferredGroup: override.preferredGroup || "",
+        shortTag: override.shortTag || "",
       }));
     });
     return rows
@@ -265,8 +292,20 @@ export default function MessagesTab({
         return [c.name, c.phone, c.telegram, c.instagram].join(" ").toLowerCase().includes(q);
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [membershipByStudent, searchQ, students, trainers, waitlist]);
-  const activeInstagramContact = instagramContacts.find((c) => c.id === instagramSelectedId) || instagramContacts[0] || null;
+  }, [instagramCrmOverrides, membershipByStudent, searchQ, students, trainers, waitlist]);
+  const matchesQuickFilter = (contact) => {
+    if (!contact) return false;
+    if (quickFilter === "all") return true;
+    if (quickFilter === "waitlist") return contact.leadStatus === "waitlist" || contact.crmStage === "waitlist_ready";
+    if (quickFilter === "leads") return contact.contactType === "lead" || ["new_lead", "contacted", "interested"].includes(contact.leadStatus);
+    if (quickFilter === "students") return contact.contactType === "student" || contact.leadStatus === "student";
+    if (quickFilter === "trainers") return contact.contactType === "trainer";
+    return true;
+  };
+  const filteredTelegramDialogs = useMemo(() => enrichedDialogs.filter((d) => matchesQuickFilter(d.contact)), [enrichedDialogs, quickFilter]);
+  const filteredInstagramContacts = useMemo(() => instagramContacts.filter((c) => matchesQuickFilter(c)), [instagramContacts, quickFilter]);
+  const activeDialog = filteredTelegramDialogs.find((d) => d.id === selectedDialog?.id) || filteredTelegramDialogs[0] || null;
+  const activeInstagramContact = filteredInstagramContacts.find((c) => c.id === instagramSelectedId) || filteredInstagramContacts[0] || null;
 
   const crmSummary = useMemo(() => {
     const st = activeDialog?.linkedStudent;
@@ -371,6 +410,18 @@ export default function MessagesTab({
     if (Object.prototype.hasOwnProperty.call(patch || {}, "contactInstagram")) {
       body.contactInstagram = patch.contactInstagram ?? null;
     }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "leadStatus")) {
+      body.leadStatus = patch.leadStatus ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "leadSource")) {
+      body.leadSource = patch.leadSource ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "preferredDirection")) {
+      body.preferredDirection = patch.preferredDirection ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "preferredGroup")) {
+      body.preferredGroup = patch.preferredGroup ?? null;
+    }
     const res = await fetch("/api/telegram?op=chatMeta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -393,15 +444,31 @@ export default function MessagesTab({
     setContactTypeDraft(normalizeContactType(meta.contact_type, activeDialog?.contact?.contactType || "other"));
     setCrmStageDraft(normalizeCrmStage(meta.crm_stage));
     setShortTagDraft(meta.short_tag || "");
+    setLeadStatusDraft(normalizeLeadStatus(meta.lead_status, activeDialog?.contact?.leadStatus || ""));
+    setLeadSourceDraft(meta.lead_source || "");
+    setPreferredDirectionDraft(meta.preferred_direction || "");
+    setPreferredGroupDraft(meta.preferred_group || "");
   }, [activeDialog?.id, metaByChat]);
 
   useEffect(() => {
     if (activeChannel !== "instagram") return;
-    if (!instagramContacts.length) return;
-    if (!instagramContacts.some((c) => c.id === instagramSelectedId)) {
-      setInstagramSelectedId(instagramContacts[0].id);
+    if (!filteredInstagramContacts.length) return;
+    if (!filteredInstagramContacts.some((c) => c.id === instagramSelectedId)) {
+      setInstagramSelectedId(filteredInstagramContacts[0].id);
     }
-  }, [activeChannel, instagramContacts, instagramSelectedId]);
+  }, [activeChannel, filteredInstagramContacts, instagramSelectedId]);
+
+  useEffect(() => {
+    if (activeChannel !== "instagram") return;
+    if (!activeInstagramContact) return;
+    setContactTypeDraft(activeInstagramContact.contactType || "other");
+    setCrmStageDraft(activeInstagramContact.crmStage || "");
+    setShortTagDraft(activeInstagramContact.shortTag || "");
+    setLeadStatusDraft(activeInstagramContact.leadStatus || "");
+    setLeadSourceDraft(activeInstagramContact.source || "");
+    setPreferredDirectionDraft(activeInstagramContact.preferredDirection || "");
+    setPreferredGroupDraft(activeInstagramContact.preferredGroup || "");
+  }, [activeChannel, activeInstagramContact]);
 
   const openLinkPanel = (chatId, currentStudentId = "") => {
     setLinkUiByChat((prev) => ({
@@ -496,6 +563,24 @@ export default function MessagesTab({
             Instagram
           </button>
         </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {[
+            ["all", "all"],
+            ["leads", "leads"],
+            ["waitlist", "waitlist"],
+            ["students", "students"],
+            ["trainers", "trainers"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setQuickFilter(id)}
+              style={{ border: `1px solid ${quickFilter === id ? theme.primary : theme.border}`, borderRadius: 999, padding: "5px 9px", background: quickFilter === id ? `${theme.primary}22` : theme.input, color: quickFilter === id ? theme.primary : theme.textMain, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
@@ -505,7 +590,7 @@ export default function MessagesTab({
         {dialogsError && <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{dialogsError}</div>}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minHeight: 0, overflow: "auto", paddingRight: 2 }}>
-          {activeChannel === "telegram" && enrichedDialogs.map((dlg) => {
+          {activeChannel === "telegram" && filteredTelegramDialogs.map((dlg) => {
             const active = activeDialog?.id === dlg.id;
             return (
               <div
@@ -543,6 +628,11 @@ export default function MessagesTab({
                   <span style={{ fontSize: 11, color: dlg.linkedStudent ? theme.success : theme.textMuted, fontWeight: 600 }}>
                     {dlg.linkedStudent ? getDisplayName(dlg.linkedStudent) : "не прив'язано"}
                   </span>
+                  {dlg.contact?.leadStatus && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: dlg.contact.leadStatus === "waitlist" ? theme.warning : theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 6px", background: theme.card }}>
+                      {dlg.contact.leadStatus}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -620,7 +710,7 @@ export default function MessagesTab({
               </div>
             );
           })}
-          {activeChannel === "instagram" && instagramContacts.map((contact) => {
+          {activeChannel === "instagram" && filteredInstagramContacts.map((contact) => {
             const active = activeInstagramContact?.id === contact.id;
             return (
               <button
@@ -637,11 +727,12 @@ export default function MessagesTab({
                   {contact.instagram || "Instagram handle не вказано"}
                 </div>
                 {contact.crmStage && <div style={{ fontSize: 11, color: theme.warning, marginTop: 4 }}>CRM: {contact.crmStage}</div>}
+                {contact.leadStatus && <div style={{ fontSize: 11, color: contact.leadStatus === "waitlist" ? theme.warning : theme.textMuted, marginTop: 3 }}>status: {contact.leadStatus}</div>}
               </button>
             );
           })}
-          {activeChannel === "telegram" && !enrichedDialogs.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Немає діалогів.</div>}
-          {activeChannel === "instagram" && !instagramContacts.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Контакти для foundation поки відсутні.</div>}
+          {activeChannel === "telegram" && !filteredTelegramDialogs.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Немає діалогів за вибраним фільтром.</div>}
+          {activeChannel === "instagram" && !filteredInstagramContacts.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Контакти для foundation поки відсутні.</div>}
         </div>
       </div>
 
@@ -678,6 +769,48 @@ export default function MessagesTab({
                       <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 600, marginTop: 2 }}>{v}</div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+            {activeInstagramContact && (
+              <div style={{ padding: 12, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: theme.textMain, marginBottom: 8 }}>Instagram CRM foundation edit (local)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                  <select value={contactTypeDraft} onChange={(e) => setContactTypeDraft(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
+                    {CONTACT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <select value={leadStatusDraft} onChange={(e) => setLeadStatusDraft(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
+                    <option value="">lead status</option>
+                    {LEAD_STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <select value={crmStageDraft} onChange={(e) => setCrmStageDraft(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
+                    <option value="">crm stage</option>
+                    {CRM_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <input value={leadSourceDraft} onChange={(e) => setLeadSourceDraft(e.target.value)} placeholder="source" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                  <input value={preferredDirectionDraft} onChange={(e) => setPreferredDirectionDraft(e.target.value)} placeholder="preferred direction" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                  <input value={preferredGroupDraft} onChange={(e) => setPreferredGroupDraft(e.target.value)} placeholder="preferred group" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={shortTagDraft} onChange={(e) => setShortTagDraft(e.target.value)} placeholder="short tag / note" style={{ flex: 1, border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                  <button
+                    type="button"
+                    onClick={() => setInstagramCrmOverrides((prev) => ({
+                      ...prev,
+                      [activeInstagramContact.id]: {
+                        contactType: contactTypeDraft,
+                        crmStage: crmStageDraft,
+                        leadStatus: leadStatusDraft,
+                        source: leadSourceDraft,
+                        preferredDirection: preferredDirectionDraft,
+                        preferredGroup: preferredGroupDraft,
+                        shortTag: shortTagDraft,
+                      },
+                    }))}
+                    style={{ border: `1px solid ${theme.secondary}`, borderRadius: 10, background: `${theme.secondary}22`, color: theme.secondary, padding: "7px 10px", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Save foundation
+                  </button>
                 </div>
               </div>
             )}
@@ -720,6 +853,14 @@ export default function MessagesTab({
 
             <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
               <div style={{ fontWeight: 800, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Contact foundation (multi-channel ready)</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: theme.textMuted }}>
+                  type: {contactTypeDraft || "other"}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: leadStatusDraft === "waitlist" ? theme.warning : theme.textMuted }}>
+                  status: {leadStatusDraft || "—"}
+                </span>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
                 <div>
                   <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Тип контакту</div>
@@ -755,6 +896,41 @@ export default function MessagesTab({
                     Зберегти foundation
                   </button>
                 </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Lead status</div>
+                  <select value={leadStatusDraft} onChange={(e) => setLeadStatusDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
+                    <option value="">—</option>
+                    {LEAD_STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Source</div>
+                  <input value={leadSourceDraft} onChange={(e) => setLeadSourceDraft(e.target.value)} placeholder="instagram/ad/referral" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Preferred direction</div>
+                  <input value={preferredDirectionDraft} onChange={(e) => setPreferredDirectionDraft(e.target.value)} placeholder="heels / bachata ..." style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Preferred group</div>
+                  <input value={preferredGroupDraft} onChange={(e) => setPreferredGroupDraft(e.target.value)} placeholder="group id/name" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => saveMeta(activeDialog.id, {
+                    leadStatus: leadStatusDraft || null,
+                    leadSource: leadSourceDraft || null,
+                    preferredDirection: preferredDirectionDraft || null,
+                    preferredGroup: preferredGroupDraft || null,
+                  })}
+                  style={{ border: `1px solid ${theme.secondary}`, borderRadius: 11, background: theme.card, color: theme.secondary, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+                >
+                  Зберегти lead fields
+                </button>
               </div>
             </div>
 
