@@ -24,9 +24,7 @@ export default function TrainersNotificationsTab({
   const [historyByChat, setHistoryByChat] = useState({});
   const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "", scheduler: { active: false, reason: "unknown" } });
   const [testResult, setTestResult] = useState("");
-  const [sendOverrideDraft, setSendOverrideDraft] = useState("");
-  const [sendOverrideDateTimeDraft, setSendOverrideDateTimeDraft] = useState("");
-  const [overrideMode, setOverrideMode] = useState("default");
+  const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
 
   const membershipByStudent = useMemo(
     () =>
@@ -195,25 +193,43 @@ export default function TrainersNotificationsTab({
   const activeDraft = digest.selectedGroupData?.activeText || "";
   const activeGroupId = digest.selectedGroupData?.groupId || "";
   const isDraftDirty = String(activeDraft || "") !== String(digest.selectedGroupData?.persistedDraft || "");
+  const selectedScheduleKey = `${selectedDialog?.id || ""}:${activeGroupId || ""}`;
+
+  const resolveMode = (rawOverride) => {
+    const value = String(rawOverride || "");
+    if (/^\d{2}:\d{2}$/.test(value)) return "custom_time";
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return "custom_datetime";
+    return "default";
+  };
+
+  const persistedOverrideValue = digest.selectedGroupData?.sendTimeOverride || null;
+  const persistedSendMode = resolveMode(persistedOverrideValue);
+  const scheduleDraft = scheduleDraftByGroup[selectedScheduleKey] || {
+    mode: persistedSendMode,
+    timeValue: persistedSendMode === "custom_time" ? String(persistedOverrideValue || "") : "",
+    datetimeValue: persistedSendMode === "custom_datetime" ? String(persistedOverrideValue || "") : "",
+    dirty: false,
+  };
+  const effectiveDraftMode = scheduleDraft.mode || "default";
 
   useEffect(() => {
-    const rawOverride = String(digest.selectedGroupData?.sendTimeOverride || "");
-    if (/^\d{2}:\d{2}$/.test(rawOverride)) {
-      setOverrideMode("time");
-      setSendOverrideDraft(rawOverride);
-      setSendOverrideDateTimeDraft("");
-      return;
-    }
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawOverride)) {
-      setOverrideMode("datetime");
-      setSendOverrideDateTimeDraft(rawOverride);
-      setSendOverrideDraft("");
-      return;
-    }
-    setOverrideMode("default");
-    setSendOverrideDraft("");
-    setSendOverrideDateTimeDraft("");
-  }, [digest.selectedGroupData?.groupId, digest.selectedGroupData?.sendTimeOverride]);
+    if (!selectedScheduleKey) return;
+    const mode = resolveMode(digest.selectedGroupData?.sendTimeOverride || "");
+    const override = String(digest.selectedGroupData?.sendTimeOverride || "");
+    setScheduleDraftByGroup((prev) => {
+      const existing = prev[selectedScheduleKey];
+      if (existing?.dirty) return prev;
+      return {
+        ...prev,
+        [selectedScheduleKey]: {
+          mode,
+          timeValue: mode === "custom_time" ? override : "",
+          datetimeValue: mode === "custom_datetime" ? override : "",
+          dirty: false,
+        },
+      };
+    });
+  }, [selectedScheduleKey, digest.selectedGroupData?.sendTimeOverride]);
 
   const updateDraft = (next) => {
     if (!selectedDialog?.id || !activeGroupId) return;
@@ -464,20 +480,50 @@ export default function TrainersNotificationsTab({
     return { color: theme.textMuted, border: theme.border, bg: theme.input };
   };
 
+  const updateScheduleDraft = (patch) => {
+    if (!selectedScheduleKey) return;
+    setScheduleDraftByGroup((prev) => {
+      const base = prev[selectedScheduleKey] || {
+        mode: persistedSendMode,
+        timeValue: persistedSendMode === "custom_time" ? String(persistedOverrideValue || "") : "",
+        datetimeValue: persistedSendMode === "custom_datetime" ? String(persistedOverrideValue || "") : "",
+        dirty: false,
+      };
+      return {
+        ...prev,
+        [selectedScheduleKey]: {
+          ...base,
+          ...patch,
+          dirty: true,
+        },
+      };
+    });
+  };
+
   const applySendOverride = async () => {
     if (!activeGroupId) return;
-    if (overrideMode === "default") {
-      setSendOverrideDraft("");
-      setSendOverrideDateTimeDraft("");
+    if (effectiveDraftMode === "default") {
       await upsertGroupState(activeGroupId, { sendTimeOverride: null });
+      setScheduleDraftByGroup((prev) => ({
+        ...prev,
+        [selectedScheduleKey]: { mode: "default", timeValue: "", datetimeValue: "", dirty: false },
+      }));
       return;
     }
-    if (overrideMode === "time") {
-      await upsertGroupState(activeGroupId, { sendTimeOverride: sendOverrideDraft || null });
+    if (effectiveDraftMode === "custom_time") {
+      await upsertGroupState(activeGroupId, { sendTimeOverride: scheduleDraft.timeValue || null });
+      setScheduleDraftByGroup((prev) => ({
+        ...prev,
+        [selectedScheduleKey]: { ...scheduleDraft, dirty: false },
+      }));
       return;
     }
-    if (overrideMode === "datetime") {
-      await upsertGroupState(activeGroupId, { sendTimeOverride: sendOverrideDateTimeDraft || null });
+    if (effectiveDraftMode === "custom_datetime") {
+      await upsertGroupState(activeGroupId, { sendTimeOverride: scheduleDraft.datetimeValue || null });
+      setScheduleDraftByGroup((prev) => ({
+        ...prev,
+        [selectedScheduleKey]: { ...scheduleDraft, dirty: false },
+      }));
     }
   };
 
@@ -553,32 +599,38 @@ export default function TrainersNotificationsTab({
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
 
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>1) Обери групу і перевір розклад</div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 280px) 1fr", gap: 10, alignItems: "start" }}>
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Step 1: Обери групу</div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 320px) 1fr", gap: 10, alignItems: "start" }}>
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ color: theme.textMuted, fontSize: 12 }}>Активна група</label>
               <select
                 value={activeGroupId}
                 onChange={(e) => setSelectedGroupIdByChat((prev) => ({ ...prev, [selectedDialog?.id || ""]: e.target.value }))}
-                style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px", fontWeight: 700 }}
+                style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "10px 12px", fontWeight: 700 }}
               >
                 {(digest.groupsData || []).map((g) => <option key={g.groupId} value={g.groupId}>{g.groupName}</option>)}
               </select>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 8, display: "grid", gap: 6 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
                 <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Заняття</div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Найближче заняття</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{trainingLabel}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Відправка</div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{nextSendLabel}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Default</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>-60 хв до старту</div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Активний режим</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{persistedSendMode}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Automation</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: digest.selectedGroupData?.enabled ? theme.success : theme.warning }}>
+                    {digest.selectedGroupData?.enabled ? "enabled" : "disabled"}
+                  </div>
                 </div>
               </div>
               {!!digest.selectedGroupData?.plan && (
@@ -588,47 +640,64 @@ export default function TrainersNotificationsTab({
               )}
             </div>
           </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => setOverrideMode("default")} style={{ border: `1px solid ${overrideMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "default" ? `${theme.primary}20` : theme.card, color: overrideMode === "default" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Default -60m</button>
-              <button type="button" onClick={() => setOverrideMode("time")} style={{ border: `1px solid ${overrideMode === "time" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "time" ? `${theme.primary}20` : theme.card, color: overrideMode === "time" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Time override</button>
-              <button type="button" onClick={() => setOverrideMode("datetime")} style={{ border: `1px solid ${overrideMode === "datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "datetime" ? `${theme.primary}20` : theme.card, color: overrideMode === "datetime" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Datetime override</button>
+        </div>
+
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Step 2: Режим надсилання</div>
+            <div style={{ fontSize: 11, color: scheduleDraft.dirty ? theme.warning : theme.textMuted }}>
+              {scheduleDraft.dirty ? "Є незбережені зміни schedule" : "Schedule синхронізований"}
             </div>
-            {overrideMode === "time" && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: 12, color: theme.textMuted }}>Локальний час (HH:mm)</label>
+          </div>
+          <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "default" })} style={{ border: `1px solid ${effectiveDraftMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "default" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "default" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Default (−60 хв)</button>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_time" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_time" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_time" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_time" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Custom time (HH:mm)</button>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_datetime" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_datetime" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_datetime" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Custom datetime</button>
+            </div>
+
+            {effectiveDraftMode === "default" && (
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Буде використано стандартне правило: відправка за 60 хвилин до найближчого заняття.</div>
+            )}
+            {effectiveDraftMode === "custom_time" && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 12, color: theme.textMuted }}>Час відправки (HH:mm) для дати найближчого заняття</label>
                 <input
                   type="time"
-                  value={sendOverrideDraft || ""}
-                  onChange={(e) => setSendOverrideDraft(e.target.value || "")}
-                  style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "6px 8px" }}
+                  value={scheduleDraft.timeValue || ""}
+                  onChange={(e) => updateScheduleDraft({ timeValue: e.target.value || "" })}
+                  style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "8px 10px" }}
                 />
               </div>
             )}
-            {overrideMode === "datetime" && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: 12, color: theme.textMuted }}>Локальний datetime</label>
+            {effectiveDraftMode === "custom_datetime" && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 12, color: theme.textMuted }}>Конкретні дата і час відправки</label>
                 <input
                   type="datetime-local"
-                  value={sendOverrideDateTimeDraft || ""}
-                  onChange={(e) => setSendOverrideDateTimeDraft(e.target.value || "")}
-                  style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "6px 8px" }}
+                  value={scheduleDraft.datetimeValue || ""}
+                  onChange={(e) => updateScheduleDraft({ datetimeValue: e.target.value || "" })}
+                  style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "8px 10px" }}
                 />
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ fontSize: 12, color: theme.textMuted }}>
-                Активний режим: {digest.selectedGroupData?.plan?.sendOverrideMode || "default_minus_60m"}
+
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8, display: "grid", gap: 6 }}>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Що буде збережено після Apply:</div>
+              <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 700 }}>
+                {effectiveDraftMode === "default" && "sendTimeOverride = null (default -60m)"}
+                {effectiveDraftMode === "custom_time" && `sendTimeOverride = "${scheduleDraft.timeValue || ""}"`}
+                {effectiveDraftMode === "custom_datetime" && `sendTimeOverride = "${scheduleDraft.datetimeValue || ""}"`}
               </div>
-              <button type="button" onClick={applySendOverride} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "5px 9px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Apply</button>
+              <button type="button" onClick={applySendOverride} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Apply schedule</button>
             </div>
           </div>
         </div>
 
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "grid", gap: 8 }}>
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>2) Редагуй шаблон дайджесту</div>
+              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Step 3: Редагування шаблону</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Головний фокус: текст повідомлення для обраної групи</div>
             </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: isDraftDirty ? theme.warning : theme.success, border: `1px solid ${isDraftDirty ? `${theme.warning}66` : `${theme.success}66`}`, borderRadius: 999, padding: "4px 8px", background: isDraftDirty ? `${theme.warning}20` : `${theme.success}20` }}>
@@ -653,8 +722,8 @@ export default function TrainersNotificationsTab({
           {savingDraft && <div style={{ fontSize: 12, color: theme.textMuted }}>Зберігаємо чернетку…</div>}
         </div>
 
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>3) Перевір або надішли</div>
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Step 4: Збереження / тест / ручний send</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Перевірити</button>
             <button type="button" disabled={sendingNow || !readiness.adminConfigured} onClick={testToAdmin} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Тест адміну</button>
@@ -663,7 +732,7 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>4) Automation per group</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Step 5: Automation status</div>
           <div style={{ display: "grid", gap: 8 }}>
             {(digest.groupsData || []).map((g) => (
               <label key={g.groupId} style={{ display: "grid", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
@@ -715,7 +784,7 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>History</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Step 5: History</div>
           {!lastActions.length && !(digest.persistedHistory || []).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Ще немає дій.</div>}
           <div style={{ display: "grid", gap: 6 }}>
             {lastActions.map((a) => {
