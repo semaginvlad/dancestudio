@@ -92,6 +92,13 @@ const handleChatMeta = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "leadSource")) payload.lead_source = req.body.leadSource || null;
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "preferredDirection")) payload.preferred_direction = req.body.preferredDirection || null;
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "preferredGroup")) payload.preferred_group = req.body.preferredGroup || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "pipelineStatus")) payload.pipeline_status = req.body.pipelineStatus || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "formatPreference")) payload.format_preference = req.body.formatPreference || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "waitlistStatus")) payload.waitlist_status = req.body.waitlistStatus || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "nextAction")) payload.next_action = req.body.nextAction || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "followUpAt")) payload.follow_up_at = req.body.followUpAt || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "followUpReason")) payload.follow_up_reason = req.body.followUpReason || null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "followUpState")) payload.follow_up_state = req.body.followUpState || null;
 
     const { data, error } = await supabase
       .from("telegram_chat_meta")
