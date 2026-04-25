@@ -436,14 +436,15 @@ export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date()
   let sendAt = new Date(nextSession.trainingAt.getTime() - 60 * 60 * 1000);
   const override = String(sendTimeOverride || "").trim();
   if (/^\d{2}:\d{2}$/.test(override)) {
-    const [oh, om] = override.split(":").map(Number);
-    const studioTraining = toStudioDate(nextSession.trainingAt);
-    studioTraining.setUTCHours(oh, om, 0, 0);
-    sendAt = fromStudioDate(studioTraining);
+    const parsed = parseStudioDateTimeToUtc(`${nextSession.date}T${override}`);
+    if (parsed) sendAt = parsed;
   } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(override)) {
     const parsed = parseStudioDateTimeToUtc(override);
     if (parsed) sendAt = parsed;
   }
+  const sendAtLocal = /^\d{2}:\d{2}$/.test(override)
+    ? `${nextSession.date} ${override}`
+    : studioDateTimeKey(sendAt);
   return {
     groupId: String(group?.id),
     groupName: group?.name || "",
@@ -452,7 +453,7 @@ export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date()
     trainingAtIso: nextSession.trainingAt.toISOString(),
     sendAtIso: sendAt.toISOString(),
     trainingAtLocal: studioDateTimeKey(nextSession.trainingAt),
-    sendAtLocal: studioDateTimeKey(sendAt),
+    sendAtLocal,
     sendTimeOverride: override || null,
     sendOverrideMode: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(override)
       ? "datetime_override"
