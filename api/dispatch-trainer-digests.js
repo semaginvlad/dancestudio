@@ -47,12 +47,19 @@ const mapGroup = (g) => ({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST" && req.method !== "GET") {
+  const method = String(req.method || "GET").toUpperCase();
+  res.setHeader("Allow", "GET, POST, OPTIONS");
+
+  if (method === "OPTIONS") {
+    return res.status(200).json({ success: true, methods: ["GET", "POST"] });
+  }
+
+  if (method !== "POST" && method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const now = new Date();
-  const input = req.method === "GET" ? (req.query || {}) : (req.body || {});
+  const input = method === "GET" ? (req.query || {}) : (req.body || {});
   const toleranceMinutes = Math.max(1, Math.min(30, Number(input?.toleranceMinutes || 10)));
   const dryRun = String(input?.dryRun || "").toLowerCase() === "true" || input?.dryRun === true || input?.dryRun === 1 || input?.dryRun === "1";
   const forcedChatId = input?.chatId ? String(input.chatId) : null;
@@ -259,7 +266,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
-    requestMethod: req.method,
+    requestMethod: method,
     dryRun,
     now: now.toISOString(),
     toleranceMinutes,
