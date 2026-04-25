@@ -41,6 +41,7 @@ const monthLabel = (d) => d.toLocaleDateString("uk-UA", { month: "long", year: "
 const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const inRange = (dateStr, start, end) => !!dateStr && dateStr >= start && dateStr <= end;
 const pct = (v, total) => (total > 0 ? Math.round((v / total) * 100) : 0);
+const pctFloat = (v, total) => (total > 0 ? Number(((v / total) * 100).toFixed(1)) : 0);
 const getSubRefDate = (s) => s.startDate || String(s.created_at || "").slice(0, 10);
 const getRawAttendanceType = (a) => a.entryType || a.guestType || "subscription";
 
@@ -136,6 +137,7 @@ export default function TrainersTab({
   const [draft, setDraft] = useState({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
   const [saving, setSaving] = useState(false);
   const [periodMonthIso, setPeriodMonthIso] = useStickyState(toISO(monthStart(new Date())), "ds_trainers_selectedMonth");
+  const [trendMonths, setTrendMonths] = useStickyState(3, "ds_trainers_trend_months_v2");
   const periodDate = useMemo(() => monthStart(new Date(`${String(periodMonthIso || toISO(monthStart(new Date()))).slice(0, 10)}T12:00:00`)), [periodMonthIso]);
   const setPeriodDate = (nextOrUpdater) => {
     setPeriodMonthIso((prevIso) => {
@@ -496,6 +498,188 @@ export default function TrainersTab({
     ];
   }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, renewalsRiskBlock.noRenewal, scopedData.scopedAttn, scopedData.scopedSubs]);
 
+  const paidSubsCurrent = useMemo(
+    () => scopedData.scopedSubs.filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), range.start, range.end)),
+    [range.end, range.start, scopedData.scopedSubs],
+  );
+  const paidSubsPrev = useMemo(
+    () => scopedData.scopedSubs.filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
+    [rangePrev.end, rangePrev.start, scopedData.scopedSubs],
+  );
+
+  const revenueAnalytics = useMemo(() => {
+    const trainerPctByGroup = Object.fromEntries(trainerBoundGroups.map((g) => [String(g.id), Number(g.trainerPct || 0)]));
+    const perGroupCurrent = {};
+    const perGroupPrev = {};
+    let monthCurrent = 0;
+    let monthPrev = 0;
+
+    paidSubsCurrent.forEach((s) => {
+      const groupId = String(s.groupId);
+      const pctValue = trainerPctByGroup[groupId] ?? 0;
+      const trainerShare = Math.round((Number(s.amount || 0) * pctValue) / 100);
+      monthCurrent += trainerShare;
+      perGroupCurrent[groupId] = (perGroupCurrent[groupId] || 0) + trainerShare;
+    });
+    paidSubsPrev.forEach((s) => {
+      const groupId = String(s.groupId);
+      const pctValue = trainerPctByGroup[groupId] ?? 0;
+      const trainerShare = Math.round((Number(s.amount || 0) * pctValue) / 100);
+      monthPrev += trainerShare;
+      perGroupPrev[groupId] = (perGroupPrev[groupId] || 0) + trainerShare;
+    });
+
+    const perGroupRows = trainerBoundGroups.map((g) => ({
+      groupId: g.id,
+      groupName: g.name,
+      trainerPct: Number(g.trainerPct || 0),
+      current: perGroupCurrent[String(g.id)] || 0,
+      previous: perGroupPrev[String(g.id)] || 0,
+      delta: (perGroupCurrent[String(g.id)] || 0) - (perGroupPrev[String(g.id)] || 0),
+    })).sort((a, b) => b.current - a.current);
+
+    return {
+      current: monthCurrent,
+      previous: monthPrev,
+      delta: monthCurrent - monthPrev,
+      perGroupRows,
+    };
+  }, [paidSubsCurrent, paidSubsPrev, trainerBoundGroups]);
+
+  const attendanceUsageAnalytics = useMemo(() => {
+    const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, range.start, range.end));
+    const totalAttendance = periodRows.reduce((sum, row) => sum + (row.quantity || 1), 0);
+    const paidUsed = periodRows
+      .filter((a) => getAttendanceEffectiveType(a, scopedData.scopedSubs) === "subscription")
+      .reduce((sum, row) => sum + (row.quantity || 1), 0);
+    const uniqueStudents = new Set(periodRows.map((a) => String(a.studentId || "")).filter(Boolean)).size;
+    const totalSessions = groupCards.reduce((sum, g) => sum + g.heldSessions, 0);
+    const perGroupPaidUsed = Object.fromEntries(groupCards.map((g) => {
+      const rows = periodRows.filter((a) => String(a.groupId) === String(g.groupId) && getAttendanceEffectiveType(a, scopedData.scopedSubs) === "subscription");
+      const used = rows.reduce((sum, row) => sum + (row.quantity || 1), 0);
+      return [String(g.groupId), used];
+    }));
+
+    return {
+      totalAttendance,
+      paidUsed,
+      avgPerStudent: uniqueStudents > 0 ? Number((totalAttendance / uniqueStudents).toFixed(2)) : 0,
+      avgPerSession: totalSessions > 0 ? Number((totalAttendance / totalSessions).toFixed(2)) : 0,
+      uniqueStudents,
+      perGroupRows: groupCards.map((g) => ({
+        groupId: g.groupId,
+        groupName: g.groupName,
+        attendance: g.attendance,
+        paidUsed: perGroupPaidUsed[String(g.groupId)] || 0,
+        avgPerSession: g.avgAttendancePerSession,
+      })),
+    };
+  }, [groupCards, range.end, range.start, scopedData.scopedAttn, scopedData.scopedSubs]);
+
+  const lossesAndWeaknessAnalytics = useMemo(() => {
+    const expiredPaidSubs = scopedData.scopedSubs.filter((s) => (
+      PAID_PACKS.has(s.planType) && s.endDate && inRange(s.endDate, range.start, range.end)
+    ));
+    const noRenewalSubs = expiredPaidSubs.filter((s) => !scopedData.scopedSubs.some((n) => (
+      PAID_PACKS.has(n.planType) && String(n.studentId) === String(s.studentId) && getSubRefDate(n) > s.endDate
+    )));
+    const noRenewalStudentIds = new Set(noRenewalSubs.map((s) => String(s.studentId)));
+    const noRenewalRate = pctFloat(noRenewalSubs.length, Math.max(1, expiredPaidSubs.length));
+
+    const byGroup = trainerBoundGroups.map((g) => {
+      const groupId = String(g.id);
+      const groupExpired = expiredPaidSubs.filter((s) => String(s.groupId) === groupId);
+      const groupNoRenewal = groupExpired.filter((s) => !scopedData.scopedSubs.some((n) => (
+        PAID_PACKS.has(n.planType) && String(n.studentId) === String(s.studentId) && getSubRefDate(n) > s.endDate
+      )));
+      const groupCard = groupCards.find((gc) => String(gc.groupId) === groupId);
+      const renewalRate = pctFloat(groupExpired.length - groupNoRenewal.length, Math.max(1, groupExpired.length));
+      const fillPctValue = groupCard?.fillPct || 0;
+      const attendanceAvg = groupCard?.avgAttendancePerSession || 0;
+      const weaknessScore = (100 - renewalRate) + (100 - fillPctValue) + (20 - Math.min(20, attendanceAvg * 2));
+      return {
+        groupId: g.id,
+        groupName: g.name,
+        renewalRate,
+        noRenewal: groupNoRenewal.length,
+        expired: groupExpired.length,
+        fillPct: fillPctValue,
+        attendanceAvg,
+        weaknessScore: Number(weaknessScore.toFixed(2)),
+      };
+    });
+
+    const weakByFill = [...byGroup].sort((a, b) => a.fillPct - b.fillPct)[0] || null;
+    const weakByRenewal = [...byGroup].sort((a, b) => a.renewalRate - b.renewalRate)[0] || null;
+    const weakByAttendance = [...byGroup].sort((a, b) => a.attendanceAvg - b.attendanceAvg)[0] || null;
+    const weakest = [...byGroup].sort((a, b) => b.weaknessScore - a.weaknessScore)[0] || null;
+    const riskGroups = [...byGroup].sort((a, b) => b.weaknessScore - a.weaknessScore).slice(0, 3);
+
+    return {
+      expiredWithoutRenewal: noRenewalSubs.length,
+      expiredPaid: expiredPaidSubs.length,
+      noRenewalRate,
+      noRenewalStudents: noRenewalStudentIds.size,
+      weakest,
+      weakByFill,
+      weakByRenewal,
+      weakByAttendance,
+      riskGroups,
+      byGroup,
+    };
+  }, [groupCards, range.end, range.start, scopedData.scopedSubs, trainerBoundGroups]);
+
+  const trendSeries = useMemo(() => {
+    const months = Number(trendMonths) === 6 ? 6 : 3;
+    const base = monthStart(periodDate);
+    const rows = [];
+    for (let i = months - 1; i >= 0; i -= 1) {
+      const d = monthStart(new Date(base.getFullYear(), base.getMonth() - i, 1));
+      const start = toISO(monthStart(d));
+      const end = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+      const attendanceTotal = scopedData.scopedAttn
+        .filter((a) => inRange(a.date, start, end))
+        .reduce((sum, row) => sum + (row.quantity || 1), 0);
+      const revenueTotal = scopedData.scopedSubs
+        .filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), start, end))
+        .reduce((sum, s) => {
+          const group = trainerBoundGroups.find((g) => String(g.id) === String(s.groupId));
+          const pctValue = Number(group?.trainerPct || 0);
+          return sum + Math.round((Number(s.amount || 0) * pctValue) / 100);
+        }, 0);
+      const activeStudents = new Set(
+        scopedData.scopedSubs
+          .filter((s) => {
+            if (String(s.status || "").toLowerCase() === "expired") return false;
+            const startDate = getSubRefDate(s);
+            const endDate = String(s.endDate || "9999-12-31");
+            return startDate <= end && endDate >= start;
+          })
+          .map((s) => String(s.studentId)),
+      ).size;
+      const monthFoundation = buildAnalyticsFoundation({
+        students: scopedData.scopedStudents,
+        groups: trainerBoundGroups,
+        studentGrps: scopedData.scopedStudentGrps,
+        subs: scopedData.scopedSubs,
+        attn: scopedData.scopedAttn,
+        trainers: scopedData.scopedTrainer,
+        trainerGroups: scopedData.scopedTrainerGroups,
+        periodType: "month",
+        anchorDate: d,
+      });
+      rows.push({
+        key: monthKey(d),
+        label: d.toLocaleDateString("uk-UA", { month: "short" }),
+        attendance: attendanceTotal,
+        revenue: revenueTotal,
+        renewals: monthFoundation.metrics.renewals || 0,
+        activeStudents,
+      });
+    }
+    return rows;
+  }, [periodDate, scopedData, trainerBoundGroups, trendMonths]);
+
   const beginCreate = () => {
     setIsCreateMode(true);
     setSelectedTrainerId("");
@@ -684,6 +868,67 @@ export default function TrainersTab({
               <div key={s.key} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: theme.textSoft }}>{s.label}</span>
                 <strong style={{ color: theme.text }}>{s.value}</strong>
+              </div>
+            ))}
+          </div>
+        );
+      }
+      if (p.kind === "revenueByGroup") {
+        return (
+          <div style={{ display: "grid", gap: 8 }}>
+            {p.rows.map((r) => (
+              <div key={r.groupId} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, display: "grid", gap: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <strong style={{ color: theme.text }}>{r.groupName}</strong>
+                  <span style={{ color: r.delta >= 0 ? theme.good : theme.bad }}>{r.delta >= 0 ? "+" : ""}{r.delta.toLocaleString()} ₴</span>
+                </div>
+                <div style={{ fontSize: 12, color: theme.textSoft }}>Поточний: {r.current.toLocaleString()} ₴ · Попередній: {r.previous.toLocaleString()} ₴ · Частка тренера: {r.trainerPct}%</div>
+              </div>
+            ))}
+          </div>
+        );
+      }
+      if (p.kind === "trendV2") {
+        const maxAttendance = Math.max(1, ...p.rows.map((x) => x.attendance || 0));
+        const maxRevenue = Math.max(1, ...p.rows.map((x) => x.revenue || 0));
+        const maxRenewals = Math.max(1, ...p.rows.map((x) => x.renewals || 0));
+        const maxActive = Math.max(1, ...p.rows.map((x) => x.activeStudents || 0));
+        return (
+          <div style={{ display: "grid", gap: 10 }}>
+            {[
+              { key: "attendance", title: "Attendance", color: theme.primary, max: maxAttendance },
+              { key: "revenue", title: "Дохід тренера", color: theme.good, max: maxRevenue },
+              { key: "renewals", title: "Продовження", color: theme.warn, max: maxRenewals },
+              { key: "activeStudents", title: "Активні учениці*", color: theme.secondary, max: maxActive },
+            ].map((line) => (
+              <div key={line.key}>
+                <div style={{ fontSize: 12, color: theme.textSoft, marginBottom: 4 }}>{line.title}</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 78 }}>
+                  {p.rows.map((r) => (
+                    <div key={`${line.key}_${r.key}`} style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ height: `${Math.max(4, (Number(r[line.key] || 0) / line.max) * 64)}px`, background: line.color, borderRadius: 4 }} />
+                      <div style={{ fontSize: 10, color: theme.textSoft, marginTop: 2, textAlign: "center" }}>{r.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: theme.textSoft }}>*Активні учениці — safe approximation за не-expired subscriptions, що перекривають місяць.</div>
+          </div>
+        );
+      }
+      if (p.kind === "riskGroups") {
+        return (
+          <div style={{ display: "grid", gap: 8 }}>
+            {p.rows.map((r) => (
+              <div key={r.groupId} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong style={{ color: theme.text }}>{r.groupName}</strong>
+                  <span style={{ color: theme.bad, fontSize: 12 }}>risk {r.weaknessScore}</span>
+                </div>
+                <div style={{ fontSize: 12, color: theme.textSoft, marginTop: 4 }}>
+                  Renewal: {r.renewalRate}% · Fill: {r.fillPct}% · Avg attendance: {r.attendanceAvg}
+                </div>
               </div>
             ))}
           </div>
@@ -1017,6 +1262,75 @@ export default function TrainersTab({
               },
             })}
           />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Дохід тренера по групах", payload: { kind: "revenueByGroup", rows: revenueAnalytics.perGroupRows } })}
+            style={{ ...tile(), borderColor: theme.good }}
+          >
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Дохід тренера (місяць)</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: theme.good }}>{revenueAnalytics.current.toLocaleString()} ₴</div>
+            <div style={{ marginTop: 6 }}><Delta value={revenueAnalytics.delta} /></div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 6 }}>Попередній: {revenueAnalytics.previous.toLocaleString()} ₴</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Attendance / used paid subscriptions", payload: { kind: "groupBars", rows: attendanceUsageAnalytics.perGroupRows.map((x) => ({ groupId: x.groupId, groupName: x.groupName, trial: 0, single: x.attendance - x.paidUsed, paid: x.paidUsed })) } })}
+            style={{ ...tile(), borderColor: theme.secondary }}
+          >
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Відвідуваність / paid usage</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: theme.text }}>{attendanceUsageAnalytics.totalAttendance}</div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 4 }}>used paid: {attendanceUsageAnalytics.paidUsed}</div>
+            <div style={{ fontSize: 11, color: theme.textSoft }}>сер./ученицю: {attendanceUsageAnalytics.avgPerStudent} · сер./заняття: {attendanceUsageAnalytics.avgPerSession}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Втрати / відтік", payload: { kind: "renewalRisk", renewals: foundationCurrent.metrics.renewals || 0, expired: lossesAndWeaknessAnalytics.expiredPaid, noRenewal: lossesAndWeaknessAnalytics.expiredWithoutRenewal } })}
+            style={{ ...tile(), borderColor: theme.bad }}
+          >
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Втрати / no-renewal</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: theme.bad }}>{lossesAndWeaknessAnalytics.expiredWithoutRenewal}</div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 4 }}>no renewal rate: {lossesAndWeaknessAnalytics.noRenewalRate}%</div>
+            <div style={{ fontSize: 11, color: theme.textSoft }}>expired paid: {lossesAndWeaknessAnalytics.expiredPaid}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Слабкі групи", payload: { kind: "riskGroups", rows: lossesAndWeaknessAnalytics.riskGroups } })}
+            style={{ ...tile(), borderColor: theme.warn }}
+          >
+            <div style={{ fontSize: 12, color: theme.textSoft }}>Слабкі місця</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: theme.text }}>{lossesAndWeaknessAnalytics.weakest?.groupName || "—"}</div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 4 }}>Найнижча заповнюваність: {lossesAndWeaknessAnalytics.weakByFill?.groupName || "—"}</div>
+            <div style={{ fontSize: 11, color: theme.textSoft }}>Найнижчий renewal: {lossesAndWeaknessAnalytics.weakByRenewal?.groupName || "—"}</div>
+          </button>
+        </div>
+
+        <div style={{ ...card(), padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 800 }}>Динаміка {Number(trendMonths) === 6 ? "6" : "3"} місяці</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" onClick={() => setTrendMonths(3)} style={{ border: `1px solid ${Number(trendMonths) === 3 ? theme.primary : theme.border}`, borderRadius: 999, background: Number(trendMonths) === 3 ? `${theme.primary}18` : theme.panelSoft, color: theme.text, padding: "4px 10px", cursor: "pointer", fontWeight: 700 }}>3м</button>
+              <button type="button" onClick={() => setTrendMonths(6)} style={{ border: `1px solid ${Number(trendMonths) === 6 ? theme.primary : theme.border}`, borderRadius: 999, background: Number(trendMonths) === 6 ? `${theme.primary}18` : theme.panelSoft, color: theme.text, padding: "4px 10px", cursor: "pointer", fontWeight: 700 }}>6м</button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDetailState({ type: "chart", title: "Тренди: attendance / revenue / renewals / active students", payload: { kind: "trendV2", rows: trendSeries } })}
+            style={{ ...tile(), margin: 0, background: theme.panelSoft }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8 }}>
+              <DetailMetric label="Attendance" value={trendSeries.at(-1)?.attendance || 0} />
+              <DetailMetric label="Дохід" value={`${(trendSeries.at(-1)?.revenue || 0).toLocaleString()} ₴`} />
+              <DetailMetric label="Продовження" value={trendSeries.at(-1)?.renewals || 0} />
+              <DetailMetric label="Активні учениці*" value={trendSeries.at(-1)?.activeStudents || 0} />
+            </div>
+            <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 8 }}>*safe approximation за активними subscriptions, що перетинають місяць.</div>
+          </button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
