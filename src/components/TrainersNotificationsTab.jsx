@@ -22,9 +22,11 @@ export default function TrainersNotificationsTab({
   const [savingDraft, setSavingDraft] = useState(false);
   const [stateByChatGroup, setStateByChatGroup] = useState({});
   const [historyByChat, setHistoryByChat] = useState({});
-  const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "" });
+  const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "", scheduler: { active: false, reason: "unknown" } });
   const [testResult, setTestResult] = useState("");
   const [sendOverrideDraft, setSendOverrideDraft] = useState("");
+  const [sendOverrideDateTimeDraft, setSendOverrideDateTimeDraft] = useState("");
+  const [overrideMode, setOverrideMode] = useState("default");
 
   const membershipByStudent = useMemo(
     () =>
@@ -80,10 +82,11 @@ export default function TrainersNotificationsTab({
               ready: !!rPayload?.ready,
               adminConfigured: !!rPayload?.adminConfigured,
               details: rPayload?.ready ? "Storage ready" : "Storage not ready",
+              scheduler: rPayload?.scheduler || { active: false, reason: "unknown" },
             });
           }
         } catch {
-          if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Readiness check failed" });
+          if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Readiness check failed", scheduler: { active: false, reason: "readiness_failed" } });
         }
 
         const stateRows = await Promise.all(
@@ -194,7 +197,22 @@ export default function TrainersNotificationsTab({
   const isDraftDirty = String(activeDraft || "") !== String(digest.selectedGroupData?.persistedDraft || "");
 
   useEffect(() => {
-    setSendOverrideDraft(digest.selectedGroupData?.sendTimeOverride || "");
+    const rawOverride = String(digest.selectedGroupData?.sendTimeOverride || "");
+    if (/^\d{2}:\d{2}$/.test(rawOverride)) {
+      setOverrideMode("time");
+      setSendOverrideDraft(rawOverride);
+      setSendOverrideDateTimeDraft("");
+      return;
+    }
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawOverride)) {
+      setOverrideMode("datetime");
+      setSendOverrideDateTimeDraft(rawOverride);
+      setSendOverrideDraft("");
+      return;
+    }
+    setOverrideMode("default");
+    setSendOverrideDraft("");
+    setSendOverrideDateTimeDraft("");
   }, [digest.selectedGroupData?.groupId, digest.selectedGroupData?.sendTimeOverride]);
 
   const updateDraft = (next) => {
@@ -356,19 +374,20 @@ export default function TrainersNotificationsTab({
     const todayStr = today();
     const history = digest.persistedHistory || [];
     return (digest.groupsData || []).map((g) => {
-      if (!g.enabled) return { groupId: g.groupId, groupName: g.groupName, status: "disabled", sendAt: g.plan?.sendAtIso || "", trainingDate: g.plan?.trainingDate || "" };
+      if (!g.enabled) return { groupId: g.groupId, groupName: g.groupName, status: "disabled", sendAt: g.plan?.sendAtIso || "", sendAtLocal: g.plan?.sendAtLocal || "", trainingDate: g.plan?.trainingDate || "" };
       if (!g.plan) return { groupId: g.groupId, groupName: g.groupName, status: "cancelled", sendAt: "", trainingDate: "" };
       const hist = history.find((h) => String(h.groupId) === String(g.groupId) && String(h.trainingDate || "").slice(0, 10) === String(g.plan.trainingDate || "").slice(0, 10));
-      if (hist?.status === "sent") return { groupId: g.groupId, groupName: g.groupName, status: "sent", sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate, details: hist.details || "" };
-      if (hist?.status === "failed" || hist?.status === "skipped") return { groupId: g.groupId, groupName: g.groupName, status: hist.status, sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate, details: hist.reason || hist.details || "" };
+      if (hist?.status === "sent") return { groupId: g.groupId, groupName: g.groupName, status: "sent", sendAt: g.plan.sendAtIso, sendAtLocal: g.plan.sendAtLocal || "", trainingDate: g.plan.trainingDate, details: hist.details || "" };
+      if (hist?.status === "failed" || hist?.status === "skipped") return { groupId: g.groupId, groupName: g.groupName, status: hist.status, sendAt: g.plan.sendAtIso, sendAtLocal: g.plan.sendAtLocal || "", trainingDate: g.plan.trainingDate, details: hist.reason || hist.details || "" };
       if (String(g.plan.trainingDate || "").slice(0, 10) !== todayStr) {
-        return { groupId: g.groupId, groupName: g.groupName, status: "not_today", sendAt: g.plan.sendAtIso, trainingDate: g.plan.trainingDate };
+        return { groupId: g.groupId, groupName: g.groupName, status: "not_today", sendAt: g.plan.sendAtIso, sendAtLocal: g.plan.sendAtLocal || "", trainingDate: g.plan.trainingDate };
       }
       return {
         groupId: g.groupId,
         groupName: g.groupName,
         status: isDispatchDueNow(g.plan, new Date(), 15) ? "due" : "scheduled",
         sendAt: g.plan.sendAtIso,
+        sendAtLocal: g.plan.sendAtLocal || "",
         trainingDate: g.plan.trainingDate,
       };
     });
@@ -421,8 +440,13 @@ export default function TrainersNotificationsTab({
   const selectedPlan = digest.selectedGroupData?.plan || null;
   const selectedChatTitle = selectedDialog?.title || selectedDialog?.id || "—";
   const selectedGroupName = digest.selectedGroupData?.groupName || "—";
-  const nextSendLabel = selectedPlan?.sendAtIso ? selectedPlan.sendAtIso.slice(0, 16).replace("T", " ") : "—";
-  const trainingLabel = selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—";
+  const nextSendLabel = selectedPlan?.sendAtLocal || "—";
+  const trainingLabel = selectedPlan?.trainingAtLocal || (selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—");
+  const schedulerStatusLabel = readiness?.scheduler?.active
+    ? "auto-dispatch active"
+    : readiness?.ready
+      ? "schedule ready, trigger missing"
+      : "scheduler missing";
 
   const statusChip = (ok) => ({
     background: ok ? `${theme.success}20` : `${theme.warning}20`,
@@ -435,6 +459,23 @@ export default function TrainersNotificationsTab({
     if (status === "failed" || status === "skipped" || status === "cancelled") return { color: theme.danger, border: `${theme.danger}44`, bg: `${theme.danger}18` };
     if (status === "due") return { color: theme.warning, border: `${theme.warning}44`, bg: `${theme.warning}18` };
     return { color: theme.textMuted, border: theme.border, bg: theme.input };
+  };
+
+  const applySendOverride = async () => {
+    if (!activeGroupId) return;
+    if (overrideMode === "default") {
+      setSendOverrideDraft("");
+      setSendOverrideDateTimeDraft("");
+      await upsertGroupState(activeGroupId, { sendTimeOverride: null });
+      return;
+    }
+    if (overrideMode === "time") {
+      await upsertGroupState(activeGroupId, { sendTimeOverride: sendOverrideDraft || null });
+      return;
+    }
+    if (overrideMode === "datetime") {
+      await upsertGroupState(activeGroupId, { sendTimeOverride: sendOverrideDateTimeDraft || null });
+    }
   };
 
   return (
@@ -473,7 +514,7 @@ export default function TrainersNotificationsTab({
             <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Planner mode</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 8 }}>
             <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Тренер</div>
               <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedChatTitle}</div>
@@ -496,6 +537,12 @@ export default function TrainersNotificationsTab({
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Storage</div>
               <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
                 {readiness.ready ? "ready" : "missing"}
+              </div>
+            </div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Scheduler</div>
+              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
+                {schedulerStatusLabel}
               </div>
             </div>
           </div>
@@ -533,21 +580,45 @@ export default function TrainersNotificationsTab({
               </div>
               {!!digest.selectedGroupData?.plan && (
                 <div style={{ fontSize: 12, color: isDispatchDueNow(digest.selectedGroupData.plan, new Date(), 15) ? theme.warning : theme.textMuted }}>
-                  Планер: відправка {digest.selectedGroupData.plan.sendAtIso.slice(0, 16).replace("T", " ")}
+                  Планер: відправка {digest.selectedGroupData.plan.sendAtLocal || digest.selectedGroupData.plan.sendAtIso}
                 </div>
               )}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ fontSize: 12, color: theme.textMuted }}>Override send time</label>
-            <input
-              type="time"
-              value={sendOverrideDraft || ""}
-              onChange={(e) => setSendOverrideDraft(e.target.value || "")}
-              style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "6px 8px" }}
-            />
-            <button type="button" onClick={() => upsertGroupState(activeGroupId, { sendTimeOverride: sendOverrideDraft || null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "5px 9px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Apply</button>
-            <button type="button" onClick={() => { setSendOverrideDraft(""); upsertGroupState(activeGroupId, { sendTimeOverride: null }); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "5px 9px", cursor: "pointer", fontSize: 12 }}>Reset</button>
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => setOverrideMode("default")} style={{ border: `1px solid ${overrideMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "default" ? `${theme.primary}20` : theme.card, color: overrideMode === "default" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Default -60m</button>
+              <button type="button" onClick={() => setOverrideMode("time")} style={{ border: `1px solid ${overrideMode === "time" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "time" ? `${theme.primary}20` : theme.card, color: overrideMode === "time" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Time override</button>
+              <button type="button" onClick={() => setOverrideMode("datetime")} style={{ border: `1px solid ${overrideMode === "datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: overrideMode === "datetime" ? `${theme.primary}20` : theme.card, color: overrideMode === "datetime" ? theme.primary : theme.textMain, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Datetime override</button>
+            </div>
+            {overrideMode === "time" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12, color: theme.textMuted }}>Локальний час (HH:mm)</label>
+                <input
+                  type="time"
+                  value={sendOverrideDraft || ""}
+                  onChange={(e) => setSendOverrideDraft(e.target.value || "")}
+                  style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "6px 8px" }}
+                />
+              </div>
+            )}
+            {overrideMode === "datetime" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12, color: theme.textMuted }}>Локальний datetime</label>
+                <input
+                  type="datetime-local"
+                  value={sendOverrideDateTimeDraft || ""}
+                  onChange={(e) => setSendOverrideDateTimeDraft(e.target.value || "")}
+                  style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "6px 8px" }}
+                />
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>
+                Активний режим: {digest.selectedGroupData?.plan?.sendOverrideMode || "default_minus_60m"}
+              </div>
+              <button type="button" onClick={applySendOverride} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "5px 9px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Apply</button>
+            </div>
           </div>
         </div>
 
@@ -608,7 +679,7 @@ export default function TrainersNotificationsTab({
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   {g.plan
-                    ? `next send ${g.plan.sendAtIso.slice(0, 16).replace("T", " ")} • заняття ${g.plan.trainingDate} ${g.plan.trainingTime}`
+                    ? `next send ${g.plan.sendAtLocal || g.plan.sendAtIso} • заняття ${g.plan.trainingDate} ${g.plan.trainingTime}`
                     : "Немає валідного schedule"}
                 </div>
               </label>
@@ -627,7 +698,7 @@ export default function TrainersNotificationsTab({
                     <div style={{ minWidth: 0 }}>
                       <div style={{ color: theme.textMain, fontWeight: 700, fontSize: 12 }}>{x.groupName}</div>
                       <div style={{ color: theme.textMuted, fontSize: 11 }}>
-                        {x.sendAt ? x.sendAt.slice(0, 16).replace("T", " ") : "—"}{x.trainingDate ? ` • заняття ${x.trainingDate}` : ""}{x.details ? ` • ${x.details}` : ""}
+                        {x.sendAtLocal || (x.sendAt ? x.sendAt.slice(0, 16).replace("T", " ") : "—")}{x.trainingDate ? ` • заняття ${x.trainingDate}` : ""}{x.details ? ` • ${x.details}` : ""}
                       </div>
                     </div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: tone.color, textTransform: "uppercase" }}>{x.status}</div>

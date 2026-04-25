@@ -1,5 +1,38 @@
 import { getDisplayName, getEffectiveEndDate, getSubStatus, hasActiveSubscriptionCoverage, today } from "./utils";
 
+const STUDIO_UTC_OFFSET_MINUTES = Number(
+  (typeof import.meta !== "undefined" && import.meta?.env?.VITE_STUDIO_UTC_OFFSET_MINUTES)
+  || (typeof process !== "undefined" && process?.env?.STUDIO_UTC_OFFSET_MINUTES)
+  || 180
+);
+const STUDIO_OFFSET_MS = STUDIO_UTC_OFFSET_MINUTES * 60 * 1000;
+
+const toStudioDate = (date) => new Date(new Date(date || new Date()).getTime() + STUDIO_OFFSET_MS);
+const fromStudioDate = (studioDate) => new Date(new Date(studioDate).getTime() - STUDIO_OFFSET_MS);
+const studioDateKey = (date) => {
+  const d = toStudioDate(date);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const studioDateTimeKey = (date) => {
+  const d = toStudioDate(date);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day} ${hh}:${mm}`;
+};
+const parseStudioDateTimeToUtc = (raw) => {
+  const m = String(raw || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm] = m;
+  const studioMs = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), 0, 0);
+  return new Date(studioMs - STUDIO_OFFSET_MS);
+};
+
 export const parseTrainerGroups = (note = "") => {
   const match = note.match(/trainer_groups\s*:\s*([^\n\r]+)/i);
   if (!match?.[1]) return [];
@@ -352,17 +385,17 @@ export const buildGroupScheduleWindows = (group) => {
 
 const buildDateFromDayAndTime = (day, time, fromDate) => {
   const [hh, mm] = String(time || "00:00").split(":").map((n) => Number(n || 0));
-  const current = new Date(fromDate || new Date());
-  const target = new Date(current);
-  target.setSeconds(0, 0);
-  target.setMinutes(mm, 0, 0);
-  target.setHours(hh);
-  const currentDay = current.getDay();
+  const currentStudio = toStudioDate(fromDate || new Date());
+  const targetStudio = new Date(currentStudio);
+  targetStudio.setUTCSeconds(0, 0);
+  targetStudio.setUTCMinutes(mm, 0, 0);
+  targetStudio.setUTCHours(hh);
+  const currentDay = currentStudio.getUTCDay();
   let diff = day - currentDay;
   if (diff < 0) diff += 7;
-  target.setDate(current.getDate() + diff);
-  if (target <= current) target.setDate(target.getDate() + 7);
-  return target;
+  targetStudio.setUTCDate(currentStudio.getUTCDate() + diff);
+  if (targetStudio <= currentStudio) targetStudio.setUTCDate(targetStudio.getUTCDate() + 7);
+  return fromStudioDate(targetStudio);
 };
 
 export const findNextValidTrainingSession = ({ group, cancelled = [], now = new Date(), lookaheadDays = 35 }) => {
@@ -382,13 +415,14 @@ export const findNextValidTrainingSession = ({ group, cancelled = [], now = new 
     const first = buildDateFromDayAndTime(w.day, w.trainingTime, now);
     for (let i = 0; i < Math.ceil(lookaheadDays / 7) + 1; i += 1) {
       const dt = new Date(first);
-      dt.setDate(first.getDate() + i * 7);
-      const dateStr = dt.toISOString().slice(0, 10);
+      dt.setUTCDate(first.getUTCDate() + i * 7);
+      const dateStr = studioDateKey(dt);
       if (cancelledSet.has(dateStr)) continue;
       candidates.push({
         date: dateStr,
         trainingTime: w.trainingTime,
         trainingAt: dt,
+        trainingAtLocal: studioDateTimeKey(dt),
       });
     }
   });
@@ -403,8 +437,12 @@ export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date()
   const override = String(sendTimeOverride || "").trim();
   if (/^\d{2}:\d{2}$/.test(override)) {
     const [oh, om] = override.split(":").map(Number);
-    sendAt = new Date(nextSession.trainingAt);
-    sendAt.setHours(oh, om, 0, 0);
+    const studioTraining = toStudioDate(nextSession.trainingAt);
+    studioTraining.setUTCHours(oh, om, 0, 0);
+    sendAt = fromStudioDate(studioTraining);
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(override)) {
+    const parsed = parseStudioDateTimeToUtc(override);
+    if (parsed) sendAt = parsed;
   }
   return {
     groupId: String(group?.id),
@@ -413,7 +451,15 @@ export const buildGroupDispatchPlan = ({ group, cancelled = [], now = new Date()
     trainingTime: nextSession.trainingTime,
     trainingAtIso: nextSession.trainingAt.toISOString(),
     sendAtIso: sendAt.toISOString(),
+    trainingAtLocal: studioDateTimeKey(nextSession.trainingAt),
+    sendAtLocal: studioDateTimeKey(sendAt),
     sendTimeOverride: override || null,
+    sendOverrideMode: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(override)
+      ? "datetime_override"
+      : /^\d{2}:\d{2}$/.test(override)
+        ? "time_override"
+        : "default_minus_60m",
+    studioUtcOffsetMinutes: STUDIO_UTC_OFFSET_MINUTES,
   };
 };
 

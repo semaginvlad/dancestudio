@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_LOG_CHAT_ID } from "./_lib/trainer-digest-send.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const buildSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -17,12 +19,32 @@ const readinessError = (res, error) => res.status(503).json({
 
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
 
+const detectSchedulerStatus = () => {
+  try {
+    const vercelPath = path.join(process.cwd(), "vercel.json");
+    if (!fs.existsSync(vercelPath)) {
+      return { active: false, reason: "vercel_json_missing", targetPath: "/api/dispatch-trainer-digests" };
+    }
+    const raw = fs.readFileSync(vercelPath, "utf8");
+    const parsed = JSON.parse(raw || "{}");
+    const crons = Array.isArray(parsed?.crons) ? parsed.crons : [];
+    const hasDispatchCron = crons.some((c) => String(c?.path || "").trim() === "/api/dispatch-trainer-digests");
+    if (!hasDispatchCron) {
+      return { active: false, reason: "dispatch_cron_not_declared", targetPath: "/api/dispatch-trainer-digests" };
+    }
+    return { active: true, reason: "dispatch_cron_declared", targetPath: "/api/dispatch-trainer-digests" };
+  } catch (error) {
+    return { active: false, reason: "scheduler_check_failed", details: String(error?.message || error), targetPath: "/api/dispatch-trainer-digests" };
+  }
+};
+
 const handleReadiness = async (res) => {
   const supabase = buildSupabase();
   const [stateCheck, historyCheck] = await Promise.all([
     supabase.from("trainer_notification_state").select("chat_id", { count: "exact", head: true }),
     supabase.from("trainer_dispatch_history").select("id", { count: "exact", head: true }),
   ]);
+  const scheduler = detectSchedulerStatus();
   const ready = !stateCheck.error && !historyCheck.error;
   return res.status(200).json({
     success: true,
@@ -32,6 +54,7 @@ const handleReadiness = async (res) => {
       trainer_notification_state: stateCheck.error ? String(stateCheck.error.message || stateCheck.error) : "ok",
       trainer_dispatch_history: historyCheck.error ? String(historyCheck.error.message || historyCheck.error) : "ok",
     },
+    scheduler,
     requiredTables: ["trainer_notification_state", "trainer_dispatch_history"],
     requiredSql: ["sql/trainer_notification_state.sql", "sql/trainer_dispatch_history.sql"],
   });
