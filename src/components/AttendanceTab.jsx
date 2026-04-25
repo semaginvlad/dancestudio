@@ -9,9 +9,11 @@ import {
   useStickyState,
   getEffectiveEndDate,
   isSubExhausted,
+  getActiveSubOnDateForCoverage,
   getNextTrainingDate,
   getPreviousTrainingDate,
 } from "../shared/utils";
+import { theme } from "../shared/constants";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -20,7 +22,13 @@ const MONTH_NAMES = [
 
 const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
-const styles = {
+const makeStyles = () => {
+  const isDark = theme.bg === "#0F131A";
+  const matrixBase = isDark ? "#131b26" : theme.card;
+  const matrixMuted = isDark ? "#101722" : theme.input;
+  const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
+
+  return ({
   wrap: {
     display: "flex",
     flexDirection: "column",
@@ -33,10 +41,10 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "14px 16px",
-    border: "1px solid #d6e0ec",
+    border: `1px solid ${theme.border}`,
     borderRadius: 14,
-    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-    boxShadow: "0 6px 20px rgba(15, 23, 42, 0.05)",
+    background: `linear-gradient(180deg, ${theme.card} 0%, ${theme.input} 100%)`,
+    boxShadow: theme.bg === "#0F131A" ? "0 6px 20px rgba(0,0,0,0.25)" : "0 6px 20px rgba(15, 23, 42, 0.05)",
   },
   toolbarLeft: {
     display: "flex",
@@ -47,11 +55,11 @@ const styles = {
   control: {
     height: 38,
     borderRadius: 10,
-    border: "1px solid #c9d5e3",
+    border: `1px solid ${theme.border}`,
     padding: "0 12px",
-    background: "#fff",
+    background: matrixBase,
     fontSize: 14,
-    color: "#111827",
+    color: theme.textMain,
     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
   },
   legend: {
@@ -59,11 +67,11 @@ const styles = {
     gap: 14,
     flexWrap: "wrap",
     fontSize: 13,
-    color: "#374151",
+    color: theme.textMuted,
   },
   hint: {
     fontSize: 12,
-    color: "#6b7280",
+    color: theme.textLight,
   },
   legendItem: {
     display: "flex",
@@ -80,11 +88,11 @@ const styles = {
   tableWrap: {
     overflowX: "auto",
     overflowY: "visible",
-    border: "1px solid #bfcddd",
+    border: `1px solid ${theme.border}`,
     borderRadius: 14,
-    background: "#fff",
+    background: theme.card,
     position: "relative",
-    boxShadow: "0 10px 28px rgba(15, 23, 42, 0.08)",
+    boxShadow: theme.bg === "#0F131A" ? "0 10px 28px rgba(0,0,0,0.3)" : "0 10px 28px rgba(15, 23, 42, 0.08)",
   },
   table: {
     borderCollapse: "separate",
@@ -95,28 +103,28 @@ const styles = {
     position: "sticky",
     left: 0,
     zIndex: 4,
-    background: "#fff",
+    background: theme.card,
     minWidth: 240,
     maxWidth: 240,
     width: 240,
-    borderRight: "1px solid #d8e1ec",
-    boxShadow: "1px 0 0 #dbe3ef",
+    borderRight: `1px solid ${theme.border}`,
+    boxShadow: `1px 0 0 ${theme.border}`,
   },
   headTop: {
     position: "sticky",
     top: 0,
     zIndex: 5,
-    background: "#f9fafb",
+    background: matrixMuted,
   },
   monthHead: (isCurrent) => ({
     textAlign: "center",
     fontWeight: 700,
     fontSize: isCurrent ? 14 : 13,
-    color: isCurrent ? "#0f172a" : "#475569",
-    borderBottom: isCurrent ? "2px solid #2563eb" : "1px solid #d8e1ec",
-    borderRight: "1px solid #d8e1ec",
+    color: isCurrent ? theme.textMain : theme.textMuted,
+    borderBottom: isCurrent ? `2px solid ${theme.primary}` : `1px solid ${theme.border}`,
+    borderRight: `1px solid ${theme.border}`,
     padding: "10px 6px 9px",
-    background: isCurrent ? "#eef6ff" : "#f6f8fb",
+    background: isCurrent ? (isDark ? "#162742" : `${theme.primary}1A`) : matrixMuted,
     whiteSpace: "nowrap",
   }),
   studentHead: {
@@ -124,9 +132,9 @@ const styles = {
     textAlign: "left",
     fontWeight: 700,
     fontSize: 14,
-    color: "#111827",
-    borderBottom: "1px solid #d8e1ec",
-    background: "#f9fafb",
+    color: theme.textMain,
+    borderBottom: `1px solid ${theme.border}`,
+    background: matrixMuted,
   },
   dayHead: (isCancelled, isMutedMonth, isCurrentMonth) => ({
     minWidth: 58,
@@ -134,26 +142,26 @@ const styles = {
     width: 58,
     textAlign: "center",
     verticalAlign: "top",
-    borderRight: "1px solid #d5dfeb",
-    borderBottom: "1px solid #d8e1ec",
+    borderRight: `1px solid ${theme.border}`,
+    borderBottom: `1px solid ${theme.border}`,
     padding: "8px 4px",
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? "#ffffff"
+        ? matrixBase
         : isMutedMonth
-          ? "#f7f9fc"
-          : "#fff",
+          ? matrixMuted
+          : matrixBase,
   }),
   dayNum: (isCurrentMonth, isMutedMonth) => ({
     fontSize: isCurrentMonth ? 15 : 14,
     fontWeight: 700,
-    color: isCurrentMonth ? "#111827" : (isMutedMonth ? "#94a3b8" : "#1f2937"),
+    color: isCurrentMonth ? theme.textMain : (isMutedMonth ? theme.textLight : theme.textMuted),
     lineHeight: 1.1,
   }),
   dayName: (isCurrentMonth, isMutedMonth) => ({
     fontSize: 11,
-    color: isCurrentMonth ? "#475569" : (isMutedMonth ? "#a3afbf" : "#64748b"),
+    color: isCurrentMonth ? theme.textMuted : (isMutedMonth ? theme.textLight : theme.textMuted),
     marginTop: 2,
   }),
   cancelBtn: (isCancelled) => ({
@@ -163,7 +171,7 @@ const styles = {
     borderRadius: 999,
     border: "1px solid",
     borderColor: isCancelled ? "#10b981" : "#fca5a5",
-    background: isCancelled ? "#ecfdf5" : "#fff",
+    background: isCancelled ? (isDark ? "#123126" : "#ecfdf5") : matrixBase,
     color: isCancelled ? "#047857" : "#b91c1c",
     cursor: "pointer",
     fontSize: 12,
@@ -174,15 +182,15 @@ const styles = {
     position: "sticky",
     left: 0,
     zIndex: 3,
-    background: "#fcfdff",
-    borderRight: "1px solid #d8e1ec",
-    borderBottom: "1px solid #e2e8f0",
+    background: matrixBase,
+    borderRight: `1px solid ${theme.border}`,
+    borderBottom: `1px solid ${theme.border}`,
     padding: "8px 10px",
   },
   studentName: {
     fontSize: 14,
     fontWeight: 600,
-    color: "#111827",
+    color: theme.textMain,
   },
   studentNameRow: {
     display: "flex",
@@ -198,9 +206,9 @@ const styles = {
     width: 18,
     height: 18,
     borderRadius: 5,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#374151",
+    border: `1px solid ${theme.border}`,
+    background: matrixBase,
+    color: theme.textMuted,
     cursor: "pointer",
     padding: 0,
     lineHeight: "16px",
@@ -213,9 +221,9 @@ const styles = {
     width: 18,
     height: 18,
     borderRadius: 5,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#4b5563",
+    border: `1px solid ${theme.border}`,
+    background: matrixBase,
+    color: theme.textMuted,
     cursor: "pointer",
     padding: 0,
     lineHeight: "16px",
@@ -224,8 +232,8 @@ const styles = {
   menu: {
     position: "fixed",
     minWidth: 160,
-    background: "#fff",
-    border: "1px solid #e5e7eb",
+    background: matrixBase,
+    border: `1px solid ${theme.border}`,
     borderRadius: 10,
     boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
     zIndex: 20,
@@ -236,7 +244,7 @@ const styles = {
     maxWidth: 150,
     width: 150,
     fontWeight: 700,
-    color: "#374151",
+    color: theme.textMuted,
     whiteSpace: "nowrap",
     fontSize: 12,
     padding: "8px 10px",
@@ -249,17 +257,17 @@ const styles = {
     padding: "8px 10px",
     borderRadius: 8,
     fontSize: 12,
-    color: "#374151",
+    color: theme.textMuted,
     cursor: "pointer",
   },
   menuItemDisabled: {
-    color: "#9ca3af",
+    color: theme.textLight,
     cursor: "not-allowed",
     opacity: 0.85,
   },
   menuDivider: {
     margin: "6px 0",
-    borderTop: "1px solid #edf2f7",
+    borderTop: `1px solid ${theme.border}`,
   },
   notifyRow: {
     display: "flex",
@@ -267,7 +275,7 @@ const styles = {
     gap: 8,
     padding: "8px 10px",
     fontSize: 12,
-    color: "#374151",
+    color: theme.textMuted,
     userSelect: "none",
   },
   notifyCheck: {
@@ -277,7 +285,7 @@ const styles = {
   },
   studentMeta: {
     fontSize: 11,
-    color: "#6b7280",
+    color: theme.textMuted,
     marginTop: 2,
     lineHeight: 1.2,
   },
@@ -288,15 +296,15 @@ const styles = {
     height: 54,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRight: "1px solid #dfe7f1",
-    borderBottom: "1px solid #dde6f0",
+    borderRight: `1px solid ${theme.border}`,
+    borderBottom: `1px solid ${theme.border}`,
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? "#ffffff"
+        ? matrixBase
         : isMutedMonth
-          ? "#f8fafd"
-          : "#fff",
+          ? matrixMuted
+          : matrixBase,
   }),
   cellBtn: (bg, disabled, saving) => ({
     width: 32,
@@ -308,10 +316,10 @@ const styles = {
     opacity: disabled || saving ? 0.55 : 1,
     fontSize: 16,
     fontWeight: 700,
-    color: bg === "#ffffff" ? "#9ca3af" : "#fff",
+    color: bg === theme.card ? theme.textLight : "#fff",
   }),
   subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
-    background: isCancelled ? "#fef2f2" : tone,
+    background: isCancelled ? (isDark ? "#311d23" : "#fef2f2") : tone,
     boxShadow: [
       `inset 0 1px 0 ${border}`,
       `inset 0 -1px 0 ${border}`,
@@ -322,19 +330,20 @@ const styles = {
       .join(", "),
   }),
   monthDivider: {
-    borderRight: "2px solid #94a3b8",
+    borderRight: `2px solid ${theme.textLight}`,
   },
   totalsRow: {
-    background: "#f3f7fc",
-    boxShadow: "inset 0 1px 0 #c9d6e5",
+    background: matrixMuted,
+    boxShadow: `inset 0 1px 0 ${theme.border}`,
   },
   emptyState: {
     padding: 18,
-    border: "1px dashed #d1d5db",
+    border: `1px dashed ${theme.border}`,
     borderRadius: 12,
-    background: "#fff",
-    color: "#6b7280",
+    background: matrixBase,
+    color: theme.textMuted,
   },
+});
 };
 
 const normalizeName = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -407,20 +416,8 @@ const fmtUaShortDate = (dateStr) => {
   return `${d}.${m}`;
 };
 
-const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  const validSubs = subs
-    .filter((s) => {
-      if (s.studentId !== studentId) return false;
-      if (s.groupId !== groupId) return false;
-      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
-      if (isSubExhausted(s)) return false;
-      const end = getEffectiveEndDate(s) || "2099-12-31";
-      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-    })
-    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
-
-  return validSubs[0] || null;
-};
+const getActiveSubOnDate = (subs, studentId, groupId, dateStr) =>
+  getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
 
 const getStudentStatusText = (subs, studentId, groupId) => {
   const groupSubs = subs
@@ -477,6 +474,10 @@ export default function AttendanceTab({
   warnedStudents,
   setWarnedStudents,
 }) {
+  const styles = useMemo(
+    () => makeStyles(),
+    [theme.bg, theme.card, theme.input, theme.border, theme.textMain, theme.textMuted, theme.textLight, theme.primary]
+  );
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
@@ -549,7 +550,7 @@ export default function AttendanceTab({
     const map = {};
     visibleDays.forEach((d, idx) => {
       map[d] = idx;
-    });
+});
     return map;
   }, [visibleDays]);
 
@@ -702,11 +703,6 @@ export default function AttendanceTab({
   };
 
   const handleMessageStudent = (student) => {
-    if (!student?.telegram) {
-      alert("Для цієї учениці не вказано Telegram.");
-      setOpenMenuState(null);
-      return;
-    }
     if (typeof onActionMessageStudent === "function") {
       onActionMessageStudent(student);
     }
@@ -717,12 +713,16 @@ export default function AttendanceTab({
 
   const isWarned = (studentId) => !!warnedStudents?.[warnedKey(studentId)];
 
-  const toggleWarned = (studentId, checked) => {
+  const toggleWarned = async (studentId, checked) => {
     if (typeof setWarnedStudents !== "function") return;
-    setWarnedStudents((prev) => ({
-      ...(prev || {}),
-      [warnedKey(studentId)]: !!checked,
-    }));
+    const key = warnedKey(studentId);
+    setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !!checked }));
+    try {
+      await db.upsertWarnedStudent(gid, studentId, checked);
+    } catch (err) {
+      setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !checked }));
+      alert(err?.message || "Не вдалося зберегти статус сповіщення");
+    }
   };
 
   const openStudentMenu = (student, btnEl) => {
@@ -1058,15 +1058,21 @@ export default function AttendanceTab({
 
   const getCellView = (student, dateStr) => {
     const rec = getRecordForCell(student, dateStr);
-    if (!rec) return { bg: "#ffffff", mark: "" };
+    const isDark = theme.bg === "#0F131A";
+    if (!rec) return { bg: isDark ? "#182230" : theme.card, mark: "" };
 
     const type = rec.entryType || "subscription";
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
-    if (type === "debt") return { bg: "#dc2626", mark: "!" };
-    if (type === "single") return { bg: "#f59e0b", mark };
-    if (type === "trial") return { bg: "#10b981", mark };
-    return { bg: "#2563eb", mark };
+    if (type === "debt") return { bg: isDark ? "#7f1d1d" : "#dc2626", mark: "!" };
+    if (type === "single") return { bg: isDark ? "#7a4313" : "#f59e0b", mark };
+    if (type === "trial") return { bg: isDark ? "#0f5a43" : "#10b981", mark };
+    return { bg: isDark ? "#1f3e79" : "#2563eb", mark };
   };
+
+  const groupStudentIdSet = useMemo(
+    () => new Set(studentIdsInGroup.map((id) => String(id))),
+    [studentIdsInGroup]
+  );
 
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
@@ -1076,14 +1082,25 @@ export default function AttendanceTab({
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
 
-  const totalPresentByDate = visibleDays.reduce((acc, dateStr) => {
+  const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
-      acc[dateStr] = 0;
+      acc[dateStr] = { total: 0, removed: 0 };
       return acc;
     }
-    acc[dateStr] = attn
-      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
-      .reduce((sum, a) => sum + (a.quantity || 1), 0);
+
+    const records = attn.filter(
+      (a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)
+    );
+
+    const total = records.reduce((sum, a) => sum + (a.quantity || 1), 0);
+    const removed = records.reduce((sum, a) => {
+      const resolvedStudentId = a.studentId || subsById[a.subId]?.studentId || null;
+      if (!resolvedStudentId) return sum;
+      if (groupStudentIdSet.has(String(resolvedStudentId))) return sum;
+      return sum + (a.quantity || 1);
+    }, 0);
+
+    acc[dateStr] = { total, removed };
     return acc;
   }, {});
 
@@ -1217,17 +1234,28 @@ export default function AttendanceTab({
             {orderedStudents.map((student) => {
               const statusInfo = getStudentStatusText(subs, student.id, gid);
               const warnedDone = isWarned(student.id);
+              const isDark = theme.bg === "#0F131A";
               const metaColor = statusInfo.tone === "danger"
-                ? (warnedDone ? "#b06a6a" : "#c81e1e")
+                ? (isDark
+                    ? (warnedDone ? "#c7767f" : "#ff7b86")
+                    : (warnedDone ? "#b06a6a" : "#c81e1e"))
                 : statusInfo.tone === "warning"
-                  ? "#d97706"
+                  ? (isDark ? (warnedDone ? "#c98a3a" : "#ffb24c") : "#d97706")
                   : styles.studentMeta.color;
               const rowHighlightStyle = statusInfo.tone === "danger"
-                ? (warnedDone
-                    ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
-                    : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" })
+                ? (isDark
+                    ? (warnedDone
+                        ? { background: "#3a171b", borderLeft: "3px solid #b24a54", boxShadow: "inset 0 1px 0 rgba(178,74,84,0.35)" }
+                        : { background: "#5a161d", borderLeft: "3px solid #ef4444", boxShadow: "inset 0 1px 0 rgba(248,113,113,0.35)" })
+                    : (warnedDone
+                        ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
+                        : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" }))
                 : statusInfo.tone === "warning"
-                  ? { background: "#fff7ed", borderLeft: "3px solid #f59e0b" }
+                  ? (isDark
+                      ? (warnedDone
+                          ? { background: "#3f2711", borderLeft: "3px solid #c27a1f", boxShadow: "inset 0 1px 0 rgba(194,122,31,0.35)" }
+                          : { background: "#5a2f08", borderLeft: "3px solid #f59e0b", boxShadow: "inset 0 1px 0 rgba(251,191,36,0.35)" })
+                      : { background: "#fff7ed", borderLeft: "3px solid #f59e0b" })
                   : {};
 
               return (
@@ -1277,9 +1305,10 @@ export default function AttendanceTab({
                   const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                   const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
                   const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
-                  const tone = subPeriod?.completed ? "#ecf1f5" : "#e0edff";
-                  const border = subPeriod?.completed ? "#64748b" : "#2563eb";
-                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const isDark = theme.bg === "#0F131A";
+                  const tone = subPeriod?.completed ? (isDark ? "#2b3647" : "#ecf1f5") : (isDark ? "#1d2f4e" : "#e0edff");
+                  const border = subPeriod?.completed ? (isDark ? "#5f728d" : "#64748b") : (isDark ? "#3f6fc2" : "#2563eb");
+                  const buttonBg = subPeriod?.completed && cellView.mark ? (isDark ? "#4b5b70" : "#9ca3af") : cellView.bg;
                   const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                   const cellStyle = subPeriod
                     ? {
@@ -1312,7 +1341,7 @@ export default function AttendanceTab({
             {!orderedStudents.length && (
               <tr>
                 <td style={styles.rowHead}>Немає учениць</td>
-                <td colSpan={visibleDays.length} style={{ padding: 16, color: "#6b7280" }}>
+                <td colSpan={visibleDays.length} style={{ padding: 16, color: theme.textMuted }}>
                   У цій групі поки немає учениць.
                 </td>
               </tr>
@@ -1320,7 +1349,7 @@ export default function AttendanceTab({
 
             <tr>
               <td style={styles.rowHead}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Додати ученицю</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>Додати ученицю</div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <input
                     value={newStudentName}
@@ -1338,7 +1367,7 @@ export default function AttendanceTab({
                   </button>
                 </div>
               </td>
-              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: "#fafafa" }} />
+              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: theme.input }} />
             </tr>
 
             <tr style={styles.totalsRow}>
@@ -1350,10 +1379,17 @@ export default function AttendanceTab({
                     ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
                     ...styles.totalsRow,
                     fontWeight: 700,
-                    color: "#111827",
+                    color: theme.textMain,
                   }}
                 >
-                  {totalPresentByDate[dateStr] || 0}
+                  <div style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                    <span>{totalsByDate[dateStr]?.total || 0}</span>
+                    {!!totalsByDate[dateStr]?.removed && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted }}>
+                        (+{totalsByDate[dateStr].removed} видал.)
+                      </span>
+                    )}
+                  </div>
                 </td>
               ))}
             </tr>
@@ -1375,10 +1411,8 @@ export default function AttendanceTab({
                 <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                 <button
                   type="button"
-                  style={{ ...styles.menuItem, ...(!student.telegram ? styles.menuItemDisabled : {}) }}
+                  style={styles.menuItem}
                   onClick={() => handleMessageStudent(student)}
-                  disabled={!student.telegram}
-                  title={!student.telegram ? "Telegram не вказано" : ""}
                 >
                   Написати повідомлення
                 </button>
