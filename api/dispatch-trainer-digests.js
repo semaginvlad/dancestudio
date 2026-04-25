@@ -47,14 +47,15 @@ const mapGroup = (g) => ({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const now = new Date();
-  const toleranceMinutes = Math.max(1, Math.min(30, Number(req.body?.toleranceMinutes || 10)));
-  const dryRun = !!req.body?.dryRun;
-  const forcedChatId = req.body?.chatId ? String(req.body.chatId) : null;
+  const input = req.method === "GET" ? (req.query || {}) : (req.body || {});
+  const toleranceMinutes = Math.max(1, Math.min(30, Number(input?.toleranceMinutes || 10)));
+  const dryRun = String(input?.dryRun || "").toLowerCase() === "true" || input?.dryRun === true || input?.dryRun === 1 || input?.dryRun === "1";
+  const forcedChatId = input?.chatId ? String(input.chatId) : null;
   const supabase = buildSupabase();
 
   const [metaRowsRaw, groupsRaw, studentsRaw, studentGroupsRaw, subsRaw, attnRaw, cancelledRaw, stateRaw, historyRaw] = await Promise.all([
@@ -258,6 +259,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     success: true,
+    requestMethod: req.method,
     dryRun,
     now: now.toISOString(),
     toleranceMinutes,

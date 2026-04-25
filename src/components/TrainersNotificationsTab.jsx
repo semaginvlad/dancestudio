@@ -376,7 +376,10 @@ export default function TrainersNotificationsTab({
     return (digest.groupsData || []).map((g) => {
       if (!g.enabled) return { groupId: g.groupId, groupName: g.groupName, status: "disabled", sendAt: g.plan?.sendAtIso || "", sendAtLocal: g.plan?.sendAtLocal || "", trainingDate: g.plan?.trainingDate || "" };
       if (!g.plan) return { groupId: g.groupId, groupName: g.groupName, status: "cancelled", sendAt: "", trainingDate: "" };
-      const hist = history.find((h) => String(h.groupId) === String(g.groupId) && String(h.trainingDate || "").slice(0, 10) === String(g.plan.trainingDate || "").slice(0, 10));
+      const expectedDedupKey = `${selectedDialog?.id || ""}::${g.groupId}::${g.plan.trainingDate}T${g.plan.trainingTime}`;
+      const groupHistory = history.filter((h) => String(h.groupId) === String(g.groupId));
+      const hist = groupHistory.find((h) => String(h.dedupKey || "") === expectedDedupKey)
+        || groupHistory.find((h) => String(h.triggerType || "") === "auto" && String(h.timestamp || "").slice(0, 10) === todayStr);
       if (hist?.status === "sent") return { groupId: g.groupId, groupName: g.groupName, status: "sent", sendAt: g.plan.sendAtIso, sendAtLocal: g.plan.sendAtLocal || "", trainingDate: g.plan.trainingDate, details: hist.details || "" };
       if (hist?.status === "failed" || hist?.status === "skipped") return { groupId: g.groupId, groupName: g.groupName, status: hist.status, sendAt: g.plan.sendAtIso, sendAtLocal: g.plan.sendAtLocal || "", trainingDate: g.plan.trainingDate, details: hist.reason || hist.details || "" };
       if (String(g.plan.trainingDate || "").slice(0, 10) !== todayStr) {
@@ -391,7 +394,7 @@ export default function TrainersNotificationsTab({
         trainingDate: g.plan.trainingDate,
       };
     });
-  }, [digest.groupsData, digest.persistedHistory]);
+  }, [digest.groupsData, digest.persistedHistory, selectedDialog?.id]);
 
   const testToAdmin = async () => {
     if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
