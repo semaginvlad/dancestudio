@@ -38,10 +38,18 @@ import MessagesTab from "./components/MessagesTab";
 import TrainersTab from "./components/TrainersTab";
 import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
 
-const toDirectionId = (name = "") => String(name || "")
+const translitMap = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
+  к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch",
+  ш: "sh", щ: "shch", ь: "", ю: "yu", я: "ya", э: "e", ё: "yo", ы: "y", ъ: "",
+};
+const normalizeDirectionId = (name = "") => String(name || "")
   .trim()
   .toLowerCase()
-  .replace(/[^a-z0-9а-яіїєґ]+/gi, "_")
+  .split("")
+  .map((ch) => translitMap[ch] ?? ch)
+  .join("")
+  .replace(/[^a-z0-9]+/gi, "_")
   .replace(/^_+|_+$/g, "");
 const UI_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
@@ -55,6 +63,7 @@ export default function App() {
   const [subs, setSubs] = useState([]);
   const [attn, setAttn] = useState([]);
   const [groups, setGroups] = useState(DEFAULT_GROUPS);
+  const [directions, setDirections] = useState([]);
   const [cancelled, setCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
@@ -99,6 +108,8 @@ export default function App() {
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [themeVersion, setThemeVersion] = useState(0);
+  const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
+  const [directionEdits, setDirectionEdits] = useState({});
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
@@ -183,11 +194,11 @@ export default function App() {
   }
 };
 
-      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg] = await Promise.all([
+      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
-        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups)
+        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections)
       ]);
 
       if (st) setStudents(st);
@@ -201,6 +212,7 @@ export default function App() {
       setWarnedStudents(warned || {});
       setTrainers(tr || []);
       setTrainerGroups(trg || []);
+      setDirections(dirs || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -222,10 +234,10 @@ export default function App() {
     const name = String(newGroupDraft.name || "").trim();
     if (!name) { alert("Вкажіть назву групи."); return; }
     const directionId = newGroupDraft.directionMode === "new"
-      ? toDirectionId(newGroupDraft.newDirectionName)
+      ? normalizeDirectionId(newGroupDraft.newDirectionName)
       : String(newGroupDraft.directionId || "").trim();
     if (!directionId) { alert("Вкажіть напрямок."); return; }
-    const draftId = String(newGroupDraft.id || "").trim() || toDirectionId(name);
+    const draftId = String(newGroupDraft.id || "").trim() || normalizeDirectionId(name);
     if (!draftId) { alert("Не вдалося сформувати id групи."); return; }
     const duplicateName = groups.some((g) => String(g.name || "").trim().toLowerCase() === name.toLowerCase());
     if (duplicateName) { alert("Група з такою назвою вже існує."); return; }
@@ -354,7 +366,12 @@ export default function App() {
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
   const directionsList = useMemo(() => {
-    const base = [...DIRECTIONS];
+    const base = (directions?.length ? directions : [...DIRECTIONS]).map((d) => ({
+      id: d.id,
+      name: d.name || d.id,
+      color: d.color || "#7b8ea8",
+      isActive: d.isActive !== false,
+    }));
     const existingIds = new Set(base.map((d) => d.id));
     groups.forEach((g) => {
       if (!g?.directionId || existingIds.has(g.directionId)) return;
@@ -366,8 +383,84 @@ export default function App() {
       existingIds.add(g.directionId);
     });
     return base;
-  }, [groups]);
+  }, [directions, groups]);
+  const persistedDirectionIds = useMemo(() => new Set((directions || []).map((d) => String(d.id))), [directions]);
   const dirMap = useMemo(()=>Object.fromEntries(directionsList.map(d=>[d.id,d])),[directionsList]);
+  const groupsCountByDirection = useMemo(() => {
+    const next = {};
+    groups.forEach((g) => {
+      const id = String(g.directionId || "");
+      if (!id) return;
+      next[id] = (next[id] || 0) + 1;
+    });
+    return next;
+  }, [groups]);
+  const upsertDirectionEdit = (id, patch) => setDirectionEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+
+  const createDirectionAction = async () => {
+    const name = String(directionDraft.name || "").trim();
+    if (!name) { alert("Вкажіть назву напрямку."); return; }
+    const id = normalizeDirectionId(directionDraft.id || name);
+    if (!id) { alert("Не вдалося сформувати ID напрямку."); return; }
+    if (directionsList.some((d) => String(d.id) === id)) { alert("Напрямок з таким ID вже існує."); return; }
+    try {
+      const inserted = await db.insertDirection({ id, name, color: directionDraft.color || "#7b8ea8", isActive: true });
+      setDirections((prev) => [...prev, inserted]);
+      setDirectionDraft({ id: "", name: "", color: "#7b8ea8" });
+    } catch (e) {
+      alert(e?.message || "Не вдалося створити напрямок.");
+    }
+  };
+
+  const saveDirectionEdit = async (directionId) => {
+    if (!persistedDirectionIds.has(String(directionId))) return;
+    const base = directionsList.find((d) => String(d.id) === String(directionId));
+    const edit = directionEdits[directionId] || {};
+    if (!base) return;
+    const nextId = normalizeDirectionId(edit.id ?? base.id);
+    const nextName = String(edit.name ?? base.name ?? "").trim();
+    if (!nextId || !nextName) { alert("ID та назва напрямку обов'язкові."); return; }
+    if (nextId !== base.id && directionsList.some((d) => String(d.id) === nextId)) { alert("Конфлікт ID напрямку."); return; }
+    try {
+      const updated = await db.updateDirection(base.id, {
+        id: nextId,
+        name: nextName,
+        color: edit.color ?? base.color ?? "#7b8ea8",
+      });
+      setDirections((prev) => prev.map((d) => (String(d.id) === String(base.id) ? updated : d)));
+      setDirectionEdits((prev) => {
+        const next = { ...prev };
+        delete next[directionId];
+        return next;
+      });
+    } catch (e) {
+      alert(e?.message || "Не вдалося зберегти напрямок.");
+    }
+  };
+
+  const toggleDirectionActive = async (direction) => {
+    if (!persistedDirectionIds.has(String(direction.id))) return;
+    try {
+      const updated = await db.updateDirection(direction.id, { isActive: !(direction.isActive !== false) });
+      setDirections((prev) => prev.map((d) => (String(d.id) === String(direction.id) ? updated : d)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося оновити статус напрямку.");
+    }
+  };
+
+  const deleteDirectionAction = async (direction) => {
+    const id = String(direction.id);
+    if (!persistedDirectionIds.has(id)) return;
+    const linkedGroups = groupsCountByDirection[id] || 0;
+    if (linkedGroups > 0) { alert(`Неможливо видалити: є ${linkedGroups} груп(и), прив'язаних до цього напрямку.`); return; }
+    if (!window.confirm(`Видалити напрямок "${direction.name}"?`)) return;
+    try {
+      await db.deleteDirection(id);
+      setDirections((prev) => prev.filter((d) => String(d.id) !== id));
+    } catch (e) {
+      alert(e?.message || "Не вдалося видалити напрямок.");
+    }
+  };
   const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
   const parseGroupSchedule = (schedule) => {
     if (Array.isArray(schedule)) return schedule;
@@ -758,6 +851,7 @@ export default function App() {
           </button>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
+          {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -1174,6 +1268,40 @@ export default function App() {
             </table>
           </div>
         )}
+      </Modal>
+      <Modal open={modal==="manageDirections"} onClose={()=>setModal(null)} title="Керування напрямками" wide>
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ ...cardSt, padding: 16, display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 700, color: theme.secondary }}>Створити новий напрямок</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto", gap: 8 }}>
+              <input style={inputSt} placeholder="Назва" value={directionDraft.name} onChange={(e) => setDirectionDraft((p) => ({ ...p, name: e.target.value }))} />
+              <input style={inputSt} placeholder="ID (опційно)" value={directionDraft.id} onChange={(e) => setDirectionDraft((p) => ({ ...p, id: e.target.value }))} />
+              <input style={inputSt} placeholder="#7b8ea8" value={directionDraft.color} onChange={(e) => setDirectionDraft((p) => ({ ...p, color: e.target.value }))} />
+              <button type="button" style={btnP} onClick={createDirectionAction}>Додати</button>
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {directionsList.map((d) => {
+              const edit = directionEdits[d.id] || {};
+              const persisted = persistedDirectionIds.has(String(d.id));
+              return (
+                <div key={d.id} style={{ ...cardSt, padding: 14, display: "grid", gap: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto auto auto", gap: 8, alignItems: "center" }}>
+                    <input style={inputSt} value={edit.name ?? d.name ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { name: e.target.value })} disabled={!persisted} />
+                    <input style={inputSt} value={edit.id ?? d.id ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { id: e.target.value })} disabled={!persisted} />
+                    <input style={inputSt} value={edit.color ?? d.color ?? "#7b8ea8"} onChange={(e) => upsertDirectionEdit(d.id, { color: e.target.value })} disabled={!persisted} />
+                    <button type="button" style={btnS} onClick={() => toggleDirectionActive(d)} disabled={!persisted}>{d.isActive === false ? "Увімкнути" : "Архівувати"}</button>
+                    <button type="button" style={btnP} onClick={() => saveDirectionEdit(d.id)} disabled={!persisted}>Зберегти</button>
+                    <button type="button" style={{ ...btnS, color: theme.danger }} onClick={() => deleteDirectionAction(d)} disabled={!persisted}>Видалити</button>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    ID: <b>{d.id}</b> · Груп: <b>{groupsCountByDirection[String(d.id)] || 0}</b>{!persisted ? " · Додано автоматично з існуючих груп (тільки читання)." : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">

@@ -157,6 +157,51 @@ export async function insertGroup(group) {
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id };
 }
 
+// ─── DIRECTIONS ───
+const mapDirection = (d) => ({
+  id: d.id,
+  name: d.name || d.id,
+  color: d.color || "#7b8ea8",
+  isActive: d.is_active !== false,
+  archivedAt: d.archived_at || null,
+});
+
+export async function fetchDirections() {
+  const { data, error } = await supabase.from("directions").select("*").order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapDirection);
+}
+
+export async function insertDirection(direction) {
+  const payload = {
+    id: direction.id,
+    name: direction.name,
+    color: direction.color || "#7b8ea8",
+    is_active: direction.isActive !== false,
+    archived_at: direction.archivedAt || null,
+  };
+  const { data, error } = await supabase.from("directions").insert(payload).select("*").single();
+  if (error) throw error;
+  return mapDirection(data);
+}
+
+export async function updateDirection(id, direction) {
+  const payload = {};
+  if (direction.id !== undefined) payload.id = direction.id;
+  if (direction.name !== undefined) payload.name = direction.name;
+  if (direction.color !== undefined) payload.color = direction.color || "#7b8ea8";
+  if (direction.isActive !== undefined) payload.is_active = !!direction.isActive;
+  if (direction.archivedAt !== undefined) payload.archived_at = direction.archivedAt;
+  const { data, error } = await supabase.from("directions").update(payload).eq("id", id).select("*").single();
+  if (error) throw error;
+  return mapDirection(data);
+}
+
+export async function deleteDirection(id) {
+  const { error } = await supabase.from("directions").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // ─── TRAINERS ───
 const mapTrainer = (t) => ({
   id: t.id,
