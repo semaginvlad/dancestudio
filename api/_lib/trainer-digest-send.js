@@ -35,6 +35,8 @@ export const sendTrainerDigestWithAdminLog = async ({
   sendToAdminOnly = false,
 }) => {
   const sentAtIso = new Date().toISOString();
+  let deliveredToTarget = false;
+  let targetMessageId = null;
   if (!sendToAdminOnly) {
     await withTelegramClient(async (client) => {
       const targetEntity = await resolveTelegramPeer(client, {
@@ -42,7 +44,12 @@ export const sendTrainerDigestWithAdminLog = async ({
         username,
         context: "send-trainer-digest:target",
       });
-      await client.sendMessage(targetEntity, { message });
+      const sentMsg = await client.sendMessage(targetEntity, { message });
+      targetMessageId = sentMsg?.id ?? sentMsg?.message?.id ?? null;
+      if (!targetMessageId) {
+        throw new Error("Telegram target send did not return message id");
+      }
+      deliveredToTarget = true;
     });
   }
 
@@ -74,7 +81,7 @@ export const sendTrainerDigestWithAdminLog = async ({
     }
   }
 
-  return { sentAtIso, adminLogStatus };
+  return { sentAtIso, adminLogStatus, deliveredToTarget, targetMessageId };
 };
 
 export const reportTrainerDigestFailureToAdmin = async ({

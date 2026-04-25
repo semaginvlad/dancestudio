@@ -218,6 +218,9 @@ export default async function handler(req, res) {
           studentsCount: generated.studentsCount || 0,
           triggerType: "auto",
         });
+        if (!sent?.deliveredToTarget) {
+          throw new Error("Trainer digest target delivery was not confirmed");
+        }
         sentDedupSet.add(dedupKey);
         const row = {
           chatId,
@@ -231,12 +234,13 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString(),
           adminLogStatus: sent.adminLogStatus,
           adminLogReason: ADMIN_LOG_CHAT_ID ? sent.adminLogStatus : "missing_admin_log_env",
+          targetMessageId: sent.targetMessageId || null,
           studentsCount: generated.studentsCount || 0,
         };
         results.push(row);
         await supabase.from("trainer_dispatch_history").insert({
           id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          chat_id: chatId, chat_title: meta.chat_title || null, group_id: groupId, group_name: group.name, trigger_type: "auto", status: "sent", dedup_key: dedupKey, students_count: row.studentsCount, details: row.adminLogStatus, reason: row.adminLogReason, created_at: row.timestamp,
+          chat_id: chatId, chat_title: meta.chat_title || null, group_id: groupId, group_name: group.name, trigger_type: "auto", status: "sent", dedup_key: dedupKey, students_count: row.studentsCount, details: `admin_log:${row.adminLogStatus};target_msg_id:${row.targetMessageId || "missing"}`, reason: row.adminLogReason, created_at: row.timestamp,
         });
       } catch (error) {
         await reportTrainerDigestFailureToAdmin({
