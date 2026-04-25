@@ -680,6 +680,23 @@ export default function TrainersTab({
     return rows;
   }, [periodDate, scopedData, trainerBoundGroups, trendMonths]);
 
+  useEffect(() => {
+    setDetailState((prev) => {
+      if (prev?.type !== "chart" || prev?.payload?.kind !== "trendV2") return prev;
+      const prevRows = Array.isArray(prev.payload?.rows) ? prev.payload.rows : [];
+      const hasSameShape = prevRows.length === trendSeries.length
+        && prevRows.every((row, idx) => row?.key === trendSeries[idx]?.key);
+      if (hasSameShape) return prev;
+      return {
+        ...prev,
+        payload: {
+          ...(prev.payload || {}),
+          rows: trendSeries,
+        },
+      };
+    });
+  }, [trendSeries]);
+
   const beginCreate = () => {
     setIsCreateMode(true);
     setSelectedTrainerId("");
