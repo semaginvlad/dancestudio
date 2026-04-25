@@ -79,12 +79,12 @@ export default function TrainersNotificationsTab({
             setReadiness({
               ready: !!rPayload?.ready,
               adminConfigured: !!rPayload?.adminConfigured,
-              details: rPayload?.ready ? "Storage ready" : "Storage not ready",
+              details: rPayload?.ready ? "Сховище готове" : "Сховище не готове",
               scheduler: rPayload?.scheduler || { active: false, reason: "unknown" },
             });
           }
         } catch {
-          if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Readiness check failed", scheduler: { active: false, reason: "readiness_failed" } });
+          if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Перевірка readiness не вдалася", scheduler: { active: false, reason: "readiness_failed" } });
         }
 
         const stateRows = await Promise.all(
@@ -277,7 +277,7 @@ export default function TrainersNotificationsTab({
       await upsertGroupState(groupId, { customTemplate: value });
     } catch (error) {
       if (String(error?.message || "").includes("storage_not_ready")) {
-        alert("Storage не готовий. Застосуйте SQL: trainer_notification_state.sql та trainer_dispatch_history.sql");
+        alert("Сховище не готове. Застосуйте SQL: trainer_notification_state.sql та trainer_dispatch_history.sql");
       }
       alert(`Не вдалося зберегти чернетку: ${String(error?.message || error)}`);
     } finally {
@@ -380,7 +380,7 @@ export default function TrainersNotificationsTab({
       await upsertGroupState(groupId, { autoSendEnabled: !!nextEnabled });
     } catch (error) {
       if (String(error?.message || "").includes("storage_not_ready")) {
-        alert("Storage не готовий. Застосуйте SQL migration для trainer_notification_state / trainer_dispatch_history.");
+        alert("Сховище не готове. Застосуйте SQL migration для trainer_notification_state / trainer_dispatch_history.");
       }
       alert(`Не вдалося зберегти toggle: ${String(error?.message || error)}`);
     }
@@ -412,7 +412,9 @@ export default function TrainersNotificationsTab({
     });
   }, [digest.groupsData, digest.persistedHistory, selectedDialog?.id]);
 
-  const testToAdmin = async () => {
+  const testToAdmin = async (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
     const text = activeDraft || digest.selectedGroupData.generatedText || "";
     if (!text) return;
@@ -449,7 +451,7 @@ export default function TrainersNotificationsTab({
       };
       await appendHistory(historyEntry);
       setLastActions((prev) => [historyEntry, ...prev].slice(0, 20));
-      setTestResult(ok ? `Тест надіслано (admin-log: ${payload?.adminLogStatus || "skipped"})` : `Тест не вдався: ${payload?.details || payload?.error || "unknown"}`);
+      setTestResult(ok ? `Тест надіслано (admin-log: ${payload?.adminLogStatus || "skipped"})` : `Тест не вдався: ${payload?.details || payload?.error || "невідома помилка"}`);
       if (!ok) alert(payload?.details || payload?.error || "Не вдалося надіслати тест");
     } finally {
       setSendingNow(false);
@@ -462,10 +464,10 @@ export default function TrainersNotificationsTab({
   const nextSendLabel = selectedPlan?.sendAtLocal || "—";
   const trainingLabel = selectedPlan?.trainingAtLocal || (selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—");
   const schedulerStatusLabel = readiness?.scheduler?.active
-    ? "auto-dispatch active"
+    ? "автовідправка активна"
     : readiness?.ready
-      ? "schedule ready, trigger missing"
-      : "scheduler missing";
+      ? "розклад готовий, тригер відсутній"
+      : "планувальник не налаштований";
 
   const statusChip = (ok) => ({
     background: ok ? `${theme.success}20` : `${theme.warning}20`,
@@ -479,6 +481,22 @@ export default function TrainersNotificationsTab({
     if (status === "due") return { color: theme.warning, border: `${theme.warning}44`, bg: `${theme.warning}18` };
     return { color: theme.textMuted, border: theme.border, bg: theme.input };
   };
+  const sendStatusLabel = (status) => ({
+    sent: "надіслано",
+    failed: "помилка",
+    skipped: "пропущено",
+    cancelled: "скасовано",
+    due: "час надсилати",
+    scheduled: "заплановано",
+    disabled: "вимкнено",
+    not_today: "не сьогодні",
+    "dry-run": "перевірка",
+  }[String(status || "").toLowerCase()] || String(status || "—"));
+  const modeLabel = (mode) => ({
+    default: "типовий (−60 хв)",
+    custom_time: "кастомний час",
+    custom_datetime: "кастомні дата й час",
+  }[mode] || "типовий (−60 хв)");
 
   const updateScheduleDraft = (patch) => {
     if (!selectedScheduleKey) return;
@@ -560,36 +578,36 @@ export default function TrainersNotificationsTab({
               <div style={{ fontWeight: 800, color: theme.textMain }}>Сповіщення / дайджест тренера</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Повʼязані групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}</div>
             </div>
-            <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Planner mode</div>
+            <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Режим планера</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 8 }}>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Тренер</div>
-              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedChatTitle}</div>
+              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{selectedChatTitle}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Група</div>
-              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2 }}>{selectedGroupName}</div>
+              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{selectedGroupName}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Next send</div>
-              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2 }}>{nextSendLabel}</div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
+              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
+              <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Адмін лог</div>
               <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
                 {readiness.adminConfigured ? "готово" : "відсутнє"}
               </div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Storage</div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
+              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Сховище</div>
               <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
-                {readiness.ready ? "ready" : "missing"}
+                {readiness.ready ? "готово" : "відсутнє"}
               </div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Scheduler</div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
+              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Планувальник</div>
               <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
                 {schedulerStatusLabel}
               </div>
@@ -600,8 +618,8 @@ export default function TrainersNotificationsTab({
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Step 1: Обери групу</div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 320px) 1fr", gap: 10, alignItems: "start" }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ color: theme.textMuted, fontSize: 12 }}>Активна група</label>
               <select
@@ -613,23 +631,23 @@ export default function TrainersNotificationsTab({
               </select>
             </div>
             <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-                <div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Найближче заняття</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{trainingLabel}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{trainingLabel}</div>
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{nextSendLabel}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Активний режим</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{persistedSendMode}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{modeLabel(persistedSendMode)}</div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Automation</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Автоматизація</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: digest.selectedGroupData?.enabled ? theme.success : theme.warning }}>
-                    {digest.selectedGroupData?.enabled ? "enabled" : "disabled"}
+                    {digest.selectedGroupData?.enabled ? "увімкнено" : "вимкнено"}
                   </div>
                 </div>
               </div>
@@ -644,16 +662,16 @@ export default function TrainersNotificationsTab({
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Step 2: Режим надсилання</div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 2: Режим надсилання</div>
             <div style={{ fontSize: 11, color: scheduleDraft.dirty ? theme.warning : theme.textMuted }}>
-              {scheduleDraft.dirty ? "Є незбережені зміни schedule" : "Schedule синхронізований"}
+              {scheduleDraft.dirty ? "Є незбережені зміни розкладу" : "Розклад синхронізований"}
             </div>
           </div>
           <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "default" })} style={{ border: `1px solid ${effectiveDraftMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "default" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "default" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Default (−60 хв)</button>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_time" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_time" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_time" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_time" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Custom time (HH:mm)</button>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_datetime" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_datetime" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_datetime" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Custom datetime</button>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "default" })} style={{ border: `1px solid ${effectiveDraftMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "default" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "default" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Типовий (−60 хв)</button>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_time" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_time" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_time" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_time" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Кастомний час (HH:mm)</button>
+              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_datetime" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_datetime" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_datetime" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Кастомні дата й час</button>
             </div>
 
             {effectiveDraftMode === "default" && (
@@ -683,13 +701,13 @@ export default function TrainersNotificationsTab({
             )}
 
             <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8, display: "grid", gap: 6 }}>
-              <div style={{ fontSize: 12, color: theme.textMuted }}>Що буде збережено після Apply:</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Що буде збережено після застосування:</div>
               <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 700 }}>
-                {effectiveDraftMode === "default" && "sendTimeOverride = null (default -60m)"}
+                {effectiveDraftMode === "default" && "sendTimeOverride = null (типовий -60 хв)"}
                 {effectiveDraftMode === "custom_time" && `sendTimeOverride = "${scheduleDraft.timeValue || ""}"`}
                 {effectiveDraftMode === "custom_datetime" && `sendTimeOverride = "${scheduleDraft.datetimeValue || ""}"`}
               </div>
-              <button type="button" onClick={applySendOverride} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Apply schedule</button>
+              <button type="button" onClick={applySendOverride} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Застосувати розклад</button>
             </div>
           </div>
         </div>
@@ -697,11 +715,11 @@ export default function TrainersNotificationsTab({
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Step 3: Редагування шаблону</div>
+              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Крок 3: Редагування шаблону</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Головний фокус: текст повідомлення для обраної групи</div>
             </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: isDraftDirty ? theme.warning : theme.success, border: `1px solid ${isDraftDirty ? `${theme.warning}66` : `${theme.success}66`}`, borderRadius: 999, padding: "4px 8px", background: isDraftDirty ? `${theme.warning}20` : `${theme.success}20` }}>
-              {isDraftDirty ? "Unsaved changes" : "Saved"}
+              {isDraftDirty ? "Є незбережені зміни" : "Збережено"}
             </div>
           </div>
 
@@ -723,16 +741,16 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Step 4: Збереження / тест / ручний send</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Крок 4: Збереження / тест / ручна відправка</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Перевірити</button>
-            <button type="button" disabled={sendingNow || !readiness.adminConfigured} onClick={testToAdmin} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Тест адміну</button>
+            <button type="button" disabled={sendingNow || !readiness.adminConfigured} onClick={(e) => testToAdmin(e)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Тест адміну</button>
             <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: false })} style={{ border: "none", borderRadius: 10, background: theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{sendingNow ? "Надсилання..." : "Надіслати"}</button>
           </div>
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Step 5: Automation status</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Крок 5: Статус автоматизації</div>
           <div style={{ display: "grid", gap: 8 }}>
             {(digest.groupsData || []).map((g) => (
               <label key={g.groupId} style={{ display: "grid", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
@@ -746,13 +764,13 @@ export default function TrainersNotificationsTab({
                     <span style={{ color: theme.textMain, fontWeight: 700 }}>{g.groupName}</span>
                   </div>
                   <span style={{ fontSize: 11, border: `1px solid ${g.enabled ? `${theme.success}55` : `${theme.warning}55`}`, color: g.enabled ? theme.success : theme.warning, background: g.enabled ? `${theme.success}18` : `${theme.warning}18`, borderRadius: 999, padding: "2px 7px", fontWeight: 700 }}>
-                    {g.enabled ? "enabled" : "disabled"}
+                    {g.enabled ? "увімкнено" : "вимкнено"}
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   {g.plan
-                    ? `next send ${g.plan.sendAtLocal || g.plan.sendAtIso} • заняття ${g.plan.trainingDate} ${g.plan.trainingTime}`
-                    : "Немає валідного schedule"}
+                    ? `наступна відправка ${g.plan.sendAtLocal || g.plan.sendAtIso} • заняття ${g.plan.trainingDate} ${g.plan.trainingTime}`
+                    : "Немає валідного розкладу"}
                 </div>
               </label>
             ))}
@@ -760,7 +778,7 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Today sends / statuses</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Надсилання на сьогодні / статуси</div>
           {todaySends.length ? (
             <div style={{ display: "grid", gap: 6 }}>
               {todaySends.map((x, i) => {
@@ -773,7 +791,7 @@ export default function TrainersNotificationsTab({
                         {x.sendAtLocal || (x.sendAt ? x.sendAt.slice(0, 16).replace("T", " ") : "—")}{x.trainingDate ? ` • заняття ${x.trainingDate}` : ""}{x.details ? ` • ${x.details}` : ""}
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color, textTransform: "uppercase" }}>{x.status}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color, textTransform: "uppercase" }}>{sendStatusLabel(x.status)}</div>
                   </div>
                 );
               })}
@@ -784,7 +802,7 @@ export default function TrainersNotificationsTab({
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Step 5: History</div>
+          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Історія</div>
           {!lastActions.length && !(digest.persistedHistory || []).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Ще немає дій.</div>}
           <div style={{ display: "grid", gap: 6 }}>
             {lastActions.map((a) => {
@@ -793,7 +811,7 @@ export default function TrainersNotificationsTab({
                 <div key={a.id} style={{ border: `1px solid ${tone.border}`, background: tone.bg, borderRadius: 10, padding: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                     <div style={{ color: theme.textMain, fontSize: 12, fontWeight: 700 }}>{a.chatTitle}</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{a.status}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{sendStatusLabel(a.status)}</div>
                   </div>
                   <div style={{ fontSize: 11, color: theme.textMuted }}>{a.time.slice(0, 16).replace("T", " ")} • учениць: {a.students}{a.details ? ` • ${a.details}` : ""}</div>
                 </div>
@@ -805,7 +823,7 @@ export default function TrainersNotificationsTab({
                 <div key={`persisted_${h.id || `${h.timestamp}_${h.groupId}`}`} style={{ border: `1px solid ${tone.border}`, background: tone.bg, borderRadius: 10, padding: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                     <div style={{ color: theme.textMain, fontSize: 12, fontWeight: 700 }}>{h.chatTitle || h.chatId} / {h.groupName || h.groupId}</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{h.status}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{sendStatusLabel(h.status)}</div>
                   </div>
                   <div style={{ fontSize: 11, color: theme.textMuted }}>{(h.timestamp || "").slice(0, 16).replace("T", " ")} • {h.triggerType} • учениць: {h.studentsCount || 0}{h.details ? ` • ${h.details}` : ""}</div>
                 </div>
