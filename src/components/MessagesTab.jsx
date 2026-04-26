@@ -339,6 +339,7 @@ export default function MessagesTab({
     if (!dialog) return false;
     if (telegramRailFilter === "all") return true;
     if (telegramRailFilter === "trainers") return dialog.trainer;
+    if (telegramRailFilter === "groups") return (dialog.linkedGroupIds || []).length > 0;
     if (telegramRailFilter === "unlinked") return !dialog.linkedStudent;
     if (telegramRailFilter.startsWith("group:")) {
       const gid = telegramRailFilter.replace("group:", "");
@@ -640,6 +641,7 @@ export default function MessagesTab({
               {[
                 ["all", "Усі чати"],
                 ["trainers", "Тренери"],
+                ["groups", "Групи"],
                 ["unlinked", "Неприв'язані / службові"],
               ].map(([id, label]) => (
                 <button
@@ -996,7 +998,7 @@ export default function MessagesTab({
 
             <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                <div style={{ fontWeight: 800, color: theme.textMain, fontSize: 13, letterSpacing: "0.01em" }}>CRM-блок</div>
+                <div style={{ fontWeight: 800, color: theme.textMain, fontSize: 13, letterSpacing: "0.01em" }}>Операційний контекст</div>
                 <div style={{ color: activeDialog.linkedStudent ? theme.success : theme.textMuted, fontSize: 11, fontWeight: 700 }}>
                   {activeDialog.linkedStudent ? "Прив'язано" : "Не прив'язано"}
                 </div>
