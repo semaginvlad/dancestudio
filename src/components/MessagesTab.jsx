@@ -1030,11 +1030,6 @@ export default function MessagesTab({
                 <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: theme.textMuted }}>
                   Тип: {activeDialog.contact?.contactType === "trainer" ? "тренер" : activeDialog.contact?.contactType === "student" ? "учениця" : "інше"}
                 </span>
-                {activeDialog.contact?.pipelineStatus && (
-                  <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${crmStatusTone(activeDialog.contact.pipelineStatus).border}`, borderRadius: 999, padding: "2px 8px", background: crmStatusTone(activeDialog.contact.pipelineStatus).bg, color: crmStatusTone(activeDialog.contact.pipelineStatus).text }}>
-                    {PIPELINE_LABELS_UA[activeDialog.contact.pipelineStatus]}
-                  </span>
-                )}
               </div>
               <div style={{ color: theme.textMuted, fontSize: 12, lineHeight: 1.45 }}>
                 У Telegram лишено лише операційний контекст: прив'язка до учениці, групи, статус абонемента, нотатка та шаблон для щоденної комунікації.
