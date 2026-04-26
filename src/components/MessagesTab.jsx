@@ -54,7 +54,7 @@ export default function MessagesTab({
     borderRadius: 24,
     boxShadow: isDark ? "0 16px 30px rgba(0, 0, 0, 0.35)" : "0 10px 26px rgba(31,55,99,0.12)",
   };
-  const [railFilter, setRailFilter] = useState("all");
+  const [telegramRailFilter, setTelegramRailFilter] = useState("all");
   const [searchQ, setSearchQ] = useState("");
   const [draft, setDraft] = useState("");
   const [internalNoteDraft, setInternalNoteDraft] = useState("");
@@ -64,7 +64,7 @@ export default function MessagesTab({
   const [linkSavingChatId, setLinkSavingChatId] = useState("");
   const [activeChannel, setActiveChannel] = useState("telegram");
   const [instagramSelectedId, setInstagramSelectedId] = useState("");
-  const [quickFilter, setQuickFilter] = useState("all");
+  const [instagramRailFilter, setInstagramRailFilter] = useState("all");
   const [instagramCrmOverrides, setInstagramCrmOverrides] = useState({});
 
   const [dialogs, setDialogs] = useState([]);
@@ -264,7 +264,7 @@ export default function MessagesTab({
         );
       })
       .sort((a, b) => b.lastTs - a.lastTs);
-  }, [dialogs, membershipByStudent, metaByChat, railFilter, searchQ, studentMap, trainerMapByTelegram]);
+  }, [dialogs, membershipByStudent, metaByChat, telegramRailFilter, searchQ, studentMap, trainerMapByTelegram]);
 
   const instagramContacts = useMemo(() => {
     const waitlistStudents = new Set((waitlist || []).map((w) => String(w.studentId || "")));
@@ -335,21 +335,24 @@ export default function MessagesTab({
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [instagramCrmOverrides, membershipByStudent, searchQ, students, trainers, waitlist]);
-  const matchesQuickFilter = (contact) => {
-    if (!contact) return false;
-    if (quickFilter === "all") return true;
-    if (quickFilter === "waitlist") return contact.leadStatus === "waitlist" || contact.crmStage === "waitlist_ready";
-    if (quickFilter === "leads") return contact.contactType === "lead" || ["new_lead", "contacted", "interested"].includes(contact.leadStatus);
-    if (quickFilter === "students") return contact.contactType === "student" || contact.leadStatus === "student";
-    if (quickFilter === "trainers") return contact.contactType === "trainer";
+  const matchesTelegramRailFilter = (dialog) => {
+    if (!dialog) return false;
+    if (telegramRailFilter === "all") return true;
+    if (telegramRailFilter === "trainers") return dialog.trainer;
+    if (telegramRailFilter === "unlinked") return !dialog.linkedStudent;
+    if (telegramRailFilter.startsWith("group:")) {
+      const gid = telegramRailFilter.replace("group:", "");
+      return (dialog.linkedGroupIds || []).includes(gid);
+    }
     return true;
   };
-  const matchesCrmRailFilter = (contact, lastTs = 0) => {
+  const matchesInstagramRailFilter = (contact, lastTs = 0) => {
     const now = Date.now();
     const ageMs = Math.max(0, now - (lastTs || 0));
     const h24 = 24 * 60 * 60 * 1000;
     const d3 = 3 * h24;
-    switch (railFilter) {
+    switch (instagramRailFilter) {
+      case "all": return true;
       case "new": return (contact?.pipelineStatus || "") === "new";
       case "needs_reply": return ["new", "contacted", "interested"].includes(contact?.pipelineStatus || "");
       case "reminder_needed": return (contact?.pipelineStatus || "") === "reminder_needed";
@@ -364,12 +367,12 @@ export default function MessagesTab({
     }
   };
   const filteredTelegramDialogs = useMemo(
-    () => enrichedDialogs.filter((d) => matchesQuickFilter(d.contact) && matchesCrmRailFilter(d.contact, d.lastTs)),
-    [enrichedDialogs, quickFilter, railFilter]
+    () => enrichedDialogs.filter((d) => matchesTelegramRailFilter(d)),
+    [enrichedDialogs, telegramRailFilter]
   );
   const filteredInstagramContacts = useMemo(
-    () => instagramContacts.filter((c) => matchesQuickFilter(c) && matchesCrmRailFilter(c, 0)),
-    [instagramContacts, quickFilter, railFilter]
+    () => instagramContacts.filter((c) => matchesInstagramRailFilter(c, parseIsoDateSafe(c.followUpAt))),
+    [instagramContacts, instagramRailFilter]
   );
   const activeDialog = filteredTelegramDialogs.find((d) => d.id === selectedDialog?.id) || filteredTelegramDialogs[0] || null;
   const activeInstagramContact = filteredInstagramContacts.find((c) => c.id === instagramSelectedId) || filteredInstagramContacts[0] || null;
@@ -628,30 +631,65 @@ export default function MessagesTab({
       }}
     >
       <div style={{ ...shellCard, padding: 12, background: theme.card, borderColor: theme.border }}>
-        <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700, marginBottom: 10, color: theme.textMuted }}>CRM-фільтри</div>
+        <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700, marginBottom: 10, color: theme.textMuted }}>
+          {activeChannel === "telegram" ? "Операційні фільтри" : "CRM-фільтри"}
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {[
-            ["all", "Усі"],
-            ["new", "Нові"],
-            ["needs_reply", "Потрібно відповісти"],
-            ["reminder_needed", "Потрібно нагадати"],
-            ["thinking", "Думає"],
-            ["booked", "Записані"],
-            ["waitlist", "Лист очікування"],
-            ["closed", "Закриті"],
-            ["no_status", "Без статусу"],
-            ["no_reply_24h", "Без відповіді 24г+"],
-            ["no_reply_3d", "Без відповіді 3 дні+"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setRailFilter(id)}
-              style={{ textAlign: "left", border: `1px solid ${railFilter === id ? theme.primary : theme.border}`, borderRadius: 14, padding: "10px 12px", background: railFilter === id ? `${theme.primary}22` : theme.input, cursor: "pointer", fontSize: 12, color: railFilter === id ? theme.primary : theme.textMain, fontWeight: railFilter === id ? 700 : 600 }}
-            >
-              {label}
-            </button>
-          ))}
+          {activeChannel === "telegram" ? (
+            <>
+              {[
+                ["all", "Усі чати"],
+                ["trainers", "Тренери"],
+                ["unlinked", "Неприв'язані / службові"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTelegramRailFilter(id)}
+                  style={{ textAlign: "left", border: `1px solid ${telegramRailFilter === id ? theme.primary : theme.border}`, borderRadius: 14, padding: "10px 12px", background: telegramRailFilter === id ? `${theme.primary}22` : theme.input, cursor: "pointer", fontSize: 12, color: telegramRailFilter === id ? theme.primary : theme.textMain, fontWeight: telegramRailFilter === id ? 700 : 600 }}
+                >
+                  {label}
+                </button>
+              ))}
+              {groups.map((g) => {
+                const id = `group:${g.id}`;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setTelegramRailFilter(id)}
+                    style={{ textAlign: "left", border: `1px solid ${telegramRailFilter === id ? theme.primary : theme.border}`, borderRadius: 14, padding: "10px 12px", background: telegramRailFilter === id ? `${theme.primary}22` : theme.input, cursor: "pointer", fontSize: 12, color: telegramRailFilter === id ? theme.primary : theme.textMain, fontWeight: telegramRailFilter === id ? 700 : 600 }}
+                  >
+                    {g.name}
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {[
+                ["all", "Усі"],
+                ["new", "Нові"],
+                ["needs_reply", "Потрібно відповісти"],
+                ["reminder_needed", "Потрібно нагадати"],
+                ["thinking", "Думає"],
+                ["booked", "Записані"],
+                ["waitlist", "Лист очікування"],
+                ["closed", "Закриті"],
+                ["no_reply_24h", "Без відповіді 24г+"],
+                ["no_reply_3d", "Без відповіді 3 дні+"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setInstagramRailFilter(id)}
+                  style={{ textAlign: "left", border: `1px solid ${instagramRailFilter === id ? theme.primary : theme.border}`, borderRadius: 14, padding: "10px 12px", background: instagramRailFilter === id ? `${theme.primary}22` : theme.input, cursor: "pointer", fontSize: 12, color: instagramRailFilter === id ? theme.primary : theme.textMain, fontWeight: instagramRailFilter === id ? 700 : 600 }}
+                >
+                  {label}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
@@ -673,28 +711,10 @@ export default function MessagesTab({
             Інстаграм
           </button>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-          {[
-            ["all", "Усі"],
-            ["leads", "Ліди"],
-            ["waitlist", "Очікування"],
-            ["students", "Учениці"],
-            ["trainers", "Тренери"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setQuickFilter(id)}
-              style={{ border: `1px solid ${quickFilter === id ? theme.primary : theme.border}`, borderRadius: 999, padding: "5px 9px", background: quickFilter === id ? `${theme.primary}22` : theme.input, color: quickFilter === id ? theme.primary : theme.textMain, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
         <input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
-          placeholder={activeChannel === "telegram" ? "Пошук: чат, @username, учениця" : "Пошук: контакт, phone, @telegram, instagram"}
+          placeholder={activeChannel === "telegram" ? "Пошук: чат, @username, учениця" : "Пошук: контакт, телефон, @telegram, instagram"}
           style={{ marginBottom: 10, border: `1px solid ${theme.border}`, borderRadius: 12, padding: "9px 11px", background: theme.input, color: theme.textMain, fontSize: 13 }}
         />
         {dialogsError && <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{dialogsError}</div>}
@@ -952,6 +972,19 @@ export default function MessagesTab({
                 </div>
               </div>
             )}
+            {activeInstagramContact && (
+              <div style={{ padding: 12, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
+                <div style={{ fontWeight: 800, color: theme.secondary, fontSize: 12, marginBottom: 6 }}>AI-основа (майбутній блок)</div>
+                <div style={{ color: theme.textMuted, fontSize: 12, lineHeight: 1.45 }}>
+                  Тут буде AI-підсумок для продажів: ймовірність запису, ризик втрати ліда, рекомендації повідомлень і next best action.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                  <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Стислий summary: —</div>
+                  <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Ризики: —</div>
+                  <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Рекомендована дія: —</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -990,142 +1023,19 @@ export default function MessagesTab({
             </div>
 
             <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
-              <div style={{ fontWeight: 800, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>CRM-основа (готово до мультиканалу)</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontWeight: 800, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Операційний профіль чату</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: theme.textMuted }}>
-                  Тип: {contactTypeDraft === "lead" ? "лід" : contactTypeDraft === "student" ? "учениця" : contactTypeDraft === "trainer" ? "тренер" : "інше"}
+                  Тип: {activeDialog.contact?.contactType === "trainer" ? "тренер" : activeDialog.contact?.contactType === "student" ? "учениця" : "інше"}
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: leadStatusDraft === "waitlist" ? theme.warning : theme.textMuted }}>
-                  Статус: {leadStatusDraft ? (leadStatusDraft === "new_lead" ? "новий лід" : leadStatusDraft === "contacted" ? "зв'язались" : leadStatusDraft === "interested" ? "зацікавлена" : leadStatusDraft === "waitlist" ? "лист очікування" : leadStatusDraft === "student" ? "учениця" : "неактуально") : "—"}
-                </span>
+                {activeDialog.contact?.pipelineStatus && (
+                  <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${crmStatusTone(activeDialog.contact.pipelineStatus).border}`, borderRadius: 999, padding: "2px 8px", background: crmStatusTone(activeDialog.contact.pipelineStatus).bg, color: crmStatusTone(activeDialog.contact.pipelineStatus).text }}>
+                    {PIPELINE_LABELS_UA[activeDialog.contact.pipelineStatus]}
+                  </span>
+                )}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Тип контакту</div>
-                  <select value={contactTypeDraft} onChange={(e) => setContactTypeDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    {CONTACT_TYPES.map((item) => <option key={item} value={item}>{item === "lead" ? "лід" : item === "student" ? "учениця" : item === "trainer" ? "тренер" : "інше"}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Етап CRM</div>
-                  <select value={crmStageDraft} onChange={(e) => setCrmStageDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    <option value="">—</option>
-                    {CRM_STAGES.map((item) => <option key={item} value={item}>{item === "potential_lead" ? "потенційний лід" : "готова до очікування"}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Короткий тег</div>
-                  <input value={shortTagDraft} onChange={(e) => setShortTagDraft(e.target.value)} placeholder="VIP / тепла / передзвонити" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <div style={{ display: "flex", alignItems: "flex-end" }}>
-                  <button
-                    type="button"
-                    onClick={() => saveMeta(activeDialog.id, {
-                      contactType: contactTypeDraft,
-                      crmStage: crmStageDraft || null,
-                      shortTag: shortTagDraft || null,
-                      contactName: activeDialog.contact?.name || activeDialog.title || "",
-                      contactPhone: activeDialog.contact?.phone || activeDialog.linkedStudent?.phone || "",
-                      contactTelegram: activeDialog.contact?.telegram || activeDialog.username || "",
-                      contactInstagram: activeDialog.contact?.instagram || "",
-                    })}
-                    style={{ width: "100%", border: `1px solid ${theme.secondary}`, borderRadius: 11, background: `${theme.secondary}22`, color: theme.secondary, padding: "7px 9px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
-                  >
-                    Зберегти базу
-                  </button>
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Статус ліда</div>
-                  <select value={leadStatusDraft} onChange={(e) => setLeadStatusDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    <option value="">—</option>
-                    {LEAD_STATUSES.map((item) => <option key={item} value={item}>{item === "new_lead" ? "новий лід" : item === "contacted" ? "зв'язались" : item === "interested" ? "зацікавлена" : item === "waitlist" ? "лист очікування" : item === "student" ? "учениця" : "неактуально"}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Джерело</div>
-                  <input value={leadSourceDraft} onChange={(e) => setLeadSourceDraft(e.target.value)} placeholder="інстаграм / реклама / рекомендація" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Бажаний напрямок</div>
-                  <input value={preferredDirectionDraft} onChange={(e) => setPreferredDirectionDraft(e.target.value)} placeholder="напр. heels / bachata" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Бажана група</div>
-                  <input value={preferredGroupDraft} onChange={(e) => setPreferredGroupDraft(e.target.value)} placeholder="ID/назва групи" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => saveMeta(activeDialog.id, {
-                    leadStatus: leadStatusDraft || null,
-                    leadSource: leadSourceDraft || null,
-                    preferredDirection: preferredDirectionDraft || null,
-                    preferredGroup: preferredGroupDraft || null,
-                  })}
-                  style={{ border: `1px solid ${theme.secondary}`, borderRadius: 11, background: theme.card, color: theme.secondary, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
-                >
-                  Зберегти поля ліда
-                </button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Основний статус чату</div>
-                  <select value={pipelineStatusDraft} onChange={(e) => setPipelineStatusDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    <option value="">Без статусу</option>
-                    {PIPELINE_STATUSES.map((item) => <option key={item} value={item}>{PIPELINE_LABELS_UA[item]}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Формат</div>
-                  <select value={formatPreferenceDraft} onChange={(e) => setFormatPreferenceDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    <option value="">Не обрано</option>
-                    <option value="group">Групові</option>
-                    <option value="individual">Індивідуальні</option>
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Статус очікування</div>
-                  <input value={waitlistStatusDraft} onChange={(e) => setWaitlistStatusDraft(e.target.value)} placeholder="активна / пауза / закрито" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Наступна дія</div>
-                  <input value={nextActionDraft} onChange={(e) => setNextActionDraft(e.target.value)} placeholder="Напр. запропонувати слот" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr auto", gap: 8, marginTop: 8, alignItems: "end" }}>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Фоллоу-ап на</div>
-                  <input type="datetime-local" value={followUpAtDraft} onChange={(e) => setFollowUpAtDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Статус фоллоу-апу</div>
-                  <select value={followUpStateDraft} onChange={(e) => setFollowUpStateDraft(e.target.value)} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }}>
-                    <option value="pending">Очікує</option>
-                    <option value="done">Виконано</option>
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 3 }}>Причина / нотатка</div>
-                  <input value={followUpReasonDraft} onChange={(e) => setFollowUpReasonDraft(e.target.value)} placeholder="Що нагадати" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card, color: theme.textMain }} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => saveMeta(activeDialog.id, {
-                    pipelineStatus: pipelineStatusDraft || null,
-                    formatPreference: formatPreferenceDraft || null,
-                    waitlistStatus: waitlistStatusDraft || null,
-                    nextAction: nextActionDraft || null,
-                    followUpAt: followUpAtDraft ? new Date(followUpAtDraft).toISOString() : null,
-                    followUpReason: followUpReasonDraft || null,
-                    followUpState: followUpStateDraft || "pending",
-                  })}
-                  style={{ border: `1px solid ${theme.secondary}`, borderRadius: 11, background: `${theme.secondary}22`, color: theme.secondary, padding: "8px 10px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
-                >
-                  Зберегти воронку
-                </button>
+              <div style={{ color: theme.textMuted, fontSize: 12, lineHeight: 1.45 }}>
+                У Telegram лишено лише операційний контекст: прив'язка до учениці, групи, статус абонемента, нотатка та шаблон для щоденної комунікації.
               </div>
             </div>
 
@@ -1182,18 +1092,6 @@ export default function MessagesTab({
                 )}
               </div>
             )}
-
-            <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
-              <div style={{ fontWeight: 800, color: theme.secondary, fontSize: 12, marginBottom: 6 }}>AI-основа (майбутній блок)</div>
-              <div style={{ color: theme.textMuted, fontSize: 12, lineHeight: 1.45 }}>
-                Тут буде короткий AI-підсумок: ризики втрати ліда, підказки наступного кроку, рекомендований follow-up та пріоритет дій.
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
-                <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Підсумок діалогу: —</div>
-                <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Ризики: —</div>
-                <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 9px", color: theme.textMuted, fontSize: 11 }}>Найкраща наступна дія: —</div>
-              </div>
-            </div>
 
             <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
               {orderedMessages.map((m) => (
