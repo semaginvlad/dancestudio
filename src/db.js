@@ -131,13 +131,163 @@ export async function fetchGroups() {
 export async function updateGroup(id, g) {
   const payload = {}
   if (g.name !== undefined) payload.name = g.name
+  if (g.directionId !== undefined) payload.direction_id = g.directionId
   if (g.schedule !== undefined) payload.schedule = g.schedule
   if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
   if (g.trainer_id !== undefined) payload.trainer_id = g.trainer_id
+  if (g.is_active !== undefined) payload.is_active = g.is_active
+  if (g.active !== undefined) payload.active = g.active
+  if (g.archived_at !== undefined) payload.archived_at = g.archived_at
 
   const { data, error } = await supabase.from('groups').update(payload).eq('id', id).select().single()
   if (error) throw error
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
+}
+
+export async function insertGroup(group) {
+  const payload = {
+    id: group.id,
+    name: group.name,
+    direction_id: group.directionId,
+    schedule: Array.isArray(group.schedule) ? group.schedule : [],
+    trainer_pct: group.trainerPct ?? 0,
+  };
+  const { data, error } = await supabase.from('groups').insert(payload).select().single();
+  if (error) throw error;
+  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id };
+}
+
+// ─── DIRECTIONS ───
+const mapDirection = (d) => ({
+  id: d.id,
+  name: d.name || d.id,
+  color: d.color || "#7b8ea8",
+  isActive: d.is_active !== false,
+  archivedAt: d.archived_at || null,
+});
+
+export async function fetchDirections() {
+  const { data, error } = await supabase.from("directions").select("*").order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapDirection);
+}
+
+export async function insertDirection(direction) {
+  const payload = {
+    id: direction.id,
+    name: direction.name,
+    color: direction.color || "#7b8ea8",
+    is_active: direction.isActive !== false,
+    archived_at: direction.archivedAt || null,
+  };
+  const { data, error } = await supabase.from("directions").insert(payload).select("*").single();
+  if (error) throw error;
+  return mapDirection(data);
+}
+
+export async function updateDirection(id, direction) {
+  const payload = {};
+  if (direction.id !== undefined) payload.id = direction.id;
+  if (direction.name !== undefined) payload.name = direction.name;
+  if (direction.color !== undefined) payload.color = direction.color || "#7b8ea8";
+  if (direction.isActive !== undefined) payload.is_active = !!direction.isActive;
+  if (direction.archivedAt !== undefined) payload.archived_at = direction.archivedAt;
+  const { data, error } = await supabase.from("directions").update(payload).eq("id", id).select("*").single();
+  if (error) throw error;
+  return mapDirection(data);
+}
+
+export async function deleteDirection(id) {
+  const { error } = await supabase.from("directions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ─── TRAINERS ───
+const mapTrainer = (t) => ({
+  id: t.id,
+  name: t.name || "",
+  firstName: t.first_name || "",
+  lastName: t.last_name || "",
+  phone: t.phone || "",
+  telegram: t.telegram || "",
+  instagramHandle: t.instagram_handle || "",
+  notes: t.notes || "",
+  isActive: t.is_active !== false,
+});
+
+export async function fetchTrainers() {
+  const { data, error } = await supabase.from('trainers').select('*').order('name', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapTrainer);
+}
+
+export async function insertTrainer(trainer) {
+  const firstName = trainer.firstName || "";
+  const lastName = trainer.lastName || "";
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim() || trainer.name || "";
+  const payload = {
+    name: fullName,
+    first_name: firstName || null,
+    last_name: lastName || null,
+    phone: trainer.phone || null,
+    telegram: trainer.telegram || null,
+    instagram_handle: trainer.instagramHandle || null,
+    notes: trainer.notes || null,
+    is_active: trainer.isActive !== false,
+  };
+  const { data, error } = await supabase.from('trainers').insert(payload).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function updateTrainer(id, trainer) {
+  const payload = {};
+  const nextFirstName = trainer.firstName;
+  const nextLastName = trainer.lastName;
+  if (nextFirstName !== undefined) payload.first_name = nextFirstName || null;
+  if (nextLastName !== undefined) payload.last_name = nextLastName || null;
+  if (nextFirstName !== undefined || nextLastName !== undefined || trainer.name !== undefined) {
+    const fallbackName = trainer.name || "";
+    payload.name = [nextFirstName || "", nextLastName || ""].filter(Boolean).join(" ").trim() || fallbackName || null;
+  }
+  if (trainer.phone !== undefined) payload.phone = trainer.phone || null;
+  if (trainer.telegram !== undefined) payload.telegram = trainer.telegram || null;
+  if (trainer.instagramHandle !== undefined) payload.instagram_handle = trainer.instagramHandle || null;
+  if (trainer.notes !== undefined) payload.notes = trainer.notes || null;
+  if (trainer.isActive !== undefined) payload.is_active = !!trainer.isActive;
+  const { data, error } = await supabase.from('trainers').update(payload).eq('id', id).select('*').single();
+  if (error) throw error;
+  return mapTrainer(data);
+}
+
+export async function fetchTrainerGroups() {
+  const { data, error } = await supabase.from('trainer_groups').select('*');
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    trainerId: row.trainer_id,
+    groupId: row.group_id,
+    isPrimary: !!row.is_primary,
+  }));
+}
+
+export async function upsertTrainerGroup(trainerId, groupId) {
+  const payload = { trainer_id: trainerId, group_id: groupId, is_primary: true };
+  const { data, error } = await supabase
+    .from('trainer_groups')
+    .upsert(payload, { onConflict: 'trainer_id,group_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return {
+    trainerId: data.trainer_id,
+    groupId: data.group_id,
+    isPrimary: !!data.is_primary,
+  };
+}
+
+export async function deleteTrainerGroup(trainerId, groupId) {
+  const { error } = await supabase.from('trainer_groups').delete().eq('trainer_id', trainerId).eq('group_id', groupId);
+  if (error) throw error;
 }
 
 // ─── SUBSCRIPTIONS ───
@@ -372,6 +522,38 @@ export async function insertCancelled(c) {
 export async function deleteCancelled(id) {
   const { error } = await supabase.from('cancelled_trainings').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ─── ATTENDANCE WARNED FLAGS ───
+const warnedKey = (groupId, studentId) => `${groupId}:${studentId}`;
+
+export async function fetchWarnedStudents() {
+  const { data, error } = await supabase.from('attendance_warned_students').select('*');
+  if (error) {
+    console.warn('attendance_warned_students:', error.message);
+    return {};
+  }
+  return (data || []).reduce((acc, row) => {
+    const key = warnedKey(row.group_id, row.student_id);
+    acc[key] = !!row.warned;
+    return acc;
+  }, {});
+}
+
+export async function upsertWarnedStudent(groupId, studentId, warned) {
+  const payload = {
+    group_id: String(groupId),
+    student_id: String(studentId),
+    warned: !!warned,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('attendance_warned_students')
+    .upsert(payload, { onConflict: 'group_id,student_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 // ─── WAITLIST ───
