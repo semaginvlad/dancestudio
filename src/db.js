@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { PLAN_TYPES } from './shared/constants'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -478,6 +479,7 @@ export async function insertAttendance(a) {
     entry_type: a.entryType || 'subscription',
   }).select().single()
   if (error) throw error
+  await ensureOneOffPaymentForAttendance(data);
   return {
     id: data.id,
     subId: data.sub_id,
@@ -492,9 +494,102 @@ export async function insertAttendance(a) {
 }
 
 export async function deleteAttendance(id) {
+  const { data: existing } = await supabase
+    .from('attendance')
+    .select('id, student_id, group_id, date, entry_type, guest_type')
+    .eq('id', id)
+    .maybeSingle();
   const { error } = await supabase.from('attendance').delete().eq('id', id)
   if (error) throw error
+  if (existing) {
+    await removeOneOffPaymentIfOrphan(existing);
+  }
 }
+
+const ONE_OFF_PLAN_TYPES = new Set(["trial", "single"]);
+const ONE_OFF_PRICE_BY_PLAN = Object.fromEntries(
+  (Array.isArray(PLAN_TYPES) ? PLAN_TYPES : [])
+    .filter((p) => ONE_OFF_PLAN_TYPES.has(String(p?.id || "").trim().toLowerCase()))
+    .map((p) => [String(p.id).trim().toLowerCase(), Number(p.price || 0)])
+);
+const normalizeOneOffType = (value) => String(value || "").trim().toLowerCase();
+
+const ensureOneOffPaymentForAttendance = async (attendanceRow) => {
+  const entryType = normalizeOneOffType(attendanceRow?.entry_type || attendanceRow?.guest_type || "");
+  if (!ONE_OFF_PLAN_TYPES.has(entryType)) return;
+  const studentId = attendanceRow?.student_id;
+  const groupId = attendanceRow?.group_id;
+  const date = String(attendanceRow?.date || "").slice(0, 10);
+  if (!studentId || !groupId || !date) return;
+  const amount = Number(ONE_OFF_PRICE_BY_PLAN[entryType] || 0);
+
+  const { data: existing, error: existingErr } = await supabase
+    .from('subscriptions')
+    .select('id')
+    .eq('student_id', studentId)
+    .eq('group_id', groupId)
+    .eq('plan_type', entryType)
+    .eq('activation_date', date)
+    .eq('start_date', date)
+    .eq('end_date', date)
+    .eq('paid', true)
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (existing?.id) return;
+
+  const { error } = await supabase.from('subscriptions').insert({
+    student_id: studentId,
+    group_id: groupId,
+    plan_type: entryType,
+    start_date: date,
+    end_date: date,
+    activation_date: date,
+    total_trainings: 1,
+    used_trainings: 1,
+    amount,
+    base_price: amount,
+    discount_pct: 0,
+    discount_source: 'studio',
+    paid: true,
+    pay_method: 'card',
+    notification_sent: false,
+    notes: `auto_one_off_from_attendance:${attendanceRow?.id || ''}`,
+  });
+  if (error) throw error;
+};
+
+const removeOneOffPaymentIfOrphan = async (attendanceRow) => {
+  const entryType = normalizeOneOffType(attendanceRow?.entry_type || attendanceRow?.guest_type || "");
+  if (!ONE_OFF_PLAN_TYPES.has(entryType)) return;
+  const studentId = attendanceRow?.student_id;
+  const groupId = attendanceRow?.group_id;
+  const date = String(attendanceRow?.date || "").slice(0, 10);
+  if (!studentId || !groupId || !date) return;
+
+  const { data: stillHasAttendance, error: attnErr } = await supabase
+    .from('attendance')
+    .select('id')
+    .eq('student_id', studentId)
+    .eq('group_id', groupId)
+    .eq('date', date)
+    .eq('entry_type', entryType)
+    .limit(1)
+    .maybeSingle();
+  if (attnErr) throw attnErr;
+  if (stillHasAttendance?.id) return;
+
+  const { error: delErr } = await supabase
+    .from('subscriptions')
+    .delete()
+    .eq('student_id', studentId)
+    .eq('group_id', groupId)
+    .eq('plan_type', entryType)
+    .eq('activation_date', date)
+    .eq('start_date', date)
+    .eq('end_date', date);
+  if (delErr) throw delErr;
+};
 
 // ─── CANCELLED ───
 export async function fetchCancelled() {
