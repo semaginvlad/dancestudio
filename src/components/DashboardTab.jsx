@@ -263,6 +263,25 @@ export default function DashboardTab({ analytics, activeSubs, subs, studentMap, 
             </div>
           ))}
         </div>
+
+        {analytics.foundation && (
+          <div style={{ ...cardSt, border: `1px dashed ${theme.border}`, marginTop: 24 }}>
+            <h3 style={{ color: theme.secondary, fontSize: 16, marginBottom: 12, fontWeight: 800 }}>
+              Analytics foundation preview ({analytics.foundation.period.key})
+            </h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10 }}>
+              {analytics.foundation.ui.kpiTiles.map((tile) => (
+                <div key={tile.id} style={{ background: theme.bg, borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>{tile.title}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: theme.textMain }}>{tile.value}</div>
+                  <div style={{ fontSize: 12, color: tile.trend.delta >= 0 ? theme.success : theme.danger }}>
+                    Δ {tile.trend.delta >= 0 ? "+" : ""}{tile.trend.delta} ({tile.trend.deltaPct}%)
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {renderDashModal()}
