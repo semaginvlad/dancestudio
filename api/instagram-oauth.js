@@ -21,6 +21,11 @@ const getConfig = () => {
 };
 
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
+const applyNoStore = (res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+};
 
 const buildAuthUrl = ({ clientId, redirectUri, scope, state }) => {
   const params = new URLSearchParams({
@@ -71,6 +76,7 @@ const sanitizeConnection = (row) => {
 };
 
 const handleStatus = async (res) => {
+  applyNoStore(res);
   const supabase = buildSupabase();
   const { data, error } = await supabase
     .from("instagram_oauth_connections")
@@ -85,10 +91,19 @@ const handleStatus = async (res) => {
       requiredSql: ["sql/instagram_oauth_connections.sql"],
     });
   }
-  return res.status(200).json({ success: true, connection: sanitizeConnection(data) });
+  return res.status(200).json({
+    success: true,
+    connection: sanitizeConnection(data),
+    storage: {
+      table: "instagram_oauth_connections",
+      selectedBy: `id=${CONNECTION_ID}`,
+      rowFound: !!data,
+    },
+  });
 };
 
 const handleStart = async (res) => {
+  applyNoStore(res);
   const { clientId, redirectUri, scope } = getConfig();
   if (!clientId || !redirectUri) {
     return res.status(400).json({ error: "Missing INSTAGRAM_CLIENT_ID/META_APP_ID or INSTAGRAM_REDIRECT_URI" });
@@ -149,6 +164,7 @@ const toExpiryIso = (expiresInSeconds = 0) => {
 };
 
 const handleExchange = async (req, res) => {
+  applyNoStore(res);
   const code = String(req.body?.code || req.query?.code || "").trim();
   if (!code) return res.status(400).json({ error: "code is required" });
 
@@ -208,6 +224,7 @@ const handleExchange = async (req, res) => {
 };
 
 const handleRefresh = async (res) => {
+  applyNoStore(res);
   const supabase = buildSupabase();
   const { data: existing, error } = await supabase
     .from("instagram_oauth_connections")

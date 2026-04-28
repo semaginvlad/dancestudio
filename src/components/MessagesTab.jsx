@@ -394,7 +394,7 @@ export default function MessagesTab({
   }, [instagramConnectionStatus]);
   const loadInstagramConnectionStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/instagram-oauth?op=status");
+      const res = await fetch("/api/instagram-oauth?op=status", { cache: "no-store" });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити Instagram connection status");
       setInstagramConnectionStatus(payload.connection || null);
@@ -404,6 +404,9 @@ export default function MessagesTab({
       setInstagramConnectionError(String(error?.message || error));
     }
   }, []);
+  useEffect(() => {
+    loadInstagramConnectionStatus();
+  }, [loadInstagramConnectionStatus]);
   useEffect(() => {
     if (activeChannel !== "instagram") return;
     loadInstagramConnectionStatus();
@@ -970,7 +973,7 @@ export default function MessagesTab({
                   onClick={async () => {
                     try {
                       setInstagramConnectionLoading(true);
-                      const res = await fetch("/api/instagram-oauth?op=start");
+                      const res = await fetch("/api/instagram-oauth?op=start", { cache: "no-store" });
                       const payload = await res.json();
                       if (!res.ok || !payload?.authUrl) throw new Error(payload?.details || payload?.error || "Не вдалося сформувати URL підключення");
                       setInstagramConnectionAction("Відкрито OAuth URL. Після авторизації вставте `code` у поле нижче та натисніть Exchange code.");
@@ -990,7 +993,7 @@ export default function MessagesTab({
                   onClick={async () => {
                     try {
                       setInstagramConnectionLoading(true);
-                      const res = await fetch("/api/instagram-oauth?op=refresh", { method: "POST" });
+                      const res = await fetch("/api/instagram-oauth?op=refresh", { method: "POST", cache: "no-store" });
                       const payload = await res.json();
                       if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося оновити Instagram token");
                       setInstagramConnectionAction("Long-lived token успішно оновлено.");
@@ -1025,6 +1028,7 @@ export default function MessagesTab({
                       setInstagramConnectionLoading(true);
                       const res = await fetch("/api/instagram-oauth?op=exchange", {
                         method: "POST",
+                        cache: "no-store",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ code: instagramAuthCodeDraft.trim() }),
                       });
