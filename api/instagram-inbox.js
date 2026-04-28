@@ -32,11 +32,43 @@ const fetchJson = async (url) => {
 const readConnection = async (supabase) => {
   const { data, error } = await supabase
     .from("instagram_oauth_connections")
-    .select("id, connected, access_token, ig_user_id, ig_username, expires_at, refreshed_at")
+    .select("id, connected, access_token, ig_user_id, ig_username, expires_at, refreshed_at, metadata")
     .eq("id", CONNECTION_ID)
     .maybeSingle();
   if (error) throw error;
   return data || null;
+};
+
+const resolveFacebookPageContext = async ({ accessToken, igUserId }) => {
+  try {
+    const fields = "id,name,access_token,instagram_business_account{id,username}";
+    const payload = await fetchJson(`${FB_GRAPH_BASE}/me/accounts?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`);
+    const pages = Array.isArray(payload?.data) ? payload.data : [];
+    const withIg = pages.filter((p) => p?.instagram_business_account?.id);
+    const matched = withIg.find((p) => String(p.instagram_business_account.id) === String(igUserId || "")) || withIg[0] || null;
+    if (!matched) {
+      return {
+        ok: false,
+        reason: "no_linked_facebook_page_with_instagram_business_account",
+        pagesCount: pages.length,
+      };
+    }
+    return {
+      ok: true,
+      pageId: String(matched.id || ""),
+      pageName: matched.name || "",
+      pageAccessToken: matched.access_token || "",
+      igBusinessId: String(matched.instagram_business_account?.id || ""),
+      igBusinessUsername: matched.instagram_business_account?.username || "",
+      pagesCount: pages.length,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "facebook_me_accounts_failed",
+      details: String(error?.message || error),
+    };
+  }
 };
 
 const collectAccountDiagnostics = async (accessToken) => {
@@ -56,34 +88,80 @@ const collectAccountDiagnostics = async (accessToken) => {
   }
 };
 
-const fetchConversationsFromMeta = async ({ accessToken, igUserId }) => {
+const fetchConversationsFromMeta = async ({ accessToken, igUserId, pageContext }) => {
   const fields = "id,updated_time,participants{id,username,name},messages.limit(1){id,message,from,created_time}";
   const paths = [
-    `${GRAPH_BASE}/me/conversations?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
-    igUserId ? `${GRAPH_BASE}/${encodeURIComponent(igUserId)}/conversations?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}` : "",
-    igUserId ? `${FB_GRAPH_BASE}/${encodeURIComponent(igUserId)}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}` : "",
+    pageContext?.ok && igUserId
+      ? {
+          endpoint: `${FB_GRAPH_BASE}/${encodeURIComponent(igUserId)}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(pageContext.pageAccessToken)}`,
+          tokenStrategy: "facebook_page_access_token",
+        }
+      : null,
+    {
+      endpoint: `${GRAPH_BASE}/me/conversations?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
+      tokenStrategy: "instagram_user_access_token",
+    },
+    igUserId
+      ? {
+          endpoint: `${GRAPH_BASE}/${encodeURIComponent(igUserId)}/conversations?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
+          tokenStrategy: "instagram_user_access_token",
+        }
+      : null,
+    igUserId
+      ? {
+          endpoint: `${FB_GRAPH_BASE}/${encodeURIComponent(igUserId)}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
+          tokenStrategy: "instagram_user_access_token_to_facebook_edge",
+        }
+      : null,
   ].filter(Boolean);
 
   const attempts = [];
-  for (const path of paths) {
+  let fallbackSuccess = null;
+  for (const row of paths) {
+    const path = row.endpoint;
+    const tokenStrategy = row.tokenStrategy;
     try {
       const payload = await fetchJson(path);
-      attempts.push({
+      const info = {
         endpoint: path,
+        tokenStrategy,
         ok: true,
         topLevelKeys: Object.keys(payload || {}),
         rawDataCount: Array.isArray(payload?.data) ? payload.data.length : null,
         hasPaging: !!payload?.paging,
-      });
-      return { payload, endpoint: path, attempts };
+      };
+      attempts.push(info);
+      if ((info.rawDataCount || 0) > 0) return { payload, endpoint: path, attempts, selectedStrategy: tokenStrategy };
+      if (!fallbackSuccess) fallbackSuccess = { payload, endpoint: path, attempts: [...attempts], selectedStrategy: tokenStrategy };
     } catch (error) {
-      attempts.push({ endpoint: path, ok: false, error: String(error?.message || error) });
+      attempts.push({ endpoint: path, tokenStrategy, ok: false, error: String(error?.message || error) });
     }
   }
+  if (fallbackSuccess) return fallbackSuccess;
   const details = attempts.map((a) => `${a.endpoint} -> ${a.error}`).join(" | ");
   const err = new Error(`Instagram inbox endpoints failed. ${details}`);
   err.attempts = attempts;
   throw err;
+};
+
+const persistPageContextFoundation = async (supabase, connection, pageContext) => {
+  if (!pageContext?.ok) return;
+  const metadata = {
+    ...((connection?.metadata && typeof connection.metadata === "object") ? connection.metadata : {}),
+    page_context: {
+      page_id: pageContext.pageId || "",
+      page_name: pageContext.pageName || "",
+      ig_business_id: pageContext.igBusinessId || "",
+      ig_business_username: pageContext.igBusinessUsername || "",
+      pages_count_seen: pageContext.pagesCount || 0,
+      saved_at: new Date().toISOString(),
+    },
+    page_access_token: pageContext.pageAccessToken || "",
+  };
+  await supabase
+    .from("instagram_oauth_connections")
+    .update({ metadata, updated_at: new Date().toISOString() })
+    .eq("id", CONNECTION_ID);
 };
 
 const extractRows = (payload) => {
@@ -189,9 +267,15 @@ const handleSync = async (res) => {
   }
 
   try {
-    const { payload, endpoint, attempts } = await fetchConversationsFromMeta({
+    const pageContext = await resolveFacebookPageContext({
       accessToken: connection.access_token,
       igUserId: connection.ig_user_id || "",
+    });
+    await persistPageContextFoundation(supabase, connection, pageContext);
+    const { payload, endpoint, attempts, selectedStrategy } = await fetchConversationsFromMeta({
+      accessToken: connection.access_token,
+      igUserId: connection.ig_user_id || "",
+      pageContext,
     });
     const accountDiagnostics = await collectAccountDiagnostics(connection.access_token);
     const rows = extractRows(payload);
@@ -222,6 +306,7 @@ const handleSync = async (res) => {
       success: true,
       syncedAt: new Date().toISOString(),
       sourceEndpoint: endpoint,
+      selectedStrategy,
       attempts,
       rawMeta: {
         topLevelKeys,
@@ -234,6 +319,7 @@ const handleSync = async (res) => {
         likelyRootCause,
         likelyProductReason,
         accountDiagnostics,
+        pageContext,
       },
       fetchedThreads: rows.length,
       persistedThreads: persisted.upserted,
