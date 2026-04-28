@@ -33,6 +33,8 @@ const tile = () => ({
 });
 
 const PAID_PACKS = new Set(["4pack", "8pack", "12pack"]);
+const REVENUE_PLAN_TYPES = new Set(["4pack", "8pack", "12pack", "single", "trial"]);
+const isRealRevenuePayment = (sub) => Number(sub?.amount || 0) > 0;
 
 const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1, 12);
 const pad = (n) => String(n).padStart(2, "0");
@@ -499,11 +501,11 @@ export default function TrainersTab({
   }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, renewalsRiskBlock.noRenewal, scopedData.scopedAttn, scopedData.scopedSubs]);
 
   const paidSubsCurrent = useMemo(
-    () => scopedData.scopedSubs.filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), range.start, range.end)),
+    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), range.start, range.end)),
     [range.end, range.start, scopedData.scopedSubs],
   );
   const paidSubsPrev = useMemo(
-    () => scopedData.scopedSubs.filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
+    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
     [rangePrev.end, rangePrev.start, scopedData.scopedSubs],
   );
 
@@ -641,7 +643,7 @@ export default function TrainersTab({
         .filter((a) => inRange(a.date, start, end))
         .reduce((sum, row) => sum + (row.quantity || 1), 0);
       const revenueTotal = scopedData.scopedSubs
-        .filter((s) => PAID_PACKS.has(s.planType) && inRange(getSubRefDate(s), start, end))
+        .filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), start, end))
         .reduce((sum, s) => {
           const group = trainerBoundGroups.find((g) => String(g.id) === String(s.groupId));
           const pctValue = Number(group?.trainerPct || 0);

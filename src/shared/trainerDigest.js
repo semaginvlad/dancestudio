@@ -520,14 +520,11 @@ export const buildTrainerGroupDraft = ({
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name, "uk-UA"));
 
-  const lines = reminderRows.map((x) => `- ${x.name} — ${x.reason}`);
+  const lines = reminderRows.map((x) => `- ${x.name}`);
   const text = lines.length
     ? [
-      "Зведення для тренера",
-      `Група: ${group.name}`,
-      `Найближче заняття: ${targetTrainingDate}`,
-      "",
-      "Нагадати щодо абонемента:",
+      `Група ${group.name}`,
+      "Немає оплат у:",
       ...lines,
     ].join("\n")
     : "";
