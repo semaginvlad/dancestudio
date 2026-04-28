@@ -35,6 +35,8 @@ const tile = () => ({
 const PAID_PACKS = new Set(["4pack", "8pack", "12pack"]);
 const REVENUE_PLAN_TYPES = new Set(["4pack", "8pack", "12pack", "single", "trial"]);
 const isRealRevenuePayment = (sub) => Number(sub?.amount || 0) > 0;
+const normalizeRevenuePlanType = (value) => String(value || "").trim().toLowerCase();
+const normalizeRevenueGroupId = (value) => String(value || "").trim();
 
 const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1, 12);
 const pad = (n) => String(n).padStart(2, "0");
@@ -501,30 +503,30 @@ export default function TrainersTab({
   }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, renewalsRiskBlock.noRenewal, scopedData.scopedAttn, scopedData.scopedSubs]);
 
   const paidSubsCurrent = useMemo(
-    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), range.start, range.end)),
+    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), range.start, range.end)),
     [range.end, range.start, scopedData.scopedSubs],
   );
   const paidSubsPrev = useMemo(
-    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
+    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
     [rangePrev.end, rangePrev.start, scopedData.scopedSubs],
   );
 
   const revenueAnalytics = useMemo(() => {
-    const trainerPctByGroup = Object.fromEntries(trainerBoundGroups.map((g) => [String(g.id), Number(g.trainerPct || 0)]));
+    const trainerPctByGroup = Object.fromEntries(trainerBoundGroups.map((g) => [normalizeRevenueGroupId(g.id), Number(g.trainerPct || 0)]));
     const perGroupCurrent = {};
     const perGroupPrev = {};
     let monthCurrent = 0;
     let monthPrev = 0;
 
     paidSubsCurrent.forEach((s) => {
-      const groupId = String(s.groupId);
+      const groupId = normalizeRevenueGroupId(s.groupId);
       const pctValue = trainerPctByGroup[groupId] ?? 0;
       const trainerShare = Math.round((Number(s.amount || 0) * pctValue) / 100);
       monthCurrent += trainerShare;
       perGroupCurrent[groupId] = (perGroupCurrent[groupId] || 0) + trainerShare;
     });
     paidSubsPrev.forEach((s) => {
-      const groupId = String(s.groupId);
+      const groupId = normalizeRevenueGroupId(s.groupId);
       const pctValue = trainerPctByGroup[groupId] ?? 0;
       const trainerShare = Math.round((Number(s.amount || 0) * pctValue) / 100);
       monthPrev += trainerShare;
@@ -643,9 +645,9 @@ export default function TrainersTab({
         .filter((a) => inRange(a.date, start, end))
         .reduce((sum, row) => sum + (row.quantity || 1), 0);
       const revenueTotal = scopedData.scopedSubs
-        .filter((s) => REVENUE_PLAN_TYPES.has(s.planType) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), start, end))
+        .filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), start, end))
         .reduce((sum, s) => {
-          const group = trainerBoundGroups.find((g) => String(g.id) === String(s.groupId));
+          const group = trainerBoundGroups.find((g) => normalizeRevenueGroupId(g.id) === normalizeRevenueGroupId(s.groupId));
           const pctValue = Number(group?.trainerPct || 0);
           return sum + Math.round((Number(s.amount || 0) * pctValue) / 100);
         }, 0);
