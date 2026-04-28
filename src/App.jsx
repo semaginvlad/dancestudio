@@ -81,6 +81,14 @@ export default function App() {
   const [filterDir, setFilterDir] = useStickyState("all", "ds_filterDir");
   const [filterGroup, setFilterGroup] = useStickyState("all", "ds_filterGroup");
   const [filterStatus, setFilterStatus] = useStickyState("all", "ds_filterStatus");
+  const [filterPlanType, setFilterPlanType] = useStickyState("all", "ds_filterPlanType");
+  const [filterPaid, setFilterPaid] = useStickyState("all", "ds_filterPaid");
+  const [filterPayMethod, setFilterPayMethod] = useStickyState("all", "ds_filterPayMethod");
+  const [filterTrainer, setFilterTrainer] = useStickyState("all", "ds_filterTrainer");
+  const [filterFromDate, setFilterFromDate] = useStickyState("", "ds_filterFromDate");
+  const [filterToDate, setFilterToDate] = useStickyState("", "ds_filterToDate");
+  const [filterDatePreset, setFilterDatePreset] = useStickyState("custom", "ds_filterDatePreset");
+  const [filterAudit, setFilterAudit] = useStickyState("all", "ds_filterAudit");
   const [stFilterDir, setStFilterDir] = useStickyState("all", "ds_stFilterDir");
   const [stFilterGroup, setStFilterGroup] = useStickyState("all", "ds_stFilterGroup");
   const [finFilterDir, setFinFilterDir] = useStickyState("all", "ds_finFilterDir");
@@ -740,19 +748,88 @@ export default function App() {
   }, [filteredStudents, studentGrps, groupMap, activeSubs]);
 
   const filteredSubs=useMemo(()=>{
+    const from = filterFromDate || "";
+    const to = filterToDate || "";
     let r=subsExt;
+    if(filterPlanType!=="all")r=r.filter(s=>String(s.planType||"").toLowerCase()===filterPlanType);
+    if(filterPaid!=="all")r=r.filter(s=>filterPaid==="paid"?!!s.paid:!s.paid);
     if(filterDir!=="all"){const gids=groups.filter(g=>g.directionId===filterDir).map(g=>g.id);r=r.filter(s=>gids.includes(s.groupId))}
     if(filterGroup!=="all")r=r.filter(s=>s.groupId===filterGroup);
     if(filterStatus!=="all")r=r.filter(s=>s.status===filterStatus);
+    if(filterPayMethod!=="all")r=r.filter(s=>String(s.payMethod||"")===filterPayMethod);
+    if(filterTrainer!=="all"){
+      const trainerGroupIds = new Set(trainerGroups.filter((tg) => String(tg.trainerId) === String(filterTrainer)).map((tg) => String(tg.groupId)));
+      r=r.filter(s=>trainerGroupIds.has(String(s.groupId)));
+    }
+    if(from)r=r.filter(s=>(s.activationDate||s.startDate||"")>=from);
+    if(to)r=r.filter(s=>(s.activationDate||s.startDate||"")<=to);
     if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>getDisplayName(studentMap[s.studentId]).toLowerCase().includes(q))}
     return r.sort((a,b)=>({warning:0,active:1,expired:2}[a.status]??3)-({warning:0,active:1,expired:2}[b.status]??3));
-  },[subsExt,filterDir,filterGroup,filterStatus,searchQ,groups,studentMap]);
+  },[subsExt,filterPlanType,filterPaid,filterDir,filterGroup,filterStatus,filterPayMethod,filterTrainer,filterFromDate,filterToDate,searchQ,groups,studentMap,trainerGroups]);
+
+  const paymentAnomalies = useMemo(() => {
+    const anomalies = [];
+    const byKey = {};
+    filteredSubs.forEach((s) => {
+      const dateKey = String(s.activationDate || s.startDate || "").slice(0, 10);
+      const key = `${s.studentId}|${s.groupId}|${dateKey}`;
+      if (!byKey[key]) byKey[key] = [];
+      byKey[key].push(s);
+    });
+    Object.values(byKey).forEach((rows) => {
+      const first = rows[0];
+      const pt = String(first?.planType || "").toLowerCase();
+      if ((pt === "trial" || pt === "single") && rows.length > 1) anomalies.push({ type: "duplicate_oneoff_same_day", rows });
+      if (rows.length > 1) anomalies.push({ type: "multiple_payments_same_day", rows });
+    });
+    filteredSubs.forEach((s) => {
+      const pt = String(s.planType || "").toLowerCase();
+      if (pt !== "trial" && pt !== "single") return;
+      const dateKey = String(s.activationDate || s.startDate || "").slice(0, 10);
+      const hasAttendance = attn.some((a) => String(a.studentId) === String(s.studentId) && String(a.groupId) === String(s.groupId) && String(a.date).slice(0, 10) === dateKey && String(a.entryType || a.guestType || "").toLowerCase() === pt);
+      if (!hasAttendance) anomalies.push({ type: "oneoff_without_attendance", rows: [s] });
+      const nearPack = subsExt.some((p) => String(p.studentId) === String(s.studentId) && String(p.groupId) === String(s.groupId) && ["4pack","8pack","12pack"].includes(String(p.planType||"").toLowerCase()) && String(p.startDate || "") <= dateKey && String(p.endDate || "9999-12-31") >= dateKey);
+      if (nearPack) anomalies.push({ type: "oneoff_near_pack_subscription", rows: [s] });
+    });
+    attn.forEach((a) => {
+      const t = String(a.entryType || a.guestType || "").toLowerCase();
+      if (t !== "trial" && t !== "single") return;
+      const dateKey = String(a.date || "").slice(0, 10);
+      const hasPayment = subsExt.some((s) => String(s.studentId) === String(a.studentId) && String(s.groupId) === String(a.groupId) && String(s.planType || "").toLowerCase() === t && String(s.activationDate || s.startDate || "").slice(0, 10) === dateKey);
+      if (!hasPayment) anomalies.push({ type: "attendance_oneoff_without_payment", rows: [a] });
+    });
+    return anomalies;
+  }, [filteredSubs, attn, subsExt]);
 
   const subsGroupedByDir = useMemo(()=>{
     const result={}; directionsList.forEach(d=>{result[d.id]={direction:d,subs:[]}});
     filteredSubs.forEach(sub=>{ const gr=groupMap[sub.groupId]; if(gr && result[gr.directionId]){result[gr.directionId].subs.push(sub);} });
     return {grouped:Object.values(result).filter(d=>d.subs.length>0)};
   },[filteredSubs, groupMap]);
+
+  useEffect(() => {
+    if (filterDatePreset === "custom") return;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6);
+    const startOfLastWeek = new Date(startOfWeek); startOfLastWeek.setDate(startOfWeek.getDate() - 7);
+    const endOfLastWeek = new Date(startOfWeek); endOfLastWeek.setDate(startOfWeek.getDate() - 1);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    const map = {
+      today: [toIso(now), toIso(now)],
+      this_week: [toIso(startOfWeek), toIso(endOfWeek)],
+      last_week: [toIso(startOfLastWeek), toIso(endOfLastWeek)],
+      this_month: [toIso(startOfMonth), toIso(endOfMonth)],
+      last_month: [toIso(startOfLastMonth), toIso(endOfLastMonth)],
+    };
+    const row = map[filterDatePreset];
+    if (row) { setFilterFromDate(row[0]); setFilterToDate(row[1]); }
+  }, [filterDatePreset, setFilterFromDate, setFilterToDate]);
 
   if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18}}>Завантаження...</div>;
 
@@ -868,7 +945,7 @@ export default function App() {
             [
               {id:"dashboard", label:"Дашборд"},
               {id:"students", label:"Учениці"},
-              {id:"subs", label:"Абонементи"},
+              {id:"subs", label:"Оплати"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
               {id:"trainers", label:"Тренери"},
@@ -1083,20 +1160,51 @@ export default function App() {
           )}
         </div>}
 
-        {/* === АБОНЕМЕНТИ === */}
+        {/* === ОПЛАТИ === */}
         {isAdmin && tab==="subs" && <div>
           <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
-            <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук за прізвищем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+            <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+            <select style={{...inputSt,width:"auto"}} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}>
+              <option value="all">Усі типи</option><option value="4pack">4pack</option><option value="8pack">8pack</option><option value="12pack">12pack</option><option value="single">single</option><option value="trial">trial</option>
+            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}>
+              <option value="all">Paid / Unpaid</option><option value="paid">Paid</option><option value="unpaid">Unpaid</option>
+            </select>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
               <option value="all">Усі напрямки</option>
               {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
+            <select style={{...inputSt,width:"auto"}} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}>
+              <option value="all">Усі тренери</option>
+              {trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}
+            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}>
+              <option value="all">Усі методи оплати</option><option value="card">card</option><option value="cash">cash</option><option value="transfer">transfer</option>
+            </select>
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
-              <option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option>
+              <option value="all">Усі статуси</option><option value="active">active</option><option value="warning">warning</option><option value="expired">expired</option><option value="completed">completed</option>
+            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}>
+              <option value="custom">custom range</option><option value="today">today</option><option value="this_week">this week</option><option value="last_week">last week</option><option value="this_month">this month</option><option value="last_month">last month</option>
+            </select>
+            <input type="date" style={{...inputSt,width:"auto"}} value={filterFromDate} onChange={e=>{setFilterDatePreset("custom");setFilterFromDate(e.target.value)}} />
+            <input type="date" style={{...inputSt,width:"auto"}} value={filterToDate} onChange={e=>{setFilterDatePreset("custom");setFilterToDate(e.target.value)}} />
+            <select style={{...inputSt,width:"auto"}} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}>
+              <option value="all">Усі записи</option>
+              <option value="only_issues">Проблемні записи</option>
             </select>
           </div>
-          {filteredSubs.length===0?<div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає абонементів</div>:
+          {filterAudit==="only_issues" && (
+            <div style={{background: theme.card, borderRadius: 20, padding: 16, marginBottom: 20, border: `1px solid ${theme.border}`}}>
+              <div style={{fontWeight: 700, color: theme.danger, marginBottom: 10}}>Проблемні записи ({paymentAnomalies.length})</div>
+              <div style={{display:"grid", gap:8, color: theme.textMuted}}>
+                {paymentAnomalies.map((a, i)=><div key={`${a.type}_${i}`}>• {a.type} ({a.rows.length})</div>)}
+                {!paymentAnomalies.length && <div>Аномалій не знайдено.</div>}
+              </div>
+            </div>
+          )}
+          {filteredSubs.length===0?<div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає оплат</div>:
           <div style={{display:"flex",flexDirection:"column",gap:20}}>
             {subsGroupedByDir.grouped.filter(d => filterDir === "all" || d.direction.id === filterDir).map(({direction, subs: dSubs}) => {
               const finalSubs = filterGroup !== "all" ? dSubs.filter(s => s.groupId === filterGroup) : dSubs;
