@@ -114,6 +114,35 @@ function isSubExhausted(sub) {
   return false;
 }
 
+const idsEqual = (a, b) => String(a ?? "") === String(b ?? "");
+
+function hasActiveSubscriptionCoverage(subs, studentId, groupId, dateStr) {
+  if (!studentId || !groupId || !dateStr) return false;
+  return (subs || []).some((s) => {
+    if (!idsEqual(s.studentId, studentId)) return false;
+    if (!idsEqual(s.groupId, groupId)) return false;
+    if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+    if (isSubExhausted(s)) return false;
+    const end = getEffectiveEndDate(s) || "2099-12-31";
+    return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+  });
+}
+
+function getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr) {
+  const validSubs = (subs || [])
+    .filter((s) => {
+      if (!idsEqual(s.studentId, studentId)) return false;
+      if (!idsEqual(s.groupId, groupId)) return false;
+      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
+      if (isSubExhausted(s)) return false;
+      const end = getEffectiveEndDate(s) || "2099-12-31";
+      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
+    })
+    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+
+  return validSubs[0] || null;
+}
+
 function getNextTrainingDate(schedule, afterDateStr) {
   if (!schedule || schedule.length === 0 || !afterDateStr) {
     const d = new Date((afterDateStr || today()) + "T12:00:00");
@@ -206,6 +235,8 @@ export {
   getSubStatus,
   getEffectiveEndDate,  // 🆕
   isSubExhausted,        // 🆕
+  hasActiveSubscriptionCoverage,
+  getActiveSubOnDateForCoverage,
   getNextTrainingDate,
   getPreviousTrainingDate,
   getNotifMsg,
