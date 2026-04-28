@@ -392,13 +392,14 @@ export default function MessagesTab({
       expiresAt: status.expiresAt || "",
     };
   }, [instagramConnectionStatus]);
-  const loadInstagramConnectionStatus = useCallback(async () => {
+  const loadInstagramConnectionStatus = useCallback(async ({ withFeedback = false } = {}) => {
     try {
       const res = await fetch("/api/instagram-oauth?op=status", { cache: "no-store" });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити Instagram connection status");
       setInstagramConnectionStatus(payload.connection || null);
       setInstagramConnectionError("");
+      if (withFeedback) setInstagramConnectionAction("Статус Instagram оновлено.");
     } catch (error) {
       setInstagramConnectionStatus(null);
       setInstagramConnectionError(String(error?.message || error));
@@ -935,7 +936,9 @@ export default function MessagesTab({
             <div style={{ padding: 12, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: theme.secondary, marginBottom: 6 }}>Готовність каналу Інстаграм</div>
               <div style={{ fontSize: 12, color: theme.textMuted, lineHeight: 1.5 }}>
-                Режим бази: API інтеграція з Meta/Instagram ще не підключена на цьому кроці. Нижче — уніфікована модель контакту та CRM-поля для майбутнього каналу.
+                {instagramConnectionReadiness.connected
+                  ? "Instagram підключено. Token активний, статус і терміни дії синхронізовані з OAuth storage."
+                  : "Режим бази: API інтеграція з Meta/Instagram ще не підключена на цьому кроці. Нижче — уніфікована модель контакту та CRM-поля для майбутнього каналу."}
               </div>
               <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                 <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "7px 8px", background: theme.card }}>
@@ -1051,11 +1054,18 @@ export default function MessagesTab({
                 </button>
                 <button
                   type="button"
-                  onClick={loadInstagramConnectionStatus}
+                  onClick={async () => {
+                    try {
+                      setInstagramConnectionLoading(true);
+                      await loadInstagramConnectionStatus({ withFeedback: true });
+                    } finally {
+                      setInstagramConnectionLoading(false);
+                    }
+                  }}
                   disabled={instagramConnectionLoading}
                   style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMuted, padding: "6px 10px", fontWeight: 700, cursor: "pointer", fontSize: 11 }}
                 >
-                  Reload
+                  {instagramConnectionLoading ? "Reloading..." : "Reload"}
                 </button>
               </div>
               {!!instagramConnectionError && (
