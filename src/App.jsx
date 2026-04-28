@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import Analytics from "./pages/Analytics";
@@ -9,6 +9,7 @@ import {
   STATUS_COLORS,
   STATUS_LABELS,
   WEEKDAYS,
+  applyThemeBindings,
   btnP,
   btnS,
   cardSt,
@@ -27,12 +28,30 @@ import {
   uid,
   useStickyState,
 } from "./shared/utils";
+import { buildAnalyticsFoundation } from "./shared/analytics";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
 import { StudentForm, SubForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
 import MessagesTab from "./components/MessagesTab";
+import TrainersTab from "./components/TrainersTab";
+import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
+
+const translitMap = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
+  к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch",
+  ш: "sh", щ: "shch", ь: "", ю: "yu", я: "ya", э: "e", ё: "yo", ы: "y", ъ: "",
+};
+const normalizeDirectionId = (name = "") => String(name || "")
+  .trim()
+  .toLowerCase()
+  .split("")
+  .map((ch) => translitMap[ch] ?? ch)
+  .join("")
+  .replace(/[^a-z0-9]+/gi, "_")
+  .replace(/^_+|_+$/g, "");
+const UI_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -44,9 +63,12 @@ export default function App() {
   const [subs, setSubs] = useState([]);
   const [attn, setAttn] = useState([]);
   const [groups, setGroups] = useState(DEFAULT_GROUPS);
+  const [directions, setDirections] = useState([]);
   const [cancelled, setCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
+  const [trainers, setTrainers] = useState([]);
+  const [trainerGroups, setTrainerGroups] = useState([]);
   
   const [tab, setTab] = useStickyState("dashboard", "ds_danceStudioTab");
   const [modal, setModal] = useState(null);
@@ -66,15 +88,70 @@ export default function App() {
   const [finSortBy, setFinSortBy] = useStickyState("total", "ds_finSortBy"); 
   const [finSortOrder, setFinSortOrder] = useStickyState("desc", "ds_finSortOrder");
   const [customOrders, setCustomOrders] = useState({});
-  const [warnedStudents, setWarnedStudents] = useStickyState({}, "ds_warned_students");
+  const [warnedStudents, setWarnedStudents] = useState({});
   const [restoreGroupByStudent, setRestoreGroupByStudent] = useState({});
   const [selectedMessageStudentId, setSelectedMessageStudentId] = useState("");
+  const [newGroupDraft, setNewGroupDraft] = useState({
+    id: "",
+    name: "",
+    directionMode: "existing",
+    directionId: DIRECTIONS[0]?.id || "",
+    newDirectionName: "",
+    schedule: [],
+    trainerPct: "0",
+    trainerId: "",
+  });
 
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
+  const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
+  const [groupEditDraft, setGroupEditDraft] = useState(null);
+  const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
+  const [themeVersion, setThemeVersion] = useState(0);
+  const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
+  const [directionEdits, setDirectionEdits] = useState({});
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
+
+  useLayoutEffect(() => {
+    const dark = {
+      primary: "#5A81FA",
+      secondary: "#2C3D8F",
+      bg: "#0F131A",
+      card: "#171D27",
+      input: "#1E2633",
+      textMain: "#E7EEFC",
+      textMuted: "#9FB0CA",
+      textLight: "#8093B1",
+      border: "#2B3546",
+      success: "#25B87A",
+      warning: "#F59F3A",
+      danger: "#EA5455",
+      exhausted: "#A8B1CE",
+      archive: "#1A2230",
+    };
+    const light = {
+      primary: "#4A6FE3",
+      secondary: "#2C3D8F",
+      bg: "#F8F9FD",
+      card: "#FFFFFF",
+      input: "#F2F5FF",
+      textMain: "#1F1F1F",
+      textMuted: "#6A6E83",
+      textLight: "#A8B1CE",
+      border: "#C7D2E8",
+      success: "#34C759",
+      warning: "#FF9500",
+      danger: "#FF453A",
+      exhausted: "#A8B1CE",
+      archive: "#E2E8F0",
+    };
+    const next = themeMode === "light" ? light : dark;
+    Object.assign(theme, next);
+    applyThemeBindings();
+    setThemeVersion((v) => v + 1);
+  }, [themeMode]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -117,10 +194,11 @@ export default function App() {
   }
 };
 
-      const [st, gr, su, at, ca, sg, wl, ord] = await Promise.all([
+      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist), fetchCustomOrders()
+        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
+        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections)
       ]);
 
       if (st) setStudents(st);
@@ -130,8 +208,11 @@ export default function App() {
       if (ca) setCancelled(ca);
       if (sg) setStudentGrps(sg);
       if (wl) setWaitlist(wl);
-      
-    setCustomOrders(ord || {});
+      setCustomOrders(ord || {});
+      setWarnedStudents(warned || {});
+      setTrainers(tr || []);
+      setTrainerGroups(trg || []);
+      setDirections(dirs || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -149,6 +230,133 @@ export default function App() {
     } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
   };
 
+  const createGroupAction = async () => {
+    const name = String(newGroupDraft.name || "").trim();
+    if (!name) { alert("Вкажіть назву групи."); return; }
+    const directionId = newGroupDraft.directionMode === "new"
+      ? normalizeDirectionId(newGroupDraft.newDirectionName)
+      : String(newGroupDraft.directionId || "").trim();
+    if (!directionId) { alert("Вкажіть напрямок."); return; }
+    const draftId = String(newGroupDraft.id || "").trim() || normalizeDirectionId(name);
+    if (!draftId) { alert("Не вдалося сформувати id групи."); return; }
+    const duplicateName = groups.some((g) => String(g.name || "").trim().toLowerCase() === name.toLowerCase());
+    if (duplicateName) { alert("Група з такою назвою вже існує."); return; }
+    const duplicateId = groups.some((g) => String(g.id) === draftId);
+    if (duplicateId) { alert("Група з таким id вже існує. Змініть назву або id."); return; }
+    if (newGroupDraft.directionMode === "new") {
+      const existingDir = directionsList.find((d) => d.id === directionId);
+      if (existingDir && existingDir.name.toLowerCase() !== String(newGroupDraft.newDirectionName || "").trim().toLowerCase()) {
+        alert("Конфлікт напрямку: такий direction id вже існує з іншою назвою.");
+        return;
+      }
+    }
+    const selectedTrainerId = String(newGroupDraft.trainerId || "").trim();
+    const validTrainerId = selectedTrainerId && trainers.some((t) => String(t.id) === selectedTrainerId)
+      ? selectedTrainerId
+      : null;
+    const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(newGroupDraft.trainerPct || "").trim(), 10) || 0));
+    const payload = {
+      id: draftId,
+      name,
+      directionId,
+      schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
+      trainerPct: trainerPctNum,
+    };
+    try {
+      const created = await db.insertGroup(payload);
+      setGroups((prev) => [created, ...prev]);
+      if (validTrainerId && db.upsertTrainerGroup) {
+        const binding = await db.upsertTrainerGroup(validTrainerId, created.id);
+        setTrainerGroups((prev) => (
+          prev.some((x) => String(x.trainerId) === String(binding.trainerId) && String(x.groupId) === String(binding.groupId))
+            ? prev
+            : [...prev, binding]
+        ));
+      }
+      setNewGroupDraft({
+        id: "",
+        name: "",
+        directionMode: "existing",
+        directionId,
+        newDirectionName: "",
+        schedule: [],
+        trainerPct: "0",
+        trainerId: "",
+      });
+      setModal(null);
+    } catch (e) {
+      const msg = e?.message || "Не вдалося створити групу.";
+      alert(msg.includes("duplicate") ? "Конфлікт id/назви: група вже існує." : msg);
+    }
+  };
+
+  const openEditGroup = (group) => {
+    setGroupEditDraft({
+      id: group.id,
+      name: group.name || "",
+      directionId: group.directionId || directionsList[0]?.id || "",
+      schedule: parseGroupSchedule(group.schedule),
+      trainerPct: String(group.trainerPct ?? 0),
+      trainerId: getGroupPrimaryTrainerId(group.id),
+    });
+  };
+
+  const saveGroupEdit = async () => {
+    if (!groupEditDraft?.id) return;
+    const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(groupEditDraft.trainerPct || "").trim(), 10) || 0));
+    const payload = {
+      name: String(groupEditDraft.name || "").trim(),
+      directionId: groupEditDraft.directionId,
+      schedule: Array.isArray(groupEditDraft.schedule) ? groupEditDraft.schedule : [],
+      trainerPct: trainerPctNum,
+    };
+    try {
+      const updated = await db.updateGroup(groupEditDraft.id, payload);
+      setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+
+      const targetTrainerId = String(groupEditDraft.trainerId || "").trim();
+      const groupRows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupEditDraft.id));
+      if (targetTrainerId) {
+        for (const row of groupRows) {
+          if (String(row.trainerId) !== targetTrainerId && db.deleteTrainerGroup) {
+            await db.deleteTrainerGroup(row.trainerId, row.groupId);
+          }
+        }
+        const binding = await db.upsertTrainerGroup(targetTrainerId, groupEditDraft.id);
+        setTrainerGroups((prev) => {
+          const filtered = prev.filter((x) => !(String(x.groupId) === String(groupEditDraft.id) && String(x.trainerId) !== targetTrainerId));
+          if (filtered.some((x) => String(x.trainerId) === String(binding.trainerId) && String(x.groupId) === String(binding.groupId))) return filtered;
+          return [...filtered, binding];
+        });
+      } else {
+        for (const row of groupRows) {
+          if (db.deleteTrainerGroup) await db.deleteTrainerGroup(row.trainerId, row.groupId);
+        }
+        setTrainerGroups((prev) => prev.filter((x) => String(x.groupId) !== String(groupEditDraft.id)));
+      }
+
+      setGroupEditDraft(null);
+    } catch (e) {
+      alert(e?.message || "Не вдалося зберегти групу");
+    }
+  };
+
+  const archiveGroup = async (group) => {
+    const meta = archiveMetaByGroupId[String(group.id)];
+    if (!meta?.mode) return;
+    const patch = meta.mode === "is_active"
+      ? { is_active: false }
+      : meta.mode === "active"
+        ? { active: false }
+        : { archived_at: today() };
+    try {
+      const updated = await db.updateGroup(group.id, patch);
+      setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося архівувати групу");
+    }
+  };
+
   const visibleGroups = useMemo(() => {
     if (!user) return [];
     if (isAdmin) return groups;
@@ -157,15 +365,152 @@ export default function App() {
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
-  const dirMap = useMemo(()=>Object.fromEntries(DIRECTIONS.map(d=>[d.id,d])),[]);
+  const directionsList = useMemo(() => {
+    const base = (directions?.length ? directions : [...DIRECTIONS]).map((d) => ({
+      id: d.id,
+      name: d.name || d.id,
+      color: d.color || "#7b8ea8",
+      isActive: d.isActive !== false,
+    }));
+    const existingIds = new Set(base.map((d) => d.id));
+    groups.forEach((g) => {
+      if (!g?.directionId || existingIds.has(g.directionId)) return;
+      base.push({
+        id: g.directionId,
+        name: String(g.directionId).replace(/_/g, " "),
+        color: "#7b8ea8",
+      });
+      existingIds.add(g.directionId);
+    });
+    return base;
+  }, [directions, groups]);
+  const persistedDirectionIds = useMemo(() => new Set((directions || []).map((d) => String(d.id))), [directions]);
+  const dirMap = useMemo(()=>Object.fromEntries(directionsList.map(d=>[d.id,d])),[directionsList]);
+  const groupsCountByDirection = useMemo(() => {
+    const next = {};
+    groups.forEach((g) => {
+      const id = String(g.directionId || "");
+      if (!id) return;
+      next[id] = (next[id] || 0) + 1;
+    });
+    return next;
+  }, [groups]);
+  const upsertDirectionEdit = (id, patch) => setDirectionEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+
+  const createDirectionAction = async () => {
+    const name = String(directionDraft.name || "").trim();
+    if (!name) { alert("Вкажіть назву напрямку."); return; }
+    const id = normalizeDirectionId(directionDraft.id || name);
+    if (!id) { alert("Не вдалося сформувати ID напрямку."); return; }
+    if (directionsList.some((d) => String(d.id) === id)) { alert("Напрямок з таким ID вже існує."); return; }
+    try {
+      const inserted = await db.insertDirection({ id, name, color: directionDraft.color || "#7b8ea8", isActive: true });
+      setDirections((prev) => [...prev, inserted]);
+      setDirectionDraft({ id: "", name: "", color: "#7b8ea8" });
+    } catch (e) {
+      alert(e?.message || "Не вдалося створити напрямок.");
+    }
+  };
+
+  const saveDirectionEdit = async (directionId) => {
+    if (!persistedDirectionIds.has(String(directionId))) return;
+    const base = directionsList.find((d) => String(d.id) === String(directionId));
+    const edit = directionEdits[directionId] || {};
+    if (!base) return;
+    const nextId = normalizeDirectionId(edit.id ?? base.id);
+    const nextName = String(edit.name ?? base.name ?? "").trim();
+    if (!nextId || !nextName) { alert("ID та назва напрямку обов'язкові."); return; }
+    if (nextId !== base.id && directionsList.some((d) => String(d.id) === nextId)) { alert("Конфлікт ID напрямку."); return; }
+    try {
+      const updated = await db.updateDirection(base.id, {
+        id: nextId,
+        name: nextName,
+        color: edit.color ?? base.color ?? "#7b8ea8",
+      });
+      setDirections((prev) => prev.map((d) => (String(d.id) === String(base.id) ? updated : d)));
+      setDirectionEdits((prev) => {
+        const next = { ...prev };
+        delete next[directionId];
+        return next;
+      });
+    } catch (e) {
+      alert(e?.message || "Не вдалося зберегти напрямок.");
+    }
+  };
+
+  const toggleDirectionActive = async (direction) => {
+    if (!persistedDirectionIds.has(String(direction.id))) return;
+    try {
+      const updated = await db.updateDirection(direction.id, { isActive: !(direction.isActive !== false) });
+      setDirections((prev) => prev.map((d) => (String(d.id) === String(direction.id) ? updated : d)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося оновити статус напрямку.");
+    }
+  };
+
+  const deleteDirectionAction = async (direction) => {
+    const id = String(direction.id);
+    if (!persistedDirectionIds.has(id)) return;
+    const linkedGroups = groupsCountByDirection[id] || 0;
+    if (linkedGroups > 0) { alert(`Неможливо видалити: є ${linkedGroups} груп(и), прив'язаних до цього напрямку.`); return; }
+    if (!window.confirm(`Видалити напрямок "${direction.name}"?`)) return;
+    try {
+      await db.deleteDirection(id);
+      setDirections((prev) => prev.filter((d) => String(d.id) !== id));
+    } catch (e) {
+      alert(e?.message || "Не вдалося видалити напрямок.");
+    }
+  };
+  const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
+  const parseGroupSchedule = (schedule) => {
+    if (Array.isArray(schedule)) return schedule;
+    if (typeof schedule === "string") {
+      try {
+        const parsed = JSON.parse(schedule);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+  const getGroupPrimaryTrainerId = (groupId) => {
+    const rows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupId));
+    const primary = rows.find((tg) => tg.isPrimary) || rows[0];
+    return primary ? String(primary.trainerId) : "";
+  };
+  const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
+    .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
+    .join(" · ");
+
+  const archiveMetaByGroupId = useMemo(() => {
+    const result = {};
+    groups.forEach((g) => {
+      if (Object.prototype.hasOwnProperty.call(g, "is_active")) {
+        result[String(g.id)] = { mode: "is_active", isArchived: g.is_active === false };
+      } else if (Object.prototype.hasOwnProperty.call(g, "active")) {
+        result[String(g.id)] = { mode: "active", isArchived: g.active === false };
+      } else if (Object.prototype.hasOwnProperty.call(g, "archived_at")) {
+        result[String(g.id)] = { mode: "archived_at", isArchived: !!g.archived_at };
+      } else {
+        result[String(g.id)] = { mode: null, isArchived: false };
+      }
+    });
+    return result;
+  }, [groups]);
 
  const subsExt = useMemo(()=>{
+    const oneOffPlanTypes = new Set(["trial", "single"]);
     const usedMap = {};
     attn.forEach(a => {
       if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + (a.quantity || 1);
     });
     return subs.map(s => {
-      const extSub = { ...s, usedTrainings: usedMap[s.id] || 0 };
+      const planType = String(s.planType || "").trim().toLowerCase();
+      const usedTrainings = oneOffPlanTypes.has(planType)
+        ? Number(s.usedTrainings || 0)
+        : (usedMap[s.id] || 0);
+      const extSub = { ...s, usedTrainings };
       extSub.status = getSubStatus(extSub);
       return extSub;
     });
@@ -198,9 +543,20 @@ export default function App() {
   }, [notifications]);
 
   const analytics = useMemo(()=>{
+    const analyticsFoundation = buildAnalyticsFoundation({
+      students,
+      groups,
+      studentGrps,
+      subs,
+      attn,
+      trainers,
+      trainerGroups,
+      periodType: "month",
+      anchorDate: today(),
+    });
     const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
     const unpaid=subs.filter(s=>!s.paid&&getSubStatus(s)!=="expired").reduce((a,s)=>a+(s.amount||0),0);
-    const byDir={};DIRECTIONS.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
+    const byDir={};directionsList.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
     const splits=[]; groups.forEach(g=>{
       const gSubs=subs.filter(s=>s.groupId===g.id&&s.paid);
       const total=gSubs.reduce((a,s)=>a+(s.amount||0),0);
@@ -227,11 +583,10 @@ export default function App() {
     const currMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(currMonth) || s.startDate?.startsWith(currMonth))).reduce((a,s)=>a+(s.amount||0),0);
     const prevMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(prevMonth) || s.startDate?.startsWith(prevMonth))).reduce((a,s)=>a+(s.amount||0),0);
 
-    const daysInMonth = new Date(parseInt(currMonth.split('-')[0]), parseInt(currMonth.split('-')[1]), 0).getDate();
-    const chartData = Array.from({length: daysInMonth}, (_, i) => {
-      const d = `${currMonth}-${String(i+1).padStart(2,'0')}`;
-      return { day: i+1, count: attn.filter(a => a.date === d).length };
-    });
+    const chartData = analyticsFoundation.ui.charts.line.series.map((row) => ({
+      day: row.x,
+      count: row.y,
+    }));
     const maxChartVal = Math.max(...chartData.map(d => d.count), 1);
 
     const currMonthDetails = {
@@ -249,9 +604,10 @@ export default function App() {
       avgLTV: usersWithPurchases > 0 ? Math.round(totalLTV / usersWithPurchases) : 0, 
       conversionRate: trialUsers > 0 ? Math.round((convertedUsers / trialUsers) * 100) : 0,
       currMonthStats: { trial: currMonthDetails.trial.length, single: currMonthDetails.single.length, pack4: currMonthDetails.pack4.length, pack8: currMonthDetails.pack8.length, pack12: currMonthDetails.pack12.length, cancelledCount: currMonthCancelled, unpaidAttn: currMonthDetails.unpaidAttn.length },
-      currMonthDetails, chartData, maxChartVal
+      currMonthDetails, chartData, maxChartVal,
+      foundation: analyticsFoundation,
     };
-  },[students,subs,activeSubs,groups, studentMap, cancelled, attn]);
+  },[students,subs,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
 
   // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
   const proAnalytics = useMemo(() => {
@@ -350,7 +706,7 @@ export default function App() {
 
   const studentsByDirection = useMemo(() => {
     const result = {}; 
-    DIRECTIONS.forEach(d => { result[d.id] = { direction: d, students: [] }; });
+    directionsList.forEach(d => { result[d.id] = { direction: d, students: [] }; });
     const inactive = [];
 
     filteredStudents.forEach(st => { 
@@ -393,7 +749,7 @@ export default function App() {
   },[subsExt,filterDir,filterGroup,filterStatus,searchQ,groups,studentMap]);
 
   const subsGroupedByDir = useMemo(()=>{
-    const result={}; DIRECTIONS.forEach(d=>{result[d.id]={direction:d,subs:[]}});
+    const result={}; directionsList.forEach(d=>{result[d.id]={direction:d,subs:[]}});
     filteredSubs.forEach(sub=>{ const gr=groupMap[sub.groupId]; if(gr && result[gr.directionId]){result[gr.directionId].subs.push(sub);} });
     return {grouped:Object.values(result).filter(d=>d.subs.length>0)};
   },[filteredSubs, groupMap]);
@@ -471,7 +827,7 @@ export default function App() {
 
 
   return (
-    <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
+    <div key={themeVersion} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
@@ -495,7 +851,12 @@ export default function App() {
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
+          <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
+            {themeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
+          </button>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+          {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
+          {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
           <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
@@ -510,6 +871,7 @@ export default function App() {
               {id:"subs", label:"Абонементи"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
+              {id:"trainers", label:"Тренери"},
               {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
               {id:"finance", label:"Фінанси"},
               {id:"pro_analytics", label:"📈 Про-Аналітика"},
@@ -536,9 +898,81 @@ export default function App() {
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
+            trainers={trainers}
+            groups={groups}
+            waitlist={waitlist}
+            studentGrps={studentGrps}
+            subs={subsExt}
+            attn={attn}
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
+            onOpenTrainerNotifications={() => {
+              setTab("trainers");
+              setTrainersSubtab("notifications");
+            }}
           />
+        )}
+        {isAdmin && tab==="trainers" && (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6 }}>
+              <button type="button" onClick={() => setTrainersSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "trainers" ? theme.primary : "transparent", color: trainersSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Тренери</button>
+              <button type="button" onClick={() => setTrainersSubtab("groups")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "groups" ? theme.primary : "transparent", color: trainersSubtab === "groups" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Групи</button>
+              <button type="button" onClick={() => setTrainersSubtab("notifications")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "notifications" ? theme.primary : "transparent", color: trainersSubtab === "notifications" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сповіщення</button>
+            </div>
+
+            {trainersSubtab === "trainers" ? (
+              <TrainersTab
+                trainers={trainers}
+                setTrainers={setTrainers}
+                trainerGroups={trainerGroups}
+                setTrainerGroups={setTrainerGroups}
+                groups={groups}
+                students={students}
+                studentGrps={studentGrps}
+                subs={subsExt}
+                attn={attn}
+                analyticsFoundation={analytics.foundation}
+                cancelled={cancelled}
+                themeMode={themeMode}
+              />
+            ) : trainersSubtab === "groups" ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                {groups.map((g) => {
+                  const dir = dirMap[g.directionId];
+                  const trainerId = getGroupPrimaryTrainerId(g.id);
+                  const trainer = trainersById[String(trainerId)];
+                  const archiveMeta = archiveMetaByGroupId[String(g.id)] || { mode: null, isArchived: false };
+                  return (
+                    <div key={g.id} style={{ ...cardSt, padding: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div style={{ fontWeight: 800, color: theme.textMain }}>{g.name}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Напрямок: {dir?.name || g.directionId || "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Графік: {formatGroupSchedule(g.schedule) || "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Тренер: {trainer ? (trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.id) : "—"}</div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Відсоток тренера: {g.trainerPct ?? 0}%</div>
+                          <div style={{ fontSize: 12, color: archiveMeta.isArchived ? theme.danger : theme.success }}>Статус: {archiveMeta.isArchived ? "Архівна" : "Активна"}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
+                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} onClick={() => archiveGroup(g)}>Архівація</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <TrainersNotificationsTab
+                groups={groups}
+                students={students}
+                studentGrps={studentGrps}
+                subs={subsExt}
+                attn={attn}
+                cancelled={cancelled}
+              />
+            )}
+          </div>
         )}
         
         {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
@@ -549,7 +983,7 @@ export default function App() {
               <input style={{...inputSt,maxWidth:300}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
               <select style={{...inputSt,width:"auto"}} value={stFilterDir} onChange={e=>{setStFilterDir(e.target.value);setStFilterGroup("all")}}>
                 <option value="all">Усі напрямки</option>
-                {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
               <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
             </div>
@@ -577,7 +1011,7 @@ export default function App() {
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
                         <div style={{display:"flex",gap:8}}>
-                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
+                          <button style={{...btnS,padding:"10px 16px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
                           <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
                         </div>
                       </div>
@@ -595,7 +1029,7 @@ export default function App() {
                   </button>
                   {expandedDirs['archive'] && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
                     {studentsByDirection.inactive.map((st, index) => (
-                      <div key={st.id} style={{background: "#fff", borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
+                      <div key={st.id} style={{background: theme.card, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
                         <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
                           <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
                           <div>
@@ -616,7 +1050,7 @@ export default function App() {
                             ))}
                           </select>
                           <button style={{...btnS,padding:"10px 14px",fontSize:13, background:theme.bg}} onClick={()=>restoreStudentToGroup(st.id)}>↩ Відновити</button>
-                          <button style={{...btnS,padding:"10px 12px",fontSize:14, background:"#fff"}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
+                          <button style={{...btnS,padding:"10px 12px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
                           <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
                         </div>
                       </div>
@@ -626,7 +1060,7 @@ export default function App() {
             )}
           </div>
           {waitlist.length > 0 && (
-            <div style={{background: "#FFF9F0", borderRadius: 28, overflow: 'hidden'}}>
+            <div style={{background: theme.input, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
               <div style={{padding:'24px', display: "flex", justifyContent: "space-between"}}>
                 <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({waitlist.length})</span>
               </div>
@@ -635,7 +1069,7 @@ export default function App() {
                   const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
                   if(!st || !gr) return null;
                   return (
-                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#fff", padding: "20px", borderRadius: 20}}>
+                    <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: theme.card, padding: "20px", borderRadius: 20}}>
                       <div style={{display: "flex", gap: 16, alignItems: "center"}}>
                         <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{i + 1}.</div>
                         <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
@@ -655,7 +1089,7 @@ export default function App() {
             <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук за прізвищем..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
               <option value="all">Усі напрямки</option>
-              {DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+              {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
@@ -783,7 +1217,7 @@ export default function App() {
               </div>
               <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
                 <div style={{flex: 1, display: "flex", gap: 12, minWidth: 300, flexWrap: "wrap"}}>
-                  <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{DIRECTIONS.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
+                  <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
                 </div>
                 <div style={{display: "flex", gap: 12, flexWrap: "wrap"}}>
@@ -842,7 +1276,170 @@ export default function App() {
           </div>
         )}
       </Modal>
+      <Modal open={modal==="manageDirections"} onClose={()=>setModal(null)} title="Керування напрямками" wide>
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ ...cardSt, padding: 16, display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 700, color: theme.secondary }}>Створити новий напрямок</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto", gap: 8 }}>
+              <input style={inputSt} placeholder="Назва" value={directionDraft.name} onChange={(e) => setDirectionDraft((p) => ({ ...p, name: e.target.value }))} />
+              <input style={inputSt} placeholder="ID (опційно)" value={directionDraft.id} onChange={(e) => setDirectionDraft((p) => ({ ...p, id: e.target.value }))} />
+              <input style={inputSt} placeholder="#7b8ea8" value={directionDraft.color} onChange={(e) => setDirectionDraft((p) => ({ ...p, color: e.target.value }))} />
+              <button type="button" style={btnP} onClick={createDirectionAction}>Додати</button>
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {directionsList.map((d) => {
+              const edit = directionEdits[d.id] || {};
+              const persisted = persistedDirectionIds.has(String(d.id));
+              return (
+                <div key={d.id} style={{ ...cardSt, padding: 14, display: "grid", gap: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto auto auto", gap: 8, alignItems: "center" }}>
+                    <input style={inputSt} value={edit.name ?? d.name ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { name: e.target.value })} disabled={!persisted} />
+                    <input style={inputSt} value={edit.id ?? d.id ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { id: e.target.value })} disabled={!persisted} />
+                    <input style={inputSt} value={edit.color ?? d.color ?? "#7b8ea8"} onChange={(e) => upsertDirectionEdit(d.id, { color: e.target.value })} disabled={!persisted} />
+                    <button type="button" style={btnS} onClick={() => toggleDirectionActive(d)} disabled={!persisted}>{d.isActive === false ? "Увімкнути" : "Архівувати"}</button>
+                    <button type="button" style={btnP} onClick={() => saveDirectionEdit(d.id)} disabled={!persisted}>Зберегти</button>
+                    <button type="button" style={{ ...btnS, color: theme.danger }} onClick={() => deleteDirectionAction(d)} disabled={!persisted}>Видалити</button>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    ID: <b>{d.id}</b> · Груп: <b>{groupsCountByDirection[String(d.id)] || 0}</b>{!persisted ? " · Додано автоматично з існуючих груп (тільки читання)." : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
+        <div style={{ display: "grid", gap: 12 }}>
+          <Field label="Назва групи *">
+            <input style={inputSt} value={newGroupDraft.name} onChange={(e) => setNewGroupDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Напр. Beginners 19:00" />
+          </Field>
+          <Field label="ID групи (опційно)">
+            <input style={inputSt} value={newGroupDraft.id} onChange={(e) => setNewGroupDraft((p) => ({ ...p, id: e.target.value }))} placeholder="auto from name if empty" />
+          </Field>
+          <Field label="Напрямок *">
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" style={{ ...btnS, background: newGroupDraft.directionMode === "existing" ? theme.secondary : theme.input, color: newGroupDraft.directionMode === "existing" ? "#fff" : theme.textMain }} onClick={() => setNewGroupDraft((p) => ({ ...p, directionMode: "existing" }))}>Існуючий</button>
+                <button type="button" style={{ ...btnS, background: newGroupDraft.directionMode === "new" ? theme.secondary : theme.input, color: newGroupDraft.directionMode === "new" ? "#fff" : theme.textMain }} onClick={() => setNewGroupDraft((p) => ({ ...p, directionMode: "new" }))}>Новий</button>
+              </div>
+              {newGroupDraft.directionMode === "existing" ? (
+                <select style={inputSt} value={newGroupDraft.directionId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, directionId: e.target.value }))}>
+                  {directionsList.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.id})</option>)}
+                </select>
+              ) : (
+                <input style={inputSt} value={newGroupDraft.newDirectionName} onChange={(e) => setNewGroupDraft((p) => ({ ...p, newDirectionName: e.target.value }))} placeholder="Напр. Heels Pro" />
+              )}
+            </div>
+          </Field>
+          <Field label="Schedule">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {UI_WEEKDAY_ORDER.map((dayIdx) => {
+                const label = WEEKDAYS[dayIdx];
+                const active = newGroupDraft.schedule.some((x) => Number(x.day) === dayIdx);
+                return (
+                  <Pill
+                    key={dayIdx}
+                    active={active}
+                    onClick={() => setNewGroupDraft((p) => ({
+                      ...p,
+                      schedule: active
+                        ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
+                        : [...p.schedule, { day: dayIdx, time: "19:00" }],
+                    }))}
+                  >
+                    {label}
+                  </Pill>
+                );
+              })}
+            </div>
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Відсоток тренера">
+              <div>
+                <input
+                  style={inputSt}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="50"
+                  value={newGroupDraft.trainerPct}
+                  onChange={(e) => {
+                    const next = e.target.value.replace(/[^\d]/g, "");
+                    if (next === "" || Number(next) <= 100) {
+                      setNewGroupDraft((p) => ({ ...p, trainerPct: next }));
+                    }
+                  }}
+                />
+                <div style={{ fontSize: 12, color: theme.textLight, marginTop: 6 }}>Введіть лише число (0-100), без знака %.</div>
+              </div>
+            </Field>
+            <Field label="Тренер (опційно)">
+              <select style={inputSt} value={newGroupDraft.trainerId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">— Без прив'язки —</option>
+                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
+            <button type="button" style={btnS} onClick={() => setModal(null)}>Скасувати</button>
+            <button type="button" style={btnP} onClick={createGroupAction}>Створити групу</button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
+        {groupEditDraft && (
+          <div style={{ display: "grid", gap: 12 }}>
+            <Field label="Назва групи">
+              <input style={inputSt} value={groupEditDraft.name} onChange={(e) => setGroupEditDraft((p) => ({ ...p, name: e.target.value }))} />
+            </Field>
+            <Field label="Напрямок">
+              <select style={inputSt} value={groupEditDraft.directionId} onChange={(e) => setGroupEditDraft((p) => ({ ...p, directionId: e.target.value }))}>
+                {directionsList.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Графік">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {UI_WEEKDAY_ORDER.map((dayIdx) => {
+                  const label = WEEKDAYS[dayIdx];
+                  const active = groupEditDraft.schedule.some((x) => Number(x.day) === dayIdx);
+                  return (
+                    <Pill
+                      key={dayIdx}
+                      active={active}
+                      onClick={() => setGroupEditDraft((p) => ({
+                        ...p,
+                        schedule: active
+                          ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
+                          : [...p.schedule, { day: dayIdx, time: "19:00" }],
+                      }))}
+                    >
+                      {label}
+                    </Pill>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="Відсоток тренера">
+              <input style={inputSt} type="text" inputMode="numeric" value={groupEditDraft.trainerPct} onChange={(e) => {
+                const next = e.target.value.replace(/[^\d]/g, "");
+                if (next === "" || Number(next) <= 100) setGroupEditDraft((p) => ({ ...p, trainerPct: next }));
+              }} />
+            </Field>
+            <Field label="Тренер">
+              <select style={inputSt} value={groupEditDraft.trainerId} onChange={(e) => setGroupEditDraft((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">— Без прив'язки —</option>
+                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+              </select>
+            </Field>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" style={btnS} onClick={() => setGroupEditDraft(null)}>Скасувати</button>
+              <button type="button" style={btnP} onClick={saveGroupEdit}>Зберегти</button>
+            </div>
+          </div>
+        )}
+      </Modal>
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
