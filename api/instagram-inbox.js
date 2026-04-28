@@ -39,6 +39,23 @@ const readConnection = async (supabase) => {
   return data || null;
 };
 
+const collectAccountDiagnostics = async (accessToken) => {
+  try {
+    const me = await fetchJson(`${GRAPH_BASE}/me?fields=id,username,account_type&access_token=${encodeURIComponent(accessToken)}`);
+    return {
+      me: {
+        id: me?.id || "",
+        username: me?.username || "",
+        accountType: me?.account_type || "",
+      },
+    };
+  } catch (error) {
+    return {
+      meError: String(error?.message || error),
+    };
+  }
+};
+
 const fetchConversationsFromMeta = async ({ accessToken, igUserId }) => {
   const fields = "id,updated_time,participants{id,username,name},messages.limit(1){id,message,from,created_time}";
   const paths = [
@@ -176,6 +193,7 @@ const handleSync = async (res) => {
       accessToken: connection.access_token,
       igUserId: connection.ig_user_id || "",
     });
+    const accountDiagnostics = await collectAccountDiagnostics(connection.access_token);
     const rows = extractRows(payload);
     const persisted = await upsertFoundationRows(supabase, rows);
     const rawDataCount = Array.isArray(payload?.data) ? payload.data.length : null;
@@ -184,11 +202,21 @@ const handleSync = async (res) => {
     const emptyReason = rows.length
       ? ""
       : rawDataCount === 0
-        ? "Meta endpoint returned data=[] for conversations."
+        ? "Meta returned valid conversations shape but data=[]."
         : "Meta response does not contain expected conversations data array.";
     const permissionHint = attempts.some((a) => String(a?.error || "").toLowerCase().includes("permission"))
       ? "Meta permissions/token type likely do not allow inbox conversations for this endpoint."
       : "";
+    const likelyRootCause = rows.length
+      ? "conversations_retrieved"
+      : rawDataCount === 0
+        ? "empty_but_valid_conversations_response"
+        : "unexpected_conversations_shape";
+    const likelyProductReason = rows.length
+      ? ""
+      : rawDataCount === 0
+        ? "Most likely no eligible DM conversations for current IG account/token visibility (or messaging eligibility/linkage limits), not a transport crash."
+        : "Endpoint reachable but payload shape differs from expected conversations list.";
 
     return res.status(200).json({
       success: true,
@@ -201,6 +229,11 @@ const handleSync = async (res) => {
         dataIsArray: Array.isArray(payload?.data),
         hasPaging: !!payload?.paging,
         firstDataShape,
+      },
+      diagnostics: {
+        likelyRootCause,
+        likelyProductReason,
+        accountDiagnostics,
       },
       fetchedThreads: rows.length,
       persistedThreads: persisted.upserted,

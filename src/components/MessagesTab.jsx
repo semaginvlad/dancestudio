@@ -1020,11 +1020,12 @@ export default function MessagesTab({
                         if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося синхронізувати Instagram inbox");
                         setInstagramLastSyncedAt(payload?.syncedAt || new Date().toISOString());
                         setInstagramSyncStatus(`Sync завершено: fetched ${payload?.fetchedThreads || 0}, persisted ${payload?.persistedThreads || 0}. Endpoint: ${payload?.sourceEndpoint || "—"}`);
-                        setInstagramSyncError(payload?.emptyReason || payload?.permissionHint || "");
+                        setInstagramSyncError(payload?.diagnostics?.likelyProductReason || payload?.emptyReason || payload?.permissionHint || "");
                         setInstagramSyncDebug(JSON.stringify({
                           sourceEndpoint: payload?.sourceEndpoint || "",
                           attempts: payload?.attempts || [],
                           rawMeta: payload?.rawMeta || {},
+                          diagnostics: payload?.diagnostics || {},
                         }, null, 2));
                         await loadInstagramInboxThreads();
                       } catch (error) {
