@@ -160,7 +160,6 @@ const handleExchange = async (req, res) => {
 export default async function handler(req, res) {
   const op = getOp(req);
   try {
-    if (req.method === "GET" && !op && req.query?.code) return await handleExchange(req, res);
     if (req.method === "GET" && op === "status") return await handleStatus(res);
     if (req.method === "GET" && op === "start") return await handleStart(res);
     if ((req.method === "POST" || req.method === "GET") && op === "exchange") return await handleExchange(req, res);
