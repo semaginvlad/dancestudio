@@ -1634,13 +1634,24 @@ export default function AttendanceTab({
 }
   const handleToggleGuestCell = async (guestRow, dateStr) => {
     if (!gid || isCancelledDate(dateStr)) return;
-    const existing = attn.find((a) => String(a.groupId) === String(gid) && !a.studentId && normalizeName(a.guestName) === normalizeName(guestRow.guestName) && toDateKey(a.date) === toDateKey(dateStr));
+    const guestIdentity = String(guestRow?.guestName || "").trim();
+    if (!guestIdentity) return;
+    const existingById = (guestRow.attendanceIds || [])
+      .map((id) => attn.find((a) => a.id === id))
+      .find((a) => a && toDateKey(a.date) === toDateKey(dateStr));
+    const existingByName = attn.find((a) =>
+      String(a.groupId) === String(gid) &&
+      !a.studentId &&
+      normalizeName(a.guestName) === normalizeName(guestIdentity) &&
+      toDateKey(a.date) === toDateKey(dateStr)
+    );
+    const existing = existingById || existingByName || null;
     try {
       if (existing?.id) {
         await db.deleteAttendance(existing.id);
       } else {
         const entry = guestRow.guestEntryType || guestEntryType || "trial";
-        await db.insertAttendance({ id: `tmp_${uid()}`, subId: null, studentId: null, date: dateStr, guestName: guestRow.guestName, guestType: entry, groupId: gid, quantity: 1, entryType: entry });
+        await db.insertAttendance({ id: `tmp_${uid()}`, subId: null, studentId: null, date: dateStr, guestName: guestIdentity, guestType: entry, groupId: gid, quantity: 1, entryType: entry });
       }
       await reloadFromDb();
     } catch (err) {
