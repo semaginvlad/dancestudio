@@ -1505,21 +1505,38 @@ export default function AttendanceTab({
                   <button type="button" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : "Додати гостя"}</div>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
                   {addMode === "student" ? (
                     <>
                       <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
                       <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
                     </>
                   ) : (
-                    <>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleCreateGuestAttendance();
+                      }}
+                      style={{ display: "flex", gap: 6, width: "100%" }}
+                    >
                       <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
                       <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
                         <option value="trial">Пробне</option>
                         <option value="single">Разове</option>
                       </select>
-                      <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateGuestAttendance} disabled={creatingGuest || !gid}>Додати</button>
-                    </>
+                      <button
+                        type="submit"
+                        style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleCreateGuestAttendance();
+                        }}
+                        disabled={creatingGuest || !gid}
+                      >
+                        Додати
+                      </button>
+                    </form>
                   )}
                 </div>
               </td>
