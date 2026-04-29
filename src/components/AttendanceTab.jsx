@@ -493,6 +493,7 @@ export default function AttendanceTab({
   const [addMode, setAddMode] = useState("student");
   const [guestNameInput, setGuestNameInput] = useState("");
   const [guestEntryType, setGuestEntryType] = useState("trial");
+  const [creatingGuest, setCreatingGuest] = useState(false);
   const [creatingStudent, setCreatingStudent] = useState(false);
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
@@ -667,8 +668,10 @@ export default function AttendanceTab({
 
   const handleCreateGuestAttendance = async () => {
     if (!gid) return;
+    if (!guestEntryType || (guestEntryType !== "trial" && guestEntryType !== "single")) return;
     const trimmedName = (guestNameInput || "").trim();
     const guestLabel = trimmedName || makeAnonymousGuestLabel({ groupId: gid, dateStr: today() });
+    setCreatingGuest(true);
     try {
       await db.insertAttendance({
         id: `tmp_${uid()}`,
@@ -685,6 +688,8 @@ export default function AttendanceTab({
       await reloadFromDb();
     } catch (err) {
       alert(err?.message || "Не вдалося додати гостя.");
+    } finally {
+      setCreatingGuest(false);
     }
   };
 
@@ -1513,7 +1518,7 @@ export default function AttendanceTab({
                         <option value="trial">Пробне</option>
                         <option value="single">Разове</option>
                       </select>
-                      <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateGuestAttendance}>Додати</button>
+                      <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateGuestAttendance} disabled={creatingGuest || !gid}>Додати</button>
                     </>
                   )}
                 </div>
