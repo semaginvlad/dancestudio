@@ -98,7 +98,7 @@ const makeStyles = () => {
   },
   table: {
     borderCollapse: "separate",
-    borderSpacing: 0,
+    borderSpacing: "0 8px",
     minWidth: "100%",
   },
   thSticky: {
@@ -109,8 +109,8 @@ const makeStyles = () => {
     minWidth: 240,
     maxWidth: 240,
     width: 240,
-    borderRight: `1px solid ${theme.border}`,
-    boxShadow: `1px 0 0 ${theme.border}`,
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
+    boxShadow: `1px 0 0 ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
   },
   headTop: {
     position: "sticky",
@@ -144,8 +144,8 @@ const makeStyles = () => {
     width: 58,
     textAlign: "center",
     verticalAlign: "top",
-    borderRight: `1px solid ${theme.border}`,
-    borderBottom: `1px solid ${theme.border}`,
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
     padding: "9px 4px",
     background: isCancelled
       ? matrixCancelled
@@ -185,12 +185,15 @@ const makeStyles = () => {
     left: 0,
     zIndex: 3,
     background: matrixBase,
-    borderRight: `1px solid ${theme.border}`,
-    borderBottom: `1px solid ${theme.border}`,
-    padding: "9px 10px",
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.22)"}`,
+    borderBottom: "none",
+    borderTopLeftRadius: 15,
+    borderBottomLeftRadius: 15,
+    padding: "10px 11px",
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.95)",
   },
   studentName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 0.1,
     color: theme.textMain,
@@ -305,7 +308,7 @@ const makeStyles = () => {
     accentColor: theme.primary,
   },
   studentMeta: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 500,
     color: theme.textMuted,
     marginTop: 3,
@@ -320,11 +323,11 @@ const makeStyles = () => {
     width: 58,
     minWidth: 58,
     maxWidth: 58,
-    height: 54,
+    height: 58,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRight: `1px solid ${theme.border}`,
-    borderBottom: `1px solid ${theme.border}`,
+    borderRight: "none",
+    borderBottom: "none",
     background: isCancelled
       ? matrixCancelled
       : isCurrentMonth
@@ -332,11 +335,12 @@ const makeStyles = () => {
         : isMutedMonth
           ? matrixMuted
           : matrixBase,
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.85)",
   }),
   cellBtn: (bg, disabled, saving) => ({
     width: 33,
     height: 33,
-    borderRadius: 11,
+    borderRadius: 12,
     border: "1px solid rgba(0,0,0,0.08)",
     background: bg,
     cursor: disabled || saving ? "not-allowed" : "pointer",
@@ -344,7 +348,8 @@ const makeStyles = () => {
     fontSize: 16,
     fontWeight: 700,
     color: bg === theme.card ? theme.textLight : "#fff",
-    boxShadow: bg === theme.card ? "inset 0 1px 0 rgba(255,255,255,0.75)" : "inset 0 1px 0 rgba(255,255,255,0.28), 0 3px 8px rgba(15,23,42,0.18)",
+    boxShadow: bg === theme.card ? "inset 0 1px 0 rgba(255,255,255,0.75)" : "inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(15,23,42,0.2)",
+    transform: saving ? "scale(0.97)" : "scale(1)",
   }),
   subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
     background: isCancelled ? (isDark ? "#311d23" : "#fef2f2") : tone,
@@ -1428,6 +1433,8 @@ export default function AttendanceTab({
                       <div style={styles.studentMeta}>Тимчасовий гість (trial/single)</div>
                     </td>
                     {visibleDays.map((dateStr) => {
+                      const dayIdx = visibleDayIndex[dateStr];
+                      const isLastDay = dayIdx === visibleDays.length - 1;
                       const rec = attn.find((a) =>
                         String(a.groupId) === String(gid) &&
                         !a.studentId &&
@@ -1446,7 +1453,7 @@ export default function AttendanceTab({
                               ? { bg: theme.bg === "#0F131A" ? "#0f5a43" : "#10b981", mark }
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
-                        <td key={dateStr} style={styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth)}>
+                        <td key={dateStr} style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
                           <button type="button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr), false)}>{cellView.mark}</button>
                         </td>
                       );
@@ -1528,6 +1535,7 @@ export default function AttendanceTab({
                   const dayIdx = visibleDayIndex[dateStr];
                   const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
                   const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                  const isLastDay = dayIdx === visibleDays.length - 1;
                   const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
                   const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
                   const isDark = theme.bg === "#0F131A";
@@ -1545,6 +1553,10 @@ export default function AttendanceTab({
                         ...styles.cell(cancelledDay, isMutedMonth, isCurrentMonth),
                         ...(isMonthBoundary ? styles.monthDivider : {}),
                       };
+                  if (isLastDay) {
+                    cellStyle.borderTopRightRadius = 15;
+                    cellStyle.borderBottomRightRadius = 15;
+                  }
 
                   return (
                     <td key={dateStr} style={cellStyle}>
