@@ -1420,9 +1420,10 @@ export default function AttendanceTab({
 
           <tbody>
             {rosterRows.map((student, rowIndex) => {
+              const rowShellStyle = { filter: "drop-shadow(0 6px 14px rgba(15,23,42,0.12))" };
               if (student.isGuest) {
                 return (
-                  <tr key={student.id}>
+                  <tr key={student.id} style={rowShellStyle}>
                     <td style={styles.rowHead}>
                       <div style={styles.studentNameRow}>
                         <div style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
@@ -1493,7 +1494,7 @@ export default function AttendanceTab({
                   : (isOnlyOneOffNoPack ? (isDark ? { background: "#2b1f4a", borderLeft: "3px solid #a855f7" } : { background: "#f3e8ff", borderLeft: "3px solid #9333ea" }) : {});
 
               return (
-              <tr key={student.id}>
+              <tr key={student.id} style={rowShellStyle}>
                 <td style={{ ...styles.rowHead, ...rowHighlightStyle }}>
                   <div style={styles.studentNameRow}>
                     <div style={styles.studentName}>{`${rowIndex + 1}. ${getDisplayName(student)}`}</div>
@@ -1576,7 +1577,7 @@ export default function AttendanceTab({
             )})}
 
             {!rosterRows.length && (
-              <tr>
+              <tr style={{ filter: "drop-shadow(0 4px 10px rgba(15,23,42,0.08))" }}>
                 <td style={styles.rowHead}>Немає учениць</td>
                 <td colSpan={visibleDays.length} style={{ padding: 16, color: theme.textMuted }}>
                   У цій групі поки немає учениць.
@@ -1584,7 +1585,7 @@ export default function AttendanceTab({
               </tr>
             )}
 
-            <tr>
+            <tr style={{ filter: "drop-shadow(0 4px 10px rgba(15,23,42,0.08))" }}>
               <td style={styles.rowHead}>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                   <button type="button" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
@@ -1629,7 +1630,7 @@ export default function AttendanceTab({
               <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: theme.input }} />
             </tr>
 
-            <tr style={styles.totalsRow}>
+            <tr style={{ ...styles.totalsRow, filter: "drop-shadow(0 4px 10px rgba(15,23,42,0.08))" }}>
               <td style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
               {visibleDays.map((dateStr) => (
                 <td
