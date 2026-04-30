@@ -200,6 +200,34 @@ const makeStyles = () => {
     border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.25)"}`,
     boxShadow: isDark ? "0 6px 14px rgba(0,0,0,0.24)" : "0 4px 10px rgba(15,23,42,0.08)",
   },
+  guestGroupCard: {
+    background: isDark ? "linear-gradient(180deg, rgba(99,102,241,0.12), rgba(99,102,241,0.06))" : "linear-gradient(180deg, rgba(238,242,255,0.95), rgba(224,231,255,0.75))",
+    border: `1px solid ${isDark ? "rgba(129,140,248,0.28)" : "rgba(129,140,248,0.3)"}`,
+  },
+  guestGroupBtn: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    textAlign: "left",
+    cursor: "pointer",
+    color: theme.textMain,
+  },
+  guestGroupArrow: (open) => ({
+    fontSize: 12,
+    color: theme.textMuted,
+    transform: open ? "rotate(90deg)" : "rotate(0deg)",
+    transition: "transform 0.15s ease",
+  }),
+  guestChildRowHead: {
+    paddingLeft: 18,
+  },
+  guestChildCard: {
+    opacity: 0.96,
+  },
   studentName: {
     fontSize: 14,
     fontWeight: 700,
@@ -554,6 +582,7 @@ export default function AttendanceTab({
   const [creatingGuest, setCreatingGuest] = useState(false);
   const [guestRosterByGroup, setGuestRosterByGroup] = useStickyState({}, "ds_attn_guest_roster_v1");
   const [creatingStudent, setCreatingStudent] = useState(false);
+  const [guestGroupExpandedByGroup, setGuestGroupExpandedByGroup] = useState({});
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
   const menuPopupRef = useRef(null);
@@ -1277,10 +1306,30 @@ export default function AttendanceTab({
     return Array.from(merged.values());
   }, [guestRosterByGroup, gid, attn, visibleDays]);
 
-  const rosterRows = useMemo(
-    () => [...orderedStudents.map((s) => ({ ...s, isGuest: false })), ...guestRows],
-    [orderedStudents, guestRows]
+  const anonGuestRows = useMemo(
+    () => guestRows.filter((r) => r.isGuest && r.anonymous),
+    [guestRows]
   );
+  const namedGuestRows = useMemo(
+    () => guestRows.filter((r) => r.isGuest && !r.anonymous),
+    [guestRows]
+  );
+  const guestGroupExpanded = !!guestGroupExpandedByGroup[String(gid)];
+  const displayRows = useMemo(() => {
+    const students = orderedStudents.map((s) => ({ ...s, isGuest: false }));
+    const named = namedGuestRows.map((g) => ({ ...g }));
+    if (!anonGuestRows.length) return [...students, ...named];
+    const parent = {
+      id: `guest-group:${gid}`,
+      isGuestGroup: true,
+      isGuest: false,
+      guestCount: anonGuestRows.length,
+    };
+    const anonChildren = guestGroupExpanded
+      ? anonGuestRows.map((g) => ({ ...g, isGuestChild: true }))
+      : [];
+    return [...students, ...named, parent, ...anonChildren];
+  }, [orderedStudents, namedGuestRows, anonGuestRows, guestGroupExpanded, gid]);
 
   const groupStudentIdSet = useMemo(
     () => new Set(studentIdsInGroup.map((id) => String(id))),
@@ -1444,12 +1493,46 @@ export default function AttendanceTab({
           </thead>
 
           <tbody>
-            {rosterRows.map((student, rowIndex) => {
-              if (student.isGuest) {
+            {displayRows.map((student, rowIndex) => {
+              if (student.isGuestGroup) {
                 return (
                   <tr key={student.id}>
                     <td style={styles.rowHead}>
-                      <div style={styles.profileCard}>
+                      <div style={{ ...styles.profileCard, ...styles.guestGroupCard }}>
+                        <button
+                          type="button"
+                          onClick={() => setGuestGroupExpandedByGroup((prev) => ({ ...(prev || {}), [String(gid)]: !guestGroupExpanded }))}
+                          style={styles.guestGroupBtn}
+                        >
+                          <span style={styles.guestGroupArrow(guestGroupExpanded)}>▸</span>
+                          <span style={styles.studentName}>{`Гості (${student.guestCount})`}</span>
+                        </button>
+                        <div style={styles.studentMeta}>Анонімні тимчасові гості</div>
+                      </div>
+                    </td>
+                    {visibleDays.map((dateStr) => {
+                      const dayIdx = visibleDayIndex[dateStr];
+                      const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                      const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                      const isLastDay = dayIdx === visibleDays.length - 1;
+                      const cellStyle = {
+                        ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      };
+                      if (isLastDay) {
+                        cellStyle.borderTopRightRadius = 15;
+                        cellStyle.borderBottomRightRadius = 15;
+                      }
+                      return <td key={dateStr} style={cellStyle} />;
+                    })}
+                  </tr>
+                );
+              }
+              if (student.isGuest) {
+                return (
+                  <tr key={student.id}>
+                    <td style={{ ...styles.rowHead, ...(student.isGuestChild ? styles.guestChildRowHead : {}) }}>
+                      <div style={{ ...styles.profileCard, ...(student.isGuestChild ? styles.guestChildCard : {}) }}>
                         <div style={styles.studentNameRow}>
                           <div style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
                           <div style={styles.menuWrap}>
@@ -1461,6 +1544,8 @@ export default function AttendanceTab({
                     </td>
                     {visibleDays.map((dateStr) => {
                       const dayIdx = visibleDayIndex[dateStr];
+                      const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                      const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                       const isLastDay = dayIdx === visibleDays.length - 1;
                       const rec = attn.find((a) =>
                         String(a.groupId) === String(gid) &&
@@ -1480,7 +1565,7 @@ export default function AttendanceTab({
                               ? { bg: theme.bg === "#0F131A" ? "#0f5a43" : "#10b981", mark }
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
-                        <td key={dateStr} style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
+                        <td key={dateStr} style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
                           <div style={styles.cellShell}><button type="button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr), false)}>{cellView.mark}</button></div>
                         </td>
                       );
@@ -1606,7 +1691,7 @@ export default function AttendanceTab({
               </tr>
             )})}
 
-            {!rosterRows.length && (
+            {!displayRows.length && (
               <tr>
                 <td style={styles.rowHead}>Немає учениць</td>
                 <td colSpan={visibleDays.length} style={{ padding: 16, color: theme.textMuted }}>
@@ -1692,7 +1777,7 @@ export default function AttendanceTab({
           style={{ ...styles.menu, top: openMenuState.top, left: openMenuState.left }}
         >
           {(() => {
-            const student = rosterRows.find((s) => s.id === openMenuState.studentId);
+            const student = displayRows.find((s) => s.id === openMenuState.studentId);
             if (!student) return null;
             if (student.isGuest) {
               return (
