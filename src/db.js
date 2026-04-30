@@ -504,6 +504,9 @@ export async function insertAttendance(a) {
   }).select().single()
   if (error) throw error
   await ensureOneOffPaymentForAttendance(data);
+  if (data?.sub_id) {
+    await syncSubUsedTrainings(data.sub_id);
+  }
   return {
     id: data.id,
     subId: data.sub_id,
@@ -520,11 +523,14 @@ export async function insertAttendance(a) {
 export async function deleteAttendance(id) {
   const { data: existing } = await supabase
     .from('attendance')
-    .select('id, student_id, group_id, date, entry_type, guest_type')
+    .select('id, sub_id, student_id, group_id, date, entry_type, guest_type')
     .eq('id', id)
     .maybeSingle();
   const { error } = await supabase.from('attendance').delete().eq('id', id)
   if (error) throw error
+  if (existing?.sub_id) {
+    await syncSubUsedTrainings(existing.sub_id);
+  }
   if (existing) {
     await removeOneOffPaymentIfOrphan(existing);
   }
