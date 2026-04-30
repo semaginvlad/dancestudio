@@ -334,8 +334,8 @@ const makeStyles = () => {
     height: 58,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRight: "none",
-    borderBottom: "none",
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.14)" : "rgba(148,163,184,0.18)"}`,
     background: isCancelled
       ? matrixCancelled
       : isCurrentMonth
@@ -345,10 +345,12 @@ const makeStyles = () => {
           : matrixBase,
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.85)",
   }),
+  // Slightly elevated shell keeps empty cells readable without heavy grid lines.
   cellShell: {
     borderRadius: 12,
     padding: 3,
-    background: isDark ? "rgba(148,163,184,0.02)" : "rgba(255,255,255,0.45)",
+    background: isDark ? "rgba(148,163,184,0.08)" : "rgba(255,255,255,0.72)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : "rgba(148,163,184,0.3)"}`,
   },
   cellBtn: (bg, disabled, saving) => ({
     width: 33,
@@ -361,7 +363,7 @@ const makeStyles = () => {
     fontSize: 16,
     fontWeight: 700,
     color: bg === theme.card ? theme.textLight : "#fff",
-    boxShadow: bg === theme.card ? "inset 0 1px 0 rgba(255,255,255,0.75)" : "inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(15,23,42,0.2)",
+    boxShadow: bg === theme.card ? "inset 0 1px 0 rgba(255,255,255,0.88), 0 1px 4px rgba(15,23,42,0.08)" : "inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(15,23,42,0.2)",
     transform: saving ? "scale(0.97)" : "scale(1)",
   }),
   subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
@@ -369,8 +371,8 @@ const makeStyles = () => {
     boxShadow: [
       `inset 0 1px 0 ${isDark ? "rgba(191,219,254,0.18)" : "rgba(37,99,235,0.12)"}`,
       `inset 0 -1px 0 ${isDark ? "rgba(191,219,254,0.14)" : "rgba(37,99,235,0.1)"}`,
-      isStart ? `inset 3px 0 0 ${border}` : "",
-      isEnd ? `inset -3px 0 0 ${border}` : "",
+      isStart ? `inset 4px 0 0 ${border}` : "",
+      isEnd ? `inset -4px 0 0 ${border}` : "",
     ]
       .filter(Boolean)
       .join(", "),
