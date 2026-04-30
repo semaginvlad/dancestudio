@@ -671,7 +671,7 @@ export default function AttendanceTab({
     if (!gid) return;
     if (!guestEntryType || (guestEntryType !== "trial" && guestEntryType !== "single")) return;
     const trimmedName = (guestNameInput || "").trim();
-    const guestLabel = trimmedName || makeAnonymousGuestLabel({ groupId: gid, dateStr: today() });
+    const guestLabel = trimmedName || makeAnonymousGuestLabel({ groupId: gid, dateStr: "pending" });
     setCreatingGuest(true);
     try {
       const row = { id: `g_${uid()}`, isGuest: true, guestName: guestLabel, attendanceIds: [], anonymous: isAnonymousGuestLabel(guestLabel), guestEntryType };
@@ -1142,7 +1142,16 @@ export default function AttendanceTab({
 
   const handleToggleGuestCell = async (guestRow, dateStr) => {
     if (!gid || isCancelledDate(dateStr)) return;
-    const guestIdentity = String(guestRow?.guestName || "").trim();
+    let guestIdentity = String(guestRow?.guestName || "").trim();
+    if (isAnonymousGuestLabel(guestIdentity) && guestIdentity.includes(":pending:")) {
+      guestIdentity = makeAnonymousGuestLabel({ groupId: gid, dateStr });
+      if (guestRow?.id) {
+        setGuestRosterByGroup((prev) => ({
+          ...(prev || {}),
+          [gid]: (prev?.[gid] || []).map((r) => (r.id === guestRow.id ? { ...r, guestName: guestIdentity } : r)),
+        }));
+      }
+    }
     if (!guestIdentity) return;
     const existingById = (guestRow.attendanceIds || [])
       .map((id) => attn.find((a) => a.id === id))
