@@ -220,29 +220,29 @@ const makeStyles = () => {
     position: "relative",
   },
   menuBtn: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     borderRadius: 999,
     border: `1px solid ${theme.border}`,
-    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)",
-    color: isDark ? "#c6d0dd" : "#475569",
+    background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.16), rgba(148,163,184,0.07))" : "linear-gradient(180deg, rgba(148,163,184,0.2), rgba(148,163,184,0.08))",
+    color: isDark ? "#d9e2ee" : "#334155",
     cursor: "pointer",
     padding: 0,
-    lineHeight: "22px",
+    lineHeight: "24px",
     fontSize: 14,
     fontWeight: 700,
-    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.05)" : "inset 0 1px 0 rgba(255,255,255,0.7)",
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 14px rgba(0,0,0,0.28)" : "inset 0 1px 0 rgba(255,255,255,0.7), 0 6px 14px rgba(15,23,42,0.12)",
   },
   menu: {
     position: "fixed",
-    minWidth: 220,
+    minWidth: 198,
     background: isDark ? "linear-gradient(180deg, rgba(22,31,45,0.98), rgba(14,21,32,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : "rgba(148,163,184,0.35)"}`,
-    borderRadius: 14,
-    boxShadow: isDark ? "0 22px 48px rgba(0,0,0,0.5)" : "0 18px 40px rgba(15,23,42,0.2)",
-    backdropFilter: "blur(6px)",
+    borderRadius: 16,
+    boxShadow: isDark ? "0 26px 52px rgba(0,0,0,0.56)" : "0 20px 42px rgba(15,23,42,0.22)",
+    backdropFilter: "blur(9px)",
     zIndex: 20,
-    padding: 8,
+    padding: 7,
   },
   totalsHead: {
     minWidth: 150,
@@ -259,33 +259,42 @@ const makeStyles = () => {
     textAlign: "left",
     border: "none",
     background: "transparent",
-    padding: "9px 11px",
-    borderRadius: 10,
+    padding: "8px 10px",
+    borderRadius: 11,
     fontSize: 12,
     fontWeight: 600,
     color: theme.textMain,
     cursor: "pointer",
+    transition: "background 120ms ease, transform 120ms ease",
   },
   menuItemDisabled: {
     color: theme.textLight,
     cursor: "not-allowed",
     opacity: 0.85,
   },
+  menuSection: {
+    display: "grid",
+    gap: 4,
+    padding: 3,
+    borderRadius: 12,
+    background: isDark ? "rgba(148,163,184,0.06)" : "rgba(148,163,184,0.08)",
+    marginBottom: 6,
+  },
   menuDivider: {
-    margin: "7px 2px",
-    borderTop: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.28)"}`,
+    margin: "2px 1px 6px",
+    borderTop: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : "rgba(148,163,184,0.3)"}`,
   },
   notifyRow: {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    padding: "9px 11px",
+    padding: "8px 10px",
     fontSize: 12,
     color: theme.textMain,
     fontWeight: 600,
     userSelect: "none",
     borderRadius: 10,
-    background: isDark ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.08)",
+    background: isDark ? "rgba(99,102,241,0.13)" : "rgba(99,102,241,0.1)",
   },
   notifyCheck: {
     width: 16,
@@ -299,6 +308,11 @@ const makeStyles = () => {
     color: theme.textMuted,
     marginTop: 3,
     lineHeight: 1.2,
+  },
+  menuDanger: {
+    background: isDark ? "rgba(185,28,28,0.2)" : "rgba(254,226,226,0.95)",
+    color: isDark ? "#fecaca" : "#b91c1c",
+    border: `1px solid ${isDark ? "rgba(248,113,113,0.35)" : "rgba(248,113,113,0.5)"}`,
   },
   cell: (isCancelled, isMutedMonth, isCurrentMonth) => ({
     width: 58,
@@ -1637,37 +1651,44 @@ export default function AttendanceTab({
             if (student.isGuest) {
               return (
                 <>
-                  <button type="button" style={styles.menuItem} onClick={() => handleConvertGuestToStudent(student)}>Перетворити на ученицю</button>
-                  <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => handleRemoveGuestRosterRow(student)}>Прибрати тимчасового гостя</button>
+                  <div style={styles.menuSection}>
+                    <button type="button" style={styles.menuItem} onClick={() => handleConvertGuestToStudent(student)}>Перетворити на ученицю</button>
+                  </div>
+                  <div style={styles.menuSection}>
+                    <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} onClick={() => handleRemoveGuestRosterRow(student)}>Прибрати тимчасового гостя</button>
+                  </div>
                 </>
               );
             }
             return (
               <>
-                <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "up")}>Перемістити вгору</button>
-                <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "down")}>Перемістити вниз</button>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "up")}>Перемістити вгору</button>
+                  <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "down")}>Перемістити вниз</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
+                  <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
+                  <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => handleMessageStudent(student)}>Написати повідомлення</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <label style={styles.notifyRow}>
+                    <input
+                      type="checkbox"
+                      style={styles.notifyCheck}
+                      checked={isWarned(student.id)}
+                      onChange={(e) => toggleWarned(student.id, e.target.checked)}
+                    />
+                    <span>Сповіщено про завершення</span>
+                  </label>
+                </div>
                 <div style={styles.menuDivider} />
-                <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
-                <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
-                <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
-                <button
-                  type="button"
-                  style={styles.menuItem}
-                  onClick={() => handleMessageStudent(student)}
-                >
-                  Написати повідомлення
-                </button>
-                <div style={styles.menuDivider} />
-                <label style={styles.notifyRow}>
-                  <input
-                    type="checkbox"
-                    style={styles.notifyCheck}
-                    checked={isWarned(student.id)}
-                    onChange={(e) => toggleWarned(student.id, e.target.checked)}
-                  />
-                  <span>Сповіщено про завершення</span>
-                </label>
-                <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+                <div style={styles.menuSection}>
+                  <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+                </div>
               </>
             );
           })()}
