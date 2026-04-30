@@ -1306,30 +1306,25 @@ export default function AttendanceTab({
     return Array.from(merged.values());
   }, [guestRosterByGroup, gid, attn, visibleDays]);
 
-  const anonGuestRows = useMemo(
-    () => guestRows.filter((r) => r.isGuest && r.anonymous),
-    [guestRows]
-  );
-  const namedGuestRows = useMemo(
-    () => guestRows.filter((r) => r.isGuest && !r.anonymous),
+  const groupedGuestRows = useMemo(
+    () => guestRows.filter((r) => r.isGuest),
     [guestRows]
   );
   const guestGroupExpanded = !!guestGroupExpandedByGroup[String(gid)];
   const displayRows = useMemo(() => {
     const students = orderedStudents.map((s) => ({ ...s, isGuest: false }));
-    const named = namedGuestRows.map((g) => ({ ...g }));
-    if (!anonGuestRows.length) return [...students, ...named];
+    if (!groupedGuestRows.length) return [...students];
     const parent = {
       id: `guest-group:${gid}`,
       isGuestGroup: true,
       isGuest: false,
-      guestCount: anonGuestRows.length,
+      guestCount: groupedGuestRows.length,
     };
-    const anonChildren = guestGroupExpanded
-      ? anonGuestRows.map((g) => ({ ...g, isGuestChild: true }))
+    const guestChildren = guestGroupExpanded
+      ? groupedGuestRows.map((g) => ({ ...g, isGuestChild: true }))
       : [];
-    return [...students, ...named, parent, ...anonChildren];
-  }, [orderedStudents, namedGuestRows, anonGuestRows, guestGroupExpanded, gid]);
+    return [...students, parent, ...guestChildren];
+  }, [orderedStudents, groupedGuestRows, guestGroupExpanded, gid]);
 
   const groupStudentIdSet = useMemo(
     () => new Set(studentIdsInGroup.map((id) => String(id))),
@@ -1507,7 +1502,7 @@ export default function AttendanceTab({
                           <span style={styles.guestGroupArrow(guestGroupExpanded)}>▸</span>
                           <span style={styles.studentName}>{`Гості (${student.guestCount})`}</span>
                         </button>
-                        <div style={styles.studentMeta}>Анонімні тимчасові гості</div>
+                        <div style={styles.studentMeta}>Тимчасові гості</div>
                       </div>
                     </td>
                     {visibleDays.map((dateStr) => {
