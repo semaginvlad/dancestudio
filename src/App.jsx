@@ -113,6 +113,7 @@ export default function App() {
   const [expandedDirs, setExpandedDirs] = useState({});
   const [expandedSubDirs, setExpandedSubDirs] = useState({});
   const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
+  const [adminTab, setAdminTab] = useState("analytics");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [themeVersion, setThemeVersion] = useState(0);
@@ -955,10 +956,7 @@ export default function App() {
               {id:"subs", label:"Оплати"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
-              {id:"trainers", label:"Тренери"},
-              {id:"alerts", label:`Сповіщення (${notifications.filter(n=>!n.notified).length})`},
-              {id:"finance", label:"Фінанси"},
-              {id:"pro_analytics", label:"📈 Про-Аналітика"},
+              {id:"admin", label:"Адмін"},
               {id:"analytics", label:"📊 Instagram"}
             ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)
           ) : (
@@ -991,20 +989,28 @@ export default function App() {
             selectedStudentId={selectedMessageStudentId}
             onSelectStudent={setSelectedMessageStudentId}
             onOpenTrainerNotifications={() => {
-              setTab("trainers");
-              setTrainersSubtab("notifications");
+              setTab("admin");
+              setAdminTab("notifications");
             }}
           />
         )}
-        {isAdmin && tab==="trainers" && (
+        {isAdmin && tab==="admin" && (
           <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6 }}>
+              <button type="button" onClick={() => setAdminTab("analytics")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "analytics" ? theme.primary : "transparent", color: adminTab === "analytics" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Аналітика</button>
+              <button type="button" onClick={() => setAdminTab("finance")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "finance" ? theme.primary : "transparent", color: adminTab === "finance" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Фінанси</button>
+              <button type="button" onClick={() => setAdminTab("notifications")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "notifications" ? theme.primary : "transparent", color: adminTab === "notifications" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сповіщення</button>
+              <button type="button" onClick={() => setAdminTab("pro")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pro" ? theme.primary : "transparent", color: adminTab === "pro" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Про-аналітика</button>
+            </div>
+            {adminTab === "analytics" && (
             <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6 }}>
               <button type="button" onClick={() => setTrainersSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "trainers" ? theme.primary : "transparent", color: trainersSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Тренери</button>
               <button type="button" onClick={() => setTrainersSubtab("groups")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "groups" ? theme.primary : "transparent", color: trainersSubtab === "groups" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Групи</button>
               <button type="button" onClick={() => setTrainersSubtab("notifications")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "notifications" ? theme.primary : "transparent", color: trainersSubtab === "notifications" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сповіщення</button>
             </div>
+            )}
 
-            {trainersSubtab === "trainers" ? (
+            {adminTab === "analytics" && (trainersSubtab === "trainers" ? (
               <TrainersTab
                 trainers={trainers}
                 setTrainers={setTrainers}
@@ -1055,11 +1061,20 @@ export default function App() {
                 attn={attn}
                 cancelled={cancelled}
               />
+            ))}
+            {adminTab === "notifications" && (
+              <TrainersNotificationsTab
+                groups={groups}
+                students={students}
+                studentGrps={studentGrps}
+                subs={subsExt}
+                attn={attn}
+                cancelled={cancelled}
+              />
             )}
+            {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
           </div>
         )}
-        
-        {isAdmin && tab==="pro_analytics" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
         
         {isAdmin && tab==="students" && <div>
           <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",justifyContent:"space-between", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
@@ -1346,7 +1361,7 @@ export default function App() {
         </div>}
 
         {/* === ФІНАНСИ === */}
-        {isAdmin && tab==="finance" && (() => {
+        {isAdmin && tab==="admin" && adminTab==="finance" && (() => {
           let finData = [...analytics.splits];
           if (finFilterDir !== "all") finData = finData.filter(s => s.group.directionId === finFilterDir);
           if (finFilterGroup !== "all") finData = finData.filter(s => s.group.id === finFilterGroup);
