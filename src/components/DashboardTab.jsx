@@ -60,6 +60,30 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const calc = (range) => {
     const pSubs = subs.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), range.start, range.end));
     const pAttn = attn.filter((a) => inRange(String(a.date || "").slice(0, 10), range.start, range.end));
+    const studentsById = new Map(students.map((s) => [String(s.id), s]));
+    const groupsById = new Map(groups.map((g) => [String(g.id), g]));
+    const includedRevenueSubs = pSubs.map((s) => {
+      const student = studentsById.get(String(s.studentId || ""));
+      const group = groupsById.get(String(s.groupId || ""));
+      return {
+        id: s.id,
+        studentId: s.studentId,
+        studentName: student?.name || student?.fullName || [student?.firstName, student?.lastName].filter(Boolean).join(" ") || "",
+        groupId: s.groupId,
+        groupName: group?.name || "",
+        planType: s.planType,
+        amount: Number(s.amount || 0),
+        paid: s.paid,
+        activationDate: s.activationDate,
+        activation_date: s.activation_date,
+        startDate: s.startDate,
+        start_date: s.start_date,
+        created_at: s.created_at,
+        computedRevenueDate: getRevenueDate(s),
+        reason: "included because computedRevenueDate is inside selected period",
+      };
+    });
+    if (typeof window !== "undefined" && window?.location?.hostname === "localhost") console.table(includedRevenueSubs);
     const revenue = pSubs.reduce((s, x) => s + Number(x.amount || 0), 0);
     const payments = pSubs.length;
     const attendance = pAttn.reduce((s, x) => s + Number(x.quantity || 1), 0);
@@ -75,6 +99,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
       byGroupRevenue: groups.map((g) => ({ id: g.id, name: g.name, value: pSubs.filter((s) => String(s.groupId) === String(g.id)).reduce((sum, s) => sum + Number(s.amount || 0), 0) })),
       byGroupAttendance: groups.map((g) => ({ id: g.id, name: g.name, value: pAttn.filter((a) => String(a.groupId) === String(g.id)).reduce((sum, a) => sum + Number(a.quantity || 1), 0), held: new Set(pAttn.filter((a) => String(a.groupId) === String(g.id)).map((a) => String(a.date || "").slice(0, 10))).size })),
       byDirRevenue: directionsList.map((d) => ({ id: d.id, name: d.name, value: pSubs.filter((s) => groups.some((g) => String(g.id) === String(s.groupId) && String(g.directionId) === String(d.id))).reduce((sum, s) => sum + Number(s.amount || 0), 0) })),
+      includedRevenueSubs,
     };
   };
 
@@ -157,6 +182,22 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
 
     <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 10 }}>
       {[{ t: "Ending soon", v: endingSoon, d: "абонементи до 7 днів" }, { t: "No active payment", v: noActivePayment, d: "актуальні учениці без активної оплати" }, { t: "Low attendance groups", v: lowAttendanceGroups, d: "avg<4, held>=2" }, { t: "Reserve demand", v: reserveDemand, d: "групи з очікуванням" }, { t: "Potential dead groups", v: deadGroups, d: "без відвідувань у періоді" }].map((r) => <div key={r.t} style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}><div style={{ fontSize: 11, color: theme.textMuted }}>{r.t}</div><div style={{ fontSize: 24, fontWeight: 800 }}>{r.v}</div><div style={{ fontSize: 11, color: theme.textLight }}>{r.d}</div></div>)}
+    </div>
+
+    <div style={{ ...cardSt, border: `1px solid ${theme.warning}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <b>DEBUG: записи, які рахуються у виручку</b>
+        <span style={{ fontSize: 12, color: theme.textLight }}>Період: {period.start}..{period.end}</span>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, color: theme.textLight }}>
+        Rule: getRevenueDate = activationDate || activation_date || startDate || start_date
+      </div>
+      <div style={{ marginTop: 6, fontSize: 12 }}>
+        count: <b>{curr.includedRevenueSubs.length}</b> · sum: <b>{curr.includedRevenueSubs.reduce((sum, x) => sum + Number(x.amount || 0), 0).toLocaleString()}₴</b>
+      </div>
+      <pre style={{ marginTop: 10, overflow: "auto", maxHeight: 320, fontSize: 11, background: theme.bg, border: `1px solid ${theme.border}`, padding: 10 }}>
+        {JSON.stringify(curr.includedRevenueSubs, null, 2)}
+      </pre>
     </div>
   </div>;
 }
