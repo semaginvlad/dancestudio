@@ -9,7 +9,17 @@ const inRange = (v, start, end) => !!v && v >= start && v <= end;
 const pctDelta = (curr, prev) => (prev > 0 ? Number((((curr - prev) / prev) * 100).toFixed(1)) : null);
 const rank = (v) => (v >= 100 ? "виконано" : v >= 70 ? "в процесі" : "ризик");
 const ringColor = (v) => (v >= 100 ? theme.success : v >= 70 ? theme.warning : theme.danger);
-const getPaymentDate = (sub = {}) => String(sub.paidAt || sub.paymentDate || sub.created_at || sub.dateAdded || sub.activationDate || sub.startDate || "").slice(0, 10);
+// created_at is CRM insert timestamp, not business payment period date, so it is fallback only.
+const getPaymentDate = (sub = {}) => String(
+  sub.paidAt
+  || sub.paymentDate
+  || sub.purchaseDate
+  || sub.activationDate
+  || sub.startDate
+  || sub.dateAdded
+  || sub.created_at
+  || ""
+).slice(0, 10);
 const isPaidSub = (sub = {}) => (sub.paid === false ? false : true);
 
 /** Previous period: same number of days immediately before current start. */
