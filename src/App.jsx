@@ -970,6 +970,7 @@ export default function App() {
           <DashboardTab
             subs={subs}
             students={students}
+            studentGrps={studentGrps}
             groups={groups}
             directionsList={directionsList}
             attn={attn}
