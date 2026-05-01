@@ -968,11 +968,13 @@ export default function App() {
       <main style={{maxWidth:1200, margin:"0 auto", padding:"0 24px"}}>
         {isAdmin && tab==="dashboard" && (
           <DashboardTab
-            analytics={analytics}
-            activeSubs={activeSubs}
             subs={subs}
-            studentMap={studentMap}
-            groupMap={groupMap}
+            students={students}
+            groups={groups}
+            directionsList={directionsList}
+            attn={attn}
+            waitlist={waitlist}
+            cancelled={cancelled}
           />
         )}
 

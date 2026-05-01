@@ -1,290 +1,111 @@
 import React, { useMemo, useState } from "react";
-import { Badge, Modal } from "./UI";
-import { DIRECTIONS, PLAN_TYPES, cardSt, theme } from "../shared/constants";
-import { fmt, getDisplayName, today } from "../shared/utils";
+import { cardSt, theme } from "../shared/constants";
 
-function DashCard({ title, value, subtitle, onClick, color }) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        ...cardSt,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        border: `1px solid ${theme.border}`,
-        cursor: onClick ? "pointer" : "default",
-        transition: "0.2s",
-      }}
-      onMouseOver={(e) =>
-        onClick &&
-        ((e.currentTarget.style.transform = "translateY(-2px)"),
-        (e.currentTarget.style.boxShadow = `0 12px 30px ${theme.border}`))
-      }
-      onMouseOut={(e) =>
-        onClick &&
-        ((e.currentTarget.style.transform = "none"),
-        (e.currentTarget.style.boxShadow = "none"))
-      }
-    >
-      <div style={{ fontSize: 13, color: theme.textLight, textTransform: "uppercase", fontWeight: 700 }}>
-        {title}
-      </div>
-      <div style={{ fontSize: 36, fontWeight: 800, color: color || theme.textMain }}>{value}</div>
-      <div style={{ fontSize: 13, color: theme.textMuted, fontWeight: 600 }}>{subtitle}</div>
-    </div>
-  );
-}
+const todayKey = () => new Date().toISOString().slice(0, 10);
+const monthStart = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`;
+const monthEnd = (d) => new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
+const inRange = (v, start, end) => !!v && v >= start && v <= end;
 
-export default function DashboardTab({ analytics, activeSubs, subs, studentMap, groupMap }) {
-  const [dashModal, setDashModal] = useState(null);
+const Tile = ({label, value, hint, tone}) => (
+  <div style={{...cardSt, border:`1px solid ${theme.border}`, padding:16}}>
+    <div style={{fontSize:12, color:theme.textMuted, textTransform:"uppercase", fontWeight:700}}>{label}</div>
+    <div style={{fontSize:30, fontWeight:800, color:tone || theme.textMain, marginTop:6}}>{value}</div>
+    <div style={{fontSize:12, color:theme.textLight, marginTop:4}}>{hint}</div>
+  </div>
+);
 
-  const modalItems = useMemo(() => {
-    if (!dashModal) return [];
-    return analytics.currMonthDetails[dashModal.type] || [];
-  }, [dashModal, analytics]);
+export default function DashboardTab({ students=[], groups=[], directionsList=[], subs=[], attn=[], waitlist=[], cancelled=[] }) {
+  const now = new Date();
+  const [periodMode, setPeriodMode] = useState("this_month");
+  const [from, setFrom] = useState(monthStart(now));
+  const [to, setTo] = useState(monthEnd(now));
 
-  const renderDashModal = () => {
-    if (!dashModal) return null;
-
-    if (dashModal.type === "activeSubs") {
-      return (
-        <Modal open={true} onClose={() => setDashModal(null)} title={dashModal.title}>
-          {activeSubs.length === 0 ? (
-            <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>Немає даних</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {activeSubs.map((s, i) => {
-                const st = studentMap[s?.studentId];
-                const gr = groupMap[s?.groupId];
-                const planName = PLAN_TYPES.find((p) => p.id === s?.planType)?.name;
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      padding: 16,
-                      background: theme.bg,
-                      borderRadius: 16,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 700, color: theme.textMain }}>{getDisplayName(st)}</div>
-                      <div style={{ fontSize: 13, color: theme.textMuted, marginTop: 4 }}>
-                        {gr?.name || "Невідома група"}
-                      </div>
-                    </div>
-                    <Badge color={theme.success}>{planName || "Абонемент"}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Modal>
-      );
+  const period = useMemo(() => {
+    if (periodMode === "custom") return { start: from, end: to };
+    if (periodMode === "last_month") {
+      const d = new Date(now.getFullYear(), now.getMonth()-1, 1);
+      return { start: monthStart(d), end: monthEnd(d) };
     }
+    return { start: monthStart(now), end: monthEnd(now) };
+  }, [periodMode, from, to]);
 
-    return (
-      <Modal open={true} onClose={() => setDashModal(null)} title={dashModal.title}>
-        {!modalItems || modalItems.length === 0 ? (
-          <div style={{ color: theme.textLight, textAlign: "center", padding: 40 }}>Немає даних</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {modalItems.map((item, i) => {
-              let st = null;
-              if (item?.studentId) {
-                st = studentMap[item.studentId];
-              } else if (item?.subId) {
-                const foundSub = subs.find((s) => s.id === item.subId);
-                if (foundSub) st = studentMap[foundSub.studentId];
-              } else if (item?.guestName) {
-                st = Object.values(studentMap).find((s) => s.name === item.guestName);
-              }
+  const data = useMemo(() => {
+    const periodSubs = subs.filter((s) => inRange(String(s.activationDate || s.startDate || "").slice(0,10), period.start, period.end));
+    const periodAttn = attn.filter((a) => inRange(String(a.date||"").slice(0,10), period.start, period.end));
+    const revenue = periodSubs.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+    const payments = periodSubs.length;
+    const activeStudents = new Set(periodAttn.map((a) => String(a.studentId || "")).filter(Boolean)).size;
+    const attendance = periodAttn.reduce((sum, a) => sum + Number(a.quantity || 1), 0);
+    const held = new Set(periodAttn.map((a) => `${a.groupId}:${String(a.date||"").slice(0,10)}`)).size;
+    const avgPerSession = held ? Number((attendance / held).toFixed(2)) : 0;
+    const activeSubs = subs.filter((s) => s.status !== "expired").length;
+    const expiredSubs = subs.filter((s) => s.status === "expired").length;
 
-              const gr = groupMap[item?.groupId];
-              const dateStr = item?.startDate || item?.date || "Невідома дата";
+    const noActivePay = students.filter((st) => !subs.some((s) => String(s.studentId) === String(st.id) && s.status !== "expired")).length;
+    const endingSoon = subs.filter((s) => s.status !== "expired" && s.endDate && s.endDate >= todayKey() && s.endDate <= new Date(Date.now()+7*86400000).toISOString().slice(0,10)).length;
+    const lowAttendanceGroups = groups.filter((g) => {
+      const gRows = periodAttn.filter((a) => String(a.groupId) === String(g.id));
+      const gAttn = gRows.reduce((sum, a) => sum + Number(a.quantity || 1), 0);
+      const gHeld = new Set(gRows.map((a) => String(a.date||"").slice(0,10))).size;
+      const avg = gHeld ? gAttn / gHeld : 0;
+      return gHeld > 0 && avg < 4;
+    }).length;
+    const reserveVacancy = groups.filter((g) => waitlist.some((w) => String(w.groupId) === String(g.id) && ["waiting","contacted",""] .includes(String(w.status || "")))).length;
 
-              return (
-                <div
-                  key={i}
-                  style={{
-                    padding: 16,
-                    background: theme.bg,
-                    borderRadius: 16,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, color: theme.textMain }}>
-                      {getDisplayName(st || { name: item?.guestName || "Невідомо" })}
-                    </div>
-                    <div style={{ fontSize: 13, color: theme.textMuted, marginTop: 4 }}>
-                      {gr?.name || "Невідома група"}
-                    </div>
-                  </div>
-                  <Badge color={theme.primary}>{fmt(dateStr)}</Badge>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Modal>
-    );
-  };
+    const byDir = directionsList.map((d) => {
+      const gids = groups.filter((g) => String(g.directionId) === String(d.id)).map((g) => String(g.id));
+      const sum = periodSubs.filter((s) => gids.includes(String(s.groupId))).reduce((a,b)=>a+Number(b.amount||0),0);
+      return { id:d.id, name:d.name, revenue:sum };
+    }).sort((a,b)=>b.revenue-a.revenue).slice(0,5);
 
-  return (
-    <>
-      <div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
-            gap: 20,
-            marginBottom: 30,
-          }}
-        >
-          <DashCard
-            title="Учениць"
-            value={analytics.totalStudents}
-            subtitle={`${analytics.activeStudents} активних`}
-            color={theme.primary}
-          />
-          <DashCard
-            title="Абонементів"
-            value={activeSubs.length}
-            subtitle={`${analytics.currMonthStats.cancelledCount} скасувань`}
-            color={theme.success}
-            onClick={() => setDashModal({ type: "activeSubs", title: "Всі активні абонементи" })}
-          />
-          <DashCard
-            title="Дохід (Цього міс.)"
-            value={`${analytics.currMonthRev.toLocaleString()}₴`}
-            subtitle={`Минулий: ${analytics.prevMonthRev.toLocaleString()}₴`}
-            color={theme.warning}
-          />
-        </div>
+    const byGroupRevenue = groups.map((g)=>({ id:g.id, name:g.name, value:periodSubs.filter((s)=>String(s.groupId)===String(g.id)).reduce((a,b)=>a+Number(b.amount||0),0)})).sort((a,b)=>b.value-a.value).slice(0,5);
+    const byGroupAttendance = groups.map((g)=>({ id:g.id, name:g.name, value:periodAttn.filter((a)=>String(a.groupId)===String(g.id)).reduce((a,b)=>a+Number(b.quantity||1),0)})).sort((a,b)=>b.value-a.value).slice(0,5);
 
-        <h3 style={{ color: theme.secondary, fontSize: 20, marginBottom: 16, fontWeight: 800 }}>
-          Цього місяця ({today().slice(0, 7)})
-        </h3>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
-            gap: 16,
-            marginBottom: 30,
-          }}
-        >
-          <DashCard onClick={() => setDashModal({ type: "trial", title: "Пробні тренування" })} title="Пробні" value={analytics.currMonthStats.trial} />
-          <DashCard onClick={() => setDashModal({ type: "single", title: "Разові тренування" })} title="Разові" value={analytics.currMonthStats.single} />
-          <DashCard onClick={() => setDashModal({ type: "pack4", title: "Абонементи 4" })} title="Абонементи 4" value={analytics.currMonthStats.pack4} />
-          <DashCard onClick={() => setDashModal({ type: "pack8", title: "Абонементи 8" })} title="Абонементи 8" value={analytics.currMonthStats.pack8} />
-          <DashCard onClick={() => setDashModal({ type: "pack12", title: "Абонементи 12" })} title="Абонементи 12" value={analytics.currMonthStats.pack12} />
-          <DashCard onClick={() => setDashModal({ type: "unpaidAttn", title: "Боргові тренування" })} title="Боргові трен." value={analytics.currMonthStats.unpaidAttn} color={theme.danger} />
-        </div>
+    const insights = [];
+    if (endingSoon > 0) insights.push(`Увага: ${endingSoon} абонементів завершуються протягом 7 днів.`);
+    if (lowAttendanceGroups > 0) insights.push(`Низька відвідуваність у ${lowAttendanceGroups} групах (avg < 4).`);
+    if (reserveVacancy > 0) insights.push(`${reserveVacancy} груп мають резерв — перевірте потенційні місця.`);
+    if (revenue > 0 && attendance > 0) insights.push(`Середній дохід на 1 відвідування: ${Math.round(revenue / attendance)}₴.`);
 
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, marginBottom: 40 }}>
-          <h3 style={{ color: theme.secondary, fontSize: 18, marginBottom: 24, fontWeight: 800 }}>
-            Графік відвідуваності
-          </h3>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              gap: 8,
-              height: 180,
-              overflowX: "auto",
-              overflowY: "hidden",
-              paddingBottom: 8,
-              paddingTop: 30,
-            }}
-          >
-            {analytics.chartData.map((d) => {
-              const barHeightPx = d.count > 0 ? Math.max((d.count / analytics.maxChartVal) * 120, 8) : 4;
-              return (
-                <div
-                  key={d.day}
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "flex-end",
-                    alignItems: "center",
-                    minWidth: 32,
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 800, opacity: d.count > 0 ? 1 : 0, marginBottom: 4 }}>
-                    {d.count}
-                  </div>
-                  <div
-                    style={{
-                      width: "100%",
-                      background: d.count > 0 ? theme.primary : theme.input,
-                      borderRadius: 8,
-                      height: `${barHeightPx}px`,
-                      transition: "all 0.3s",
-                    }}
-                  />
-                  <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 10, fontWeight: 600 }}>{d.day}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+    return { revenue, payments, activeStudents, attendance, avgPerSession, activeSubs, expiredSubs, noActivePay, endingSoon, lowAttendanceGroups, reserveVacancy, byDir, byGroupRevenue, byGroupAttendance, insights };
+  }, [subs, attn, students, groups, directionsList, waitlist, period]);
 
-        <h3 style={{ color: theme.secondary, fontSize: 20, marginBottom: 16, fontWeight: 800 }}>
-          За напрямками
-        </h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 16 }}>
-          {DIRECTIONS.map((d) => (
-            <div
-              key={d.id}
-              style={{
-                ...cardSt,
-                padding: "20px",
-                border: `1px solid ${theme.border}`,
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "space-between",
-                minHeight: 110,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: d.color, marginBottom: 8 }}>{d.name}</div>
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: theme.textMain }}>
-                {analytics.byDir[d.id]?.students || 0}{" "}
-                <span style={{ fontSize: 14, color: theme.textLight, fontWeight: 600 }}>уч.</span>
-              </div>
-            </div>
-          ))}
-        </div>
+  return <div style={{display:"grid", gap:16}}>
+    <div style={{...cardSt, border:`1px solid ${theme.border}`, display:"flex", gap:10, alignItems:"center", flexWrap:"wrap"}}>
+      <button style={{...cardSt, padding:"8px 12px", background:periodMode==="this_month"?theme.primary:theme.card, color:periodMode==="this_month"?"#fff":theme.textMain}} onClick={()=>setPeriodMode("this_month")}>Цей місяць</button>
+      <button style={{...cardSt, padding:"8px 12px", background:periodMode==="last_month"?theme.primary:theme.card, color:periodMode==="last_month"?"#fff":theme.textMain}} onClick={()=>setPeriodMode("last_month")}>Минулий місяць</button>
+      <button style={{...cardSt, padding:"8px 12px", background:periodMode==="custom"?theme.primary:theme.card, color:periodMode==="custom"?"#fff":theme.textMain}} onClick={()=>setPeriodMode("custom")}>Custom</button>
+      {periodMode === "custom" && <><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /><input type="date" value={to} onChange={(e)=>setTo(e.target.value)} /></>}
+    </div>
 
-        {analytics.foundation && (
-          <div style={{ ...cardSt, border: `1px dashed ${theme.border}`, marginTop: 24 }}>
-            <h3 style={{ color: theme.secondary, fontSize: 16, marginBottom: 12, fontWeight: 800 }}>
-              Analytics foundation preview ({analytics.foundation.period.key})
-            </h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10 }}>
-              {analytics.foundation.ui.kpiTiles.map((tile) => (
-                <div key={tile.id} style={{ background: theme.bg, borderRadius: 12, padding: 12 }}>
-                  <div style={{ fontSize: 12, color: theme.textMuted }}>{tile.title}</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: theme.textMain }}>{tile.value}</div>
-                  <div style={{ fontSize: 12, color: tile.trend.delta >= 0 ? theme.success : theme.danger }}>
-                    Δ {tile.trend.delta >= 0 ? "+" : ""}{tile.trend.delta} ({tile.trend.deltaPct}%)
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+    <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:12}}>
+      <Tile label="Загальна виручка" value={`${data.revenue.toLocaleString()}₴`} hint="sum(amount) за період" tone={theme.success} />
+      <Tile label="Кількість оплат" value={data.payments} hint="кількість subs з activation/start у періоді" />
+      <Tile label="Активні учениці" value={data.activeStudents} hint="унікальні studentId у attendance" />
+      <Tile label="Відвідування" value={data.attendance} hint="sum(attendance.quantity||1)" />
+      <Tile label="Сер. відвідуваність/заняття" value={data.avgPerSession} hint="attendance / held sessions" />
+      <Tile label="Активні абонементи" value={data.activeSubs} hint="subs status != expired" />
+      <Tile label="Завершені/прострочені" value={data.expiredSubs} hint="subs status == expired" tone={theme.danger} />
+    </div>
+
+    <div style={{display:"grid", gridTemplateColumns:"1.2fr 1fr", gap:12}}>
+      <div style={{...cardSt, border:`1px solid ${theme.border}`}}><h3 style={{marginTop:0}}>Ризики</h3>
+        <ul>
+          <li>Учениці без активної оплати: <b>{data.noActivePay}</b></li>
+          <li>Абонементи, що скоро закінчуються (7 днів): <b>{data.endingSoon}</b></li>
+          <li>Групи з низькою відвідуваністю: <b>{data.lowAttendanceGroups}</b></li>
+          <li>Групи з резервом/потенційним місцем: <b>{data.reserveVacancy}</b></li>
+        </ul>
       </div>
+      <div style={{...cardSt, border:`1px solid ${theme.border}`}}><h3 style={{marginTop:0}}>Що важливо зараз</h3>
+        <ul>{data.insights.slice(0,5).map((x,i)=><li key={i}>{x}</li>)}</ul>
+      </div>
+    </div>
 
-      {renderDashModal()}
-    </>
-  );
+    <div style={{display:"grid", gridTemplateColumns:"repeat(3,minmax(0,1fr))", gap:12}}>
+      <div style={{...cardSt, border:`1px solid ${theme.border}`}}><h4 style={{marginTop:0}}>Топ напрямки за виручкою</h4>{data.byDir.map((r)=><div key={r.id}>{r.name}: <b>{r.revenue.toLocaleString()}₴</b></div>)}</div>
+      <div style={{...cardSt, border:`1px solid ${theme.border}`}}><h4 style={{marginTop:0}}>Топ групи за виручкою</h4>{data.byGroupRevenue.map((r)=><div key={r.id}>{r.name}: <b>{r.value.toLocaleString()}₴</b></div>)}</div>
+      <div style={{...cardSt, border:`1px solid ${theme.border}`}}><h4 style={{marginTop:0}}>Топ групи за відвідуваністю</h4>{data.byGroupAttendance.map((r)=><div key={r.id}>{r.name}: <b>{r.value}</b></div>)}</div>
+    </div>
+  </div>;
 }
