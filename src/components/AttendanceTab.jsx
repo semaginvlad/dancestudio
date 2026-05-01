@@ -24,6 +24,7 @@ const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 const makeStyles = () => {
   const isDark = theme.bg === "#0F131A";
+  const CELL_SIZE = 40;
   const matrixBase = isDark ? "#131b26" : theme.card;
   const matrixMuted = isDark ? "#101722" : theme.input;
   const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
@@ -98,7 +99,7 @@ const makeStyles = () => {
   },
   table: {
     borderCollapse: "separate",
-    borderSpacing: "0 7px",
+    borderSpacing: "0 6px",
     minWidth: "100%",
   },
   thSticky: {
@@ -140,14 +141,14 @@ const makeStyles = () => {
     background: matrixMuted,
   },
   dayHead: (isCancelled, isMutedMonth, isCurrentMonth) => ({
-    minWidth: 58,
-    maxWidth: 58,
-    width: 58,
+    minWidth: CELL_SIZE,
+    maxWidth: CELL_SIZE,
+    width: CELL_SIZE,
     textAlign: "center",
     verticalAlign: "top",
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
     borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
-    padding: "9px 4px",
+    padding: "8px 3px",
     background: isCancelled
       ? matrixCancelled
       : isCurrentMonth
@@ -190,12 +191,12 @@ const makeStyles = () => {
     borderBottom: "none",
     borderTopLeftRadius: 15,
     borderBottomLeftRadius: 15,
-    padding: "8px 10px",
+    padding: "6px 10px",
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.95)",
   },
   profileCard: {
     borderRadius: 14,
-    padding: "6px 8px",
+    padding: "5px 8px",
     background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.14), rgba(148,163,184,0.06))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.95))",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.25)"}`,
     boxShadow: isDark ? "0 6px 14px rgba(0,0,0,0.24)" : "0 4px 10px rgba(15,23,42,0.08)",
@@ -356,10 +357,12 @@ const makeStyles = () => {
     border: `1px solid ${isDark ? "rgba(248,113,113,0.35)" : "rgba(248,113,113,0.5)"}`,
   },
   cell: (isCancelled, isMutedMonth, isCurrentMonth) => ({
-    width: 58,
-    minWidth: 58,
-    maxWidth: 58,
-    height: 54,
+    width: CELL_SIZE,
+    minWidth: CELL_SIZE,
+    maxWidth: CELL_SIZE,
+    height: CELL_SIZE,
+    minHeight: CELL_SIZE,
+    maxHeight: CELL_SIZE,
     textAlign: "center",
     verticalAlign: "middle",
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
@@ -374,14 +377,14 @@ const makeStyles = () => {
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.85)",
   }),
   cellShell: {
-    width: 39,
-    height: 39,
+    width: CELL_SIZE - 4,
+    height: CELL_SIZE - 4,
     margin: "0 auto",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 11,
-    padding: 4,
+    borderRadius: 10,
+    padding: 3,
     boxSizing: "border-box",
     background: isDark ? "rgba(148,163,184,0.09)" : "rgba(255,255,255,0.76)",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : "rgba(148,163,184,0.28)"}`,
@@ -389,7 +392,7 @@ const makeStyles = () => {
   cellBtn: (bg, disabled, saving) => ({
     width: "100%",
     height: "100%",
-    borderRadius: 9,
+    borderRadius: 8,
     border: bg === theme.card
       ? `1px solid ${isDark ? "rgba(148,163,184,0.5)" : "rgba(148,163,184,0.42)"}`
       : "1px solid rgba(0,0,0,0.1)",
