@@ -9,15 +9,13 @@ const inRange = (v, start, end) => !!v && v >= start && v <= end;
 const pctDelta = (curr, prev) => (prev > 0 ? Number((((curr - prev) / prev) * 100).toFixed(1)) : null);
 const rank = (v) => (v >= 100 ? "виконано" : v >= 70 ? "в процесі" : "ризик");
 const ringColor = (v) => (v >= 100 ? theme.success : v >= 70 ? theme.warning : theme.danger);
-// created_at is CRM insert timestamp, not business payment period date, so it is fallback only.
-const getPaymentDate = (sub = {}) => String(
-  sub.paidAt
-  || sub.paymentDate
-  || sub.purchaseDate
-  || sub.activationDate
+// Revenue is based on activation_date (service delivery),
+// not on payment/creation time. This matches studio accounting and trainer payouts.
+const getRevenueDate = (sub = {}) => String(
+  sub.activationDate
+  || sub.activation_date
   || sub.startDate
-  || sub.dateAdded
-  || sub.created_at
+  || sub.start_date
   || ""
 ).slice(0, 10);
 const isPaidSub = (sub = {}) => (sub.paid === false ? false : true);
@@ -60,14 +58,14 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const prev = useMemo(() => getPrevPeriod(period.start, period.end), [period]);
 
   const calc = (range) => {
-    const pSubs = subs.filter((s) => isPaidSub(s) && inRange(getPaymentDate(s), range.start, range.end));
+    const pSubs = subs.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), range.start, range.end));
     const pAttn = attn.filter((a) => inRange(String(a.date || "").slice(0, 10), range.start, range.end));
     const revenue = pSubs.reduce((s, x) => s + Number(x.amount || 0), 0);
     const payments = pSubs.length;
     const attendance = pAttn.reduce((s, x) => s + Number(x.quantity || 1), 0);
     const heldSessions = new Set(pAttn.map((a) => `${a.groupId}:${String(a.date || "").slice(0, 10)}`)).size;
     const activeStudents = new Set(pAttn.map((a) => String(a.studentId || "")).filter(Boolean)).size;
-    const byDayRev = new Map(); pSubs.forEach((s) => { const d = getPaymentDate(s); byDayRev.set(d, (byDayRev.get(d) || 0) + Number(s.amount || 0)); });
+    const byDayRev = new Map(); pSubs.forEach((s) => { const d = getRevenueDate(s); byDayRev.set(d, (byDayRev.get(d) || 0) + Number(s.amount || 0)); });
     const byDayAttn = new Map(); pAttn.forEach((a) => { const d = String(a.date || "").slice(0, 10); byDayAttn.set(d, (byDayAttn.get(d) || 0) + Number(a.quantity || 1)); });
     return {
       revenue, payments, attendance, heldSessions, activeStudents,
