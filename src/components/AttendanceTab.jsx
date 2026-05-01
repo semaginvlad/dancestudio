@@ -9,9 +9,11 @@ import {
   useStickyState,
   getEffectiveEndDate,
   isSubExhausted,
+  getActiveSubOnDateForCoverage,
   getNextTrainingDate,
   getPreviousTrainingDate,
 } from "../shared/utils";
+import { theme } from "../shared/constants";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -20,23 +22,31 @@ const MONTH_NAMES = [
 
 const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
-const styles = {
+const makeStyles = () => {
+  const isDark = theme.bg === "#0F131A";
+  const CELL_SIZE = 40;
+  const matrixBase = isDark ? "#131b26" : theme.card;
+  const matrixMuted = isDark ? "#101722" : theme.input;
+  const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
+
+  return ({
   wrap: {
     display: "flex",
     flexDirection: "column",
-    gap: 12,
+    gap: 14,
   },
   toolbar: {
     display: "flex",
     flexWrap: "wrap",
-    gap: 10,
+    gap: 12,
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "14px 16px",
-    border: "1px solid #d6e0ec",
-    borderRadius: 14,
-    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-    boxShadow: "0 6px 20px rgba(15, 23, 42, 0.05)",
+    padding: "15px 16px",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.25)" : theme.border}`,
+    borderRadius: 18,
+    background: isDark ? "linear-gradient(180deg, rgba(26,36,50,0.96) 0%, rgba(18,26,38,0.96) 100%)" : "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
+    boxShadow: theme.bg === "#0F131A" ? "0 12px 30px rgba(0,0,0,0.33)" : "0 10px 26px rgba(15, 23, 42, 0.08)",
+    backdropFilter: "blur(6px)",
   },
   toolbarLeft: {
     display: "flex",
@@ -45,25 +55,25 @@ const styles = {
     alignItems: "center",
   },
   control: {
-    height: 38,
-    borderRadius: 10,
-    border: "1px solid #c9d5e3",
+    height: 36,
+    borderRadius: 12,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : theme.border}`,
     padding: "0 12px",
-    background: "#fff",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.95)",
     fontSize: 14,
-    color: "#111827",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
+    color: theme.textMain,
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.05)" : "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 0 rgba(15,23,42,0.04)",
   },
   legend: {
     display: "flex",
     gap: 14,
     flexWrap: "wrap",
     fontSize: 13,
-    color: "#374151",
+    color: theme.textMuted,
   },
   hint: {
     fontSize: 12,
-    color: "#6b7280",
+    color: theme.textLight,
   },
   legendItem: {
     display: "flex",
@@ -80,90 +90,92 @@ const styles = {
   tableWrap: {
     overflowX: "auto",
     overflowY: "visible",
-    border: "1px solid #bfcddd",
-    borderRadius: 14,
-    background: "#fff",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : theme.border}`,
+    borderRadius: 18,
+    background: isDark ? "linear-gradient(180deg, rgba(21,30,43,0.98), rgba(16,23,34,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
     position: "relative",
-    boxShadow: "0 10px 28px rgba(15, 23, 42, 0.08)",
+    boxShadow: theme.bg === "#0F131A" ? "0 18px 38px rgba(0,0,0,0.4)" : "0 14px 34px rgba(15, 23, 42, 0.1)",
+    backdropFilter: "blur(7px)",
   },
   table: {
     borderCollapse: "separate",
-    borderSpacing: 0,
+    borderSpacing: "0 4px",
     minWidth: "100%",
   },
   thSticky: {
     position: "sticky",
     left: 0,
     zIndex: 4,
-    background: "#fff",
+    background: theme.card,
     minWidth: 240,
     maxWidth: 240,
     width: 240,
-    borderRight: "1px solid #d8e1ec",
-    boxShadow: "1px 0 0 #dbe3ef",
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
+    boxShadow: `1px 0 0 ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
   },
   headTop: {
     position: "sticky",
     top: 0,
     zIndex: 5,
-    background: "#f9fafb",
+    background: matrixMuted,
   },
   monthHead: (isCurrent) => ({
     textAlign: "center",
     fontWeight: 700,
     fontSize: isCurrent ? 14 : 13,
-    color: isCurrent ? "#0f172a" : "#475569",
-    borderBottom: isCurrent ? "2px solid #2563eb" : "1px solid #d8e1ec",
-    borderRight: "1px solid #d8e1ec",
-    padding: "10px 6px 9px",
-    background: isCurrent ? "#eef6ff" : "#f6f8fb",
+    color: isCurrent ? theme.textMain : theme.textMuted,
+    borderBottom: isCurrent ? `2px solid ${theme.primary}` : `1px solid ${theme.border}`,
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.24)"}`,
+    padding: "12px 7px 11px",
+    background: isCurrent ? (isDark ? "#162742" : `${theme.primary}1A`) : matrixMuted,
     whiteSpace: "nowrap",
+    letterSpacing: 0.2,
   }),
   studentHead: {
-    padding: "10px 12px",
+    padding: "11px 12px",
     textAlign: "left",
     fontWeight: 700,
     fontSize: 14,
-    color: "#111827",
-    borderBottom: "1px solid #d8e1ec",
-    background: "#f9fafb",
+    color: theme.textMain,
+    borderBottom: `1px solid ${theme.border}`,
+    background: matrixMuted,
   },
   dayHead: (isCancelled, isMutedMonth, isCurrentMonth) => ({
-    minWidth: 58,
-    maxWidth: 58,
-    width: 58,
+    minWidth: CELL_SIZE,
+    maxWidth: CELL_SIZE,
+    width: CELL_SIZE,
     textAlign: "center",
     verticalAlign: "top",
-    borderRight: "1px solid #d5dfeb",
-    borderBottom: "1px solid #d8e1ec",
-    padding: "8px 4px",
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
+    padding: "8px 3px",
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? "#ffffff"
+        ? matrixBase
         : isMutedMonth
-          ? "#f7f9fc"
-          : "#fff",
+          ? matrixMuted
+          : matrixBase,
   }),
   dayNum: (isCurrentMonth, isMutedMonth) => ({
-    fontSize: isCurrentMonth ? 15 : 14,
+    fontSize: isCurrentMonth ? 16 : 14,
     fontWeight: 700,
-    color: isCurrentMonth ? "#111827" : (isMutedMonth ? "#94a3b8" : "#1f2937"),
+    color: isCurrentMonth ? theme.textMain : (isMutedMonth ? theme.textLight : theme.textMuted),
     lineHeight: 1.1,
   }),
   dayName: (isCurrentMonth, isMutedMonth) => ({
-    fontSize: 11,
-    color: isCurrentMonth ? "#475569" : (isMutedMonth ? "#a3afbf" : "#64748b"),
+    fontSize: 10,
+    color: isCurrentMonth ? theme.textMuted : (isMutedMonth ? theme.textLight : theme.textMuted),
     marginTop: 2,
   }),
   cancelBtn: (isCancelled) => ({
     marginTop: 6,
-    width: 22,
-    height: 22,
+    width: 21,
+    height: 21,
     borderRadius: 999,
     border: "1px solid",
     borderColor: isCancelled ? "#10b981" : "#fca5a5",
-    background: isCancelled ? "#ecfdf5" : "#fff",
+    background: isCancelled ? (isDark ? "#123126" : "#ecfdf5") : matrixBase,
     color: isCancelled ? "#047857" : "#b91c1c",
     cursor: "pointer",
     fontSize: 12,
@@ -174,15 +186,54 @@ const styles = {
     position: "sticky",
     left: 0,
     zIndex: 3,
-    background: "#fcfdff",
-    borderRight: "1px solid #d8e1ec",
-    borderBottom: "1px solid #e2e8f0",
-    padding: "8px 10px",
+    background: matrixBase,
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.22)"}`,
+    borderBottom: "none",
+    borderTopLeftRadius: 15,
+    borderBottomLeftRadius: 15,
+    padding: "4px 8px",
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.95)",
+  },
+  profileCard: {
+    borderRadius: 14,
+    padding: "4px 8px",
+    background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.14), rgba(148,163,184,0.06))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.95))",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.25)"}`,
+    boxShadow: isDark ? "0 6px 14px rgba(0,0,0,0.24)" : "0 4px 10px rgba(15,23,42,0.08)",
+  },
+  guestGroupCard: {
+    background: isDark ? "linear-gradient(180deg, rgba(99,102,241,0.12), rgba(99,102,241,0.06))" : "linear-gradient(180deg, rgba(238,242,255,0.95), rgba(224,231,255,0.75))",
+    border: `1px solid ${isDark ? "rgba(129,140,248,0.28)" : "rgba(129,140,248,0.3)"}`,
+  },
+  guestGroupBtn: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    textAlign: "left",
+    cursor: "pointer",
+    color: theme.textMain,
+  },
+  guestGroupArrow: (open) => ({
+    fontSize: 12,
+    color: theme.textMuted,
+    transform: open ? "rotate(90deg)" : "rotate(0deg)",
+    transition: "transform 0.15s ease",
+  }),
+  guestChildRowHead: {
+    paddingLeft: 18,
+  },
+  guestChildCard: {
+    opacity: 0.96,
   },
   studentName: {
     fontSize: 14,
-    fontWeight: 600,
-    color: "#111827",
+    fontWeight: 700,
+    letterSpacing: 0.1,
+    color: theme.textMain,
   },
   studentNameRow: {
     display: "flex",
@@ -192,15 +243,16 @@ const styles = {
   },
   orderBtns: {
     display: "flex",
-    gap: 4,
+    gap: 6,
+    alignItems: "center",
   },
   orderBtn: {
     width: 18,
     height: 18,
     borderRadius: 5,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#374151",
+    border: `1px solid ${theme.border}`,
+    background: matrixBase,
+    color: theme.textMuted,
     cursor: "pointer",
     padding: 0,
     lineHeight: "16px",
@@ -210,33 +262,36 @@ const styles = {
     position: "relative",
   },
   menuBtn: {
-    width: 18,
-    height: 18,
-    borderRadius: 5,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#4b5563",
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    border: `1px solid ${theme.border}`,
+    background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.16), rgba(148,163,184,0.07))" : "linear-gradient(180deg, rgba(148,163,184,0.2), rgba(148,163,184,0.08))",
+    color: isDark ? "#d9e2ee" : "#334155",
     cursor: "pointer",
     padding: 0,
-    lineHeight: "16px",
-    fontSize: 12,
+    lineHeight: "24px",
+    fontSize: 14,
+    fontWeight: 700,
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 14px rgba(0,0,0,0.28)" : "inset 0 1px 0 rgba(255,255,255,0.7), 0 6px 14px rgba(15,23,42,0.12)",
   },
   menu: {
     position: "fixed",
-    minWidth: 160,
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 10,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+    minWidth: 198,
+    background: isDark ? "linear-gradient(180deg, rgba(22,31,45,0.98), rgba(14,21,32,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : "rgba(148,163,184,0.35)"}`,
+    borderRadius: 16,
+    boxShadow: isDark ? "0 26px 52px rgba(0,0,0,0.56)" : "0 20px 42px rgba(15,23,42,0.22)",
+    backdropFilter: "blur(9px)",
     zIndex: 20,
-    padding: 6,
+    padding: 7,
   },
   totalsHead: {
     minWidth: 150,
     maxWidth: 150,
     width: 150,
     fontWeight: 700,
-    color: "#374151",
+    color: theme.textMuted,
     whiteSpace: "nowrap",
     fontSize: 12,
     padding: "8px 10px",
@@ -247,19 +302,29 @@ const styles = {
     border: "none",
     background: "transparent",
     padding: "8px 10px",
-    borderRadius: 8,
+    borderRadius: 11,
     fontSize: 12,
-    color: "#374151",
+    fontWeight: 600,
+    color: theme.textMain,
     cursor: "pointer",
+    transition: "background 120ms ease, transform 120ms ease",
   },
   menuItemDisabled: {
-    color: "#9ca3af",
+    color: theme.textLight,
     cursor: "not-allowed",
     opacity: 0.85,
   },
+  menuSection: {
+    display: "grid",
+    gap: 4,
+    padding: 3,
+    borderRadius: 12,
+    background: isDark ? "rgba(148,163,184,0.06)" : "rgba(148,163,184,0.08)",
+    marginBottom: 6,
+  },
   menuDivider: {
-    margin: "6px 0",
-    borderTop: "1px solid #edf2f7",
+    margin: "2px 1px 6px",
+    borderTop: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : "rgba(148,163,184,0.3)"}`,
   },
   notifyRow: {
     display: "flex",
@@ -267,74 +332,108 @@ const styles = {
     gap: 8,
     padding: "8px 10px",
     fontSize: 12,
-    color: "#374151",
+    color: theme.textMain,
+    fontWeight: 600,
     userSelect: "none",
+    borderRadius: 10,
+    background: isDark ? "rgba(99,102,241,0.13)" : "rgba(99,102,241,0.1)",
   },
   notifyCheck: {
-    width: 14,
-    height: 14,
+    width: 16,
+    height: 16,
     cursor: "pointer",
+    accentColor: theme.primary,
   },
   studentMeta: {
-    fontSize: 11,
-    color: "#6b7280",
+    fontSize: 10,
+    fontWeight: 500,
+    color: theme.textMuted,
     marginTop: 2,
-    lineHeight: 1.2,
+    lineHeight: 1.15,
+  },
+  menuDanger: {
+    background: isDark ? "rgba(185,28,28,0.2)" : "rgba(254,226,226,0.95)",
+    color: isDark ? "#fecaca" : "#b91c1c",
+    border: `1px solid ${isDark ? "rgba(248,113,113,0.35)" : "rgba(248,113,113,0.5)"}`,
   },
   cell: (isCancelled, isMutedMonth, isCurrentMonth) => ({
-    width: 58,
-    minWidth: 58,
-    maxWidth: 58,
-    height: 54,
+    width: CELL_SIZE,
+    minWidth: CELL_SIZE,
+    maxWidth: CELL_SIZE,
+    height: CELL_SIZE,
+    minHeight: CELL_SIZE,
+    maxHeight: CELL_SIZE,
+    padding: 0,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRight: "1px solid #dfe7f1",
-    borderBottom: "1px solid #dde6f0",
+    borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.2)"}`,
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.14)" : "rgba(148,163,184,0.18)"}`,
     background: isCancelled
-      ? "#ffe9e9"
+      ? matrixCancelled
       : isCurrentMonth
-        ? "#ffffff"
+        ? matrixBase
         : isMutedMonth
-          ? "#f8fafd"
-          : "#fff",
+          ? matrixMuted
+          : matrixBase,
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.85)",
   }),
-  cellBtn: (bg, disabled, saving) => ({
-    width: 32,
-    height: 32,
+  cellShell: {
+    width: CELL_SIZE - 5,
+    height: CELL_SIZE - 5,
+    margin: "0 auto",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 10,
-    border: "1px solid rgba(0,0,0,0.08)",
-    background: bg,
+    padding: 2,
+    boxSizing: "border-box",
+    background: isDark ? "rgba(148,163,184,0.09)" : "rgba(255,255,255,0.76)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : "rgba(148,163,184,0.28)"}`,
+  },
+  cellBtn: (bg, disabled, saving) => ({
+    width: "100%",
+    height: "100%",
+    borderRadius: 8,
+    border: bg === theme.card
+      ? `1px solid ${isDark ? "rgba(148,163,184,0.5)" : "rgba(148,163,184,0.42)"}`
+      : "1px solid rgba(0,0,0,0.1)",
+    background: bg === theme.card ? (isDark ? "rgba(51,65,85,0.78)" : "rgba(248,250,252,0.98)") : bg,
     cursor: disabled || saving ? "not-allowed" : "pointer",
     opacity: disabled || saving ? 0.55 : 1,
     fontSize: 16,
     fontWeight: 700,
-    color: bg === "#ffffff" ? "#9ca3af" : "#fff",
+    color: bg === theme.card ? theme.textLight : "#fff",
+    boxShadow: bg === theme.card
+      ? `inset 0 1px 0 ${isDark ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.92)"}, inset 0 -1px 0 ${isDark ? "rgba(15,23,42,0.35)" : "rgba(148,163,184,0.24)"}, 0 1px 4px rgba(15,23,42,0.08)`
+      : "inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(15,23,42,0.2)",
+    transform: saving ? "scale(0.97)" : "scale(1)",
   }),
   subPeriodCell: (tone, border, isStart, isEnd, isCancelled) => ({
-    background: isCancelled ? "#fef2f2" : tone,
+    background: isCancelled ? (isDark ? "#311d23" : "#fef2f2") : tone,
     boxShadow: [
-      `inset 0 1px 0 ${border}`,
-      `inset 0 -1px 0 ${border}`,
-      isStart ? `inset 2px 0 0 ${border}` : "",
-      isEnd ? `inset -2px 0 0 ${border}` : "",
+      `inset 0 1px 0 ${isDark ? "rgba(191,219,254,0.18)" : "rgba(37,99,235,0.12)"}`,
+      `inset 0 -1px 0 ${isDark ? "rgba(191,219,254,0.14)" : "rgba(37,99,235,0.1)"}`,
+      isStart ? `inset 5px 0 0 ${border}` : "",
+      isEnd ? `inset -5px 0 0 ${border}` : "",
     ]
       .filter(Boolean)
       .join(", "),
   }),
   monthDivider: {
-    borderRight: "2px solid #94a3b8",
+    borderRight: `2px solid ${theme.textLight}`,
   },
   totalsRow: {
-    background: "#f3f7fc",
-    boxShadow: "inset 0 1px 0 #c9d6e5",
+    background: isDark ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.09)",
+    boxShadow: `inset 0 1px 0 ${theme.border}`,
   },
   emptyState: {
     padding: 18,
-    border: "1px dashed #d1d5db",
+    border: `1px dashed ${theme.border}`,
     borderRadius: 12,
-    background: "#fff",
-    color: "#6b7280",
+    background: matrixBase,
+    color: theme.textMuted,
   },
+});
 };
 
 const normalizeName = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -400,6 +499,10 @@ const toDateKey = (value) => {
   if (value instanceof Date) return ymd(value);
   return String(value).slice(0, 10);
 };
+const ANON_GUEST_PREFIX = "__anon_guest__:";
+const isAnonymousGuestLabel = (value) => String(value || "").startsWith(ANON_GUEST_PREFIX);
+const makeAnonymousGuestLabel = ({ groupId, dateStr }) =>
+  `${ANON_GUEST_PREFIX}${String(groupId || "group")}:${String(dateStr || today())}:${uid().slice(0, 8)}`;
 const fmtUaShortDate = (dateStr) => {
   if (!dateStr) return "—";
   const [y, m, d] = dateStr.split("-");
@@ -407,20 +510,10 @@ const fmtUaShortDate = (dateStr) => {
   return `${d}.${m}`;
 };
 
-const getActiveSubOnDate = (subs, studentId, groupId, dateStr) => {
-  const validSubs = subs
-    .filter((s) => {
-      if (s.studentId !== studentId) return false;
-      if (s.groupId !== groupId) return false;
-      if ((s.usedTrainings || 0) >= (s.totalTrainings || 0)) return false;
-      if (isSubExhausted(s)) return false;
-      const end = getEffectiveEndDate(s) || "2099-12-31";
-      return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-    })
-    .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
-
-  return validSubs[0] || null;
-};
+const getActiveSubOnDate = (subs, studentId, groupId, dateStr) =>
+  getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+const PACK_PLAN_TYPES = new Set(["4pack", "8pack", "12pack"]);
+const isPackSubscription = (sub) => PACK_PLAN_TYPES.has(String(sub?.planType || "").trim().toLowerCase());
 
 const getStudentStatusText = (subs, studentId, groupId) => {
   const groupSubs = subs
@@ -477,13 +570,23 @@ export default function AttendanceTab({
   warnedStudents,
   setWarnedStudents,
 }) {
+  const styles = useMemo(
+    () => makeStyles(),
+    [theme.bg, theme.card, theme.input, theme.border, theme.textMain, theme.textMuted, theme.textLight, theme.primary]
+  );
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
+  const [addMode, setAddMode] = useState("student");
+  const [guestNameInput, setGuestNameInput] = useState("");
+  const [guestEntryType, setGuestEntryType] = useState("trial");
+  const [creatingGuest, setCreatingGuest] = useState(false);
+  const [guestRosterByGroup, setGuestRosterByGroup] = useStickyState({}, "ds_attn_guest_roster_v1");
   const [creatingStudent, setCreatingStudent] = useState(false);
+  const [guestGroupExpandedByGroup, setGuestGroupExpandedByGroup] = useState({});
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
   const menuPopupRef = useRef(null);
@@ -517,6 +620,10 @@ export default function AttendanceTab({
     () => groups.find((g) => g.id === gid) || null,
     [groups, gid]
   );
+  const subsForAttendanceSemantics = useMemo(
+    () => subs.filter((s) => isPackSubscription(s)),
+    [subs]
+  );
 
   const currentDirectionId = currentGroup?.directionId || null;
   const schedule = useMemo(
@@ -549,7 +656,7 @@ export default function AttendanceTab({
     const map = {};
     visibleDays.forEach((d, idx) => {
       map[d] = idx;
-    });
+});
     return map;
   }, [visibleDays]);
 
@@ -641,6 +748,31 @@ export default function AttendanceTab({
     });
   };
 
+  const buildGuestAutoLabel = () => {
+    const dateLabel = today();
+    const sameDayCount = attn.filter((a) =>
+      String(a.groupId) === String(gid) &&
+      !a.studentId &&
+      toDateKey(a.date) === dateLabel
+    ).length;
+    return `Гість ${dateLabel} #${sameDayCount + 1}`;
+  };
+
+  const handleCreateGuestAttendance = async () => {
+    if (!gid) return;
+    if (!guestEntryType || (guestEntryType !== "trial" && guestEntryType !== "single")) return;
+    const trimmedName = (guestNameInput || "").trim();
+    const guestLabel = trimmedName || makeAnonymousGuestLabel({ groupId: gid, dateStr: "pending" });
+    setCreatingGuest(true);
+    try {
+      const row = { id: `g_${uid()}`, isGuest: true, guestName: guestLabel, attendanceIds: [], anonymous: isAnonymousGuestLabel(guestLabel), guestEntryType };
+      setGuestRosterByGroup((prev) => ({ ...(prev || {}), [gid]: [...(prev?.[gid] || []), row] }));
+      setGuestNameInput("");
+    } finally {
+      setCreatingGuest(false);
+    }
+  };
+
   const handleRemoveFromGroup = async (student) => {
     if (!gid || !student?.id) return;
     const ok = window.confirm(`Прибрати ${getDisplayName(student)} з групи "${currentGroup?.name || gid}"?`);
@@ -677,8 +809,8 @@ export default function AttendanceTab({
   };
 
   const handleEditSub = (student) => {
-    const activeSub = getActiveSubOnDate(subs, student.id, gid, today());
-    const lastSub = [...subs]
+    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, today());
+    const lastSub = [...subsForAttendanceSemantics]
       .filter((s) => s.studentId === student.id && s.groupId === gid)
       .sort((a, b) => {
         const aKey = a.activationDate || a.startDate || a.created_at || "";
@@ -702,14 +834,52 @@ export default function AttendanceTab({
   };
 
   const handleMessageStudent = (student) => {
-    if (!student?.telegram) {
-      alert("Для цієї учениці не вказано Telegram.");
-      setOpenMenuState(null);
-      return;
-    }
     if (typeof onActionMessageStudent === "function") {
       onActionMessageStudent(student);
     }
+    setOpenMenuState(null);
+  };
+
+  const handleConvertGuestToStudent = async (guestRow) => {
+    if (!guestRow?.guestName || !gid) return;
+    const defaultName = isAnonymousGuestLabel(guestRow.guestName) ? "Гість" : guestRow.guestName;
+    const enteredName = window.prompt("Ім'я нової учениці", defaultName);
+    if (enteredName == null) return;
+    const name = enteredName.trim();
+    if (!name) {
+      alert("Вкажи ім'я учениці.");
+      return;
+    }
+    try {
+      const createdStudent = await db.insertStudent({ name });
+      const link = await db.addStudentGroup(createdStudent.id, gid);
+      const safeRowIds = Array.isArray(guestRow.attendanceIds) ? guestRow.attendanceIds.filter(Boolean) : [];
+      if (!safeRowIds.length) {
+        alert("Не знайдено записів гостя в поточному видимому періоді.");
+        return;
+      }
+      const ok = window.confirm(`Перетворити гостя на ученицю і переприв'язати ${safeRowIds.length} запис(ів) тільки з поточного видимого періоду?`);
+      if (!ok) return;
+      await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
+      if (typeof setStudents === "function") {
+        setStudents((prev) => [...(prev || []), createdStudent]);
+      }
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => [...(prev || []), link || { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid }]);
+      }
+      await reloadFromDb();
+      setOpenMenuState(null);
+    } catch (err) {
+      alert(err?.message || "Не вдалося перетворити гостя на ученицю.");
+    }
+  };
+  const handleRemoveGuestRosterRow = (guestRow) => {
+    const hasAttendance = attn.some((a) => String(a.groupId) === String(gid) && !a.studentId && normalizeName(a.guestName) === normalizeName(guestRow.guestName));
+    if (hasAttendance) {
+      alert("Спочатку приберіть відмітки відвідувань цього гостя в таблиці.");
+      return;
+    }
+    setGuestRosterByGroup((prev) => ({ ...(prev || {}), [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id) }));
     setOpenMenuState(null);
   };
 
@@ -717,12 +887,16 @@ export default function AttendanceTab({
 
   const isWarned = (studentId) => !!warnedStudents?.[warnedKey(studentId)];
 
-  const toggleWarned = (studentId, checked) => {
+  const toggleWarned = async (studentId, checked) => {
     if (typeof setWarnedStudents !== "function") return;
-    setWarnedStudents((prev) => ({
-      ...(prev || {}),
-      [warnedKey(studentId)]: !!checked,
-    }));
+    const key = warnedKey(studentId);
+    setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !!checked }));
+    try {
+      await db.upsertWarnedStudent(gid, studentId, checked);
+    } catch (err) {
+      setWarnedStudents((prev) => ({ ...(prev || {}), [key]: !checked }));
+      alert(err?.message || "Не вдалося зберегти статус сповіщення");
+    }
   };
 
   const openStudentMenu = (student, btnEl) => {
@@ -768,7 +942,7 @@ export default function AttendanceTab({
   const subPeriodsByStudent = useMemo(() => {
     const map = {};
 
-    subs
+    subsForAttendanceSemantics
       .filter((s) => s.groupId === gid)
       .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""))
       .forEach((s) => {
@@ -790,7 +964,7 @@ export default function AttendanceTab({
       });
 
     return map;
-  }, [subs, gid, lastAttendanceBySub]);
+  }, [subsForAttendanceSemantics, gid, lastAttendanceBySub]);
 
   const getSubPeriodForCell = (studentId, dateStr) => {
     const periods = subPeriodsByStudent[studentId] || [];
@@ -831,7 +1005,7 @@ export default function AttendanceTab({
   const isCancelledDate = (dateStr) =>
     cancelled.some((c) => c.groupId === gid && c.date === dateStr);
 
-  const hasTrialInDirection = (student) => {
+  const hasAttendanceInDirection = (student) => {
     if (!currentDirectionId) return false;
     const directionGroupIds = new Set(
       groups
@@ -840,8 +1014,6 @@ export default function AttendanceTab({
     );
 
     return attn.some((a) => {
-      const type = a.entryType || a.guestType || "subscription";
-      if (type !== "trial") return false;
       if (!directionGroupIds.has(a.groupId)) return false;
       return sameStudentByRecord(a, student);
     });
@@ -849,7 +1021,7 @@ export default function AttendanceTab({
 
   const resolveNewEntry = (student, dateStr) => {
     if (entryMode === "subscription") {
-      const activeSub = getActiveSubOnDate(subs, student.id, gid, dateStr);
+      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
       if (!activeSub) {
         throw new Error("На цю дату немає активного абонемента.");
       }
@@ -861,26 +1033,26 @@ export default function AttendanceTab({
     }
 
     if (entryMode === "trial") {
-      if (hasTrialInDirection(student)) {
-        throw new Error("Пробне по цьому напрямку вже використане.");
+      if (hasAttendanceInDirection(student)) {
+        throw new Error("Пробне заняття доступне тільки для нових учениць у цьому напрямку.");
       }
       return { entryType: "trial", subId: null };
     }
 
     if (entryMode === "debt") {
-      const activeSub = getActiveSubOnDate(subs, student.id, gid, dateStr);
+      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
       if (activeSub) {
         throw new Error("У учениці є активний абонемент, борг ставити не можна.");
       }
       return { entryType: "debt", subId: null };
     }
 
-    const activeSub = getActiveSubOnDate(subs, student.id, gid, dateStr);
+    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
     if (activeSub) {
       return { entryType: "subscription", subId: activeSub.id };
     }
 
-    if (!hasTrialInDirection(student)) {
+    if (!hasAttendanceInDirection(student)) {
       return { entryType: "trial", subId: null };
     }
 
@@ -994,6 +1166,7 @@ export default function AttendanceTab({
         if (!ok) return;
 
         const affected = rawSubs.filter((s) => {
+          if (!isPackSubscription(s)) return false;
           if (s.groupId !== gid) return false;
           const end = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
           return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
@@ -1040,7 +1213,7 @@ export default function AttendanceTab({
           await db.updateSub(subId, { endDate: oldEnd });
         }
       } else {
-        const affected = rawSubs.filter((s) => s.groupId === gid && (s.endDate || "") >= dateStr);
+        const affected = rawSubs.filter((s) => isPackSubscription(s) && s.groupId === gid && (s.endDate || "") >= dateStr);
         for (const sub of affected) {
           const reverted = getPreviousTrainingDate(schedule, sub.endDate);
           await db.updateSub(sub.id, { endDate: reverted });
@@ -1056,17 +1229,111 @@ export default function AttendanceTab({
     }
   };
 
+  const handleToggleGuestCell = async (guestRow, dateStr) => {
+    if (!gid || isCancelledDate(dateStr)) return;
+    let guestIdentity = String(guestRow?.guestName || "").trim();
+    if (isAnonymousGuestLabel(guestIdentity) && guestIdentity.includes(":pending:")) {
+      guestIdentity = makeAnonymousGuestLabel({ groupId: gid, dateStr });
+      if (guestRow?.id) {
+        setGuestRosterByGroup((prev) => ({
+          ...(prev || {}),
+          [gid]: (prev?.[gid] || []).map((r) => (r.id === guestRow.id ? { ...r, guestName: guestIdentity } : r)),
+        }));
+      }
+    }
+    if (!guestIdentity) return;
+    const existingById = (guestRow.attendanceIds || [])
+      .map((id) => attn.find((a) => a.id === id))
+      .find((a) => a && toDateKey(a.date) === toDateKey(dateStr));
+    const existingByName = attn.find((a) =>
+      String(a.groupId) === String(gid) &&
+      !a.studentId &&
+      normalizeName(a.guestName) === normalizeName(guestIdentity) &&
+      toDateKey(a.date) === toDateKey(dateStr)
+    );
+    const existing = existingById || existingByName || null;
+    try {
+      if (existing?.id) {
+        await db.deleteAttendance(existing.id);
+      } else {
+        const entry = guestRow.guestEntryType || guestEntryType || "trial";
+        await db.insertAttendance({ id: `tmp_${uid()}`, subId: null, studentId: null, date: dateStr, guestName: guestIdentity, guestType: entry, groupId: gid, quantity: 1, entryType: entry });
+      }
+      await reloadFromDb();
+    } catch (err) {
+      alert(err?.message || "Не вдалося змінити відвідування гостя.");
+    }
+  };
+
   const getCellView = (student, dateStr) => {
     const rec = getRecordForCell(student, dateStr);
-    if (!rec) return { bg: "#ffffff", mark: "" };
+    const isDark = theme.bg === "#0F131A";
+    if (!rec) return { bg: isDark ? "#182230" : theme.card, mark: "" };
 
-    const type = rec.entryType || "subscription";
+    const type = String(rec.entryType || rec.guestType || "subscription").trim().toLowerCase();
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
-    if (type === "debt") return { bg: "#dc2626", mark: "!" };
-    if (type === "single") return { bg: "#f59e0b", mark };
-    if (type === "trial") return { bg: "#10b981", mark };
-    return { bg: "#2563eb", mark };
+    if (type === "debt") return { bg: isDark ? "#7f1d1d" : "#dc2626", mark: "!" };
+    if (type === "single") return { bg: isDark ? "#7a4313" : "#f59e0b", mark };
+    if (type === "trial") return { bg: isDark ? "#0f5a43" : "#10b981", mark };
+    return { bg: isDark ? "#1f3e79" : "#2563eb", mark };
   };
+
+  const guestRows = useMemo(() => {
+    const tempRows = guestRosterByGroup?.[gid] || [];
+    const persistedRows = attn.filter((a) =>
+      String(a.groupId) === String(gid) &&
+      !a.studentId &&
+      visibleDays.includes(toDateKey(a.date))
+    );
+    const merged = new Map();
+
+    tempRows.forEach((r) => {
+      const key = normalizeName(r.guestName) || `guest_${r.id}`;
+      merged.set(key, { ...r, attendanceIds: Array.isArray(r.attendanceIds) ? [...r.attendanceIds] : [] });
+    });
+
+    persistedRows.forEach((r) => {
+      const key = normalizeName(r.guestName) || `guest_${toDateKey(r.date)}`;
+      const baseName = (r.guestName || "").trim() || `Гість ${toDateKey(r.date)}`;
+      const existing = merged.get(key) || {
+        id: `guest:${key}`,
+        isGuest: true,
+        guestName: baseName,
+        anonymous: isAnonymousGuestLabel(baseName),
+        attendanceIds: [],
+        guestEntryType: String(r.entryType || r.guestType || "trial").toLowerCase() === "single" ? "single" : "trial",
+      };
+      if (r.id && !existing.attendanceIds.includes(r.id)) existing.attendanceIds.push(r.id);
+      merged.set(key, existing);
+    });
+
+    return Array.from(merged.values());
+  }, [guestRosterByGroup, gid, attn, visibleDays]);
+
+  const groupedGuestRows = useMemo(
+    () => guestRows.filter((r) => r.isGuest),
+    [guestRows]
+  );
+  const guestGroupExpanded = !!guestGroupExpandedByGroup[String(gid)];
+  const displayRows = useMemo(() => {
+    const students = orderedStudents.map((s) => ({ ...s, isGuest: false }));
+    if (!groupedGuestRows.length) return [...students];
+    const parent = {
+      id: `guest-group:${gid}`,
+      isGuestGroup: true,
+      isGuest: false,
+      guestCount: groupedGuestRows.length,
+    };
+    const guestChildren = guestGroupExpanded
+      ? groupedGuestRows.map((g) => ({ ...g, isGuestChild: true }))
+      : [];
+    return [...students, parent, ...guestChildren];
+  }, [orderedStudents, groupedGuestRows, guestGroupExpanded, gid]);
+
+  const groupStudentIdSet = useMemo(
+    () => new Set(studentIdsInGroup.map((id) => String(id))),
+    [studentIdsInGroup]
+  );
 
   if (!groups?.length) {
     return <div style={styles.emptyState}>Немає груп.</div>;
@@ -1076,14 +1343,25 @@ export default function AttendanceTab({
     return <div style={styles.emptyState}>Вибери групу.</div>;
   }
 
-  const totalPresentByDate = visibleDays.reduce((acc, dateStr) => {
+  const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
-      acc[dateStr] = 0;
+      acc[dateStr] = { total: 0, removed: 0 };
       return acc;
     }
-    acc[dateStr] = attn
-      .filter((a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr))
-      .reduce((sum, a) => sum + (a.quantity || 1), 0);
+
+    const records = attn.filter(
+      (a) => a.groupId === gid && toDateKey(a.date) === toDateKey(dateStr)
+    );
+
+    const total = records.reduce((sum, a) => sum + (a.quantity || 1), 0);
+    const removed = records.reduce((sum, a) => {
+      const resolvedStudentId = a.studentId || subsById[a.subId]?.studentId || null;
+      if (!resolvedStudentId) return sum;
+      if (groupStudentIdSet.has(String(resolvedStudentId))) return sum;
+      return sum + (a.quantity || 1);
+    }, 0);
+
+    acc[dateStr] = { total, removed };
     return acc;
   }, {});
 
@@ -1214,31 +1492,125 @@ export default function AttendanceTab({
           </thead>
 
           <tbody>
-            {orderedStudents.map((student) => {
-              const statusInfo = getStudentStatusText(subs, student.id, gid);
+            {displayRows.map((student, rowIndex) => {
+              if (student.isGuestGroup) {
+                return (
+                  <tr key={student.id}>
+                    <td style={styles.rowHead}>
+                      <div style={{ ...styles.profileCard, ...styles.guestGroupCard }}>
+                        <button
+                          type="button"
+                          onClick={() => setGuestGroupExpandedByGroup((prev) => ({ ...(prev || {}), [String(gid)]: !guestGroupExpanded }))}
+                          style={styles.guestGroupBtn}
+                        >
+                          <span style={styles.guestGroupArrow(guestGroupExpanded)}>▸</span>
+                          <span style={styles.studentName}>{`Гості (${student.guestCount})`}</span>
+                        </button>
+                        <div style={styles.studentMeta}>Тимчасові гості</div>
+                      </div>
+                    </td>
+                    {visibleDays.map((dateStr) => {
+                      const dayIdx = visibleDayIndex[dateStr];
+                      const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                      const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                      const isLastDay = dayIdx === visibleDays.length - 1;
+                      const cellStyle = {
+                        ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                        ...(isMonthBoundary ? styles.monthDivider : {}),
+                      };
+                      if (isLastDay) {
+                        cellStyle.borderTopRightRadius = 15;
+                        cellStyle.borderBottomRightRadius = 15;
+                      }
+                      return <td key={dateStr} style={cellStyle} />;
+                    })}
+                  </tr>
+                );
+              }
+              if (student.isGuest) {
+                return (
+                  <tr key={student.id}>
+                    <td style={{ ...styles.rowHead, ...(student.isGuestChild ? styles.guestChildRowHead : {}) }}>
+                      <div style={{ ...styles.profileCard, ...(student.isGuestChild ? styles.guestChildCard : {}) }}>
+                        <div style={styles.studentNameRow}>
+                          <div style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
+                          <div style={styles.menuWrap}>
+                            <button type="button" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
+                          </div>
+                        </div>
+                        <div style={styles.studentMeta}>Тимчасовий гість (trial/single)</div>
+                      </div>
+                    </td>
+                    {visibleDays.map((dateStr) => {
+                      const dayIdx = visibleDayIndex[dateStr];
+                      const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                      const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                      const isLastDay = dayIdx === visibleDays.length - 1;
+                      const rec = attn.find((a) =>
+                        String(a.groupId) === String(gid) &&
+                        !a.studentId &&
+                        normalizeName(a.guestName) === normalizeName(student.guestName) &&
+                        toDateKey(a.date) === toDateKey(dateStr)
+                      );
+                      const t = String(rec?.entryType || rec?.guestType || "subscription").toLowerCase();
+                      const mark = rec ? ((rec.quantity || 1) >= 2 ? "2" : "✓") : "";
+                      const cellView = !rec
+                        ? { bg: theme.bg === "#0F131A" ? "#182230" : theme.card, mark: "" }
+                        : t === "debt"
+                          ? { bg: theme.bg === "#0F131A" ? "#7f1d1d" : "#dc2626", mark: "!" }
+                          : t === "single"
+                            ? { bg: theme.bg === "#0F131A" ? "#7a4313" : "#f59e0b", mark }
+                            : t === "trial"
+                              ? { bg: theme.bg === "#0F131A" ? "#0f5a43" : "#10b981", mark }
+                              : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
+                      return (
+                        <td key={dateStr} style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
+                          <div style={styles.cellShell}><button type="button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr), false)}>{cellView.mark}</button></div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              }
+              const statusInfo = getStudentStatusText(subsForAttendanceSemantics, student.id, gid);
+              const hasPack = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && isPackSubscription(s));
+              const oneOffHistory = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && ["trial", "single"].includes(String(s.planType || "").toLowerCase()))
+                || attn.some((a) => String(a.groupId) === String(gid) && String(a.studentId) === String(student.id) && ["trial", "single"].includes(String(a.entryType || a.guestType || "").toLowerCase()));
+              const hasNonOneOff = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && !["trial", "single"].includes(String(s.planType || "").toLowerCase()));
+              const isOnlyOneOffNoPack = !hasPack && oneOffHistory && !hasNonOneOff;
               const warnedDone = isWarned(student.id);
+              const isDark = theme.bg === "#0F131A";
               const metaColor = statusInfo.tone === "danger"
-                ? (warnedDone ? "#b06a6a" : "#c81e1e")
+                ? (isDark
+                    ? (warnedDone ? "#c7767f" : "#ff7b86")
+                    : (warnedDone ? "#b06a6a" : "#c81e1e"))
                 : statusInfo.tone === "warning"
-                  ? "#d97706"
+                  ? (isDark ? (warnedDone ? "#c98a3a" : "#ffb24c") : "#d97706")
                   : styles.studentMeta.color;
               const rowHighlightStyle = statusInfo.tone === "danger"
-                ? (warnedDone
-                    ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
-                    : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" })
+                ? (isDark
+                    ? (warnedDone
+                        ? { background: "#3a171b", borderLeft: "3px solid #b24a54", boxShadow: "inset 0 1px 0 rgba(178,74,84,0.35)" }
+                        : { background: "#5a161d", borderLeft: "3px solid #ef4444", boxShadow: "inset 0 1px 0 rgba(248,113,113,0.35)" })
+                    : (warnedDone
+                        ? { background: "#f7eeee", borderLeft: "3px solid #caa5a5" }
+                        : { background: "#ffe2e2", borderLeft: "3px solid #dc2626", boxShadow: "inset 0 1px 0 #fecaca" }))
                 : statusInfo.tone === "warning"
-                  ? { background: "#fff7ed", borderLeft: "3px solid #f59e0b" }
-                  : {};
+                  ? (isDark
+                      ? (warnedDone
+                          ? { background: "#3f2711", borderLeft: "3px solid #c27a1f", boxShadow: "inset 0 1px 0 rgba(194,122,31,0.35)" }
+                          : { background: "#5a2f08", borderLeft: "3px solid #f59e0b", boxShadow: "inset 0 1px 0 rgba(251,191,36,0.35)" })
+                      : { background: "#fff7ed", borderLeft: "3px solid #f59e0b" })
+                  : (isOnlyOneOffNoPack ? (isDark ? { background: "#2b1f4a", borderLeft: "3px solid #a855f7" } : { background: "#f3e8ff", borderLeft: "3px solid #9333ea" }) : {});
 
               return (
               <tr key={student.id}>
                 <td style={{ ...styles.rowHead, ...rowHighlightStyle }}>
-                  <div style={styles.studentNameRow}>
-                    <div style={styles.studentName}>{getDisplayName(student)}</div>
-                    <div style={styles.orderBtns}>
-                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "up")} title="Вгору">↑</button>
-                      <button type="button" style={styles.orderBtn} onClick={() => moveStudent(student.id, "down")} title="Вниз">↓</button>
-                      <div style={styles.menuWrap}>
+                  <div style={styles.profileCard}>
+                    <div style={styles.studentNameRow}>
+                      <div style={styles.studentName}>{`${rowIndex + 1}. ${getDisplayName(student)}`}</div>
+                      <div style={styles.orderBtns}>
+                        <div style={styles.menuWrap}>
                         <button
                           type="button"
                           style={styles.menuBtn}
@@ -1255,11 +1627,12 @@ export default function AttendanceTab({
                         >
                           ⋮
                         </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div style={{ ...styles.studentMeta, color: metaColor }}>
-                    {statusInfo.text}
+                    <div style={{ ...styles.studentMeta, color: metaColor }}>
+                      {statusInfo.text}
+                    </div>
                   </div>
                 </td>
 
@@ -1275,11 +1648,13 @@ export default function AttendanceTab({
                   const dayIdx = visibleDayIndex[dateStr];
                   const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
                   const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
+                  const isLastDay = dayIdx === visibleDays.length - 1;
                   const isStart = !!subPeriod && (!prevDay || prevDay < subPeriod.start);
                   const isEnd = !!subPeriod && (!nextDay || nextDay > subPeriod.end);
-                  const tone = subPeriod?.completed ? "#ecf1f5" : "#e0edff";
-                  const border = subPeriod?.completed ? "#64748b" : "#2563eb";
-                  const buttonBg = subPeriod?.completed && cellView.mark ? "#9ca3af" : cellView.bg;
+                  const isDark = theme.bg === "#0F131A";
+                  const tone = subPeriod?.completed ? (isDark ? "#2b3647" : "#ecf1f5") : (isDark ? "#1d2f4e" : "#e0edff");
+                  const border = subPeriod?.completed ? (isDark ? "#5f728d" : "#64748b") : (isDark ? "#3f6fc2" : "#2563eb");
+                  const buttonBg = subPeriod?.completed && cellView.mark ? (isDark ? "#4b5b70" : "#9ca3af") : cellView.bg;
                   const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                   const cellStyle = subPeriod
                     ? {
@@ -1291,9 +1666,14 @@ export default function AttendanceTab({
                         ...styles.cell(cancelledDay, isMutedMonth, isCurrentMonth),
                         ...(isMonthBoundary ? styles.monthDivider : {}),
                       };
+                  if (isLastDay) {
+                    cellStyle.borderTopRightRadius = 15;
+                    cellStyle.borderBottomRightRadius = 15;
+                  }
 
                   return (
                     <td key={dateStr} style={cellStyle}>
+                      <div style={styles.cellShell}>
                       <button
                         type="button"
                         disabled={cancelledDay || saving}
@@ -1303,16 +1683,17 @@ export default function AttendanceTab({
                       >
                         {cellView.mark}
                       </button>
+                      </div>
                     </td>
                   );
                 })}
               </tr>
             )})}
 
-            {!orderedStudents.length && (
+            {!displayRows.length && (
               <tr>
                 <td style={styles.rowHead}>Немає учениць</td>
-                <td colSpan={visibleDays.length} style={{ padding: 16, color: "#6b7280" }}>
+                <td colSpan={visibleDays.length} style={{ padding: 16, color: theme.textMuted }}>
                   У цій групі поки немає учениць.
                 </td>
               </tr>
@@ -1320,25 +1701,47 @@ export default function AttendanceTab({
 
             <tr>
               <td style={styles.rowHead}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Додати ученицю</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    value={newStudentName}
-                    onChange={(e) => setNewStudentName(e.target.value)}
-                    placeholder="Ім'я учениці"
-                    style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}
-                  />
-                  <button
-                    type="button"
-                    style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                    onClick={handleCreateStudentInGroup}
-                    disabled={creatingStudent}
-                  >
-                    Додати
-                  </button>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <button type="button" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
+                  <button type="button" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : "Додати гостя"}</div>
+                <div style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
+                  {addMode === "student" ? (
+                    <>
+                      <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+                      <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
+                    </>
+                  ) : (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleCreateGuestAttendance();
+                      }}
+                      style={{ display: "flex", gap: 6, width: "100%" }}
+                    >
+                      <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+                      <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
+                        <option value="trial">Пробне</option>
+                        <option value="single">Разове</option>
+                      </select>
+                      <button
+                        type="submit"
+                        style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleCreateGuestAttendance();
+                        }}
+                        disabled={creatingGuest || !gid}
+                      >
+                        Додати
+                      </button>
+                    </form>
+                  )}
                 </div>
               </td>
-              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: "#fafafa" }} />
+              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: theme.input }} />
             </tr>
 
             <tr style={styles.totalsRow}>
@@ -1350,10 +1753,17 @@ export default function AttendanceTab({
                     ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
                     ...styles.totalsRow,
                     fontWeight: 700,
-                    color: "#111827",
+                    color: theme.textMain,
                   }}
                 >
-                  {totalPresentByDate[dateStr] || 0}
+                  <div style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
+                    <span>{totalsByDate[dateStr]?.total || 0}</span>
+                    {!!totalsByDate[dateStr]?.removed && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted }}>
+                        (+{totalsByDate[dateStr].removed} видал.)
+                      </span>
+                    )}
+                  </div>
                 </td>
               ))}
             </tr>
@@ -1366,33 +1776,49 @@ export default function AttendanceTab({
           style={{ ...styles.menu, top: openMenuState.top, left: openMenuState.left }}
         >
           {(() => {
-            const student = orderedStudents.find((s) => s.id === openMenuState.studentId);
+            const student = displayRows.find((s) => s.id === openMenuState.studentId);
             if (!student) return null;
+            if (student.isGuest) {
+              return (
+                <>
+                  <div style={styles.menuSection}>
+                    <button type="button" style={styles.menuItem} onClick={() => handleConvertGuestToStudent(student)}>Перетворити на ученицю</button>
+                  </div>
+                  <div style={styles.menuSection}>
+                    <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} onClick={() => handleRemoveGuestRosterRow(student)}>Прибрати тимчасового гостя</button>
+                  </div>
+                </>
+              );
+            }
             return (
               <>
-                <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
-                <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
-                <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
-                <button
-                  type="button"
-                  style={{ ...styles.menuItem, ...(!student.telegram ? styles.menuItemDisabled : {}) }}
-                  onClick={() => handleMessageStudent(student)}
-                  disabled={!student.telegram}
-                  title={!student.telegram ? "Telegram не вказано" : ""}
-                >
-                  Написати повідомлення
-                </button>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "up")}>Перемістити вгору</button>
+                  <button type="button" style={styles.menuItem} onClick={() => moveStudent(student.id, "down")}>Перемістити вниз</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
+                  <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
+                  <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <button type="button" style={styles.menuItem} onClick={() => handleMessageStudent(student)}>Написати повідомлення</button>
+                </div>
+                <div style={styles.menuSection}>
+                  <label style={styles.notifyRow}>
+                    <input
+                      type="checkbox"
+                      style={styles.notifyCheck}
+                      checked={isWarned(student.id)}
+                      onChange={(e) => toggleWarned(student.id, e.target.checked)}
+                    />
+                    <span>Сповіщено про завершення</span>
+                  </label>
+                </div>
                 <div style={styles.menuDivider} />
-                <label style={styles.notifyRow}>
-                  <input
-                    type="checkbox"
-                    style={styles.notifyCheck}
-                    checked={isWarned(student.id)}
-                    onChange={(e) => toggleWarned(student.id, e.target.checked)}
-                  />
-                  <span>Сповіщено про завершення</span>
-                </label>
-                <button type="button" style={{ ...styles.menuItem, color: "#b91c1c" }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+                <div style={styles.menuSection}>
+                  <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} onClick={() => { handleRemoveFromGroup(student); setOpenMenuState(null); }}>Прибрати з групи</button>
+                </div>
               </>
             );
           })()}
