@@ -61,17 +61,22 @@ const pickColor = (e) => {
 };
 
 export default function ScheduleTab({ groups = [], directionsList = [], trainers = [], cancelled = [], roomBookings = [], isAdmin = false, onAddBooking, onDeleteBooking }) {
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  const safeDirections = Array.isArray(directionsList) ? directionsList : [];
+  const safeTrainers = Array.isArray(trainers) ? trainers : [];
+  const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
+  const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({ date: toLocalDateKey(new Date()), startTime: "12:00", endTime: "13:00", trainerId: "", trainerName: "", title: "", note: "" });
 
-  const dirMap = useMemo(() => new Map(directionsList.map((d) => [String(d.id), d.name || d.id])), [directionsList]);
-  const trainerMap = useMemo(() => new Map(trainers.map((t) => [String(t.id), t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")])), [trainers]);
-  const cancelledSet = useMemo(() => new Set(cancelled.map((c) => `${c.groupId}:${String(c.date).slice(0, 10)}`)), [cancelled]);
+  const dirMap = useMemo(() => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])), [safeDirections]);
+  const trainerMap = useMemo(() => new Map(safeTrainers.map((t) => [String(t.id), t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")])), [safeTrainers]);
+  const cancelledSet = useMemo(() => new Set(safeCancelled.map((c) => `${c.groupId}:${String(c.date).slice(0, 10)}`)), [safeCancelled]);
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
   const events = useMemo(() => {
-    const slots = parseGroupSchedule(groups);
+    const slots = parseGroupSchedule(safeGroups);
     const groupEvents = [];
     weekDays.forEach((day) => {
       const date = toLocalDateKey(day); const dow = day.getDay();
@@ -81,12 +86,12 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
         cancelled: cancelledSet.has(`${s.groupId}:${date}`),
       }));
     });
-    const bookingEvents = roomBookings.map((b) => ({
+    const bookingEvents = safeBookings.map((b) => ({
       kind: "booking", id: b.id, date: b.date, startTime: b.startTime, endTime: b.endTime, title: b.title,
       direction: "Individual / reserve", trainer: b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—", note: b.note || "", cancelled: false,
     }));
     return [...groupEvents, ...bookingEvents].filter((e) => weekDays.some((d) => toLocalDateKey(d) === e.date));
-  }, [groups, weekDays, dirMap, trainerMap, cancelledSet, roomBookings]);
+  }, [safeGroups, weekDays, dirMap, trainerMap, cancelledSet, safeBookings]);
 
   const eventsByDay = useMemo(() => {
     const map = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
@@ -107,7 +112,13 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
   const detectConflicts = (candidate) => {
     const cStart = toMin(candidate.startTime); const cEnd = toMin(candidate.endTime);
     if (cStart == null || cEnd == null || cEnd <= cStart) return [];
-    return events.filter((e) => e.date === candidate.date && overlaps(cStart, cEnd, toMin(e.startTime) || -1, toMin(e.endTime) || -1));
+    return events.filter((e) => {
+      if (e.date !== candidate.date) return false;
+      const eStart = toMin(e.startTime);
+      const eEnd = toMin(e.endTime);
+      if (eStart == null || eEnd == null || eEnd <= eStart) return false;
+      return overlaps(cStart, cEnd, eStart, eEnd);
+    });
   };
 
   const saveBooking = async () => {
@@ -123,7 +134,8 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
   const gridHeight = (DAY_END_HOUR - DAY_START_HOUR) * HOUR_PX;
   const today = toLocalDateKey(new Date());
 
-  return <div style={{ display: "grid", gap: 12 }}>
+  try {
+    return <div style={{ display: "grid", gap: 12 }}>
     <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
       <button onClick={() => setWeekStart((d) => addDays(d, -7))}>← Попередній тиждень</button>
       <button onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
@@ -137,7 +149,7 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
         <input type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
         <input type="time" value={draft.startTime} onChange={(e) => setDraft((p) => ({ ...p, startTime: e.target.value }))} />
         <input type="time" value={draft.endTime} onChange={(e) => setDraft((p) => ({ ...p, endTime: e.target.value }))} />
-        <select value={draft.trainerId} onChange={(e) => setDraft((p) => ({ ...p, trainerId: e.target.value }))}><option value="">Тренер</option>{trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")}</option>)}</select>
+        <select value={draft.trainerId} onChange={(e) => setDraft((p) => ({ ...p, trainerId: e.target.value }))}><option value="">Тренер</option>{safeTrainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")}</option>)}</select>
         <input placeholder="Назва / клієнт" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
         <input placeholder="Нотатка" value={draft.note} onChange={(e) => setDraft((p) => ({ ...p, note: e.target.value }))} />
       </div>
@@ -186,4 +198,12 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
       </div>
     </div>
   </div>;
+  } catch (e) {
+    return <div style={{ ...cardSt, border: `1px solid ${theme.danger}` }}>
+      <b>Графік тимчасово недоступний</b>
+      <div style={{ marginTop: 6, fontSize: 12, color: theme.textLight }}>
+        Помилка рендеру ScheduleTab: {String(e?.message || e)}
+      </div>
+    </div>;
+  }
 }
