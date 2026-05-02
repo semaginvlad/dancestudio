@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { cardSt, theme } from "../shared/constants";
 
-const dayMs = 86400000;
+const DAY_START_HOUR = 8;
+const DAY_END_HOUR = 22;
+const HOUR_PX = 54;
+const HEADER_H = 56;
 const toLocalDateKey = (date) => {
   const d = date instanceof Date ? date : new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -9,15 +12,10 @@ const toLocalDateKey = (date) => {
 const startOfWeek = (date) => {
   const d = new Date(`${toLocalDateKey(date)}T12:00:00`);
   const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
   return d;
 };
-const addDays = (date, days) => {
-  const d = new Date(`${toLocalDateKey(date)}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d;
-};
+const addDays = (date, days) => { const d = new Date(`${toLocalDateKey(date)}T12:00:00`); d.setDate(d.getDate() + days); return d; };
 const toMin = (t = "") => {
   const [h, m] = String(t || "").split(":");
   const hh = Number(h); const mm = Number(m || 0);
@@ -25,143 +23,117 @@ const toMin = (t = "") => {
   return hh * 60 + mm;
 };
 const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
-
 const parseWeekday = (raw) => {
-  if (raw === null || raw === undefined) return null;
+  if (raw == null) return null;
   const n = Number(raw);
-  if (Number.isFinite(n)) {
-    if (n >= 1 && n <= 7) return n % 7;
-    if (n >= 0 && n <= 6) return n;
-  }
-  const s = String(raw).trim().toLowerCase();
-  const map = {
-    mon: 1, monday: 1, пн: 1,
-    tue: 2, tuesday: 2, вт: 2,
-    wed: 3, wednesday: 3, ср: 3,
-    thu: 4, thursday: 4, чт: 4,
-    fri: 5, friday: 5, пт: 5,
-    sat: 6, saturday: 6, сб: 6,
-    sun: 0, sunday: 0, нд: 0,
-  };
-  return map[s] ?? null;
+  if (Number.isFinite(n)) return n >= 1 && n <= 7 ? n % 7 : (n >= 0 && n <= 6 ? n : null);
+  return ({ mon: 1, monday: 1, пн: 1, tue: 2, tuesday: 2, вт: 2, wed: 3, wednesday: 3, ср: 3, thu: 4, thursday: 4, чт: 4, fri: 5, friday: 5, пт: 5, sat: 6, saturday: 6, сб: 6, sun: 0, sunday: 0, нд: 0 }[String(raw).trim().toLowerCase()]) ?? null;
 };
 
 const parseGroupSchedule = (groups = []) => {
   const out = [];
-  groups.forEach((g) => {
-    const rows = Array.isArray(g.schedule) ? g.schedule : [];
-    rows.forEach((row, idx) => {
-      const wd = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
-      const start = String(row.startTime || row.start || row.time || "").slice(0, 5);
-      const end = String(row.endTime || row.end || "").slice(0, 5);
-      if (wd === null || !start) return;
-      out.push({
-        id: `${g.id}_${idx}`,
-        groupId: g.id,
-        groupName: g.name || g.id,
-        directionId: g.directionId,
-        trainerId: g.trainer_id || null,
-        weekday: wd,
-        startTime: start,
-        endTime: end || "",
-      });
-    });
-  });
+  groups.forEach((g) => (Array.isArray(g.schedule) ? g.schedule : []).forEach((row, idx) => {
+    const weekday = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
+    const startTime = String(row.startTime || row.start || row.time || "").slice(0, 5);
+    const endTime = String(row.endTime || row.end || "").slice(0, 5) || "";
+    if (weekday === null || !startTime) return;
+    out.push({ id: `${g.id}_${idx}`, groupId: g.id, groupName: g.name || g.id, directionId: g.directionId, trainerId: g.trainer_id || null, weekday, startTime, endTime });
+  }));
   return out;
 };
 
-export default function ScheduleTab({ groups = [], directionsList = [], trainers = [], cancelled = [], roomBookings = [], onAddBooking, onDeleteBooking }) {
+const palette = {
+  latin: { bg: "rgba(250, 211, 144, 0.25)", border: "#f59e0b" },
+  bachata: { bg: "rgba(244, 114, 182, 0.22)", border: "#ec4899" },
+  high_heels: { bg: "rgba(196, 181, 253, 0.24)", border: "#8b5cf6" },
+  jazz_funk: { bg: "rgba(147, 197, 253, 0.22)", border: "#3b82f6" },
+  k_pop: { bg: "rgba(134, 239, 172, 0.22)", border: "#22c55e" },
+  dancehall: { bg: "rgba(251, 191, 36, 0.2)", border: "#d97706" },
+  reserve: { bg: "rgba(45, 212, 191, 0.2)", border: "#14b8a6" },
+  cancelled: { bg: "rgba(248, 113, 113, 0.16)", border: theme.danger },
+  default: { bg: "rgba(148, 163, 184, 0.2)", border: "#64748b" },
+};
+const pickColor = (e) => {
+  if (e.cancelled) return palette.cancelled;
+  if (e.kind === "booking") return palette.reserve;
+  const key = String(e.direction || "").trim().toLowerCase().replace(/\s+/g, "_");
+  return palette[key] || palette.default;
+};
+
+export default function ScheduleTab({ groups = [], directionsList = [], trainers = [], cancelled = [], roomBookings = [], isAdmin = false, onAddBooking, onDeleteBooking }) {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({ date: toLocalDateKey(new Date()), startTime: "12:00", endTime: "13:00", trainerId: "", trainerName: "", title: "", note: "" });
 
-  const dirMap = useMemo(() => new Map((directionsList || []).map((d) => [String(d.id), d.name || d.id])), [directionsList]);
-  const trainerMap = useMemo(() => new Map((trainers || []).map((t) => [String(t.id), t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")])), [trainers]);
-  const cancelledSet = useMemo(() => new Set((cancelled || []).map((c) => `${c.groupId}:${String(c.date).slice(0, 10)}`)), [cancelled]);
-
+  const dirMap = useMemo(() => new Map(directionsList.map((d) => [String(d.id), d.name || d.id])), [directionsList]);
+  const trainerMap = useMemo(() => new Map(trainers.map((t) => [String(t.id), t.name || [t.firstName, t.lastName].filter(Boolean).join(" ")])), [trainers]);
+  const cancelledSet = useMemo(() => new Set(cancelled.map((c) => `${c.groupId}:${String(c.date).slice(0, 10)}`)), [cancelled]);
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-  const groupSlots = useMemo(() => parseGroupSchedule(groups), [groups]);
 
-  const scheduleEvents = useMemo(() => {
+  const events = useMemo(() => {
+    const slots = parseGroupSchedule(groups);
     const groupEvents = [];
     weekDays.forEach((day) => {
-      const dateKey = toLocalDateKey(day);
-      const dow = day.getDay();
-      groupSlots.filter((s) => s.weekday === dow).forEach((s) => {
-        groupEvents.push({
-          kind: "group",
-          id: `${s.id}_${dateKey}`,
-          date: dateKey,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          title: s.groupName,
-          direction: dirMap.get(String(s.directionId || "")) || "—",
-          trainer: trainerMap.get(String(s.trainerId || "")) || "—",
-          cancelled: cancelledSet.has(`${s.groupId}:${dateKey}`),
-        });
-      });
+      const date = toLocalDateKey(day); const dow = day.getDay();
+      slots.filter((s) => s.weekday === dow).forEach((s) => groupEvents.push({
+        kind: "group", id: `${s.id}_${date}`, date, startTime: s.startTime, endTime: s.endTime || "", title: s.groupName,
+        direction: dirMap.get(String(s.directionId || "")) || "—", trainer: trainerMap.get(String(s.trainerId || "")) || "—",
+        cancelled: cancelledSet.has(`${s.groupId}:${date}`),
+      }));
     });
-    const bookingEvents = (roomBookings || []).map((b) => ({
-      kind: "booking",
-      id: b.id,
-      date: b.date,
-      startTime: b.startTime,
-      endTime: b.endTime,
-      title: b.title,
-      trainer: b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
-      note: b.note || "",
+    const bookingEvents = roomBookings.map((b) => ({
+      kind: "booking", id: b.id, date: b.date, startTime: b.startTime, endTime: b.endTime, title: b.title,
+      direction: "Individual / reserve", trainer: b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—", note: b.note || "", cancelled: false,
     }));
-    return [...groupEvents, ...bookingEvents].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
-  }, [weekDays, groupSlots, roomBookings, dirMap, trainerMap, cancelledSet]);
+    return [...groupEvents, ...bookingEvents].filter((e) => weekDays.some((d) => toLocalDateKey(d) === e.date));
+  }, [groups, weekDays, dirMap, trainerMap, cancelledSet, roomBookings]);
 
   const eventsByDay = useMemo(() => {
-    const m = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
-    scheduleEvents.forEach((e) => { if (m.has(e.date)) m.get(e.date).push(e); });
-    return m;
-  }, [weekDays, scheduleEvents]);
+    const map = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
+    events.forEach((e) => { if (map.has(e.date)) map.get(e.date).push(e); });
+    map.forEach((arr) => arr.sort((a, b) => (toMin(a.startTime) || 0) - (toMin(b.startTime) || 0)));
+    return map;
+  }, [events, weekDays]);
+
+  const toTopHeight = (startTime, endTime) => {
+    const start = Math.max(DAY_START_HOUR * 60, toMin(startTime) ?? DAY_START_HOUR * 60);
+    const endDefault = start + 60;
+    const end = Math.min(DAY_END_HOUR * 60, (toMin(endTime) ?? endDefault));
+    const top = ((start - DAY_START_HOUR * 60) / 60) * HOUR_PX;
+    const height = Math.max(28, ((Math.max(end, start + 30) - start) / 60) * HOUR_PX);
+    return { top, height, start, end };
+  };
 
   const detectConflicts = (candidate) => {
-    const cStart = toMin(candidate.startTime);
-    const cEnd = toMin(candidate.endTime);
-    if (cStart === null || cEnd === null || cEnd <= cStart) return [];
-    return scheduleEvents.filter((e) => {
-      if (e.date !== candidate.date) return false;
-      const s = toMin(e.startTime); const en = toMin(e.endTime);
-      if (s === null || en === null) return false;
-      return overlaps(cStart, cEnd, s, en);
-    });
+    const cStart = toMin(candidate.startTime); const cEnd = toMin(candidate.endTime);
+    if (cStart == null || cEnd == null || cEnd <= cStart) return [];
+    return events.filter((e) => e.date === candidate.date && overlaps(cStart, cEnd, toMin(e.startTime) || -1, toMin(e.endTime) || -1));
   };
 
   const saveBooking = async () => {
-    if (!draft.date || !draft.startTime || !draft.endTime || !draft.title.trim()) { alert("Заповніть дату, час і назву"); return; }
+    if (!isAdmin) return;
+    if (!draft.date || !draft.startTime || !draft.endTime || !draft.title.trim()) return alert("Заповніть дату, час і назву");
     const conflicts = detectConflicts(draft);
-    if (conflicts.length > 0) {
-      const ok = window.confirm(`Є перетин у графіку (${conflicts.length}). Зберегти все одно?`);
-      if (!ok) return;
-    }
-    await onAddBooking({
-      date: draft.date,
-      startTime: draft.startTime,
-      endTime: draft.endTime,
-      trainerId: draft.trainerId || null,
-      trainerName: draft.trainerName || null,
-      title: draft.title.trim(),
-      type: "individual",
-      note: draft.note || null,
-    });
+    if (conflicts.length && !window.confirm(`Є перетин у графіку (${conflicts.length}). Зберегти все одно?`)) return;
+    await onAddBooking({ date: draft.date, startTime: draft.startTime, endTime: draft.endTime, trainerId: draft.trainerId || null, trainerName: draft.trainerName || null, title: draft.title.trim(), type: "individual", note: draft.note || null });
     setDraft((p) => ({ ...p, title: "", note: "" }));
+    setShowForm(false);
   };
 
+  const gridHeight = (DAY_END_HOUR - DAY_START_HOUR) * HOUR_PX;
+  const today = toLocalDateKey(new Date());
+
   return <div style={{ display: "grid", gap: 12 }}>
-    <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
       <button onClick={() => setWeekStart((d) => addDays(d, -7))}>← Попередній тиждень</button>
       <button onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
       <button onClick={() => setWeekStart((d) => addDays(d, 7))}>Наступний тиждень →</button>
-      <div style={{ marginLeft: "auto", color: theme.textLight, fontSize: 12 }}>Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}</div>
+      <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}</div>
+      {isAdmin && <button style={{ fontWeight: 700 }} onClick={() => setShowForm((v) => !v)}>+ Додати тренування / резерв</button>}
     </div>
 
-    <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
-      <b>+ Резерв залу</b>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginTop: 8 }}>
+    {isAdmin && showForm && <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
         <input type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
         <input type="time" value={draft.startTime} onChange={(e) => setDraft((p) => ({ ...p, startTime: e.target.value }))} />
         <input type="time" value={draft.endTime} onChange={(e) => setDraft((p) => ({ ...p, endTime: e.target.value }))} />
@@ -170,24 +142,48 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
         <input placeholder="Нотатка" value={draft.note} onChange={(e) => setDraft((p) => ({ ...p, note: e.target.value }))} />
       </div>
       <div style={{ marginTop: 8 }}><button onClick={saveBooking}>Зберегти резерв</button></div>
-    </div>
+    </div>}
 
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gap: 8 }}>
-      {weekDays.map((d) => {
-        const dk = toLocalDateKey(d);
-        const list = eventsByDay.get(dk) || [];
-        return <div key={dk} style={{ ...cardSt, border: `1px solid ${theme.border}`, minHeight: 240 }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>{d.toLocaleDateString("uk-UA", { weekday: "short" })} · {dk.slice(5)}</div>
-          <div style={{ display: "grid", gap: 6 }}>
-            {list.length === 0 ? <div style={{ color: theme.textLight, fontSize: 12 }}>Немає подій</div> : list.map((e) => <div key={e.id} style={{ border: `1px solid ${e.kind === "group" ? (e.cancelled ? theme.danger : theme.primary) : theme.warning}`, background: e.kind === "group" ? (e.cancelled ? "rgba(234,84,85,0.08)" : "rgba(90,129,250,0.09)") : "rgba(245,159,58,0.12)", borderRadius: 10, padding: 8, opacity: e.cancelled ? 0.65 : 1 }}>
-              <div style={{ fontSize: 12, color: theme.textLight }}>{e.startTime}{e.endTime ? `–${e.endTime}` : ""} · {e.kind === "group" ? "Група" : "Резерв"}</div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{e.title}</div>
-              {e.kind === "group" ? <div style={{ fontSize: 12 }}>{e.direction} · {e.trainer}{e.cancelled ? " · cancelled" : ""}</div> : <div style={{ fontSize: 12 }}>{e.trainer}{e.note ? ` · ${e.note}` : ""}</div>}
-              {e.kind === "booking" && <button style={{ marginTop: 6, fontSize: 11 }} onClick={() => onDeleteBooking(e.id)}>Видалити</button>}
-            </div>)}
+    <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 0, overflow: "auto" }}>
+      <div style={{ minWidth: 980 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `70px repeat(7, 1fr)`, height: HEADER_H, borderBottom: `1px solid ${theme.border}` }}>
+          <div />
+          {weekDays.map((d) => {
+            const dk = toLocalDateKey(d); const isToday = dk === today;
+            return <div key={dk} style={{ padding: "8px 10px", borderLeft: `1px solid ${theme.border}`, background: isToday ? "rgba(90,129,250,0.16)" : "transparent" }}>
+              <div style={{ fontWeight: 700 }}>{d.toLocaleDateString("uk-UA", { weekday: "short" })}</div>
+              <div style={{ fontSize: 12, color: theme.textLight }}>{dk}</div>
+            </div>;
+          })}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: `70px repeat(7, 1fr)`, position: "relative", minHeight: gridHeight }}>
+          <div style={{ position: "relative", borderRight: `1px solid ${theme.border}` }}>
+            {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => DAY_START_HOUR + i).map((h) => <div key={h} style={{ position: "absolute", top: i * HOUR_PX - 8, left: 8, fontSize: 11, color: theme.textLight }}>{String(h).padStart(2, "0")}:00</div>)}
           </div>
-        </div>;
-      })}
+
+          {weekDays.map((d) => {
+            const dateKey = toLocalDateKey(d); const dayEvents = eventsByDay.get(dateKey) || [];
+            return <div key={dateKey} style={{ position: "relative", borderLeft: `1px solid ${theme.border}`, minHeight: gridHeight }}>
+              {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * HOUR_PX, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.45 }} />)}
+              {dayEvents.map((e, idx) => {
+                const { top, height, start, end } = toTopHeight(e.startTime, e.endTime);
+                const overlapCount = dayEvents.filter((x) => overlaps(start, end, toTopHeight(x.startTime, x.endTime).start, toTopHeight(x.startTime, x.endTime).end)).length;
+                const width = overlapCount > 1 ? "47%" : "94%";
+                const left = overlapCount > 1 ? `${(idx % 2) * 49 + 3}%` : "3%";
+                const c = pickColor(e);
+                return <div key={e.id} style={{ position: "absolute", top, left, width, height, padding: 6, borderRadius: 10, border: `1px solid ${c.border}`, background: c.bg, overflow: "hidden", fontSize: 11 }}>
+                  <div style={{ fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.title}</div>
+                  <div style={{ color: theme.textLight }}>{e.startTime}{e.endTime ? `–${e.endTime}` : ""} · {e.kind === "booking" ? "Reserve" : e.direction}</div>
+                  <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div>
+                  {e.cancelled && <div style={{ color: theme.danger, fontWeight: 700 }}>cancelled</div>}
+                  {isAdmin && e.kind === "booking" && <button style={{ marginTop: 4, fontSize: 10 }} onClick={() => onDeleteBooking(e.id)}>Видалити</button>}
+                </div>;
+              })}
+            </div>;
+          })}
+        </div>
+      </div>
     </div>
   </div>;
 }

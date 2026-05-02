@@ -964,7 +964,10 @@ export default function App() {
               {id:"analytics", label:"📊 Instagram"}
             ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)
           ) : (
-            <button style={{padding: "12px 24px", background: theme.primary, border: "none", borderRadius: 100, color: "#fff", fontSize: 14, fontWeight: 600}}>Мої групи (Відвідування)</button>
+            [
+              { id: "attendance", label: "Мої групи (Відвідування)" },
+              { id: "schedule", label: "Графік" },
+            ].map((t) => <button key={t.id} onClick={() => setTab(t.id)} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor:"pointer"}}>{t.label}</button>)
           )}
         </div>
       </nav>
@@ -989,6 +992,7 @@ export default function App() {
             trainers={trainers}
             cancelled={cancelled}
             roomBookings={roomBookings}
+            isAdmin={isAdmin}
             onAddBooking={async (payload) => {
               const created = await db.insertRoomBooking(payload);
               setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
@@ -998,6 +1002,18 @@ export default function App() {
               await db.deleteRoomBooking(id);
               setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
             }}
+          />
+        )}
+        {!isAdmin && tab==="schedule" && (
+          <ScheduleTab
+            groups={groups}
+            directionsList={directionsList}
+            trainers={trainers}
+            cancelled={cancelled}
+            roomBookings={roomBookings}
+            isAdmin={false}
+            onAddBooking={async () => {}}
+            onDeleteBooking={async () => {}}
           />
         )}
 
