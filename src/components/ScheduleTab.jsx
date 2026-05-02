@@ -14,9 +14,34 @@ const DEFAULT_TYPES = [
 const toLocalDateKey = (date) => { const d = date instanceof Date ? date : new Date(date); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const startOfWeek = (date) => { const d = new Date(`${toLocalDateKey(date)}T12:00:00`); const day = d.getDay(); d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day)); return d; };
 const addDays = (date, days) => { const d = new Date(`${toLocalDateKey(date)}T12:00:00`); d.setDate(d.getDate() + days); return d; };
-const toMin = (t = "") => { const [h, m] = String(t || "").split(":"); const hh = Number(h); const mm = Number(m || 0); return Number.isFinite(hh) && Number.isFinite(mm) ? hh * 60 + mm : null; };
+const toMin = (t = "") => {
+  const raw = String(t || "").trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/\s+/g, "").replace(".", ":");
+  if (normalized.includes("-")) return toMin(normalized.split("-")[0]);
+  if (/^\d{1,2}$/.test(normalized)) return Number(normalized) * 60;
+  const [h, m] = normalized.split(":");
+  const hh = Number(h); const mm = Number(m || 0);
+  return Number.isFinite(hh) && Number.isFinite(mm) ? hh * 60 + mm : null;
+};
+const minToHHMM = (mins) => {
+  const m = ((Number(mins) % 1440) + 1440) % 1440;
+  const hh = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
 const overlaps = (aS, aE, bS, bE) => aS < bE && bS < aE;
-const parseWeekday = (raw) => ({ mon: 1, monday: 1, пн: 1, tue: 2, tuesday: 2, вт: 2, wed: 3, wednesday: 3, ср: 3, thu: 4, thursday: 4, чт: 4, fri: 5, friday: 5, пт: 5, sat: 6, saturday: 6, сб: 6, sun: 0, sunday: 0, нд: 0 }[String(raw || "").trim().toLowerCase()]);
+const parseWeekday = (raw) => {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n >= 0 && n <= 6) return n;
+    if (n >= 1 && n <= 7) return n % 7;
+  }
+  const v = String(raw || "").trim().toLowerCase();
+  const map = { mon: 1, monday: 1, пн: 1, tue: 2, tuesday: 2, вт: 2, wed: 3, wednesday: 3, ср: 3, thu: 4, thursday: 4, чт: 4, fri: 5, friday: 5, пт: 5, sat: 6, saturday: 6, сб: 6, sun: 0, sunday: 0, нд: 0 };
+  return map[v] ?? null;
+};
 const normalizeStyleKey = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const getColorKey = (e = {}) => {
   if (e.cancelled) return "cancelled";
@@ -74,10 +99,15 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
     const map = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
     const groupSlots = [];
     safeGroups.forEach((g) => (Array.isArray(g.schedule) ? g.schedule : []).forEach((row, idx) => {
-      const wd = Number.isFinite(Number(row.weekday)) ? Number(row.weekday) : parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
-      const startTime = String(row.startTime || row.start || row.time || "").slice(0, 5);
-      const endTime = String(row.endTime || row.end || "").slice(0, 5);
-      if (wd == null || !startTime) return;
+      const weekdayRaw = row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay;
+      const wd = parseWeekday(weekdayRaw);
+      const rawTime = row.startTime || row.start || row.time || "";
+      const startMin = toMin(rawTime);
+      if (wd == null || startMin == null) return;
+      const rawEnd = row.endTime || row.end || "";
+      const endMin = toMin(rawEnd) ?? (startMin + 60);
+      const startTime = minToHHMM(startMin);
+      const endTime = minToHHMM(endMin);
       groupSlots.push({ id: `${g.id}_${idx}`, groupId: g.id, weekday: wd, startTime, endTime, title: g.name || g.id, direction: dirMap.get(String(g.directionId || "")) || "—", trainer: trainerMap.get(String(g.trainer_id || "")) || "—" });
     }));
     weekDays.forEach((d) => {
@@ -96,6 +126,10 @@ export default function ScheduleTab({ groups = [], directionsList = [], trainers
       map.get(b.date).push({ id: b.id, kind: "booking", date: b.date, title: b.title, startTime: b.startTime, endTime: b.endTime, startMin, endMin, direction: bt?.label || "Reserve", trainer: b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—", peopleCount: b.peopleCount ?? b.people_count, price: b.price, bookingType: b.bookingType || b.booking_type || b.type });
     });
     map.forEach((arr, k) => map.set(k, layoutDayEvents(arr)));
+    if (typeof window !== "undefined" && window.location?.hostname === "localhost") {
+      const totalGroupEvents = Array.from(map.values()).reduce((s, x) => s + x.filter((e) => e.kind === "group").length, 0);
+      console.log("[ScheduleTab] group events parsed:", totalGroupEvents);
+    }
     return map;
   }, [weekDays, safeGroups, safeBookings, dirMap, trainerMap, cancelledSet, bookingTypes]);
 
