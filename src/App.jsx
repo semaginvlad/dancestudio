@@ -1002,6 +1002,10 @@ export default function App() {
               await db.deleteRoomBooking(id);
               setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
             }}
+            onUpdateBooking={async (id, payload) => {
+              const updated = await db.updateRoomBooking(id, payload);
+              setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
+            }}
           />
         )}
         {!isAdmin && tab==="schedule" && (
@@ -1014,6 +1018,7 @@ export default function App() {
             isAdmin={false}
             onAddBooking={async () => {}}
             onDeleteBooking={async () => {}}
+            onUpdateBooking={async () => {}}
           />
         )}
 

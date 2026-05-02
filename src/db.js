@@ -701,6 +701,8 @@ const mapRoomBooking = (b) => ({
   bookingType: b.booking_type || b.type || "individual",
   peopleCount: Number(b.people_count || 0) || null,
   price: Number(b.price || 0) || null,
+  paymentMethod: b.payment_method || null,
+  eventType: b.event_type || null,
   note: b.note || "",
   createdAt: b.created_at || null,
 });
@@ -726,6 +728,8 @@ export async function insertRoomBooking(payload) {
     booking_type: payload.bookingType || payload.type || 'individual',
     people_count: payload.peopleCount || null,
     price: payload.price || null,
+    payment_method: payload.paymentMethod || null,
+    event_type: payload.eventType || null,
     note: payload.note || null,
   }).select('*').single();
   if (error) throw error;
@@ -744,6 +748,8 @@ export async function updateRoomBooking(id, payload) {
   if (payload.bookingType !== undefined) next.booking_type = payload.bookingType || null;
   if (payload.peopleCount !== undefined) next.people_count = payload.peopleCount || null;
   if (payload.price !== undefined) next.price = payload.price || null;
+  if (payload.paymentMethod !== undefined) next.payment_method = payload.paymentMethod || null;
+  if (payload.eventType !== undefined) next.event_type = payload.eventType || null;
   if (payload.note !== undefined) next.note = payload.note || null;
   const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
   if (error) throw error;
