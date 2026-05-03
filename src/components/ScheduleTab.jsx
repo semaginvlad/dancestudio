@@ -215,6 +215,7 @@ export default function ScheduleTab({
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
+  const [quickCreate, setQuickCreate] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
     startTime: "12:00",
@@ -499,19 +500,58 @@ export default function ScheduleTab({
       status: e.status || "active",
     }));
   };
-  const openCreateAt = (date, minute) => {
+  const openCreateAt = (date, minute, clickEvent) => {
     const start = roundToNearest30(minute);
-    setEditingId(null);
-    setShowForm(true);
-    setDraft((p) => ({
-      ...p,
+    const base = {
       date,
       startTime: minToHHMM(start),
       endTime: minToHHMM(start + 60),
       eventType: "room_booking",
       status: "active",
       recurrence: "none",
+      title: "",
+      trainerId: "",
+      trainerName: "",
+      bookingType: DEFAULT_TYPES[0].id,
+      peopleCount: 1,
+      price: DEFAULT_TYPES[0].price,
+      paymentMethod: "card",
+    };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const left = Math.min(Math.max(8, (clickEvent?.clientX || 40) + 8), vw - 320);
+    const top = Math.min(Math.max(8, (clickEvent?.clientY || 40) + 8), vh - 320);
+    setQuickCreate({ ...base, x: left, y: top });
+  };
+  const applyQuickToFullForm = () => {
+    if (!quickCreate) return;
+    const { x, y, ...quickPayload } = quickCreate;
+    setEditingId(null);
+    setShowForm(true);
+    setDraft((p) => ({
+      ...p,
+      ...quickPayload,
+      recurrenceUntil: "",
+      color: "",
+      description: "",
     }));
+    setQuickCreate(null);
+  };
+  const saveQuickCreate = async () => {
+    if (!quickCreate?.title?.trim()) return alert("Вкажіть назву події");
+    const payload = {
+      ...quickCreate,
+      title: quickCreate.title.trim(),
+      bookingType: quickCreate.eventType === "custom_admin_event" ? null : quickCreate.bookingType,
+      peopleCount: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.peopleCount || 0) || null,
+      price: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.price || 0) || null,
+      paymentMethod: quickCreate.eventType === "custom_admin_event" ? "none" : (quickCreate.paymentMethod || "none"),
+      recurrence: "none",
+      recurrenceUntil: null,
+      status: "active",
+    };
+    await onAddBooking(payload);
+    setQuickCreate(null);
   };
 
   const openGroupSlotEditor = (e) => {
@@ -592,6 +632,20 @@ export default function ScheduleTab({
       document.removeEventListener("keydown", onEsc);
     };
   }, [openMenuState]);
+  useEffect(() => {
+    if (!quickCreate) return;
+    const onDoc = (e) => {
+      if (e.target.closest("[data-quick-create='1']")) return;
+      setQuickCreate(null);
+    };
+    const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
+    document.addEventListener("click", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("click", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [quickCreate]);
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -939,7 +993,7 @@ export default function ScheduleTab({
                     const rect = ev.currentTarget.getBoundingClientRect();
                     const y = ev.clientY - rect.top;
                     const mins = DAY_START_HOUR * 60 + (y / HOUR_PX) * 60;
-                    openCreateAt(date, mins);
+                    openCreateAt(date, mins, ev);
                   }}
                 >
                   {isAdmin && hoverSlot?.date === date ? (
@@ -1141,6 +1195,34 @@ export default function ScheduleTab({
           </div>
         </div>
       </div>
+
+      {isAdmin && quickCreate && createPortal(
+        <div data-quick-create="1" onClick={(e)=>e.stopPropagation()} style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 300, border: `1px solid ${theme.border}`, display: "grid", gap: 6 }}>
+          <b>Швидке створення</b>
+          <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
+          <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
+          <select style={inputSt} value={quickCreate.trainerId || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, trainerId: e.target.value }))}>
+            <option value="">Тренер</option>{safeTrainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
+          </select>
+          <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>setQuickCreate((p)=>({ ...p, eventType: e.target.value }))}>
+            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="custom_admin_event">Кастомна подія</option>
+          </select>
+          {quickCreate.eventType !== "custom_admin_event" ? <>
+            <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>setQuickCreate((p)=>({ ...p, bookingType: e.target.value }))}>{bookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} />
+              <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
+            </div>
+            <select style={inputSt} value={quickCreate.paymentMethod || "card"} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
+              <option value="card">Карта</option><option value="cash">Готівка</option><option value="none">Без оплати</option>
+            </select>
+          </> : null}
+          <div style={{ display: "flex", gap: 6 }}>
+            <button style={btnP} onClick={saveQuickCreate}>Створити</button>
+            <button style={btnS} onClick={applyQuickToFullForm}>Більше налаштувань</button>
+            <button style={btnS} onClick={()=>setQuickCreate(null)}>Скасувати</button>
+          </div>
+        </div>, document.body)}
 
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
