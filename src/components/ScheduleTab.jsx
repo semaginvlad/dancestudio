@@ -181,6 +181,7 @@ export default function ScheduleTab({
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [openMenuEventId, setOpenMenuEventId] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
     startTime: "12:00",
@@ -344,6 +345,25 @@ export default function ScheduleTab({
   };
   const startEdit = (e) => {
     setEditingId(e.id);
+    setShowForm(true);
+    setDraft((p) => ({
+      ...p,
+      date: e.date,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      eventType: e.eventType || "room_booking",
+      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      paymentMethod: e.paymentMethod || "none",
+      peopleCount: e.peopleCount || 0,
+      price: e.price || 0,
+      trainerName: e.trainer || "",
+      title: e.title || "",
+      note: e.note || "",
+    }));
+  };
+
+  const duplicateBookingLikeEvent = (e) => {
+    setEditingId(null);
     setShowForm(true);
     setDraft((p) => ({
       ...p,
@@ -681,7 +701,123 @@ export default function ScheduleTab({
                           overflow: "hidden",
                         }}
                       >
-                        <div style={{ fontWeight: 700 }}>{e.title}</div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "start",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, paddingRight: 8 }}>
+                            {e.title}
+                          </div>
+                          {isAdmin && (
+                            <div style={{ position: "relative" }}>
+                              <button
+                                style={{
+                                  ...btnS,
+                                  padding: "0 6px",
+                                  fontSize: 12,
+                                  lineHeight: "16px",
+                                }}
+                                onClick={() =>
+                                  setOpenMenuEventId((prev) =>
+                                    prev === e.id ? null : e.id,
+                                  )
+                                }
+                              >
+                                ⋮
+                              </button>
+                              {openMenuEventId === e.id && (
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    right: 0,
+                                    top: 18,
+                                    zIndex: 40,
+                                    minWidth: 180,
+                                    background: theme.card,
+                                    border: `1px solid ${theme.border}`,
+                                    borderRadius: 8,
+                                    padding: 6,
+                                    display: "grid",
+                                    gap: 4,
+                                  }}
+                                >
+                                  {e.kind === "booking" ? (
+                                    <>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          startEdit(e);
+                                        }}
+                                      >
+                                        Редагувати
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          duplicateBookingLikeEvent(e);
+                                        }}
+                                      >
+                                        Дублювати
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          if (window.confirm("Видалити подію?"))
+                                            onDeleteBooking(e.id);
+                                        }}
+                                      >
+                                        Видалити
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          alert(
+                                            `Деталі заняття:\n${e.title}\nДата: ${e.date}\nЧас: ${e.startTime}-${e.endTime}\nНапрямок: ${e.direction}\nТренер: ${e.trainer}`,
+                                          );
+                                        }}
+                                      >
+                                        Деталі заняття
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          alert(
+                                            "Редагування групових занять буде додано наступним кроком",
+                                          );
+                                        }}
+                                      >
+                                        Редагувати групу
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuEventId(null);
+                                          alert(
+                                            "Скасування з графіка буде додано наступним кроком",
+                                          );
+                                        }}
+                                      >
+                                        Скасувати заняття
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <div>
                           {e.startTime}–{e.endTime}
                         </div>
@@ -691,32 +827,6 @@ export default function ScheduleTab({
                         {e.paymentMethod && e.paymentMethod !== "none" ? (
                           <div>{e.paymentMethod}</div>
                         ) : null}
-                        {isAdmin && e.kind === "booking" && (
-                          <div
-                            style={{ display: "flex", gap: 6, marginTop: 4 }}
-                          >
-                            <button
-                              style={{
-                                ...btnS,
-                                padding: "2px 6px",
-                                fontSize: 10,
-                              }}
-                              onClick={() => startEdit(e)}
-                            >
-                              Редагувати
-                            </button>
-                            <button
-                              style={{
-                                ...btnS,
-                                padding: "2px 6px",
-                                fontSize: 10,
-                              }}
-                              onClick={() => onDeleteBooking(e.id)}
-                            >
-                              Видалити
-                            </button>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
