@@ -1,0 +1,1195 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
+import { useStickyState } from "../shared/utils";
+
+const DAY_START_HOUR = 8;
+const DAY_END_HOUR = 22;
+const HOUR_PX = 54;
+const MIN_EVENT_HEIGHT = 24;
+const DEFAULT_TYPES = [
+  {
+    id: "individual_1_2",
+    label: "Індивідуальне 1–2 особи",
+    peopleMin: 1,
+    peopleMax: 2,
+    price: 200,
+  },
+  {
+    id: "small_group_3_9",
+    label: "Міні-група 3–9 осіб",
+    peopleMin: 3,
+    peopleMax: 9,
+    price: 500,
+  },
+  {
+    id: "group_10_plus",
+    label: "Група 10+ осіб",
+    peopleMin: 10,
+    peopleMax: null,
+    price: 1000,
+  },
+];
+const toLocalDateKey = (date) => {
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const startOfWeek = (date) => {
+  const d = new Date(`${toLocalDateKey(date)}T12:00:00`);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d;
+};
+const addDays = (date, days) => {
+  const d = new Date(`${toLocalDateKey(date)}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+const toMin = (t = "") => {
+  const raw = String(t || "").trim();
+  if (!raw) return null;
+  const n = raw.replace(/\s+/g, "").replace(".", ":");
+  if (n.includes("-")) return toMin(n.split("-")[0]);
+  if (/^\d{1,2}$/.test(n)) return Number(n) * 60;
+  const [h, m] = n.split(":");
+  const hh = Number(h);
+  const mm = Number(m || 0);
+  return Number.isFinite(hh) && Number.isFinite(mm) ? hh * 60 + mm : null;
+};
+const minToHHMM = (mins) => {
+  const m = ((Number(mins) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+};
+const roundToNearest30 = (mins) => Math.max(0, Math.round(mins / 30) * 30);
+const overlaps = (aS, aE, bS, bE) => aS < bE && bS < aE;
+const parseWeekday = (raw) => {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n >= 0 && n <= 6) return n;
+    if (n >= 1 && n <= 7) return n % 7;
+  }
+  const m = {
+    mon: 1,
+    monday: 1,
+    пн: 1,
+    tue: 2,
+    tuesday: 2,
+    вт: 2,
+    wed: 3,
+    wednesday: 3,
+    ср: 3,
+    thu: 4,
+    thursday: 4,
+    чт: 4,
+    fri: 5,
+    friday: 5,
+    пт: 5,
+    sat: 6,
+    saturday: 6,
+    сб: 6,
+    sun: 0,
+    sunday: 0,
+    нд: 0,
+  };
+  return m[String(raw).trim().toLowerCase()] ?? null;
+};
+const normalizeLabel = (value = "") =>
+  String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ");
+const getDirectionDisplayName = (value = "") => {
+  const label = normalizeLabel(value);
+  if (/latin|latina|латина/.test(label)) return "Латина";
+  if (/bachata|бачата/.test(label)) return "Бачата";
+  if (/high heels|heels/.test(label)) return "High Heels";
+  if (/jazz funk|jazz-funk/.test(label)) return "Jazz Funk";
+  if (/k pop|k-pop|kpop/.test(label)) return "K-pop";
+  if (/dancehall/.test(label)) return "Dancehall";
+  if (/reserve|booking/.test(label)) return "Резерв";
+  if (/individual/.test(label)) return "Індивідуальне";
+  if (/custom/.test(label)) return "Подія";
+  return value || "—";
+};
+const getEventTypeLabel = (value = "") => {
+  const m = {
+    room_booking: "Резерв залу",
+    individual_training: "Індивідуальне тренування",
+    custom_admin_event: "Кастомна подія",
+    group_lesson: "Групове заняття",
+  };
+  return m[value] || value || "—";
+};
+const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
+const colorKey = (e) => {
+  if (e.cancelled) return "cancelled";
+  const t = `${norm(e.direction)} ${norm(e.title)} ${norm(e.eventType)}`;
+  if (/custom_admin_event/.test(t)) return "custom";
+  if (e.kind === "booking") return "reserve";
+  if (/latin|latina|латина/.test(t)) return "latin";
+  if (/bachata|бачата/.test(t)) return "bachata";
+  if (/high heels|heels/.test(t)) return "high_heels";
+  if (/jazz funk|jazz-funk/.test(t)) return "jazz_funk";
+  if (/k pop|kpop|k-pop/.test(t)) return "k_pop";
+  if (/dancehall/.test(t)) return "dancehall";
+  return "default";
+};
+const recurrenceModes = ["none", "daily", "weekly", "monthly"];
+const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
+const paymentLabel = (v) => ({ cash: "Готівка", card: "Карта", none: "Без оплати" }[v] || v || "—");
+const palette = {
+  latin: { bg: "rgba(250,211,144,.24)", border: "#f59e0b" },
+  bachata: { bg: "rgba(244,114,182,.22)", border: "#ec4899" },
+  high_heels: { bg: "rgba(196,181,253,.24)", border: "#8b5cf6" },
+  jazz_funk: { bg: "rgba(147,197,253,.22)", border: "#3b82f6" },
+  k_pop: { bg: "rgba(134,239,172,.22)", border: "#22c55e" },
+  dancehall: { bg: "rgba(132,204,22,.22)", border: "#65a30d" },
+  reserve: { bg: "rgba(45,212,191,.2)", border: "#14b8a6" },
+  custom: { bg: "rgba(129,140,248,.2)", border: "#6366f1" },
+  cancelled: { bg: "rgba(248,113,113,.16)", border: theme.danger },
+  default: { bg: "rgba(148,163,184,.2)", border: "#64748b" },
+};
+
+const layoutDayEvents = (events = []) => {
+  const sorted = [...events].sort(
+    (a, b) =>
+      a.startMin - b.startMin ||
+      a.endMin - b.endMin ||
+      String(a.title).localeCompare(String(b.title)),
+  );
+  const clusters = [];
+  let cur = [];
+  let curEnd = -1;
+  sorted.forEach((e) => {
+    if (!cur.length || e.startMin < curEnd) {
+      cur.push(e);
+      curEnd = Math.max(curEnd, e.endMin);
+    } else {
+      clusters.push(cur);
+      cur = [e];
+      curEnd = e.endMin;
+    }
+  });
+  if (cur.length) clusters.push(cur);
+  const out = [];
+  clusters.forEach((cluster) => {
+    const colsEnd = [];
+    const local = [];
+    cluster.forEach((e) => {
+      let col = colsEnd.findIndex((x) => x <= e.startMin);
+      if (col === -1) {
+        colsEnd.push(e.endMin);
+        col = colsEnd.length - 1;
+      } else colsEnd[col] = e.endMin;
+      local.push({ ...e, colIndex: col });
+    });
+    const colCount = Math.max(colsEnd.length, 1);
+    local.forEach((e) => out.push({ ...e, colCount }));
+  });
+  return out;
+};
+
+export default function ScheduleTab({
+  groups = [],
+  directionsList = [],
+  trainers = [],
+  cancelled = [],
+  roomBookings = [],
+  isAdmin = false,
+  onAddBooking,
+  onDeleteBooking,
+  onUpdateBooking,
+  onUpdateGroupSchedule,
+}) {
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  const safeDirections = Array.isArray(directionsList) ? directionsList : [];
+  const safeTrainers = Array.isArray(trainers) ? trainers : [];
+  const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
+  const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
+  const [bookingTypes, setBookingTypes] = useStickyState(
+    DEFAULT_TYPES,
+    "ds_schedule_booking_options_v1",
+  );
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
+  const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
+  const [selectedEventDetails, setSelectedEventDetails] = useState(null);
+  const [hoverSlot, setHoverSlot] = useState(null);
+  const [draft, setDraft] = useState({
+    date: toLocalDateKey(new Date()),
+    startTime: "12:00",
+    endTime: "13:00",
+    eventType: "room_booking",
+    bookingType: DEFAULT_TYPES[0].id,
+    paymentMethod: "card",
+    peopleCount: 1,
+    trainerId: "",
+    trainerName: "",
+    title: "",
+    note: "",
+    recurrence: "none",
+    recurrenceUntil: "",
+    color: "",
+    description: "",
+    status: "active",
+    price: DEFAULT_TYPES[0].price,
+  });
+  const dirMap = useMemo(
+    () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
+    [safeDirections],
+  );
+  const trainerMap = useMemo(
+    () =>
+      new Map(
+        safeTrainers.map((t) => [
+          String(t.id),
+          t.name || [t.firstName, t.lastName].filter(Boolean).join(" "),
+        ]),
+      ),
+    [safeTrainers],
+  );
+  const cancelledSet = useMemo(
+    () =>
+      new Set(
+        safeCancelled.map((c) => `${c.groupId}:${String(c.date).slice(0, 10)}`),
+      ),
+    [safeCancelled],
+  );
+  const weekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
+    [weekStart],
+  );
+  const eventsByDay = useMemo(() => {
+    const map = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
+    const slots = [];
+    safeGroups.forEach((g) =>
+      (Array.isArray(g.schedule) ? g.schedule : []).forEach((row, idx) => {
+        const wd = parseWeekday(
+          row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay,
+        );
+        const st = toMin(row.startTime || row.start || row.time || "");
+        if (wd == null || st == null) return;
+        const en = toMin(row.endTime || row.end || "") ?? st + 60;
+        slots.push({
+          id: `${g.id}_${idx}`,
+          groupId: g.id,
+          slotIndex: idx,
+          weekday: wd,
+          startTime: minToHHMM(st),
+          endTime: minToHHMM(en),
+          title: g.name || g.id,
+          direction: getDirectionDisplayName(dirMap.get(String(g.directionId || "")) || "—"),
+          trainer: trainerMap.get(String(g.trainer_id || "")) || "—",
+        });
+      }),
+    );
+    weekDays.forEach((d) => {
+      const date = toLocalDateKey(d);
+      slots
+        .filter((s) => s.weekday === d.getDay())
+        .forEach((s) => {
+          const st = toMin(s.startTime);
+          const en = toMin(s.endTime) ?? st + 60;
+          map
+            .get(date)
+            .push({
+              ...s,
+              kind: "group",
+              eventType: "group_lesson",
+              date,
+              groupName: s.title,
+              slotIndex: s.slotIndex,
+              startMin: st,
+              endMin: en,
+              cancelled: cancelledSet.has(`${s.groupId}:${date}`),
+            });
+        });
+    });
+    safeBookings.forEach((b) => {
+      const st = toMin(b.startTime);
+      const en = toMin(b.endTime);
+      if (st == null || en == null || en <= st) return;
+      const recurrenceRaw = String(b.recurrence || "")
+        .trim()
+        .toLowerCase();
+      const recurrence = recurrenceModes.includes(recurrenceRaw)
+        ? recurrenceRaw
+        : "none";
+      const until = b.recurrenceUntil
+        ? new Date(`${b.recurrenceUntil}T00:00:00`)
+        : null;
+      const baseDate = new Date(`${b.date}T00:00:00`);
+      const bt = bookingTypes.find(
+        (x) => x.id === (b.bookingType || b.booking_type || b.type),
+      );
+      if (recurrence === "none") {
+        if (!map.has(b.date)) return;
+        map.get(b.date).push({
+          id: `${b.id}:${b.date}`,
+          parentId: b.id,
+          kind: "booking",
+          date: b.date,
+          parentDate: b.date,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          startMin: st,
+          endMin: en,
+          title: b.title || "Подія",
+          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          trainer:
+            b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
+          peopleCount: b.peopleCount ?? b.people_count,
+          price: b.price,
+          paymentMethod: b.paymentMethod || b.payment_method,
+          bookingType: b.bookingType || b.booking_type || b.type,
+          eventType: b.eventType || b.event_type || "room_booking",
+          note: b.note || "",
+          recurrence,
+          recurrenceUntil: b.recurrenceUntil || "",
+          color: b.color || "",
+          description: b.description || "",
+          status: b.status || "active",
+        });
+        return;
+      }
+      weekDays.forEach((day) => {
+        const dateKey = toLocalDateKey(day);
+        if (!map.has(dateKey)) return;
+        if (until && day > until) return;
+        if (day < baseDate) return;
+        if (recurrence === "weekly" && day.getDay() !== baseDate.getDay()) return;
+        if (recurrence === "monthly" && day.getDate() !== baseDate.getDate()) return;
+        map.get(dateKey).push({
+          id: `${b.id}:${dateKey}`,
+          parentId: b.id,
+          kind: "booking",
+          date: dateKey,
+          parentDate: b.date,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          startMin: st,
+          endMin: en,
+          title: b.title || "Подія",
+          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          trainer:
+            b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
+          peopleCount: b.peopleCount ?? b.people_count,
+          price: b.price,
+          paymentMethod: b.paymentMethod || b.payment_method,
+          bookingType: b.bookingType || b.booking_type || b.type,
+          eventType: b.eventType || b.event_type || "room_booking",
+          note: b.note || "",
+          recurrence,
+          recurrenceUntil: b.recurrenceUntil || "",
+          color: b.color || "",
+          description: b.description || "",
+          status: b.status || "active",
+        });
+      });
+    });
+    map.forEach((arr, k) => {
+      const deduped = [];
+      const seen = new Set();
+      arr.forEach((e) => {
+        const dedupeKey = `${e.kind}:${e.parentId || e.id}:${e.date}:${e.startTime}:${e.endTime}`;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        deduped.push(e);
+      });
+      map.set(k, layoutDayEvents(deduped));
+    });
+    return map;
+  }, [
+    weekDays,
+    safeGroups,
+    safeBookings,
+    dirMap,
+    trainerMap,
+    cancelledSet,
+    bookingTypes,
+  ]);
+
+  const saveBooking = async () => {
+    if (!isAdmin) return;
+    const st = toMin(draft.startTime);
+    const en = toMin(draft.endTime);
+    if (
+      !draft.date ||
+      !draft.title.trim() ||
+      st == null ||
+      en == null ||
+      en <= st
+    )
+      return alert("Перевірте дату/час/назву");
+    const payload = {
+      ...draft,
+      title: draft.title.trim(),
+      trainerId: draft.trainerId || null,
+      trainerName: draft.trainerName || null,
+      peopleCount:
+        draft.eventType === "custom_admin_event"
+          ? null
+          : Number(draft.peopleCount || 0) || null,
+      price:
+        draft.eventType === "custom_admin_event"
+          ? null
+          : Number(draft.price || 0) || null,
+      bookingType:
+        draft.eventType === "custom_admin_event" ? null : draft.bookingType,
+      paymentMethod:
+        draft.eventType === "custom_admin_event"
+          ? "none"
+          : draft.paymentMethod || "none",
+      recurrence: draft.recurrence || "none",
+      recurrenceUntil:
+        draft.recurrence === "none" ? null : draft.recurrenceUntil || null,
+      color: draft.color || null,
+      description: draft.description || null,
+      status: draft.status || "active",
+    };
+    if (editingId) await onUpdateBooking(editingId, payload);
+    else await onAddBooking(payload);
+    setShowForm(false);
+    setEditingId(null);
+  };
+  const startEdit = (e) => {
+    setEditingId(e.parentId || e.id);
+    setShowForm(true);
+    setDraft((p) => ({
+      ...p,
+      date: e.date,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      eventType: e.eventType || "room_booking",
+      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      paymentMethod: e.paymentMethod || "none",
+      peopleCount: e.peopleCount || 0,
+      price: e.price || 0,
+      trainerName: e.trainer || "",
+      title: e.title || "",
+      note: e.note || "",
+      recurrence: e.recurrence || "none",
+      recurrenceUntil: e.recurrenceUntil || "",
+      color: e.color || "",
+      description: e.description || "",
+      status: e.status || "active",
+    }));
+  };
+
+  const duplicateBookingLikeEvent = (e) => {
+    setEditingId(null);
+    setShowForm(true);
+    setDraft((p) => ({
+      ...p,
+      date: e.date,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      eventType: e.eventType || "room_booking",
+      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      paymentMethod: e.paymentMethod || "none",
+      peopleCount: e.peopleCount || 0,
+      price: e.price || 0,
+      trainerName: e.trainer || "",
+      title: e.title || "",
+      note: e.note || "",
+      recurrence: e.recurrence || "none",
+      recurrenceUntil: e.recurrenceUntil || "",
+      color: e.color || "",
+      description: e.description || "",
+      status: e.status || "active",
+    }));
+  };
+  const openCreateAt = (date, minute) => {
+    const start = roundToNearest30(minute);
+    setEditingId(null);
+    setShowForm(true);
+    setDraft((p) => ({
+      ...p,
+      date,
+      startTime: minToHHMM(start),
+      endTime: minToHHMM(start + 60),
+      eventType: "room_booking",
+      status: "active",
+      recurrence: "none",
+    }));
+  };
+
+  const openGroupSlotEditor = (e) => {
+    if (e.groupId == null || e.slotIndex == null) {
+      setGroupSlotEdit({
+        error: "Не вдалося визначити запис розкладу для редагування",
+        groupName: e.groupName || e.title || "—",
+        direction: e.direction || "—",
+        trainer: e.trainer || "—",
+      });
+      return;
+    }
+    setGroupSlotEdit({
+      groupId: e.groupId,
+      slotIndex: e.slotIndex,
+      groupName: e.groupName || e.title,
+      weekday: e.weekday,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      direction: e.direction || "—",
+      trainer: e.trainer || "—",
+      error: "",
+    });
+  };
+
+  const saveGroupSlotEdit = async () => {
+    if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.error) return;
+    if (groupSlotEdit.groupId == null || groupSlotEdit.slotIndex == null) {
+      setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
+      return;
+    }
+    const g = safeGroups.find((x) => String(x.id) === String(groupSlotEdit.groupId));
+    if (!g) {
+      setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
+      return;
+    }
+    const prev = Array.isArray(g.schedule) ? g.schedule : [];
+    if (!prev[groupSlotEdit.slotIndex]) {
+      setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
+      return;
+    }
+    const nextSchedule = prev.map((row, idx) => {
+      if (idx !== groupSlotEdit.slotIndex) return row;
+      const next = { ...row };
+      if ("weekday" in next) next.weekday = groupSlotEdit.weekday;
+      else if ("dayOfWeek" in next) next.dayOfWeek = groupSlotEdit.weekday;
+      else if ("day" in next) next.day = groupSlotEdit.weekday;
+      else if ("dow" in next) next.dow = groupSlotEdit.weekday;
+      else if ("weekDay" in next) next.weekDay = groupSlotEdit.weekday;
+      else next.weekday = groupSlotEdit.weekday;
+      if ("startTime" in next) next.startTime = groupSlotEdit.startTime;
+      else if ("start" in next) next.start = groupSlotEdit.startTime;
+      else if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime || ""}`.replace(/-$/, "");
+      else next.startTime = groupSlotEdit.startTime;
+      if ("endTime" in next) next.endTime = groupSlotEdit.endTime;
+      else if ("end" in next) next.end = groupSlotEdit.endTime;
+      return next;
+    });
+    try {
+      await onUpdateGroupSchedule(groupSlotEdit.groupId, nextSchedule);
+      setGroupSlotEdit(null);
+    } catch (err) {
+      console.error(err);
+      alert("Не вдалося зберегти зміни розкладу");
+    }
+  };
+
+  useEffect(() => {
+    if (!openMenuState) return undefined;
+    const onDocClick = () => setOpenMenuState(null);
+    const onEsc = (ev) => {
+      if (ev.key === "Escape") setOpenMenuState(null);
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [openMenuState]);
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div
+        style={{
+          ...cardSt,
+          border: `1px solid ${theme.border}`,
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          style={btnS}
+          onClick={() => setWeekStart((d) => addDays(d, -7))}
+        >
+          ← Попередній тиждень
+        </button>
+        <button
+          style={btnS}
+          onClick={() => setWeekStart(startOfWeek(new Date()))}
+        >
+          Сьогодні
+        </button>
+        <button style={btnS} onClick={() => setWeekStart((d) => addDays(d, 7))}>
+          Наступний тиждень →
+        </button>
+        <div
+          style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}
+        >
+          Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
+        </div>
+        {isAdmin && (
+          <button
+            style={btnP}
+            onClick={() => {
+              setEditingId(null);
+              setShowForm((v) => !v);
+            }}
+          >
+            + Додати тренування / резерв
+          </button>
+        )}
+      </div>
+
+      {isAdmin && showForm && (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
+              gap: 8,
+            }}
+          >
+            <select
+              style={inputSt}
+              value={draft.eventType}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, eventType: e.target.value }))
+              }
+            >
+              <option value="room_booking">{getEventTypeLabel("room_booking")}</option>
+              <option value="individual_training">{getEventTypeLabel("individual_training")}</option>
+              <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>
+            </select>
+            <input
+              style={inputSt}
+              type="date"
+              value={draft.date}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, date: e.target.value }))
+              }
+            />
+            <input
+              style={inputSt}
+              type="time"
+              value={draft.startTime}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, startTime: e.target.value }))
+              }
+            />
+            <input
+              style={inputSt}
+              type="time"
+              value={draft.endTime}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, endTime: e.target.value }))
+              }
+            />
+            {draft.eventType !== "custom_admin_event" && (
+              <>
+                <select
+                  style={inputSt}
+                  value={draft.bookingType}
+                  onChange={(e) => {
+                    const bt = bookingTypes.find(
+                      (x) => x.id === e.target.value,
+                    );
+                    setDraft((p) => ({
+                      ...p,
+                      bookingType: e.target.value,
+                      price: bt?.price || p.price,
+                    }));
+                  }}
+                >
+                  {bookingTypes.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  style={inputSt}
+                  type="number"
+                  placeholder="К-ть людей"
+                  value={draft.peopleCount}
+                  onChange={(e) =>
+                    setDraft((p) => ({
+                      ...p,
+                      peopleCount: Number(e.target.value || 0),
+                    }))
+                  }
+                />
+                <input
+                  style={inputSt}
+                  type="number"
+                  placeholder="Ціна"
+                  value={draft.price}
+                  onChange={(e) =>
+                    setDraft((p) => ({
+                      ...p,
+                      price: Number(e.target.value || 0),
+                    }))
+                  }
+                />
+                <select
+                  style={inputSt}
+                  value={draft.paymentMethod}
+                  onChange={(e) =>
+                    setDraft((p) => ({ ...p, paymentMethod: e.target.value }))
+                  }
+                >
+                  <option value="card">Карта</option>
+                  <option value="cash">Готівка</option>
+                  <option value="none">Без оплати</option>
+                </select>
+              </>
+            )}
+            <select
+              style={inputSt}
+              value={draft.trainerId}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, trainerId: e.target.value }))
+              }
+            >
+              <option value="">Тренер</option>
+              {safeTrainers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name ||
+                    [t.firstName, t.lastName].filter(Boolean).join(" ")}
+                </option>
+              ))}
+            </select>
+            <input
+              style={inputSt}
+              placeholder="Назва / клієнт"
+              value={draft.title}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, title: e.target.value }))
+              }
+            />
+            <input
+              style={inputSt}
+              placeholder="Нотатка"
+              value={draft.note}
+              onChange={(e) =>
+                setDraft((p) => ({ ...p, note: e.target.value }))
+              }
+            />
+            <select style={inputSt} value={draft.recurrence} onChange={(e) => setDraft((p) => ({ ...p, recurrence: e.target.value }))}>
+              <option value="none">Без повтору</option>
+              <option value="daily">Щодня</option>
+              <option value="weekly">Щотижня</option>
+              <option value="monthly">Щомісяця</option>
+            </select>
+            <input style={inputSt} type="date" value={draft.recurrenceUntil || ""} onChange={(e) => setDraft((p) => ({ ...p, recurrenceUntil: e.target.value }))} />
+            <input style={inputSt} type="color" value={draft.color || "#64748b"} onChange={(e) => setDraft((p) => ({ ...p, color: e.target.value }))} />
+            <select style={inputSt} value={draft.status || "active"} onChange={(e) => setDraft((p) => ({ ...p, status: e.target.value }))}>
+              <option value="active">Активно</option>
+              <option value="tentative">Попередньо</option>
+              <option value="cancelled">Скасовано</option>
+            </select>
+            <input style={inputSt} placeholder="Опис" value={draft.description || ""} onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))} />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={btnP} onClick={saveBooking}>
+              {editingId ? "Зберегти зміни" : "Зберегти резерв"}
+            </button>
+            <button
+              style={btnS}
+              onClick={() => {
+                setShowForm(false);
+                setEditingId(null);
+              }}
+            >
+              Скасувати
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedEventDetails && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center" }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(560px,92vw)", maxHeight: "90vh", overflow: "auto" }}>
+            <b>Деталі заняття</b>
+            <div style={{ marginTop: 8, display: "grid", gap: 4, fontSize: 13 }}>
+              <div><b>Назва:</b> {selectedEventDetails.title}</div>
+              <div><b>Дата:</b> {selectedEventDetails.date}</div>
+              <div><b>Час:</b> {selectedEventDetails.startTime}–{selectedEventDetails.endTime}</div>
+              <div><b>Група:</b> {selectedEventDetails.groupName || selectedEventDetails.title}</div>
+              <div><b>Напрямок:</b> {selectedEventDetails.direction || "—"}</div>
+              <div><b>Тренер:</b> {selectedEventDetails.trainer || "—"}</div>
+              <div><b>Тип події:</b> {getEventTypeLabel(selectedEventDetails.eventType)}</div>
+              {selectedEventDetails.cancelled ? <div style={{ color: theme.danger }}><b>Статус:</b> cancelled</div> : null}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button style={btnP} onClick={() => setSelectedEventDetails(null)}>Закрити</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && groupSlotEdit && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center" }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(620px,94vw)", maxHeight: "90vh", overflow: "auto" }}>
+          <b>Редагувати заняття групи</b>
+          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 4 }}>
+            Група: {groupSlotEdit.groupName}
+          </div>
+          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 2 }}>
+            Напрямок: {groupSlotEdit.direction || "—"} · Тренер: {groupSlotEdit.trainer || "—"}
+          </div>
+          {groupSlotEdit.error ? (
+            <div style={{ marginTop: 8, color: theme.danger, fontSize: 13 }}>{groupSlotEdit.error}</div>
+          ) : null}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+            <select style={inputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))}>
+              <option value={1}>Пн</option><option value={2}>Вт</option><option value={3}>Ср</option><option value={4}>Чт</option><option value={5}>Пт</option><option value={6}>Сб</option><option value={0}>Нд</option>
+            </select>
+            <input style={inputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
+            <input style={inputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
+            <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
+          </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        style={{
+          ...cardSt,
+          border: `1px solid ${theme.border}`,
+          padding: 0,
+          overflow: "auto",
+        }}
+      >
+        <div style={{ minWidth: 980 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "70px repeat(7,1fr)",
+              borderBottom: `1px solid ${theme.border}`,
+              minHeight: 56,
+            }}
+          >
+            <div />
+            {weekDays.map((d) => (
+              <div
+                key={toLocalDateKey(d)}
+                style={{ padding: 8, borderLeft: `1px solid ${theme.border}` }}
+              >
+                <b>{d.toLocaleDateString("uk-UA", { weekday: "short" })}</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>
+                  {toLocalDateKey(d)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "70px repeat(7,1fr)",
+              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * HOUR_PX,
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                borderRight: `1px solid ${theme.border}`,
+              }}
+            >
+              {Array.from(
+                { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
+                (_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      top: i * HOUR_PX - 8,
+                      left: 8,
+                      fontSize: 11,
+                      color: theme.textLight,
+                    }}
+                  >
+                    {String(DAY_START_HOUR + i).padStart(2, "0")}:00
+                  </div>
+                ),
+              )}
+            </div>
+            {weekDays.map((d) => {
+              const date = toLocalDateKey(d);
+              const dayEvents = eventsByDay.get(date) || [];
+              return (
+                <div
+                  key={date}
+                  style={{
+                    position: "relative",
+                    borderLeft: `1px solid ${theme.border}`,
+                    cursor: isAdmin ? "crosshair" : "default",
+                  }}
+                  onMouseMove={(ev) => {
+                    if (!isAdmin) return;
+                    const rect = ev.currentTarget.getBoundingClientRect();
+                    const y = ev.clientY - rect.top;
+                    const mins = DAY_START_HOUR * 60 + (y / HOUR_PX) * 60;
+                    setHoverSlot({ date, minute: roundToNearest30(mins) });
+                  }}
+                  onMouseLeave={() => setHoverSlot(null)}
+                  onClick={(ev) => {
+                    if (!isAdmin) return;
+                    if (ev.target.closest("[data-event-card='1']")) return;
+                    const rect = ev.currentTarget.getBoundingClientRect();
+                    const y = ev.clientY - rect.top;
+                    const mins = DAY_START_HOUR * 60 + (y / HOUR_PX) * 60;
+                    openCreateAt(date, mins);
+                  }}
+                >
+                  {isAdmin && hoverSlot?.date === date ? (
+                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: HOUR_PX / 2, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 0 }} />
+                  ) : null}
+                  {Array.from(
+                    { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
+                    (_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          position: "absolute",
+                          top: i * HOUR_PX,
+                          left: 0,
+                          right: 0,
+                          borderTop: `1px solid ${theme.border}`,
+                          opacity: 0.35,
+                        }}
+                      />
+                    ),
+                  )}
+                  {dayEvents.map((e) => {
+                    const dur = Math.max(0, e.endMin - e.startMin);
+                    const top =
+                      ((e.startMin - DAY_START_HOUR * 60) / 60) * HOUR_PX;
+                    const height = Math.max(
+                      MIN_EVENT_HEIGHT,
+                      (dur / 60) * HOUR_PX,
+                    );
+                    const gap = 2;
+                    const available = 94;
+                    const width =
+                      e.colCount > 1
+                        ? (available - gap * (e.colCount - 1)) / e.colCount
+                        : available;
+                    const left = 3 + e.colIndex * (width + gap);
+                    const c = e.color
+                      ? { bg: `${e.color}22`, border: e.color }
+                      : palette[colorKey(e)] || palette.default;
+                    const stView = statusStyles[e.status] || statusStyles.active;
+                    return (
+                      <div
+                        key={e.id}
+                        data-event-card="1"
+                        style={{
+                          position: "absolute",
+                          top,
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          height,
+                          border: `1px solid ${c.border}`,
+                          background: c.bg,
+                          opacity: stView.opacity,
+                          borderRadius: 10,
+                          padding: 6,
+                          fontSize: 11,
+                          overflow: "visible",
+                          zIndex: openMenuState?.eventId === e.id ? 2000 : 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "start",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>
+                            {e.title}
+                          </div>
+                          {isAdmin && (
+                            <div style={{ position: "absolute", top: 6, right: 6, zIndex: 2100 }}>
+                              <button
+                                style={{
+                                  ...btnS,
+                                  padding: "0 6px",
+                                  fontSize: 12,
+                                  lineHeight: "16px",
+                                  position: "relative",
+                                  zIndex: 2200,
+                                }}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  const rect = ev.currentTarget.getBoundingClientRect();
+                                  setOpenMenuState((prev) =>
+                                    prev?.eventId === e.id
+                                      ? null
+                                      : {
+                                          eventId: e.id,
+                                          top: rect.bottom + 6,
+                                          left: rect.right - 190,
+                                        },
+                                  );
+                                }}
+                              >
+                                ⋮
+                              </button>
+                              {openMenuState?.eventId === e.id &&
+                                createPortal(
+                                  <div
+                                    onClick={(ev) => ev.stopPropagation()}
+                                    style={{
+                                      position: "fixed",
+                                      left: Math.max(8, openMenuState.left),
+                                      top: Math.max(8, openMenuState.top),
+                                      zIndex: 3000,
+                                      minWidth: 190,
+                                      background: theme.card,
+                                      border: `1px solid ${theme.border}`,
+                                      borderRadius: 8,
+                                      padding: 6,
+                                      display: "grid",
+                                      gap: 4,
+                                      boxShadow: "0 10px 28px rgba(0,0,0,.25)",
+                                    }}
+                                  >
+                                  {e.kind === "booking" ? (
+                                    <>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuState(null);
+                                          startEdit(e);
+                                        }}
+                                      >
+                                        Редагувати
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuState(null);
+                                          duplicateBookingLikeEvent(e);
+                                        }}
+                                      >
+                                        Дублювати
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuState(null);
+                                          if (window.confirm("Видалити подію/серію?"))
+                                            onDeleteBooking(e.parentId || e.id);
+                                        }}
+                                      >
+                                        Видалити
+                                      </button>
+                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Попередньо</button>
+                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "cancelled" }); }}>Скасовано</button>
+                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Активно</button>
+                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Скинути колір</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuState(null);
+                                          setSelectedEventDetails(e);
+                                        }}
+                                      >
+                                        Деталі заняття
+                                      </button>
+                                      <button
+                                        style={btnS}
+                                        onClick={() => {
+                                          setOpenMenuState(null);
+                                          openGroupSlotEditor(e);
+                                        }}
+                                      >
+                                        Редагувати заняття
+                                      </button>
+                                    </>
+                                  )}
+                                  </div>,
+                                  document.body,
+                                )}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em" }}>
+                          <div style={{ color: theme.text, fontSize: 11 }}>{e.startTime}–{e.endTime}</div>
+                          {height > 44 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
+                          {e.kind === "booking" && height > 56 ? <div>{stView.text}</div> : null}
+                          {e.kind === "booking" && height > 68 ? <div>{getEventTypeLabel(e.eventType)}</div> : null}
+                          {e.description && height > 82 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
+                          {e.peopleCount && height > 92 ? <div>{e.peopleCount} ос.</div> : null}
+                          {e.price && height > 100 ? <div>{e.price}₴</div> : null}
+                        </div>
+                        {e.paymentMethod && e.paymentMethod !== "none" ? (
+                          <div style={{ fontSize: 10.5, color: theme.textLight }}>{paymentLabel(e.paymentMethod)}</div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {isAdmin && (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <b>Типи резерву / ціни</b>
+          {bookingTypes.map((t, i) => (
+            <div
+              key={t.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "2fr 120px",
+                gap: 8,
+                marginTop: 6,
+              }}
+            >
+              <input
+                style={inputSt}
+                value={t.label}
+                onChange={(e) =>
+                  setBookingTypes((p) =>
+                    p.map((x, idx) =>
+                      idx === i ? { ...x, label: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <input
+                style={inputSt}
+                type="number"
+                value={t.price}
+                onChange={(e) =>
+                  setBookingTypes((p) =>
+                    p.map((x, idx) =>
+                      idx === i
+                        ? { ...x, price: Number(e.target.value || 0) }
+                        : x,
+                    ),
+                  )
+                }
+              />
+            </div>
+          ))}
+          <button
+            style={{ ...btnS, marginTop: 8 }}
+            onClick={() => setBookingTypes(DEFAULT_TYPES)}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
