@@ -284,16 +284,34 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
 }
 
 export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps }) {
+  const [mode, setMode] = useState("existing");
   const [studentId, setStudentId] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [note, setNote] = useState("");
   return (
     <div>
-      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+      <Field label="Тип контакту">
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
+          <button type="button" style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+        </div>
+      </Field>
+      {mode === "existing" ? (
+        <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+      ) : (
+        <>
+          <Field label="Ім'я *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Контакт / Instagram"><input style={inputSt} value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
+        </>
+      )}
       <Field label="В яку групу чекає? *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-        <button type="button" style={{ ...btnP, background: theme.warning, opacity: studentId && groupId ? 1 : .4 }} onClick={() => {
-          if (studentId && groupId) onDone({ studentId, groupId, dateAdded: today() })
+        <button type="button" style={{ ...btnP, background: theme.warning, opacity: ((mode === "existing" ? studentId : name.trim()) && groupId) ? 1 : .4 }} onClick={() => {
+          if ((mode === "existing" ? studentId : name.trim()) && groupId) onDone({ studentId: mode === "existing" ? studentId : null, groupId, dateAdded: today(), name: name.trim(), contact: contact.trim(), note: note.trim(), status: "waiting" })
         }}>
           Додати в резерв
         </button>
