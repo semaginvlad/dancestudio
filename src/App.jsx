@@ -1006,6 +1006,10 @@ export default function App() {
               const updated = await db.updateRoomBooking(id, payload);
               setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
             }}
+            onUpdateGroupSchedule={async (groupId, schedule) => {
+              const updated = await db.updateGroup(groupId, { schedule });
+              setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+            }}
           />
         )}
         {!isAdmin && tab==="schedule" && (
@@ -1019,6 +1023,7 @@ export default function App() {
             onAddBooking={async () => {}}
             onDeleteBooking={async () => {}}
             onUpdateBooking={async () => {}}
+            onUpdateGroupSchedule={async () => {}}
           />
         )}
 

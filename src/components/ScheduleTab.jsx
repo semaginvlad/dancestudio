@@ -169,6 +169,7 @@ export default function ScheduleTab({
   onAddBooking,
   onDeleteBooking,
   onUpdateBooking,
+  onUpdateGroupSchedule,
 }) {
   const safeGroups = Array.isArray(groups) ? groups : [];
   const safeDirections = Array.isArray(directionsList) ? directionsList : [];
@@ -183,6 +184,7 @@ export default function ScheduleTab({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
+  const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime }
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
     startTime: "12:00",
@@ -236,6 +238,7 @@ export default function ScheduleTab({
         slots.push({
           id: `${g.id}_${idx}`,
           groupId: g.id,
+          slotIndex: idx,
           weekday: wd,
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
@@ -259,6 +262,8 @@ export default function ScheduleTab({
               kind: "group",
               eventType: "group_lesson",
               date,
+              groupName: s.title,
+              slotIndex: s.slotIndex,
               startMin: st,
               endMin: en,
               cancelled: cancelledSet.has(`${s.groupId}:${date}`),
@@ -380,6 +385,43 @@ export default function ScheduleTab({
       title: e.title || "",
       note: e.note || "",
     }));
+  };
+
+  const openGroupSlotEditor = (e) => {
+    setGroupSlotEdit({
+      groupId: e.groupId,
+      slotIndex: e.slotIndex,
+      groupName: e.groupName || e.title,
+      weekday: e.weekday,
+      startTime: e.startTime,
+      endTime: e.endTime,
+    });
+  };
+
+  const saveGroupSlotEdit = async () => {
+    if (!groupSlotEdit || !onUpdateGroupSchedule) return;
+    const g = safeGroups.find((x) => String(x.id) === String(groupSlotEdit.groupId));
+    if (!g) return;
+    const prev = Array.isArray(g.schedule) ? g.schedule : [];
+    const nextSchedule = prev.map((row, idx) => {
+      if (idx !== groupSlotEdit.slotIndex) return row;
+      const next = { ...row };
+      if ("weekday" in next) next.weekday = groupSlotEdit.weekday;
+      else if ("dayOfWeek" in next) next.dayOfWeek = groupSlotEdit.weekday;
+      else if ("day" in next) next.day = groupSlotEdit.weekday;
+      else if ("dow" in next) next.dow = groupSlotEdit.weekday;
+      else if ("weekDay" in next) next.weekDay = groupSlotEdit.weekday;
+      else next.weekday = groupSlotEdit.weekday;
+      if ("startTime" in next) next.startTime = groupSlotEdit.startTime;
+      else if ("start" in next) next.start = groupSlotEdit.startTime;
+      else if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime || ""}`.replace(/-$/, "");
+      else next.startTime = groupSlotEdit.startTime;
+      if ("endTime" in next) next.endTime = groupSlotEdit.endTime;
+      else if ("end" in next) next.end = groupSlotEdit.endTime;
+      return next;
+    });
+    await onUpdateGroupSchedule(groupSlotEdit.groupId, nextSchedule);
+    setGroupSlotEdit(null);
   };
 
   useEffect(() => {
@@ -591,6 +633,24 @@ export default function ScheduleTab({
             >
               Скасувати
             </button>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && groupSlotEdit && (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <b>Редагувати групове заняття</b>
+          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 4 }}>
+            Група: {groupSlotEdit.groupName}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+            <input style={inputSt} type="number" min="0" max="6" value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))} />
+            <input style={inputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
+            <input style={inputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button style={btnP} onClick={saveGroupSlotEdit}>Зберегти</button>
+            <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
           </div>
         </div>
       )}
@@ -819,9 +879,11 @@ export default function ScheduleTab({
                                         style={btnS}
                                         onClick={() => {
                                           setOpenMenuState(null);
-                                          alert(
-                                            "Редагування групових занять буде додано наступним кроком",
-                                          );
+                                          if (!onUpdateGroupSchedule) {
+                                            alert("Редагування групових занять буде додано наступним кроком");
+                                            return;
+                                          }
+                                          openGroupSlotEditor(e);
                                         }}
                                       >
                                         Редагувати групу
