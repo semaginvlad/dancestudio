@@ -133,6 +133,7 @@ const colorKey = (e) => {
   return "default";
 };
 const recurrenceModes = ["none", "daily", "weekly", "monthly"];
+const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
 const paymentLabel = (v) => ({ cash: "Готівка", card: "Карта", none: "Без оплати" }[v] || v || "—");
 const palette = {
@@ -521,6 +522,7 @@ export default function ScheduleTab({
     const vh = window.innerHeight;
     const left = Math.min(Math.max(8, (clickEvent?.clientX || 40) + 8), vw - 320);
     const top = Math.min(Math.max(8, (clickEvent?.clientY || 40) + 8), vh - 320);
+    if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", { ...base, x: left, y: top });
     setQuickCreate({ ...base, x: left, y: top });
   };
   const applyQuickToFullForm = () => {
@@ -634,14 +636,17 @@ export default function ScheduleTab({
   }, [openMenuState]);
   useEffect(() => {
     if (!quickCreate) return;
+    if (DEBUG_QUICK_CREATE) console.log("[quick-create] state", quickCreate);
     const onDoc = (e) => {
       if (e.target.closest("[data-quick-create='1']")) return;
+      if (DEBUG_QUICK_CREATE) console.log("[quick-create] outside close");
       setQuickCreate(null);
     };
     const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
-    document.addEventListener("click", onDoc);
+    const t = setTimeout(() => document.addEventListener("click", onDoc), 0);
     document.addEventListener("keydown", onEsc);
     return () => {
+      clearTimeout(t);
       document.removeEventListener("click", onDoc);
       document.removeEventListener("keydown", onEsc);
     };
@@ -990,10 +995,12 @@ export default function ScheduleTab({
                       }}
                       onMouseLeave={() => setHoverSlot(null)}
                       onClick={(ev) => {
+                        ev.stopPropagation();
                         if (ev.target.closest("[data-event-card='1']")) return;
                         const rect = ev.currentTarget.getBoundingClientRect();
                         const y = ev.clientY - rect.top;
                         const mins = DAY_START_HOUR * 60 + (y / HOUR_PX) * 60;
+                        if (DEBUG_QUICK_CREATE) console.log("[quick-create] layer click", { date, y, mins });
                         openCreateAt(date, mins, ev);
                       }}
                     />
