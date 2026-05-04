@@ -11,6 +11,7 @@ export default function TrainersNotificationsTab({
   attn = [],
   cancelled = [],
 }) {
+  const DEBUG_TRAINER_MESSAGE = false;
   const [dialogs, setDialogs] = useState([]);
   const [metaByChat, setMetaByChat] = useState({});
   const [selectedChatId, setSelectedChatId] = useStickyState("", "ds_trainer_notify_selected_chat_v1");
@@ -175,7 +176,7 @@ export default function TrainersNotificationsTab({
         enabled: row.auto_send_enabled !== false,
         persistedDraft: manualDraft,
         sendTimeOverride: row.send_time_override || null,
-        activeText: (draftByChat[`${selectedDialog.id}:${g.id}`] ?? manualDraft ?? generated.text) || "",
+        activeText: (draftByChat[`${selectedDialog.id}:${g.id}`] ?? generated.text) || "",
       };
     });
 
@@ -192,7 +193,7 @@ export default function TrainersNotificationsTab({
 
   const activeDraft = digest.selectedGroupData?.activeText || "";
   const activeGroupId = digest.selectedGroupData?.groupId || "";
-  const isDraftDirty = String(activeDraft || "") !== String(digest.selectedGroupData?.persistedDraft || "");
+  const isDraftDirty = String(activeDraft || "") !== String(digest.selectedGroupData?.generatedText || "");
   const selectedScheduleKey = `${selectedDialog?.id || ""}:${activeGroupId || ""}`;
 
   const resolveMode = (rawOverride) => {
@@ -285,19 +286,38 @@ export default function TrainersNotificationsTab({
     }
   };
 
+  const buildFreshTrainerAttendanceMessage = ({ groupId }) => {
+    const g = groups.find((x) => String(x.id) === String(groupId));
+    if (!g) return { text: "", studentsCount: 0 };
+    const stateMap = (selectedDialog && stateByChatGroup[selectedDialog.id]) || {};
+    const row = stateMap[String(g.id)] || {};
+    const plan = buildGroupDispatchPlan({ group: g, cancelled, now: new Date(), sendTimeOverride: row.send_time_override || null });
+    const generated = buildTrainerGroupDraft({
+      group: g,
+      students,
+      membershipByStudent,
+      subsByStudent,
+      attn,
+      targetTrainingDate: plan?.trainingDate || today(),
+    });
+    if (DEBUG_TRAINER_MESSAGE) console.log("[trainer-message:fresh]", { groupId, studentsCount: generated.studentsCount, preview: String(generated.text || "").slice(0, 120) });
+    return { text: generated.text || "", studentsCount: generated.studentsCount || 0 };
+  };
+
   const regenerateFromTemplate = () => {
     if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
     if (!window.confirm("Перезаписати ручну чернетку автогенерованим шаблоном для цієї групи?")) return;
-    const regenerated = digest.selectedGroupData.generatedText || "";
+    const regenerated = buildFreshTrainerAttendanceMessage({ groupId: activeGroupId }).text || "";
     setDraftByChat((prev) => ({ ...prev, [`${selectedDialog.id}:${activeGroupId}`]: regenerated }));
     saveManualDraft(activeGroupId, regenerated);
     setRefreshVersion((v) => v + 1);
   };
 
   const copyToClipboard = async () => {
-    if (!activeDraft) return;
+    const freshText = buildFreshTrainerAttendanceMessage({ groupId: activeGroupId }).text || activeDraft || "";
+    if (!freshText) return;
     try {
-      await navigator.clipboard.writeText(activeDraft);
+      await navigator.clipboard.writeText(freshText);
       alert("Скопійовано");
     } catch {
       alert("Не вдалося скопіювати");
@@ -306,7 +326,8 @@ export default function TrainersNotificationsTab({
 
   const sendNow = async ({ dryRun = false } = {}) => {
     if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
-    const text = activeDraft || digest.selectedGroupData.generatedText || "";
+    const fresh = buildFreshTrainerAttendanceMessage({ groupId: activeGroupId });
+    const text = fresh.text || "";
     if (!text) return;
     const nowIso = new Date().toISOString();
 
@@ -317,7 +338,7 @@ export default function TrainersNotificationsTab({
           status: "dry-run",
           chatTitle: `${selectedDialog.title || selectedDialog.id} / ${digest.selectedGroupData.groupName}`,
           time: nowIso,
-          students: digest.selectedGroupData.generatedStudentsCount || 0,
+          students: fresh.studentsCount || 0,
         },
         ...prev,
       ].slice(0, 20));
@@ -326,7 +347,7 @@ export default function TrainersNotificationsTab({
 
     setSendingNow(true);
     try {
-      await saveManualDraft(activeGroupId, text);
+      updateDraft(text);
       const res = await fetch("/api/telegram?op=sendTrainerDigest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -336,7 +357,7 @@ export default function TrainersNotificationsTab({
           chatTitle: selectedDialog.title || selectedDialog.id,
           groupId: digest.selectedGroupData.groupId,
           groupNames: [digest.selectedGroupData.groupName],
-          studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+          studentsCount: fresh.studentsCount || 0,
           triggerType: "manual",
         }),
       });
@@ -351,7 +372,7 @@ export default function TrainersNotificationsTab({
         groupId: digest.selectedGroupData.groupId,
         groupName: digest.selectedGroupData.groupName,
         timestamp: nowIso,
-        studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+        studentsCount: fresh.studentsCount || 0,
         details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "send failed"),
       };
       await appendHistory(historyEntry);
@@ -361,7 +382,7 @@ export default function TrainersNotificationsTab({
           status: ok ? "sent" : "failed",
           chatTitle: `${selectedDialog.title || selectedDialog.id} / ${digest.selectedGroupData.groupName}`,
           time: nowIso,
-          students: digest.selectedGroupData.generatedStudentsCount || 0,
+          students: fresh.studentsCount || 0,
           details: ok
             ? `admin-log: ${payload?.adminLogStatus || "skipped"}`
             : (payload?.details || payload?.error || "send failed"),
@@ -416,7 +437,8 @@ export default function TrainersNotificationsTab({
     event?.preventDefault?.();
     event?.stopPropagation?.();
     if (!selectedDialog?.id || !activeGroupId || !digest.selectedGroupData) return;
-    const text = activeDraft || digest.selectedGroupData.generatedText || "";
+    const fresh = buildFreshTrainerAttendanceMessage({ groupId: activeGroupId });
+    const text = fresh.text || "";
     if (!text) return;
     const nowIso = new Date().toISOString();
     setSendingNow(true);
@@ -430,7 +452,7 @@ export default function TrainersNotificationsTab({
           chatTitle: selectedDialog.title || selectedDialog.id,
           groupId: digest.selectedGroupData.groupId,
           groupNames: [digest.selectedGroupData.groupName],
-          studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+          studentsCount: fresh.studentsCount || 0,
           triggerType: "test",
           sendToAdminOnly: true,
         }),
@@ -446,7 +468,7 @@ export default function TrainersNotificationsTab({
         groupId: digest.selectedGroupData.groupId,
         groupName: digest.selectedGroupData.groupName,
         timestamp: nowIso,
-        studentsCount: digest.selectedGroupData.generatedStudentsCount || 0,
+        studentsCount: fresh.studentsCount || 0,
         details: ok ? `admin-log:${payload?.adminLogStatus || "skipped"}` : (payload?.details || payload?.error || "test failed"),
       };
       await appendHistory(historyEntry);
