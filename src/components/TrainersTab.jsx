@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard, resolveAttendanceClassification } from "../shared/analytics";
-import { theme as appTheme } from "../shared/constants";
+import { PLAN_TYPES, theme as appTheme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 
 const theme = {
@@ -110,6 +110,19 @@ const getEffectivePaidAmount = (sub = {}) => {
   if (nominal > 0 && discountPct > 0) return Math.max(0, nominal - Math.round((nominal * discountPct) / 100));
   return amount;
 };
+const ONE_OFF_DEFAULT_PRICE = Object.fromEntries(
+  PLAN_TYPES
+    .filter((p) => ["trial", "single"].includes(String(p.id || "").toLowerCase()))
+    .map((p) => [String(p.id).toLowerCase(), money(p.price)]),
+);
+const getAttendanceRevenue = (row = {}) => {
+  const explicitAmount = money(row.amount || row.price || row.paymentAmount || row.payment_amount);
+  if (explicitAmount > 0) return { amount: explicitAmount, revenueSource: "attendance.amount|price|paymentAmount", warning: null };
+  const type = String(row.entryType || row.guestType || row.planType || "").trim().toLowerCase();
+  const fallback = money(ONE_OFF_DEFAULT_PRICE[type]);
+  if (fallback > 0) return { amount: fallback, revenueSource: `fallback.plan_price.${type}`, warning: null };
+  return { amount: 0, revenueSource: "missing", warning: "guest one-off has no amount; salary revenue = 0" };
+};
 const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 }) => {
   const pctValue = Math.max(0, Math.min(100, Number(trainerPct || 0)));
   const revenueDate = source === "attendance_guest_oneoff" ? String(row.date || "").slice(0, 10) : getSubRefDate(row);
@@ -117,7 +130,8 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
   const nominal = getNominalAmount(row);
   const discountValue = getDiscountValue(row);
   const discountPercent = getDiscountPercent(row);
-  const effectivePaidAmount = source === "attendance_guest_oneoff" ? getAttendanceRevenue(row) : getEffectivePaidAmount(row);
+  const attendanceRevenue = source === "attendance_guest_oneoff" ? getAttendanceRevenue(row) : null;
+  const effectivePaidAmount = source === "attendance_guest_oneoff" ? attendanceRevenue.amount : getEffectivePaidAmount(row);
   const trainerNominalShare = Math.round((nominal * pctValue) / 100);
   let trainerShare = Math.round((effectivePaidAmount * pctValue) / 100);
   let formulaBranch = source === "attendance_guest_oneoff"
@@ -138,6 +152,10 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
     studentName: row.studentName || row.studentFullName || null,
     groupId: row.groupId ?? null,
     trainerId: row.trainerId ?? null,
+    attendanceId: source === "attendance_guest_oneoff" ? row.id ?? null : null,
+    entryType: row.entryType || null,
+    guestType: row.guestType || null,
+    quantity: row.quantity ?? 1,
     planType: row.planType || null,
     nominalAmount: nominal,
     paidAmountUsed: effectivePaidAmount,
@@ -150,11 +168,13 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
     trainerShare,
     revenueDate,
     formulaBranch,
+    attendanceRevenue: attendanceRevenue?.amount ?? null,
+    revenueSource: attendanceRevenue?.revenueSource ?? "subscription",
+    warning: attendanceRevenue?.warning ?? null,
     rawKeys: Object.keys(row || {}),
     rawDiscountFields: getRawDiscountSnapshot(row),
   };
 };
-const getAttendanceRevenue = (row = {}) => money(row.amount || row.price || row.paymentAmount || row.payment_amount);
 
 const Delta = ({ value = 0 }) => (
   <span style={{
