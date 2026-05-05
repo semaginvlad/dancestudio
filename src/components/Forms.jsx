@@ -73,7 +73,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [amount, setAmount] = useState(initial?.amount || 1500);
   const [paid, setPaid] = useState(initial?.paid ?? false);
   const [payMethod, setPayMethod] = useState(initial?.payMethod || "card");
-  const [discountPct, setDiscountPct] = useState(initial?.discountPct || 0);
+  const [discountPct, setDiscountPct] = useState(Number(initial?.discountPct || 0));
   const [discountSource, setDiscountSource] = useState(initial?.discountSource || "studio");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [retrospectiveMode, setRetrospectiveMode] = useState(false);
@@ -94,7 +94,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
-  const basePrice = plan?.price || 0;
+  const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? (plan?.price || 0)));
 
   // 🆕 Обчислюємо дату закінчення залежно від активації
   const selectedEndDate = isEndDateManualOverride ? manualEndDate : autoEndDate;
@@ -118,8 +118,11 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
 
   // 🔧 Перераховуємо amount при зміні planType АБО discountPct (і при редагуванні теж)
   useEffect(() => {
-    const p = PLAN_TYPES.find(p => p.id === planType);
-    if (p) setAmount(p.price - Math.round(p.price * discountPct / 100));
+    const p = PLAN_TYPES.find((x) => x.id === planType);
+    if (!p) return;
+    const nextBase = Number(p.price || 0);
+    setBasePrice(nextBase);
+    setAmount(nextBase - Math.round((nextBase * Number(discountPct || 0)) / 100));
   }, [planType, discountPct]);
 
   useEffect(() => {
@@ -221,6 +224,11 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
             </div>
           </Field>
         </div>
+        {discountSource && Number(discountPct) === 0 && (
+          <div style={{ fontSize: 12, color: theme.warning, marginTop: 8 }}>
+            ⚠ Обрано сторону знижки, але знижка % = 0. Перевірте, чи потрібно вказати знижку.
+          </div>
+        )}
         {discountPct > 0 && (
           <div style={{ fontSize: 14, color: theme.warning, marginTop: 12, fontWeight: 500 }}>
             Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice * discountPct / 100)}₴ → <strong style={{ color: theme.success, fontSize: 18 }}>До сплати: {basePrice - Math.round(basePrice * discountPct / 100)}₴</strong>
@@ -229,8 +237,11 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <Field label="Сума до сплати (грн)">
+          <Field label="Сума до сплати (грн)">
           <input style={{ ...inputSt, color: theme.success, fontWeight: 700, fontSize: 20 }} type="number" min={0} value={amount} onChange={e => setAmount(+e.target.value)} />
+        </Field>
+        <Field label="Базова ціна (грн)">
+          <input style={inputSt} type="number" min={0} value={basePrice} onChange={e => setBasePrice(Math.max(0, +e.target.value || 0))} />
         </Field>
         <Field label="Метод оплати">
           <div style={{ display: "flex", gap: 8 }}>

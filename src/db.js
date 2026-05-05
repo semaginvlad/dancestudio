@@ -299,24 +299,27 @@ export async function fetchSubs() {
 }
 
 export async function insertSub(s) {
-  const { data, error } = await supabase.from('subscriptions').insert({
+  const payload = {
     student_id: s.studentId,
     group_id: s.groupId,
     plan_type: s.planType,
     start_date: s.startDate,
     end_date: s.endDate,
     original_end_date: s.originalEndDate || s.endDate,
-    activation_date: s.activationDate || null,  // 🆕
+    activation_date: s.activationDate || null,
     total_trainings: s.totalTrainings,
     used_trainings: s.usedTrainings || 0,
-    amount: s.amount,
-    base_price: s.basePrice || s.amount,
-    discount_pct: s.discountPct || 0,
+    amount: Number(s.amount ?? 0),
+    base_price: Number(s.basePrice ?? s.amount ?? 0),
+    discount_pct: Number(s.discountPct ?? 0),
     discount_source: s.discountSource || 'studio',
     paid: s.paid,
     pay_method: s.payMethod || 'card',
     notification_sent: false,
     notes: s.notes,
+  };
+  const { data, error } = await supabase.from('subscriptions').insert({
+    ...payload,
   }).select().single()
   if (error) throw error
   return mapSub(data)
@@ -334,9 +337,9 @@ export async function updateSub(id, s) {
   if (s.activationDate !== undefined) payload.activation_date = s.activationDate  // 🆕
   if (s.totalTrainings !== undefined) payload.total_trainings = s.totalTrainings
   if (s.usedTrainings !== undefined) payload.used_trainings = s.usedTrainings
-  if (s.amount !== undefined) payload.amount = s.amount
-  if (s.basePrice !== undefined) payload.base_price = s.basePrice
-  if (s.discountPct !== undefined) payload.discount_pct = s.discountPct
+  if (s.amount !== undefined) payload.amount = Number(s.amount)
+  if (s.basePrice !== undefined) payload.base_price = Number(s.basePrice)
+  if (s.discountPct !== undefined) payload.discount_pct = Number(s.discountPct)
   if (s.discountSource !== undefined) payload.discount_source = s.discountSource
   if (s.paid !== undefined) payload.paid = s.paid
   if (s.payMethod !== undefined) payload.pay_method = s.payMethod
@@ -368,9 +371,9 @@ function mapSub(s) {
     totalTrainings: s.total_trainings,
     usedTrainings: s.used_trainings,
     amount: s.amount,
-    basePrice: s.base_price,
-    discountPct: s.discount_pct,
-    discountSource: s.discount_source,
+    basePrice: s.base_price ?? s.basePrice ?? null,
+    discountPct: s.discount_pct ?? s.discountPct ?? 0,
+    discountSource: s.discount_source ?? s.discountSource ?? null,
     paid: s.paid,
     payMethod: s.pay_method,
     notificationSent: s.notification_sent,
