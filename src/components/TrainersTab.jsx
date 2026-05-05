@@ -58,12 +58,31 @@ const money = (v) => Number(v || 0) || 0;
 const getNominalAmount = (sub = {}) =>
   money(sub.nominalAmount || sub.nominal_amount || sub.fullAmount || sub.full_amount || sub.price || sub.baseAmount || sub.base_amount);
 const getDiscountSide = (sub = {}) => String(sub.discountSide || sub.discount_side || sub.discountBy || sub.discount_by || "").toLowerCase();
-const getDiscountPercent = (sub = {}) => {
+  const getDiscountPercent = (sub = {}) => {
   const raw = Number(sub.discountPercent ?? sub.discount_percent ?? 0);
   if (!Number.isFinite(raw)) return 0;
   return Math.max(0, Math.min(100, raw));
 };
 const getDiscountValue = (sub = {}) => money(sub.discountAmount ?? sub.discount_amount ?? sub.discount ?? 0);
+const getRawDiscountSnapshot = (sub = {}) => ({
+  amount: sub.amount,
+  price: sub.price,
+  baseAmount: sub.baseAmount,
+  base_amount: sub.base_amount,
+  nominalAmount: sub.nominalAmount,
+  nominal_amount: sub.nominal_amount,
+  fullAmount: sub.fullAmount,
+  full_amount: sub.full_amount,
+  discount: sub.discount,
+  discountPercent: sub.discountPercent,
+  discount_percent: sub.discount_percent,
+  discountAmount: sub.discountAmount,
+  discount_amount: sub.discount_amount,
+  discountSide: sub.discountSide,
+  discount_side: sub.discount_side,
+  discountBy: sub.discountBy,
+  discount_by: sub.discount_by,
+});
 const getEffectivePaidAmount = (sub = {}) => {
   const amount = money(sub.amount);
   const nominal = getNominalAmount(sub);
@@ -104,6 +123,8 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
     formulaBranch: source === "attendance_guest_oneoff"
       ? "attendance_guest_oneoff: trainerShare = attendanceRevenue * trainerPct / 100"
       : "subscription: trainerShare = effectivePaidAmount * trainerPct / 100",
+    rawKeys: Object.keys(row || {}),
+    rawDiscountFields: getRawDiscountSnapshot(row),
   };
 };
 const getAttendanceRevenue = (row = {}) => money(row.amount || row.price || row.paymentAmount || row.payment_amount);
@@ -653,6 +674,8 @@ export default function TrainersTab({
       perGroupRows,
       debug: {
         totalComputedSalary: monthCurrent,
+        visibleSalarySourceVar: "revenueAnalytics.current",
+        visibleSalaryRowsCount: debugRows.length,
         rows: debugRows,
         groupTotals: perGroupRows.map((r) => ({ groupId: r.groupId, groupName: r.groupName, total: r.current })),
         trainerTotals: Object.entries(perTrainerCurrent).map(([trainerName, total]) => ({ trainerName, total })).sort((a, b) => b.total - a.total),
@@ -793,6 +816,19 @@ export default function TrainersTab({
     }
     return rows;
   }, [periodDate, scopedData, trainerBoundGroups, trendMonths]);
+
+  const visibleSalaryDebug = useMemo(() => {
+    const visibleSalaryTotal = revenueAnalytics.current;
+    const helperSalaryTotal = revenueAnalytics.debug.totalComputedSalary;
+    return {
+      visibleSalaryTotal,
+      helperSalaryTotal,
+      difference: visibleSalaryTotal - helperSalaryTotal,
+      sourceVar: revenueAnalytics.debug.visibleSalarySourceVar,
+      rowsIncluded: revenueAnalytics.debug.visibleSalaryRowsCount,
+      calcSource: "revenueAnalytics useMemo -> calcTrainerShare",
+    };
+  }, [revenueAnalytics]);
 
   useEffect(() => {
     setDetailState((prev) => {
@@ -1403,6 +1439,9 @@ export default function TrainersTab({
           >
             <div style={{ fontSize: 12, color: theme.textSoft }}>Дохід тренера (місяць)</div>
             <div style={{ fontSize: 26, fontWeight: 800, color: theme.good }}>{revenueAnalytics.current.toLocaleString()} ₴</div>
+            <div style={{ fontSize: 10, color: theme.textSoft, marginTop: 4 }}>
+              debug: renderedValue={visibleSalaryDebug.visibleSalaryTotal} · source={visibleSalaryDebug.sourceVar} · rows={visibleSalaryDebug.rowsIncluded}
+            </div>
             <div style={{ marginTop: 6 }}><Delta value={revenueAnalytics.delta} /></div>
             <div style={{ fontSize: 11, color: theme.textSoft, marginTop: 6 }}>Попередній: {revenueAnalytics.previous.toLocaleString()} ₴</div>
           </button>
@@ -1446,6 +1485,10 @@ export default function TrainersTab({
           <div style={{ marginTop: 8, fontSize: 12, color: theme.textSoft }}>Group totals: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(revenueAnalytics.debug.groupTotals, null, 2)}</pre></div>
           <div style={{ marginTop: 8, fontSize: 12, color: theme.textSoft }}>Trainer totals: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(revenueAnalytics.debug.trainerTotals, null, 2)}</pre></div>
           <div style={{ marginTop: 8, fontSize: 12, color: theme.textSoft }}>Rows: <pre style={{ maxHeight: 360, overflow: "auto", whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(revenueAnalytics.debug.rows, null, 2)}</pre></div>
+        </details>
+        <details style={{ ...card(), padding: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 800 }}>DEBUG: visible salary source</summary>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(visibleSalaryDebug, null, 2)}</pre>
         </details>
 
         <div style={{ ...card(), padding: 12, display: "grid", gap: 10 }}>
