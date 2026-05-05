@@ -166,8 +166,9 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user || null);
-      if (session?.user) loadAllData();
+      const currentUser = session?.user || null;
+      setUser(currentUser);
+      if (currentUser) loadAllData(currentUser);
       else setLoading(false);
     });
 
@@ -179,7 +180,13 @@ export default function App() {
     return () => subscription?.unsubscribe();
   }, []);
 
-  const loadAllData = async () => {
+  useEffect(() => {
+    if (user && !isAdmin && tab !== "attendance") {
+      setTab("attendance");
+    }
+  }, [user, isAdmin, tab, setTab]);
+
+  const loadAllData = async (currentUser = user) => {
     setLoading(true);
     try {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
@@ -212,19 +219,37 @@ export default function App() {
         safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
       ]);
 
-      if (st) setStudents(st);
-      if (gr?.length) setGroups(gr);
-      if (su) setSubs(su);
-      if (at) setAttn(at);
-      if (ca) setCancelled(ca);
-      if (sg) setStudentGrps(sg);
-      if (wl) setWaitlist(wl);
-      setCustomOrders(ord || {});
-      setWarnedStudents(warned || {});
-      setTrainers(tr || []);
-      setTrainerGroups(trg || []);
+      const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
+      const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const allowedGroups = isCurrentAdmin
+        ? allGroups
+        : allGroups.filter((g) => String(g.trainer_id || "") === String(currentUser?.id || ""));
+      const allowedGroupIds = new Set(allowedGroups.map((g) => String(g.id)));
+      const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
+      const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
+      const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
+      const scopedCancelled = isCurrentAdmin ? (ca || []) : (ca || []).filter((c) => allowedGroupIds.has(String(c.groupId)));
+      const allowedStudentIds = new Set([
+        ...scopedStudentGrps.map((row) => String(row.studentId)),
+        ...scopedSubs.map((sub) => String(sub.studentId)),
+        ...scopedAttn.map((row) => String(row.studentId || "")).filter(Boolean),
+      ]);
+      const scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+
+      // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
+      setStudents(scopedStudents);
+      setGroups(allowedGroups);
+      setSubs(scopedSubs);
+      setAttn(scopedAttn);
+      setCancelled(scopedCancelled);
+      setStudentGrps(scopedStudentGrps);
+      if (wl) setWaitlist(isCurrentAdmin ? wl : []);
+      setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
+      setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
+      setTrainers(isCurrentAdmin ? (tr || []) : []);
+      setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
       setDirections(dirs || []);
-      setRoomBookings(rb || []);
+      setRoomBookings(isCurrentAdmin ? (rb || []) : []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -966,7 +991,6 @@ export default function App() {
           ) : (
             [
               { id: "attendance", label: "Мої групи (Відвідування)" },
-              { id: "schedule", label: "Графік" },
             ].map((t) => <button key={t.id} onClick={() => setTab(t.id)} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor:"pointer"}}>{t.label}</button>)
           )}
         </div>
@@ -1010,20 +1034,6 @@ export default function App() {
               const updated = await db.updateGroup(groupId, { schedule });
               setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
             }}
-          />
-        )}
-        {!isAdmin && tab==="schedule" && (
-          <ScheduleTab
-            groups={groups}
-            directionsList={directionsList}
-            trainers={trainers}
-            cancelled={cancelled}
-            roomBookings={roomBookings}
-            isAdmin={false}
-            onAddBooking={async () => {}}
-            onDeleteBooking={async () => {}}
-            onUpdateBooking={async () => {}}
-            onUpdateGroupSchedule={async () => {}}
           />
         )}
 
