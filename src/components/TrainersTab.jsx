@@ -118,7 +118,19 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
   const discountValue = getDiscountValue(row);
   const discountPercent = getDiscountPercent(row);
   const effectivePaidAmount = source === "attendance_guest_oneoff" ? getAttendanceRevenue(row) : getEffectivePaidAmount(row);
-  const trainerShare = Math.round((effectivePaidAmount * pctValue) / 100);
+  const trainerNominalShare = Math.round((nominal * pctValue) / 100);
+  let trainerShare = Math.round((effectivePaidAmount * pctValue) / 100);
+  let formulaBranch = source === "attendance_guest_oneoff"
+    ? "attendance_guest_oneoff: trainerShare = attendanceRevenue * trainerPct / 100"
+    : "subscription: trainerShare = effectivePaidAmount * trainerPct / 100";
+  if (source === "subscription" && side === "studio" && nominal > 0) {
+    trainerShare = Math.min(effectivePaidAmount, trainerNominalShare);
+    formulaBranch = "studio discount: trainerShare = min(effectivePaidAmount, nominalAmount * trainerPct / 100)";
+  } else if (source === "subscription" && side === "trainer") {
+    // Trainer-side discount: trainer salary follows the effective paid amount split.
+    trainerShare = Math.round((effectivePaidAmount * pctValue) / 100);
+    formulaBranch = "trainer discount: trainerShare = effectivePaidAmount * trainerPct / 100";
+  }
   return {
     source,
     subId: source === "subscription" ? row.id ?? row.subId ?? null : row.subId ?? null,
@@ -134,11 +146,10 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
     discountPercent,
     discountSide: side || "none",
     trainerPct: pctValue,
+    trainerNominalShare,
     trainerShare,
     revenueDate,
-    formulaBranch: source === "attendance_guest_oneoff"
-      ? "attendance_guest_oneoff: trainerShare = attendanceRevenue * trainerPct / 100"
-      : "subscription: trainerShare = effectivePaidAmount * trainerPct / 100",
+    formulaBranch,
     rawKeys: Object.keys(row || {}),
     rawDiscountFields: getRawDiscountSnapshot(row),
   };
