@@ -498,29 +498,37 @@ export async function insertAttendance(a) {
   const entryType = String(a.entryType || 'subscription').trim().toLowerCase();
   let guestType = a.guestType ? String(a.guestType).trim().toLowerCase() : null;
   let studentId = a.studentId || null;
-  if ((entryType === 'trial' || entryType === 'single') && !guestType) {
-    console.warn('insertAttendance blocked: entryType trial/single requires guestType', { entryType, guestType, studentId, row: a });
-    throw new Error('invalid attendance row: guestType required for trial/single');
-  }
-  if (guestType && studentId) {
-    console.warn('insertAttendance blocked: guestType cannot be mixed with studentId', { entryType, guestType, studentId, row: a });
-    throw new Error('invalid attendance row: guestType + studentId mix is forbidden');
-  }
-  if (entryType === 'trial' || entryType === 'single') {
+  let normalizedEntryType = entryType;
+  let guestName = a.guestName || null;
+
+  // NOTE:
+  // stale guestType can leak from UI state for normal student attendance rows.
+  // If studentId is present and entryType is not trial/single, studentId wins:
+  // force subscription semantics and clear guest fields (do not throw).
+  if (studentId && entryType !== 'trial' && entryType !== 'single') {
+    normalizedEntryType = 'subscription';
+    guestType = null;
+    guestName = null;
+  } else if (entryType === 'trial' || entryType === 'single') {
+    if (studentId && guestType) {
+      console.warn('insertAttendance blocked: invalid mixed guest/student trial-single row', { entryType, guestType, studentId, row: a });
+      throw new Error('invalid attendance row: trial/single cannot have studentId');
+    }
+    if (!guestType) {
+      console.warn('insertAttendance warning: guestType missing for trial/single; defaulting to entryType', { entryType, row: a });
+    }
     guestType = guestType || entryType;
     studentId = null;
-  } else if (studentId) {
-    guestType = null;
   }
   const { data, error } = await supabase.from('attendance').insert({
     sub_id: a.subId || null,
     student_id: studentId,
     date: a.date,
-    guest_name: a.guestName || null,
+    guest_name: guestName,
     guest_type: guestType,
     group_id: a.groupId || null,
     quantity: a.quantity || 1,
-    entry_type: studentId ? 'subscription' : entryType,
+    entry_type: normalizedEntryType,
   }).select().single()
   if (error) throw error
   await ensureOneOffPaymentForAttendance(data);
