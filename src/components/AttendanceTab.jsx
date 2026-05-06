@@ -804,8 +804,8 @@ export default function AttendanceTab({
 
     setCreatingStudent(true);
     try {
-      const createdStudent = await db.insertStudent({ name });
-      const link = await db.addStudentGroup(createdStudent.id, gid);
+      const createdStudent = await db.createStudentForGroup(gid, { name });
+      const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
 
       if (typeof setStudents === "function") {
         setStudents((prev) => [...(prev || []), createdStudent]);
@@ -824,7 +824,7 @@ export default function AttendanceTab({
       });
       setNewStudentName("");
     } catch (err) {
-      alert(err?.message || "Не вдалося створити ученицю.");
+      alert(`Не вдалося створити ученицю через CRM RPC. ${err?.message || "Перевір, що функція crm_create_student_for_group застосована в Supabase."}`);
     } finally {
       setCreatingStudent(false);
     }
@@ -948,8 +948,6 @@ export default function AttendanceTab({
       return;
     }
     try {
-      const createdStudent = await db.insertStudent({ name });
-      const link = await db.addStudentGroup(createdStudent.id, gid);
       const safeRowIds = Array.isArray(guestRow.attendanceIds) ? guestRow.attendanceIds.filter(Boolean) : [];
       if (!safeRowIds.length) {
         alert("Не знайдено записів гостя в поточному видимому періоді.");
@@ -957,6 +955,8 @@ export default function AttendanceTab({
       }
       const ok = window.confirm(`Перетворити гостя на ученицю і переприв'язати ${safeRowIds.length} запис(ів) тільки з поточного видимого періоду?`);
       if (!ok) return;
+      const createdStudent = await db.createStudentForGroup(gid, { name });
+      const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
       await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
       if (typeof setStudents === "function") {
         setStudents((prev) => [...(prev || []), createdStudent]);
@@ -967,7 +967,7 @@ export default function AttendanceTab({
       await reloadFromDb();
       setOpenMenuState(null);
     } catch (err) {
-      alert(err?.message || "Не вдалося перетворити гостя на ученицю.");
+      alert(`Не вдалося перетворити гостя на ученицю через CRM RPC. ${err?.message || "Перевір, що функція crm_create_student_for_group застосована в Supabase."}`);
     }
   };
   const handleRemoveGuestRosterRow = (guestRow) => {
