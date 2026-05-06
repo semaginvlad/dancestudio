@@ -204,6 +204,7 @@ export default function ScheduleTab({
   cancelled = [],
   roomBookings = [],
   isAdmin = false,
+  allowBookingMutations = false,
   onAddBooking,
   onDeleteBooking,
   onUpdateBooking,
@@ -214,6 +215,7 @@ export default function ScheduleTab({
   const safeTrainers = Array.isArray(trainers) ? trainers : [];
   const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
   const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
+  const canManageBookings = isAdmin || allowBookingMutations;
   const [bookingTypes, setBookingTypes] = useStickyState(
     DEFAULT_TYPES,
     "ds_schedule_booking_options_v1",
@@ -422,7 +424,7 @@ export default function ScheduleTab({
   ]);
 
   const saveBooking = async () => {
-    if (!isAdmin) return;
+    if (!canManageBookings) return;
     const st = toMin(draft.startTime);
     const en = toMin(draft.endTime);
     if (
@@ -696,7 +698,7 @@ export default function ScheduleTab({
         >
           Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
         </div>
-        {isAdmin && (
+        {canManageBookings && (
           <button
             style={btnP}
             onClick={() => {
@@ -709,7 +711,7 @@ export default function ScheduleTab({
         )}
       </div>
 
-      {isAdmin && showForm && (
+      {canManageBookings && showForm && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
           <div
             style={{
@@ -727,7 +729,7 @@ export default function ScheduleTab({
             >
               <option value="room_booking">{getEventTypeLabel("room_booking")}</option>
               <option value="individual_training">{getEventTypeLabel("individual_training")}</option>
-              <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>
+              {isAdmin && <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>}
             </select>
             <input
               style={inputSt}
@@ -996,7 +998,7 @@ export default function ScheduleTab({
                     borderLeft: `1px solid ${theme.border}`,
                   }}
                 >
-                  {isAdmin ? (
+                  {canManageBookings ? (
                     <div
                       style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
                       onMouseDown={(ev) => {
@@ -1031,10 +1033,10 @@ export default function ScheduleTab({
                       }}
                     />
                   ) : null}
-                  {isAdmin && hoverSlot?.date === date ? (
+                  {canManageBookings && hoverSlot?.date === date ? (
                     <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: HOUR_PX / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
                   ) : null}
-                  {isAdmin && selection?.date === date ? (
+                  {canManageBookings && selection?.date === date ? (
                     <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * HOUR_PX, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
                   ) : null}
                   {Array.from(
@@ -1103,7 +1105,7 @@ export default function ScheduleTab({
                           <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>
                             {e.title}
                           </div>
-                          {isAdmin && (
+                          {(isAdmin || e.kind === "booking") && (
                             <div style={{ position: "absolute", top: 6, right: 6, zIndex: 2100 }}>
                               <button
                                 style={{
@@ -1197,15 +1199,17 @@ export default function ScheduleTab({
                                       >
                                         Деталі заняття
                                       </button>
-                                      <button
-                                        style={btnS}
-                                        onClick={() => {
-                                          setOpenMenuState(null);
-                                          openGroupSlotEditor(e);
-                                        }}
-                                      >
-                                        Редагувати заняття
-                                      </button>
+                                      {isAdmin && (
+                                        <button
+                                          style={btnS}
+                                          onClick={() => {
+                                            setOpenMenuState(null);
+                                            openGroupSlotEditor(e);
+                                          }}
+                                        >
+                                          Редагувати заняття
+                                        </button>
+                                      )}
                                     </>
                                   )}
                                   </div>,
@@ -1236,7 +1240,7 @@ export default function ScheduleTab({
         </div>
       </div>
 
-      {isAdmin && quickCreate && createPortal(
+      {canManageBookings && quickCreate && createPortal(
         <div data-quick-create="1" onClick={(e)=>e.stopPropagation()} style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}>
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
@@ -1245,7 +1249,7 @@ export default function ScheduleTab({
             <option value="">Тренер</option>{safeTrainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
           </select>
           <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>setQuickCreate((p)=>({ ...p, eventType: e.target.value }))}>
-            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="custom_admin_event">Кастомна подія</option>
+            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
           </select>
           {quickCreate.eventType !== "custom_admin_event" ? <>
             <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>setQuickCreate((p)=>({ ...p, bookingType: e.target.value }))}>{bookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
