@@ -599,7 +599,9 @@ export async function relinkGuestAttendanceToStudent({ groupId, studentId, atten
     .from('attendance')
     .update({
       student_id: studentId,
+      guest_name: null,
       guest_type: null,
+      sub_id: null,
     })
     .in('id', rowIds)
     .select('*');

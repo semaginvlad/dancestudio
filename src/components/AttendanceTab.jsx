@@ -958,6 +958,10 @@ export default function AttendanceTab({
       const createdStudent = await db.createStudentForGroup(gid, { name });
       const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
       await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
+      setGuestRosterByGroup((prev) => ({
+        ...(prev || {}),
+        [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id && normalizeName(r.guestName) !== normalizeName(guestRow.guestName)),
+      }));
       if (typeof setStudents === "function") {
         setStudents((prev) => [...(prev || []), createdStudent]);
       }
