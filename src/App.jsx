@@ -64,8 +64,10 @@ export default function App() {
   const [subs, setSubs] = useState([]);
   const [attn, setAttn] = useState([]);
   const [groups, setGroups] = useState(DEFAULT_GROUPS);
+  const [scheduleGroups, setScheduleGroups] = useState(DEFAULT_GROUPS);
   const [directions, setDirections] = useState([]);
   const [cancelled, setCancelled] = useState([]);
+  const [scheduleCancelled, setScheduleCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
   const [trainers, setTrainers] = useState([]);
@@ -181,7 +183,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user && !isAdmin && tab !== "attendance") {
+    if (user && !isAdmin && !["attendance", "schedule"].includes(tab)) {
       setTab("attendance");
     }
   }, [user, isAdmin, tab, setTab]);
@@ -239,9 +241,11 @@ export default function App() {
       // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
       setStudents(scopedStudents);
       setGroups(allowedGroups);
+      setScheduleGroups(allGroups);
       setSubs(scopedSubs);
       setAttn(scopedAttn);
       setCancelled(scopedCancelled);
+      setScheduleCancelled(ca || []);
       setStudentGrps(scopedStudentGrps);
       if (wl) setWaitlist(isCurrentAdmin ? wl : []);
       setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
@@ -249,7 +253,7 @@ export default function App() {
       setTrainers(isCurrentAdmin ? (tr || []) : []);
       setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
       setDirections(dirs || []);
-      setRoomBookings(isCurrentAdmin ? (rb || []) : []);
+      setRoomBookings(rb || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -939,6 +943,66 @@ export default function App() {
 
 
 
+  // Frontend guard only; Supabase RLS is still required for server-side booking ownership enforcement.
+  const canMutateRoomBooking = (booking) => {
+    if (isAdmin) return true;
+    return !!booking && String(booking.trainerId || "") === String(user?.id || "");
+  };
+
+  const addRoomBookingAction = async (payload) => {
+    const safePayload = isAdmin
+      ? payload
+      : {
+          ...payload,
+          trainerId: user?.id || null,
+          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
+            ? payload.eventType
+            : "room_booking",
+        };
+    const created = await db.insertRoomBooking(safePayload);
+    setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
+  };
+
+  const deleteRoomBookingAction = async (id) => {
+    const booking = roomBookings.find((x) => String(x.id) === String(id));
+    if (!canMutateRoomBooking(booking)) {
+      alert("Можна видаляти тільки власні резерви / індивідуальні тренування.");
+      return;
+    }
+    if (isAdmin && !window.confirm("Видалити резерв залу?")) return;
+    await db.deleteRoomBooking(id);
+    setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
+  };
+
+  const updateRoomBookingAction = async (id, payload) => {
+    const booking = roomBookings.find((x) => String(x.id) === String(id));
+    if (!canMutateRoomBooking(booking)) {
+      alert("Можна редагувати тільки власні резерви / індивідуальні тренування.");
+      return;
+    }
+    const safePayload = isAdmin
+      ? payload
+      : {
+          ...payload,
+          trainerId: booking.trainerId || user?.id || null,
+          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || booking.eventType || ""))
+            ? (payload.eventType || booking.eventType)
+            : "room_booking",
+        };
+    const updated = await db.updateRoomBooking(id, safePayload);
+    setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
+  };
+
+  const updateGroupScheduleAction = async (groupId, schedule) => {
+    if (!isAdmin) {
+      alert("Редагування розкладу груп доступне тільки адміністратору.");
+      return;
+    }
+    const updated = await db.updateGroup(groupId, { schedule });
+    setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+    setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+  };
+
   return (
     <div key={themeVersion} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -991,6 +1055,7 @@ export default function App() {
           ) : (
             [
               { id: "attendance", label: "Мої групи (Відвідування)" },
+              { id: "schedule", label: "Графік" },
             ].map((t) => <button key={t.id} onClick={() => setTab(t.id)} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor:"pointer"}}>{t.label}</button>)
           )}
         </div>
@@ -1009,31 +1074,19 @@ export default function App() {
             cancelled={cancelled}
           />
         )}
-        {isAdmin && tab==="schedule" && (
+        {tab === "schedule" && (isAdmin || user) && (
           <ScheduleTab
-            groups={groups}
+            groups={isAdmin ? groups : scheduleGroups}
             directionsList={directionsList}
             trainers={trainers}
-            cancelled={cancelled}
+            cancelled={scheduleCancelled}
             roomBookings={roomBookings}
             isAdmin={isAdmin}
-            onAddBooking={async (payload) => {
-              const created = await db.insertRoomBooking(payload);
-              setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
-            }}
-            onDeleteBooking={async (id) => {
-              if (!window.confirm("Видалити резерв залу?")) return;
-              await db.deleteRoomBooking(id);
-              setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
-            }}
-            onUpdateBooking={async (id, payload) => {
-              const updated = await db.updateRoomBooking(id, payload);
-              setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
-            }}
-            onUpdateGroupSchedule={async (groupId, schedule) => {
-              const updated = await db.updateGroup(groupId, { schedule });
-              setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
-            }}
+            allowBookingMutations={!isAdmin}
+            onAddBooking={addRoomBookingAction}
+            onDeleteBooking={deleteRoomBookingAction}
+            onUpdateBooking={updateRoomBookingAction}
+            onUpdateGroupSchedule={updateGroupScheduleAction}
           />
         )}
 
