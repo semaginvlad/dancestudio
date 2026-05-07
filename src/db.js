@@ -306,8 +306,24 @@ export async function deleteTrainerGroup(trainerId, groupId) {
 }
 
 // ─── SUBSCRIPTIONS ───
-export async function fetchSubs() {
-  const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })
+const SAFE_SUBS_COLUMNS = [
+  'id',
+  'student_id',
+  'group_id',
+  'plan_type',
+  'start_date',
+  'end_date',
+  'original_end_date',
+  'activation_date',
+  'total_trainings',
+  'used_trainings',
+  'notification_sent',
+  'created_at',
+].join(',')
+
+export async function fetchSubs({ includeFinancial = true } = {}) {
+  const columns = includeFinancial ? '*' : SAFE_SUBS_COLUMNS
+  const { data, error } = await supabase.from('subscriptions').select(columns).order('created_at', { ascending: false })
   if (error) throw error
   return data.map(mapSub)
 }
