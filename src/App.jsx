@@ -64,8 +64,10 @@ export default function App() {
   const [subs, setSubs] = useState([]);
   const [attn, setAttn] = useState([]);
   const [groups, setGroups] = useState(DEFAULT_GROUPS);
+  const [scheduleGroups, setScheduleGroups] = useState(DEFAULT_GROUPS);
   const [directions, setDirections] = useState([]);
   const [cancelled, setCancelled] = useState([]);
+  const [scheduleCancelled, setScheduleCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
   const [trainers, setTrainers] = useState([]);
@@ -166,8 +168,9 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user || null);
-      if (session?.user) loadAllData();
+      const currentUser = session?.user || null;
+      setUser(currentUser);
+      if (currentUser) loadAllData(currentUser);
       else setLoading(false);
     });
 
@@ -179,7 +182,13 @@ export default function App() {
     return () => subscription?.unsubscribe();
   }, []);
 
-  const loadAllData = async () => {
+  useEffect(() => {
+    if (user && !isAdmin && !["attendance", "schedule"].includes(tab)) {
+      setTab("attendance");
+    }
+  }, [user, isAdmin, tab, setTab]);
+
+  const loadAllData = async (currentUser = user) => {
     setLoading(true);
     try {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
@@ -205,24 +214,44 @@ export default function App() {
   }
 };
 
+      const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
       const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
-        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(db.fetchSubs),
+        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(() => db.fetchSubs({ includeFinancial: !!isCurrentAdmin })),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
         safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
       ]);
 
-      if (st) setStudents(st);
-      if (gr?.length) setGroups(gr);
-      if (su) setSubs(su);
-      if (at) setAttn(at);
-      if (ca) setCancelled(ca);
-      if (sg) setStudentGrps(sg);
-      if (wl) setWaitlist(wl);
-      setCustomOrders(ord || {});
-      setWarnedStudents(warned || {});
-      setTrainers(tr || []);
-      setTrainerGroups(trg || []);
+      const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const allowedGroups = isCurrentAdmin
+        ? allGroups
+        : allGroups.filter((g) => String(g.trainer_id || "") === String(currentUser?.id || ""));
+      const allowedGroupIds = new Set(allowedGroups.map((g) => String(g.id)));
+      const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
+      const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
+      const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
+      const scopedCancelled = isCurrentAdmin ? (ca || []) : (ca || []).filter((c) => allowedGroupIds.has(String(c.groupId)));
+      const allowedStudentIds = new Set([
+        ...scopedStudentGrps.map((row) => String(row.studentId)),
+        ...scopedSubs.map((sub) => String(sub.studentId)),
+        ...scopedAttn.map((row) => String(row.studentId || "")).filter(Boolean),
+      ]);
+      const scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+
+      // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
+      setStudents(scopedStudents);
+      setGroups(allowedGroups);
+      setScheduleGroups(allGroups);
+      setSubs(scopedSubs);
+      setAttn(scopedAttn);
+      setCancelled(scopedCancelled);
+      setScheduleCancelled(ca || []);
+      setStudentGrps(scopedStudentGrps);
+      if (wl) setWaitlist(isCurrentAdmin ? wl : []);
+      setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
+      setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
+      setTrainers(isCurrentAdmin ? (tr || []) : []);
+      setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
     } catch (e) {
@@ -914,6 +943,66 @@ export default function App() {
 
 
 
+  // Frontend guard only; Supabase RLS is still required for server-side booking ownership enforcement.
+  const canMutateRoomBooking = (booking) => {
+    if (isAdmin) return true;
+    return !!booking && String(booking.trainerId || "") === String(user?.id || "");
+  };
+
+  const addRoomBookingAction = async (payload) => {
+    const safePayload = isAdmin
+      ? payload
+      : {
+          ...payload,
+          trainerId: user?.id || null,
+          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
+            ? payload.eventType
+            : "room_booking",
+        };
+    const created = await db.insertRoomBooking(safePayload);
+    setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
+  };
+
+  const deleteRoomBookingAction = async (id) => {
+    const booking = roomBookings.find((x) => String(x.id) === String(id));
+    if (!canMutateRoomBooking(booking)) {
+      alert("Можна видаляти тільки власні резерви / індивідуальні тренування.");
+      return;
+    }
+    if (isAdmin && !window.confirm("Видалити резерв залу?")) return;
+    await db.deleteRoomBooking(id);
+    setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
+  };
+
+  const updateRoomBookingAction = async (id, payload) => {
+    const booking = roomBookings.find((x) => String(x.id) === String(id));
+    if (!canMutateRoomBooking(booking)) {
+      alert("Можна редагувати тільки власні резерви / індивідуальні тренування.");
+      return;
+    }
+    const safePayload = isAdmin
+      ? payload
+      : {
+          ...payload,
+          trainerId: booking.trainerId || user?.id || null,
+          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || booking.eventType || ""))
+            ? (payload.eventType || booking.eventType)
+            : "room_booking",
+        };
+    const updated = await db.updateRoomBooking(id, safePayload);
+    setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
+  };
+
+  const updateGroupScheduleAction = async (groupId, schedule) => {
+    if (!isAdmin) {
+      alert("Редагування розкладу груп доступне тільки адміністратору.");
+      return;
+    }
+    const updated = await db.updateGroup(groupId, { schedule });
+    setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+    setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+  };
+
   return (
     <div key={themeVersion} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -945,7 +1034,7 @@ export default function App() {
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
-          <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>
+          {isAdmin && <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
       </header>
@@ -985,49 +1074,23 @@ export default function App() {
             cancelled={cancelled}
           />
         )}
-        {isAdmin && tab==="schedule" && (
+        {tab === "schedule" && (isAdmin || user) && (
           <ScheduleTab
-            groups={groups}
+            groups={isAdmin ? groups : scheduleGroups}
             directionsList={directionsList}
             trainers={trainers}
-            cancelled={cancelled}
+            cancelled={scheduleCancelled}
             roomBookings={roomBookings}
             isAdmin={isAdmin}
-            onAddBooking={async (payload) => {
-              const created = await db.insertRoomBooking(payload);
-              setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
-            }}
-            onDeleteBooking={async (id) => {
-              if (!window.confirm("Видалити резерв залу?")) return;
-              await db.deleteRoomBooking(id);
-              setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
-            }}
-            onUpdateBooking={async (id, payload) => {
-              const updated = await db.updateRoomBooking(id, payload);
-              setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
-            }}
-            onUpdateGroupSchedule={async (groupId, schedule) => {
-              const updated = await db.updateGroup(groupId, { schedule });
-              setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
-            }}
-          />
-        )}
-        {!isAdmin && tab==="schedule" && (
-          <ScheduleTab
-            groups={groups}
-            directionsList={directionsList}
-            trainers={trainers}
-            cancelled={cancelled}
-            roomBookings={roomBookings}
-            isAdmin={false}
-            onAddBooking={async () => {}}
-            onDeleteBooking={async () => {}}
-            onUpdateBooking={async () => {}}
-            onUpdateGroupSchedule={async () => {}}
+            allowBookingMutations={!isAdmin}
+            onAddBooking={addRoomBookingAction}
+            onDeleteBooking={deleteRoomBookingAction}
+            onUpdateBooking={updateRoomBookingAction}
+            onUpdateGroupSchedule={updateGroupScheduleAction}
           />
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={(stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }} onActionEditSub={(sub) => { setEditItem(sub); setModal("editSub"); }} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
+        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} onActionAddSub={isAdmin ? ((stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }) : undefined} onActionEditSub={isAdmin ? ((sub) => { setEditItem(sub); setModal("editSub"); }) : undefined} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
@@ -1658,8 +1721,8 @@ export default function App() {
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
       
-      <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>
-      <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>
+      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{if(db.insertWaitlist){const w=await db.insertWaitlist(d);setWaitlist(p=>[...p,w]);}else{setWaitlist(p=>[...p,{...d, id:uid()}]);}setModal(null);}catch(e){console.warn(e);setWaitlist(p=>[...p,{...d, id:uid()}]);setModal(null);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
     </div>
   );

@@ -26,15 +26,17 @@ export const onAuthChange = (callback) => {
 };
 
 // ─── STUDENTS ───
+const mapStudent = (s) => ({
+  ...s,
+  messageTemplate: s.message_template,
+  firstName: s.first_name,
+  lastName: s.last_name,
+});
+
 export async function fetchStudents() {
   const { data, error } = await supabase.from('students').select('*')
   if (error) throw error
-  return data.map(s => ({
-    ...s,
-    messageTemplate: s.message_template,
-    firstName: s.first_name,
-    lastName: s.last_name,
-  }))
+  return data.map(mapStudent)
 }
 
 export async function insertStudent(s) {
@@ -49,12 +51,29 @@ export async function insertStudent(s) {
     message_template: s.message_template || null,
   }).select().single()
   if (error) throw error
-  return {
-    ...data,
-    messageTemplate: data.message_template,
-    firstName: data.first_name,
-    lastName: data.last_name,
-  }
+  return mapStudent(data)
+}
+
+export async function createStudentForGroup(groupId, s = {}) {
+  if (!groupId) throw new Error('groupId is required');
+  const firstName = s.first_name ?? s.firstName ?? '';
+  const lastName = s.last_name ?? s.lastName ?? '';
+  const messageTemplate = s.message_template ?? s.messageTemplate ?? null;
+  const fullName = [lastName, firstName].filter(Boolean).join(' ') || s.name || '';
+  const { data, error } = await supabase.rpc('crm_create_student_for_group', {
+    p_group_id: groupId,
+    p_name: fullName,
+    p_first_name: firstName || null,
+    p_last_name: lastName || null,
+    p_phone: s.phone || null,
+    p_telegram: s.telegram || null,
+    p_notes: s.notes || null,
+    p_message_template: messageTemplate || null,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('RPC crm_create_student_for_group did not return a student');
+  return mapStudent(row);
 }
 
 export async function updateStudent(id, s) {
@@ -71,12 +90,7 @@ export async function updateStudent(id, s) {
 
   const { data, error } = await supabase.from('students').update(payload).eq('id', id).select().single()
   if (error) throw error
-  return {
-    ...data,
-    messageTemplate: data.message_template,
-    firstName: data.first_name,
-    lastName: data.last_name,
-  }
+  return mapStudent(data)
 }
 
 export async function deleteStudent(id) {
@@ -292,8 +306,24 @@ export async function deleteTrainerGroup(trainerId, groupId) {
 }
 
 // ─── SUBSCRIPTIONS ───
-export async function fetchSubs() {
-  const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })
+const TRAINER_SAFE_SUBSCRIPTION_COLUMNS = [
+  'id',
+  'student_id',
+  'group_id',
+  'plan_type',
+  'start_date',
+  'end_date',
+  'original_end_date',
+  'activation_date',
+  'total_trainings',
+  'used_trainings',
+  'notification_sent',
+  'created_at',
+].join(',')
+
+export async function fetchSubs({ includeFinancial = true } = {}) {
+  const columns = includeFinancial ? '*' : TRAINER_SAFE_SUBSCRIPTION_COLUMNS
+  const { data, error } = await supabase.from('subscriptions').select(columns).order('created_at', { ascending: false })
   if (error) throw error
   return data.map(mapSub)
 }
@@ -585,7 +615,9 @@ export async function relinkGuestAttendanceToStudent({ groupId, studentId, atten
     .from('attendance')
     .update({
       student_id: studentId,
+      guest_name: null,
       guest_type: null,
+      sub_id: null,
     })
     .in('id', rowIds)
     .select('*');
