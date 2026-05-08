@@ -140,6 +140,8 @@ const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
 const paymentLabel = (v) => ({ cash: "Готівка", card: "Карта", none: "Без оплати" }[v] || v || "—");
 const cleanBookingTypes = (types = []) => (Array.isArray(types) ? types : []).filter((t) => t?.id !== "cleaning");
+const getTrainerDisplayName = (trainer = {}) =>
+  trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.email || trainer.id || "Без імені";
 const textClipStyle = { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxWidth: "100%" };
 const lineClampStyle = (lines = 1) => ({
   ...textClipStyle,
@@ -267,7 +269,7 @@ export default function ScheduleTab({
       new Map(
         safeTrainers.map((t) => [
           String(t.id),
-          t.name || [t.firstName, t.lastName].filter(Boolean).join(" "),
+          getTrainerDisplayName(t),
         ]),
       ),
     [safeTrainers],
@@ -803,7 +805,7 @@ export default function ScheduleTab({
                   style={inputSt}
                   value={draft.bookingType}
                   onChange={(e) => {
-                    const bt = bookingTypes.find(
+                    const bt = selectableBookingTypes.find(
                       (x) => x.id === e.target.value,
                     );
                     setDraft((p) => ({
@@ -871,8 +873,7 @@ export default function ScheduleTab({
               <option value="">Тренер</option>
               {bookingTrainerOptions.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name ||
-                    [t.firstName, t.lastName].filter(Boolean).join(" ")}
+                  {getTrainerDisplayName(t)}
                 </option>
               ))}
             </select>
@@ -1293,7 +1294,7 @@ export default function ScheduleTab({
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
           <select style={inputSt} value={quickCreate.trainerId || ""} onChange={(e)=>{ const trainerId = e.target.value; setQuickCreate((p)=>({ ...p, trainerId, trainerName: trainerId ? trainerMap.get(String(trainerId)) || "" : "" })); }}>
-            <option value="">Тренер</option>{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
+            <option value="">Тренер</option>{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
           </select>
           <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>{ const eventType = e.target.value; setQuickCreate((p)=>({ ...p, eventType, bookingType: eventType === "cleaning" ? "" : p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id, peopleCount: eventType === "cleaning" ? 0 : p.peopleCount || 1, price: eventType === "cleaning" ? 0 : p.price || defaultBookingType?.price || 0, paymentMethod: eventType === "cleaning" ? "none" : p.paymentMethod || "card" })); }}>
             <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="cleaning">Прибирання</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
