@@ -719,11 +719,11 @@ export default function ScheduleTab({
       setQuickCreate(null);
     };
     const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
-    const t = setTimeout(() => document.addEventListener("click", onDoc), 0);
+    const t = setTimeout(() => document.addEventListener("pointerdown", onDoc), 0);
     document.addEventListener("keydown", onEsc);
     return () => {
       clearTimeout(t);
-      document.removeEventListener("click", onDoc);
+      document.removeEventListener("pointerdown", onDoc);
       document.removeEventListener("keydown", onEsc);
     };
   }, [quickCreate]);
@@ -1326,7 +1326,7 @@ export default function ScheduleTab({
       </div>
 
       {canManageBookings && quickCreate && createPortal(
-        <div data-quick-create="1" onClick={(e)=>e.stopPropagation()} style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}>
+        <div data-quick-create="1" onPointerDown={(e)=>e.stopPropagation()} onClick={(e)=>e.stopPropagation()} style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}>
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
