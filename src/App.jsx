@@ -954,7 +954,7 @@ export default function App() {
       ? payload
       : {
           ...payload,
-          trainerId: payload?.trainerId || user?.id || null,
+          trainerId: user?.id || null,
           eventType: ["room_booking", "individual_training", "cleaning"].includes(String(payload?.eventType || ""))
             ? payload.eventType
             : "room_booking",
@@ -984,7 +984,7 @@ export default function App() {
       ? payload
       : {
           ...payload,
-          trainerId: payload?.trainerId || booking.trainerId || user?.id || null,
+          trainerId: user?.id || null,
           eventType: ["room_booking", "individual_training", "cleaning"].includes(String(payload?.eventType || booking.eventType || ""))
             ? (payload.eventType || booking.eventType)
             : "room_booking",

@@ -281,10 +281,11 @@ export default function ScheduleTab({
     [safeTrainers],
   );
   const bookingTrainerOptions = useMemo(() => {
-    if (safeTrainers.length) return safeTrainers;
+    if (isAdmin) return safeTrainers;
     if (!currentUserIdStr) return [];
-    return [{ id: currentUserIdStr, name: currentUserName || "Поточний тренер" }];
-  }, [currentUserIdStr, currentUserName, safeTrainers]);
+    const currentTrainer = safeTrainers.find((t) => String(t.id) === currentUserIdStr);
+    return [currentTrainer || { id: currentUserIdStr, name: currentUserName || "Поточний тренер" }];
+  }, [currentUserIdStr, currentUserName, isAdmin, safeTrainers]);
   const cancelledSet = useMemo(
     () =>
       new Set(
@@ -471,9 +472,9 @@ export default function ScheduleTab({
     const payload = {
       ...draft,
       title: draft.title.trim(),
-      trainerId: draft.trainerId || null,
-      trainerName: draft.trainerId
-        ? trainerMap.get(String(draft.trainerId)) || draft.trainerName || null
+      trainerId: isAdmin ? draft.trainerId || null : currentUserIdStr || null,
+      trainerName: (isAdmin ? draft.trainerId : currentUserIdStr)
+        ? trainerMap.get(String(isAdmin ? draft.trainerId : currentUserIdStr)) || draft.trainerName || currentUserName || null
         : null,
       peopleCount: hasIndividualBookingDetails(draft.eventType)
         ? Number(draft.peopleCount || 0) || null
@@ -498,6 +499,10 @@ export default function ScheduleTab({
     setEditingId(null);
   };
   const startEdit = (e) => {
+    if (!isAdmin && String(e.trainerId || "") !== currentUserIdStr) {
+      alert("Можна редагувати тільки власні резерви / індивідуальні тренування.");
+      return;
+    }
     setEditingId(e.parentId || e.id);
     setShowForm(true);
     setDraft((p) => ({
@@ -510,8 +515,8 @@ export default function ScheduleTab({
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: e.trainerId || "",
-      trainerName: e.trainer || "",
+      trainerId: isAdmin ? e.trainerId || "" : currentUserIdStr,
+      trainerName: isAdmin ? e.trainer || "" : trainerMap.get(currentUserIdStr) || currentUserName || e.trainer || "",
       title: e.title || "",
       note: e.note || "",
       recurrence: e.recurrence || "none",
@@ -535,8 +540,8 @@ export default function ScheduleTab({
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: e.trainerId || "",
-      trainerName: e.trainer || "",
+      trainerId: isAdmin ? e.trainerId || "" : currentUserIdStr,
+      trainerName: isAdmin ? e.trainer || "" : trainerMap.get(currentUserIdStr) || currentUserName || e.trainer || "",
       title: e.title || "",
       note: e.note || "",
       recurrence: e.recurrence || "none",
@@ -596,9 +601,9 @@ export default function ScheduleTab({
       price: hasPricePaymentFields(quickCreate.eventType)
         ? Number((isAdmin ? quickCreate.price : getBookingTypePrice(quickCreate.bookingType)) || 0) || null
         : null,
-      trainerId: quickCreate.trainerId || null,
-      trainerName: quickCreate.trainerId
-        ? trainerMap.get(String(quickCreate.trainerId)) || quickCreate.trainerName || null
+      trainerId: isAdmin ? quickCreate.trainerId || null : currentUserIdStr || null,
+      trainerName: (isAdmin ? quickCreate.trainerId : currentUserIdStr)
+        ? trainerMap.get(String(isAdmin ? quickCreate.trainerId : currentUserIdStr)) || quickCreate.trainerName || currentUserName || null
         : null,
       paymentMethod: hasPricePaymentFields(quickCreate.eventType) ? (quickCreate.paymentMethod || "none") : "none",
       recurrence: "none",
@@ -872,7 +877,8 @@ export default function ScheduleTab({
             )}
             <select
               style={inputSt}
-              value={draft.trainerId}
+              value={isAdmin ? draft.trainerId : currentUserIdStr}
+              disabled={!isAdmin}
               onChange={(e) => {
                 const trainerId = e.target.value;
                 setDraft((p) => ({
@@ -882,7 +888,7 @@ export default function ScheduleTab({
                 }));
               }}
             >
-              <option value="">Тренер</option>
+              {isAdmin && <option value="">Тренер</option>}
               {bookingTrainerOptions.map((t) => (
                 <option key={t.id} value={t.id}>
                   {getTrainerDisplayName(t)}
@@ -1301,8 +1307,8 @@ export default function ScheduleTab({
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
-          <select style={inputSt} value={quickCreate.trainerId || ""} onChange={(e)=>{ const trainerId = e.target.value; setQuickCreate((p)=>({ ...p, trainerId, trainerName: trainerId ? trainerMap.get(String(trainerId)) || "" : "" })); }}>
-            <option value="">Тренер</option>{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
+          <select style={inputSt} value={isAdmin ? quickCreate.trainerId || "" : currentUserIdStr} disabled={!isAdmin} onChange={(e)=>{ const trainerId = e.target.value; setQuickCreate((p)=>({ ...p, trainerId, trainerName: trainerId ? trainerMap.get(String(trainerId)) || "" : "" })); }}>
+            {isAdmin && <option value="">Тренер</option>}{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
           </select>
           <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>{ const eventType = e.target.value; setQuickCreate((p)=>({ ...p, eventType, bookingType: hasBookingTariff(eventType) ? p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id : "", peopleCount: hasIndividualBookingDetails(eventType) ? p.peopleCount || 1 : 0, price: hasPricePaymentFields(eventType) ? getBookingTypePrice(p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id) : 0, paymentMethod: hasPricePaymentFields(eventType) ? p.paymentMethod || "card" : "none" })); }}>
             <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="cleaning">Прибирання</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
