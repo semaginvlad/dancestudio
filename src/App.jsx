@@ -250,7 +250,7 @@ export default function App() {
       if (wl) setWaitlist(isCurrentAdmin ? wl : []);
       setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
-      setTrainers(isCurrentAdmin ? (tr || []) : []);
+      setTrainers(tr || []);
       setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
@@ -954,8 +954,8 @@ export default function App() {
       ? payload
       : {
           ...payload,
-          trainerId: user?.id || null,
-          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
+          trainerId: payload?.trainerId || user?.id || null,
+          eventType: ["room_booking", "individual_training", "cleaning"].includes(String(payload?.eventType || ""))
             ? payload.eventType
             : "room_booking",
         };
@@ -984,8 +984,8 @@ export default function App() {
       ? payload
       : {
           ...payload,
-          trainerId: booking.trainerId || user?.id || null,
-          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || booking.eventType || ""))
+          trainerId: payload?.trainerId || booking.trainerId || user?.id || null,
+          eventType: ["room_booking", "individual_training", "cleaning"].includes(String(payload?.eventType || booking.eventType || ""))
             ? (payload.eventType || booking.eventType)
             : "room_booking",
         };

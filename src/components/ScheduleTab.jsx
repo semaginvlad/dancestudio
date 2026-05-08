@@ -9,13 +9,6 @@ const HOUR_PX = 54;
 const MIN_EVENT_HEIGHT = 24;
 const DEFAULT_TYPES = [
   {
-    id: "cleaning",
-    label: "Прибирання",
-    peopleMin: null,
-    peopleMax: null,
-    price: 0,
-  },
-  {
     id: "individual_1_2",
     label: "Індивідуальне 1–2 особи",
     peopleMin: 1,
@@ -120,6 +113,7 @@ const getEventTypeLabel = (value = "") => {
   const m = {
     room_booking: "Резерв залу",
     individual_training: "Індивідуальне тренування",
+    cleaning: "Прибирання",
     custom_admin_event: "Кастомна подія",
     group_lesson: "Групове заняття",
   };
@@ -130,6 +124,7 @@ const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
   const t = `${norm(e.direction)} ${norm(e.title)} ${norm(e.eventType)}`;
   if (/custom_admin_event/.test(t)) return "custom";
+  if (String(e.eventType || "").toLowerCase() === "cleaning") return "cleaning";
   if (String(e.bookingType || "").toLowerCase() === "cleaning") return "cleaning";
   if (e.kind === "booking") return "reserve";
   if (/latin|latina|латина/.test(t)) return "latin";
@@ -144,6 +139,16 @@ const recurrenceModes = ["none", "daily", "weekly", "monthly"];
 const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
 const paymentLabel = (v) => ({ cash: "Готівка", card: "Карта", none: "Без оплати" }[v] || v || "—");
+const cleanBookingTypes = (types = []) => (Array.isArray(types) ? types : []).filter((t) => t?.id !== "cleaning");
+const textClipStyle = { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxWidth: "100%" };
+const lineClampStyle = (lines = 1) => ({
+  ...textClipStyle,
+  display: "-webkit-box",
+  WebkitLineClamp: lines,
+  WebkitBoxOrient: "vertical",
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+});
 const palette = {
   latin: { bg: "rgba(250,211,144,.24)", border: "#f59e0b" },
   bachata: { bg: "rgba(244,114,182,.22)", border: "#ec4899" },
@@ -223,6 +228,8 @@ export default function ScheduleTab({
     DEFAULT_TYPES,
     "ds_schedule_booking_options_v1",
   );
+  const selectableBookingTypes = useMemo(() => cleanBookingTypes(bookingTypes), [bookingTypes]);
+  const defaultBookingType = selectableBookingTypes[0] || DEFAULT_TYPES[0];
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -266,20 +273,10 @@ export default function ScheduleTab({
     [safeTrainers],
   );
   const bookingTrainerOptions = useMemo(() => {
-    if (isAdmin) return safeTrainers;
+    if (safeTrainers.length) return safeTrainers;
     if (!currentUserIdStr) return [];
-    const currentTrainer = safeTrainers.find((t) => String(t.id) === currentUserIdStr);
-    return [
-      currentTrainer || {
-        id: currentUserIdStr,
-        name: currentUserName || "Поточний тренер",
-      },
-    ];
-  }, [currentUserIdStr, currentUserName, isAdmin, safeTrainers]);
-  const defaultBookingTrainerName = useMemo(() => {
-    if (isAdmin || !currentUserIdStr) return "";
-    return trainerMap.get(currentUserIdStr) || currentUserName || "Поточний тренер";
-  }, [currentUserIdStr, currentUserName, isAdmin, trainerMap]);
+    return [{ id: currentUserIdStr, name: currentUserName || "Поточний тренер" }];
+  }, [currentUserIdStr, currentUserName, safeTrainers]);
   const cancelledSet = useMemo(
     () =>
       new Set(
@@ -351,7 +348,7 @@ export default function ScheduleTab({
         ? new Date(`${b.recurrenceUntil}T00:00:00`)
         : null;
       const baseDate = new Date(`${b.date}T00:00:00`);
-      const bt = bookingTypes.find(
+      const bt = selectableBookingTypes.find(
         (x) => x.id === (b.bookingType || b.booking_type || b.type),
       );
       if (recurrence === "none") {
@@ -367,7 +364,11 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          direction: getDirectionDisplayName(
+            b.eventType === "cleaning" || b.event_type === "cleaning" || b.bookingType === "cleaning" || b.booking_type === "cleaning"
+              ? "Прибирання"
+              : bt?.label || "Reserve",
+          ),
           trainerId: b.trainerId || b.trainer_id || "",
           trainer:
             b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
@@ -403,7 +404,11 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          direction: getDirectionDisplayName(
+            b.eventType === "cleaning" || b.event_type === "cleaning" || b.bookingType === "cleaning" || b.booking_type === "cleaning"
+              ? "Прибирання"
+              : bt?.label || "Reserve",
+          ),
           trainerId: b.trainerId || b.trainer_id || "",
           trainer:
             b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
@@ -440,7 +445,7 @@ export default function ScheduleTab({
     dirMap,
     trainerMap,
     cancelledSet,
-    bookingTypes,
+    selectableBookingTypes,
   ]);
 
   const saveBooking = async () => {
@@ -458,24 +463,22 @@ export default function ScheduleTab({
     const payload = {
       ...draft,
       title: draft.title.trim(),
-      trainerId: isAdmin ? draft.trainerId || null : currentUserIdStr || null,
-      trainerName: isAdmin
-        ? draft.trainerId
-          ? trainerMap.get(String(draft.trainerId)) || draft.trainerName || null
-          : null
-        : defaultBookingTrainerName || draft.trainerName || null,
+      trainerId: draft.trainerId || null,
+      trainerName: draft.trainerId
+        ? trainerMap.get(String(draft.trainerId)) || draft.trainerName || null
+        : null,
       peopleCount:
-        draft.eventType === "custom_admin_event"
+        ["custom_admin_event", "cleaning"].includes(draft.eventType)
           ? null
           : Number(draft.peopleCount || 0) || null,
       price:
-        draft.eventType === "custom_admin_event"
+        ["custom_admin_event", "cleaning"].includes(draft.eventType)
           ? null
           : Number(draft.price || 0) || null,
       bookingType:
-        draft.eventType === "custom_admin_event" ? null : draft.bookingType,
+        ["custom_admin_event", "cleaning"].includes(draft.eventType) ? null : draft.bookingType,
       paymentMethod:
-        draft.eventType === "custom_admin_event"
+        ["custom_admin_event", "cleaning"].includes(draft.eventType)
           ? "none"
           : draft.paymentMethod || "none",
       recurrence: draft.recurrence || "none",
@@ -499,12 +502,12 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      bookingType: e.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id,
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: isAdmin ? e.trainerId || "" : currentUserIdStr,
-      trainerName: isAdmin ? e.trainer || "" : defaultBookingTrainerName || e.trainer || "",
+      trainerId: e.trainerId || "",
+      trainerName: e.trainer || "",
       title: e.title || "",
       note: e.note || "",
       recurrence: e.recurrence || "none",
@@ -524,12 +527,12 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      bookingType: e.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id,
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: isAdmin ? e.trainerId || "" : currentUserIdStr,
-      trainerName: isAdmin ? e.trainer || "" : defaultBookingTrainerName || e.trainer || "",
+      trainerId: e.trainerId || "",
+      trainerName: e.trainer || "",
       title: e.title || "",
       note: e.note || "",
       recurrence: e.recurrence || "none",
@@ -549,11 +552,11 @@ export default function ScheduleTab({
       status: "active",
       recurrence: "none",
       title: "",
-      trainerId: isAdmin ? "" : currentUserIdStr,
-      trainerName: isAdmin ? "" : defaultBookingTrainerName,
-      bookingType: DEFAULT_TYPES[0].id,
+      trainerId: currentUserIdStr || "",
+      trainerName: currentUserIdStr ? trainerMap.get(currentUserIdStr) || currentUserName || "" : "",
+      bookingType: defaultBookingType?.id || DEFAULT_TYPES[0].id,
       peopleCount: 1,
-      price: DEFAULT_TYPES[0].price,
+      price: defaultBookingType?.price ?? DEFAULT_TYPES[0].price,
       paymentMethod: "card",
     };
     const vw = window.innerWidth;
@@ -584,16 +587,14 @@ export default function ScheduleTab({
     const payload = {
       ...quickCreate,
       title: quickCreate.title.trim(),
-      bookingType: quickCreate.eventType === "custom_admin_event" ? null : quickCreate.bookingType,
-      peopleCount: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.peopleCount || 0) || null,
-      price: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.price || 0) || null,
-      trainerId: isAdmin ? quickCreate.trainerId || null : currentUserIdStr || null,
-      trainerName: isAdmin
-        ? quickCreate.trainerId
-          ? trainerMap.get(String(quickCreate.trainerId)) || quickCreate.trainerName || null
-          : null
-        : defaultBookingTrainerName || quickCreate.trainerName || null,
-      paymentMethod: quickCreate.eventType === "custom_admin_event" ? "none" : (quickCreate.paymentMethod || "none"),
+      bookingType: ["custom_admin_event", "cleaning"].includes(quickCreate.eventType) ? null : quickCreate.bookingType,
+      peopleCount: ["custom_admin_event", "cleaning"].includes(quickCreate.eventType) ? null : Number(quickCreate.peopleCount || 0) || null,
+      price: ["custom_admin_event", "cleaning"].includes(quickCreate.eventType) ? null : Number(quickCreate.price || 0) || null,
+      trainerId: quickCreate.trainerId || null,
+      trainerName: quickCreate.trainerId
+        ? trainerMap.get(String(quickCreate.trainerId)) || quickCreate.trainerName || null
+        : null,
+      paymentMethod: ["custom_admin_event", "cleaning"].includes(quickCreate.eventType) ? "none" : (quickCreate.paymentMethod || "none"),
       recurrence: "none",
       recurrenceUntil: null,
       status: "active",
@@ -755,12 +756,21 @@ export default function ScheduleTab({
             <select
               style={inputSt}
               value={draft.eventType}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, eventType: e.target.value }))
-              }
+              onChange={(e) => {
+                const eventType = e.target.value;
+                setDraft((p) => ({
+                  ...p,
+                  eventType,
+                  bookingType: eventType === "cleaning" ? "" : p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id,
+                  peopleCount: eventType === "cleaning" ? 0 : p.peopleCount || 1,
+                  price: eventType === "cleaning" ? 0 : p.price || defaultBookingType?.price || 0,
+                  paymentMethod: eventType === "cleaning" ? "none" : p.paymentMethod || "card",
+                }));
+              }}
             >
               <option value="room_booking">{getEventTypeLabel("room_booking")}</option>
               <option value="individual_training">{getEventTypeLabel("individual_training")}</option>
+              <option value="cleaning">{getEventTypeLabel("cleaning")}</option>
               {isAdmin && <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>}
             </select>
             <input
@@ -787,7 +797,7 @@ export default function ScheduleTab({
                 setDraft((p) => ({ ...p, endTime: e.target.value }))
               }
             />
-            {draft.eventType !== "custom_admin_event" && (
+            {!["custom_admin_event", "cleaning"].includes(draft.eventType) && (
               <>
                 <select
                   style={inputSt}
@@ -803,7 +813,7 @@ export default function ScheduleTab({
                     }));
                   }}
                 >
-                  {bookingTypes.map((b) => (
+                  {selectableBookingTypes.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.label}
                     </option>
@@ -848,8 +858,7 @@ export default function ScheduleTab({
             )}
             <select
               style={inputSt}
-              value={isAdmin ? draft.trainerId : currentUserIdStr}
-              disabled={!isAdmin}
+              value={draft.trainerId}
               onChange={(e) => {
                 const trainerId = e.target.value;
                 setDraft((p) => ({
@@ -859,7 +868,7 @@ export default function ScheduleTab({
                 }));
               }}
             >
-              {isAdmin && <option value="">Тренер</option>}
+              <option value="">Тренер</option>
               {bookingTrainerOptions.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name ||
@@ -1128,7 +1137,7 @@ export default function ScheduleTab({
                           borderRadius: 10,
                           padding: 6,
                           fontSize: 11,
-                          overflow: "visible",
+                          overflow: "hidden",
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
@@ -1140,7 +1149,7 @@ export default function ScheduleTab({
                             gap: 6,
                           }}
                         >
-                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", flex: "1 1 auto", ...lineClampStyle(2) }}>
                             {e.title}
                           </div>
                           {(isAdmin || e.kind === "booking") && (
@@ -1256,17 +1265,17 @@ export default function ScheduleTab({
                             </div>
                           )}
                         </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em" }}>
-                          <div style={{ color: theme.text, fontSize: 11 }}>{e.startTime}–{e.endTime}</div>
-                          {height > 44 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {e.kind === "booking" && height > 56 ? <div>{stView.text}</div> : null}
-                          {e.kind === "booking" && height > 68 ? <div>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {e.description && height > 82 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {e.peopleCount && height > 92 ? <div>{e.peopleCount} ос.</div> : null}
-                          {e.price && height > 100 ? <div>{e.price}₴</div> : null}
+                        <div style={{ ...textClipStyle, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em" }}>
+                          <div style={{ color: theme.text, fontSize: 11, ...textClipStyle, whiteSpace: "nowrap" }}>{e.startTime}–{e.endTime}</div>
+                          {height > 44 ? <div style={{ ...textClipStyle, whiteSpace: "nowrap" }}>{e.trainer}</div> : null}
+                          {e.kind === "booking" && height > 56 ? <div style={{ ...textClipStyle, whiteSpace: "nowrap" }}>{stView.text}</div> : null}
+                          {e.kind === "booking" && height > 68 ? <div style={{ ...textClipStyle, whiteSpace: "nowrap" }}>{getEventTypeLabel(e.eventType)}</div> : null}
+                          {e.description && height > 82 ? <div style={lineClampStyle(2)}>{e.description}</div> : null}
+                          {e.peopleCount && height > 92 ? <div style={{ ...textClipStyle, whiteSpace: "nowrap" }}>{e.peopleCount} ос.</div> : null}
+                          {e.price && height > 100 ? <div style={{ ...textClipStyle, whiteSpace: "nowrap" }}>{e.price}₴</div> : null}
                         </div>
                         {e.paymentMethod && e.paymentMethod !== "none" ? (
-                          <div style={{ fontSize: 10.5, color: theme.textLight }}>{paymentLabel(e.paymentMethod)}</div>
+                          <div style={{ ...textClipStyle, whiteSpace: "nowrap", fontSize: 10.5, color: theme.textLight }}>{paymentLabel(e.paymentMethod)}</div>
                         ) : null}
                       </div>
                     );
@@ -1283,16 +1292,16 @@ export default function ScheduleTab({
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
-          <select style={inputSt} value={isAdmin ? quickCreate.trainerId || "" : currentUserIdStr} disabled={!isAdmin} onChange={(e)=>{ const trainerId = e.target.value; setQuickCreate((p)=>({ ...p, trainerId, trainerName: trainerId ? trainerMap.get(String(trainerId)) || "" : "" })); }}>
-            {isAdmin && <option value="">Тренер</option>}{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
+          <select style={inputSt} value={quickCreate.trainerId || ""} onChange={(e)=>{ const trainerId = e.target.value; setQuickCreate((p)=>({ ...p, trainerId, trainerName: trainerId ? trainerMap.get(String(trainerId)) || "" : "" })); }}>
+            <option value="">Тренер</option>{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
           </select>
-          <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>setQuickCreate((p)=>({ ...p, eventType: e.target.value }))}>
-            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
+          <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>{ const eventType = e.target.value; setQuickCreate((p)=>({ ...p, eventType, bookingType: eventType === "cleaning" ? "" : p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id, peopleCount: eventType === "cleaning" ? 0 : p.peopleCount || 1, price: eventType === "cleaning" ? 0 : p.price || defaultBookingType?.price || 0, paymentMethod: eventType === "cleaning" ? "none" : p.paymentMethod || "card" })); }}>
+            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="cleaning">Прибирання</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
           </select>
-          {quickCreate.eventType !== "custom_admin_event" ? <>
-            <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>setQuickCreate((p)=>({ ...p, bookingType: e.target.value }))}>{bookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
-            <div style={{ display: "grid", gridTemplateColumns: quickCreate.bookingType === "cleaning" ? "1fr" : "1fr 1fr", gap: 6 }}>
-              {quickCreate.bookingType !== "cleaning" ? <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} /> : null}
+          {! ["custom_admin_event", "cleaning"].includes(quickCreate.eventType) ? <>
+            <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>setQuickCreate((p)=>({ ...p, bookingType: e.target.value }))}>{selectableBookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} />
               <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
             </div>
             <select style={inputSt} value={quickCreate.paymentMethod || "card"} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
@@ -1309,7 +1318,7 @@ export default function ScheduleTab({
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
           <b>Типи резерву / ціни</b>
-          {bookingTypes.map((t, i) => (
+          {selectableBookingTypes.map((t, i) => (
             <div
               key={t.id}
               style={{
@@ -1324,7 +1333,7 @@ export default function ScheduleTab({
                 value={t.label}
                 onChange={(e) =>
                   setBookingTypes((p) =>
-                    p.map((x, idx) =>
+                    cleanBookingTypes(p).map((x, idx) =>
                       idx === i ? { ...x, label: e.target.value } : x,
                     ),
                   )
@@ -1336,7 +1345,7 @@ export default function ScheduleTab({
                 value={t.price}
                 onChange={(e) =>
                   setBookingTypes((p) =>
-                    p.map((x, idx) =>
+                    cleanBookingTypes(p).map((x, idx) =>
                       idx === i
                         ? { ...x, price: Number(e.target.value || 0) }
                         : x,
