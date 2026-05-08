@@ -141,8 +141,10 @@ const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative
 const cleanBookingTypes = (types = []) => (Array.isArray(types) ? types : []).filter((t) => t?.id !== "cleaning");
 const getTrainerDisplayName = (trainer = {}) =>
   trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.email || trainer.id || "Без імені";
+const TRAINER_EVENT_TYPES = ["room_booking", "individual_training"];
+const ADMIN_EVENT_TYPES = [...TRAINER_EVENT_TYPES, "cleaning", "custom_admin_event"];
 const hasIndividualBookingDetails = (eventType = "") => eventType === "individual_training";
-const hasBookingTariff = (eventType = "") => ["room_booking", "individual_training"].includes(eventType);
+const hasBookingTariff = (eventType = "") => TRAINER_EVENT_TYPES.includes(eventType);
 const hasPricePaymentFields = hasBookingTariff;
 const textClipStyle = { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxWidth: "100%" };
 const lineClampStyle = (lines = 1) => ({
@@ -238,6 +240,7 @@ export default function ScheduleTab({
     const tariff = selectableBookingTypes.find((x) => x.id === bookingTypeId);
     return tariff?.price ?? defaultBookingType?.price ?? DEFAULT_TYPES[0].price;
   };
+  const allowedEventTypes = isAdmin ? ADMIN_EVENT_TYPES : TRAINER_EVENT_TYPES;
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -469,8 +472,13 @@ export default function ScheduleTab({
       en <= st
     )
       return alert("Перевірте дату/час/назву");
+    if (!isAdmin && !TRAINER_EVENT_TYPES.includes(draft.eventType)) {
+      alert("Тренер може створювати тільки резерв залу або індивідуальне тренування.");
+      return;
+    }
     const payload = {
       ...draft,
+      eventType: isAdmin ? draft.eventType : draft.eventType || "room_booking",
       title: draft.title.trim(),
       trainerId: isAdmin ? draft.trainerId || null : currentUserIdStr || null,
       trainerName: (isAdmin ? draft.trainerId : currentUserIdStr)
@@ -593,8 +601,13 @@ export default function ScheduleTab({
   };
   const saveQuickCreate = async () => {
     if (!quickCreate?.title?.trim()) return alert("Вкажіть назву події");
+    if (!isAdmin && !TRAINER_EVENT_TYPES.includes(quickCreate.eventType)) {
+      alert("Тренер може створювати тільки резерв залу або індивідуальне тренування.");
+      return;
+    }
     const payload = {
       ...quickCreate,
+      eventType: isAdmin ? quickCreate.eventType : quickCreate.eventType || "room_booking",
       title: quickCreate.title.trim(),
       bookingType: hasBookingTariff(quickCreate.eventType) ? quickCreate.bookingType : null,
       peopleCount: hasIndividualBookingDetails(quickCreate.eventType) ? Number(quickCreate.peopleCount || 0) || null : null,
@@ -779,10 +792,9 @@ export default function ScheduleTab({
                 }));
               }}
             >
-              <option value="room_booking">{getEventTypeLabel("room_booking")}</option>
-              <option value="individual_training">{getEventTypeLabel("individual_training")}</option>
-              <option value="cleaning">{getEventTypeLabel("cleaning")}</option>
-              {isAdmin && <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>}
+              {allowedEventTypes.map((eventType) => (
+                <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
+              ))}
             </select>
             <input
               style={inputSt}
@@ -1311,7 +1323,7 @@ export default function ScheduleTab({
             {isAdmin && <option value="">Тренер</option>}{bookingTrainerOptions.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
           </select>
           <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>{ const eventType = e.target.value; setQuickCreate((p)=>({ ...p, eventType, bookingType: hasBookingTariff(eventType) ? p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id : "", peopleCount: hasIndividualBookingDetails(eventType) ? p.peopleCount || 1 : 0, price: hasPricePaymentFields(eventType) ? getBookingTypePrice(p.bookingType || defaultBookingType?.id || DEFAULT_TYPES[0].id) : 0, paymentMethod: hasPricePaymentFields(eventType) ? p.paymentMethod || "card" : "none" })); }}>
-            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option><option value="cleaning">Прибирання</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
+            {allowedEventTypes.map((eventType) => <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>)}
           </select>
           {hasBookingTariff(quickCreate.eventType) ? <>
             <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>{ const bookingType = e.target.value; const price = getBookingTypePrice(bookingType); setQuickCreate((p)=>({ ...p, bookingType, price })); }}>{selectableBookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
