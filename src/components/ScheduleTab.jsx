@@ -220,7 +220,9 @@ export default function ScheduleTab({
   const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
   const canManageBookings = isAdmin || allowBookingMutations;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
-  const currentTrainerFromState = safeTrainers.find((t) => String(t.id) === currentTrainerId);
+  const currentTrainerFromState = safeTrainers.find(
+    (t) => String(t.authUserId || "") === currentTrainerId,
+  ) || safeTrainers.find((t) => String(t.id) === currentTrainerId);
   const currentTrainerName =
     getTrainerDisplayName(currentTrainerFromState) ||
     currentUser?.user_metadata?.full_name ||
@@ -904,7 +906,7 @@ export default function ScheduleTab({
               {!isAdmin && currentTrainerId ? (
                 <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option>
               ) : null}
-              {safeTrainers.map((t) => (
+              {isAdmin && safeTrainers.map((t) => (
                 <option key={t.id} value={t.id}>
                   {getTrainerDisplayName(t)}
                 </option>
@@ -1349,7 +1351,7 @@ export default function ScheduleTab({
           >
             {isAdmin ? <option value="">Тренер</option> : null}
             {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
-            {safeTrainers.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
+            {isAdmin && safeTrainers.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
           </select>
           <select
             style={inputSt}

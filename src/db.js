@@ -220,6 +220,7 @@ export async function deleteDirection(id) {
 // ─── TRAINERS ───
 const mapTrainer = (t) => ({
   id: t.id,
+  authUserId: t.auth_user_id || null,
   name: t.name || "",
   firstName: t.first_name || "",
   lastName: t.last_name || "",
@@ -234,6 +235,19 @@ export async function fetchTrainers() {
   const { data, error } = await supabase.from('trainers').select('*').order('name', { ascending: true });
   if (error) throw error;
   return (data || []).map(mapTrainer);
+}
+
+export async function fetchMyTrainerProfile(authUserId) {
+  const userId = authUserId || (await getSessionUser())?.id;
+  if (!userId) return null;
+
+  const { data, error } = await supabase
+    .from('trainers')
+    .select('*')
+    .eq('auth_user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapTrainer(data) : null;
 }
 
 export async function insertTrainer(trainer) {
@@ -780,6 +794,15 @@ export async function fetchRoomBookings() {
   const { data, error } = await supabase.from('room_bookings').select('*').order('date', { ascending: true }).order('start_time', { ascending: true });
   if (error) {
     console.warn('room_bookings:', error.message);
+    return [];
+  }
+  return (data || []).map(mapRoomBooking);
+}
+
+export async function fetchScheduleRoomBookings() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_room_bookings');
+  if (error) {
+    console.warn('crm_fetch_schedule_room_bookings RPC is required for trainer Schedule reads:', error.message);
     return [];
   }
   return (data || []).map(mapRoomBooking);
