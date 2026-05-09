@@ -799,6 +799,15 @@ export async function fetchRoomBookings() {
   return (data || []).map(mapRoomBooking);
 }
 
+export async function fetchScheduleRoomBookings() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_room_bookings');
+  if (error) {
+    console.warn('crm_fetch_schedule_room_bookings:', error.message);
+    return [];
+  }
+  return (data || []).map(mapRoomBooking);
+}
+
 export async function insertRoomBooking(payload) {
   const { data, error } = await supabase.from('room_bookings').insert({
     date: payload.date,
