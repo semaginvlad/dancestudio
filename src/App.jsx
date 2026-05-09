@@ -221,11 +221,14 @@ export default function App() {
 };
 
       const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
+      const fetchTrainerProfiles = isCurrentAdmin
+        ? db.fetchTrainers
+        : () => db.fetchMyTrainerProfile(currentUser?.id);
       const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
-        safeFetch(db.fetchTrainers), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
+        safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -256,7 +259,7 @@ export default function App() {
       if (wl) setWaitlist(isCurrentAdmin ? wl : []);
       setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
-      setTrainers(isCurrentAdmin ? (tr || []) : []);
+      setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
       setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
