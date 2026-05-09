@@ -224,14 +224,23 @@ export default function App() {
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile(currentUser?.id);
-      const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
-        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
+      const fetchScheduleBookings = isCurrentAdmin
+        ? db.fetchRoomBookings
+        : db.fetchScheduleRoomBookings;
+      const fetchScheduleGroupRows = isCurrentAdmin
+        ? async () => null
+        : db.fetchScheduleGroups;
+      const [st, gr, scheduleGr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
+        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
-        safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
+        safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const allScheduleGroups = isCurrentAdmin
+        ? allGroups
+        : (scheduleGr || []);
       const allowedGroups = isCurrentAdmin
         ? allGroups
         : allGroups.filter((g) => String(g.trainer_id || "") === String(currentUser?.id || ""));
@@ -250,7 +259,7 @@ export default function App() {
       // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
       setStudents(scopedStudents);
       setGroups(allowedGroups);
-      setScheduleGroups(allGroups);
+      setScheduleGroups(allScheduleGroups);
       setSubs(scopedSubs);
       setAttn(scopedAttn);
       setCancelled(scopedCancelled);

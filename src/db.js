@@ -132,15 +132,26 @@ export async function removeStudentGroup(studentId, groupId) {
 }
 
 // ─── GROUPS ───
+const mapGroup = (g) => ({
+  ...g,
+  directionId: g.direction_id,
+  trainerPct: g.trainer_pct,
+  trainer_id: g.trainer_id,
+});
+
 export async function fetchGroups() {
   const { data, error } = await supabase.from('groups').select('*')
   if (error) throw error
-  return data.map(g => ({
-    ...g,
-    directionId: g.direction_id,
-    trainerPct: g.trainer_pct,
-    trainer_id: g.trainer_id,
-  }))
+  return (data || []).map(mapGroup)
+}
+
+export async function fetchScheduleGroups() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_groups')
+  if (error) {
+    console.warn('crm_fetch_schedule_groups:', error.message);
+    return [];
+  }
+  return (data || []).map(mapGroup)
 }
 
 export async function updateGroup(id, g) {
@@ -237,17 +248,12 @@ export async function fetchTrainers() {
   return (data || []).map(mapTrainer);
 }
 
-export async function fetchMyTrainerProfile(authUserId) {
-  const userId = authUserId || (await getSessionUser())?.id;
-  if (!userId) return null;
-
-  const { data, error } = await supabase
-    .from('trainers')
-    .select('*')
-    .eq('auth_user_id', userId)
-    .maybeSingle();
+export async function fetchMyTrainerProfile() {
+  const { data, error } = await supabase.rpc('crm_get_my_trainer_profile');
   if (error) throw error;
-  return data ? mapTrainer(data) : null;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? mapTrainer(row) : null;
 }
 
 export async function insertTrainer(trainer) {
@@ -794,6 +800,15 @@ export async function fetchRoomBookings() {
   const { data, error } = await supabase.from('room_bookings').select('*').order('date', { ascending: true }).order('start_time', { ascending: true });
   if (error) {
     console.warn('room_bookings:', error.message);
+    return [];
+  }
+  return (data || []).map(mapRoomBooking);
+}
+
+export async function fetchScheduleRoomBookings() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_room_bookings');
+  if (error) {
+    console.warn('crm_fetch_schedule_room_bookings:', error.message);
     return [];
   }
   return (data || []).map(mapRoomBooking);
