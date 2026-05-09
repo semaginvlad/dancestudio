@@ -224,11 +224,14 @@ export default function App() {
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile(currentUser?.id);
+      const fetchScheduleBookings = isCurrentAdmin
+        ? db.fetchRoomBookings
+        : db.fetchScheduleRoomBookings;
       const [st, gr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
-        safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(db.fetchRoomBookings)
+        safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
