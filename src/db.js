@@ -742,14 +742,25 @@ const removeOneOffPaymentIfOrphan = async (attendanceRow) => {
 };
 
 // ─── CANCELLED ───
+const mapCancelled = (c) => {
+  let parsed = null;
+  try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch (e) {}
+  return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
+};
+
 export async function fetchCancelled() {
   const { data, error } = await supabase.from('cancelled_trainings').select('*')
   if (error) throw error
-  return data.map(c => {
-    let parsed = null;
-    try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch (e) {}
-    return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
-  })
+  return (data || []).map(mapCancelled)
+}
+
+export async function fetchScheduleCancelled() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_cancelled_trainings')
+  if (error) {
+    console.warn('crm_fetch_schedule_cancelled_trainings:', error.message)
+    return []
+  }
+  return (data || []).map(mapCancelled)
 }
 
 export async function insertCancelled(c) {
@@ -864,6 +875,19 @@ export async function updateRoomBooking(id, payload) {
 export async function deleteRoomBooking(id) {
   const { error } = await supabase.from('room_bookings').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ─── CUSTOM ORDERS ───
+export async function fetchMyCustomOrders() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_custom_orders');
+  if (error) {
+    console.warn('crm_fetch_my_custom_orders:', error.message);
+    return {};
+  }
+  return (data || []).reduce((acc, row) => {
+    acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
+    return acc;
+  }, {});
 }
 
 // ─── ATTENDANCE WARNED FLAGS ───
