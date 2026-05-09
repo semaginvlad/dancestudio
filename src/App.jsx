@@ -198,29 +198,31 @@ export default function App() {
     setLoading(true);
     try {
       const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
-      
-     const fetchCustomOrders = async () => {
-  try {
-    const { data, error } = await supabase
-      .from("custom_orders")
-      .select("group_id, student_ids");
-
-    if (error) {
-      console.error("Fetch orders error:", error);
-      return {};
-    }
-
-    return (data || []).reduce((acc, row) => {
-      acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
-      return acc;
-    }, {});
-  } catch (e) {
-    console.error("Fetch orders exception:", e);
-    return {};
-  }
-};
-
       const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
+      
+      const fetchCustomOrders = async () => {
+        if (!isCurrentAdmin) return db.fetchMyCustomOrders();
+
+        try {
+          const { data, error } = await supabase
+            .from("custom_orders")
+            .select("group_id, student_ids");
+
+          if (error) {
+            console.error("Fetch orders error:", error);
+            return {};
+          }
+
+          return (data || []).reduce((acc, row) => {
+            acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
+            return acc;
+          }, {});
+        } catch (e) {
+          console.error("Fetch orders exception:", e);
+          return {};
+        }
+      };
+
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile(currentUser?.id);
@@ -233,7 +235,7 @@ export default function App() {
       const [st, gr, scheduleGr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(db.fetchWaitlist), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
+        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
         safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
 
@@ -265,8 +267,8 @@ export default function App() {
       setCancelled(scopedCancelled);
       setScheduleCancelled(ca || []);
       setStudentGrps(scopedStudentGrps);
-      if (wl) setWaitlist(isCurrentAdmin ? wl : []);
-      setCustomOrders(isCurrentAdmin ? (ord || {}) : Object.fromEntries(Object.entries(ord || {}).filter(([groupId]) => allowedGroupIds.has(String(groupId)))));
+      setWaitlist(wl || []);
+      setCustomOrders(ord || {});
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
       setTrainerGroups(isCurrentAdmin ? (trg || []) : []);

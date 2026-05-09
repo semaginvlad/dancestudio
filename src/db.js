@@ -866,6 +866,19 @@ export async function deleteRoomBooking(id) {
   if (error) throw error;
 }
 
+// ─── CUSTOM ORDERS ───
+export async function fetchMyCustomOrders() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_custom_orders');
+  if (error) {
+    console.warn('crm_fetch_my_custom_orders:', error.message);
+    return {};
+  }
+  return (data || []).reduce((acc, row) => {
+    acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
+    return acc;
+  }, {});
+}
+
 // ─── ATTENDANCE WARNED FLAGS ───
 const warnedKey = (groupId, studentId) => `${groupId}:${studentId}`;
 
