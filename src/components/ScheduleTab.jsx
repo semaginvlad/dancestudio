@@ -120,11 +120,14 @@ const getEventTypeLabel = (value = "") => {
   const m = {
     room_booking: "Резерв залу",
     individual_training: "Індивідуальне тренування",
+    cleaning: "Прибирання",
     custom_admin_event: "Кастомна подія",
     group_lesson: "Групове заняття",
   };
   return m[value] || value || "—";
 };
+const getTrainerDisplayName = (trainer) =>
+  trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
 const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
@@ -143,7 +146,6 @@ const colorKey = (e) => {
 const recurrenceModes = ["none", "daily", "weekly", "monthly"];
 const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
-const paymentLabel = (v) => ({ cash: "Готівка", card: "Карта", none: "Без оплати" }[v] || v || "—");
 const palette = {
   latin: { bg: "rgba(250,211,144,.24)", border: "#f59e0b" },
   bachata: { bg: "rgba(244,114,182,.22)", border: "#ec4899" },
@@ -209,6 +211,7 @@ export default function ScheduleTab({
   onDeleteBooking,
   onUpdateBooking,
   onUpdateGroupSchedule,
+  currentUser = null,
 }) {
   const safeGroups = Array.isArray(groups) ? groups : [];
   const safeDirections = Array.isArray(directionsList) ? directionsList : [];
@@ -216,9 +219,28 @@ export default function ScheduleTab({
   const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
   const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
   const canManageBookings = isAdmin || allowBookingMutations;
+  const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
+  const currentTrainerFromState = safeTrainers.find(
+    (t) =>
+      String(t.authUserId || "") === currentTrainerId ||
+      String(t.id || "") === currentTrainerId,
+  );
+  const currentTrainerName =
+    getTrainerDisplayName(currentTrainerFromState) ||
+    currentUser?.user_metadata?.full_name ||
+    currentUser?.user_metadata?.name ||
+    currentUser?.email ||
+    "";
+  const allowedEventTypes = isAdmin
+    ? ["room_booking", "individual_training", "cleaning", "custom_admin_event"]
+    : ["room_booking", "individual_training"];
   const [bookingTypes, setBookingTypes] = useStickyState(
     DEFAULT_TYPES,
     "ds_schedule_booking_options_v1",
+  );
+  const tariffTypes = useMemo(
+    () => bookingTypes.filter((type) => type.id !== "cleaning"),
+    [bookingTypes],
   );
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [showForm, setShowForm] = useState(false);
@@ -234,8 +256,8 @@ export default function ScheduleTab({
     startTime: "12:00",
     endTime: "13:00",
     eventType: "room_booking",
-    bookingType: DEFAULT_TYPES[0].id,
-    paymentMethod: "card",
+    bookingType: DEFAULT_TYPES[1].id,
+    paymentMethod: "none",
     peopleCount: 1,
     trainerId: "",
     trainerName: "",
@@ -246,7 +268,7 @@ export default function ScheduleTab({
     color: "",
     description: "",
     status: "active",
-    price: DEFAULT_TYPES[0].price,
+    price: 0,
   });
   const dirMap = useMemo(
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
@@ -257,7 +279,7 @@ export default function ScheduleTab({
       new Map(
         safeTrainers.map((t) => [
           String(t.id),
-          t.name || [t.firstName, t.lastName].filter(Boolean).join(" "),
+          getTrainerDisplayName(t),
         ]),
       ),
     [safeTrainers],
@@ -350,8 +372,9 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          trainerId: b.trainerId || b.trainer_id || null,
           trainer:
-            b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
+            b.trainerName || trainerMap.get(String(b.trainerId || b.trainer_id || "")) || "—",
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
@@ -385,8 +408,9 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          trainerId: b.trainerId || b.trainer_id || null,
           trainer:
-            b.trainerName || trainerMap.get(String(b.trainerId || "")) || "—",
+            b.trainerName || trainerMap.get(String(b.trainerId || b.trainer_id || "")) || "—",
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
@@ -423,6 +447,66 @@ export default function ScheduleTab({
     bookingTypes,
   ]);
 
+  const getTariffPrice = (bookingType) =>
+    tariffTypes.find((type) => type.id === bookingType)?.price || 0;
+  const canMutateEvent = (event) =>
+    isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
+  const normalizeBookingPayload = (source) => {
+    const eventType = allowedEventTypes.includes(source.eventType)
+      ? source.eventType
+      : "room_booking";
+    const trainerId = isAdmin ? source.trainerId || null : currentTrainerId || null;
+    const trainerName = isAdmin ? source.trainerName || null : currentTrainerName || null;
+    const base = {
+      ...source,
+      eventType,
+      trainerId,
+      trainerName,
+      recurrence: source.recurrence || "none",
+      recurrenceUntil: source.recurrence === "none" ? null : source.recurrenceUntil || null,
+      color: source.color || null,
+      description: source.description || null,
+      status: source.status || "active",
+    };
+    if (eventType === "individual_training") {
+      const bookingType = tariffTypes.some((type) => type.id === source.bookingType)
+        ? source.bookingType
+        : tariffTypes[0]?.id || "individual_1_2";
+      return {
+        ...base,
+        bookingType,
+        peopleCount: Number(source.peopleCount || 0) || null,
+        price: isAdmin ? Number(source.price || 0) || null : getTariffPrice(bookingType),
+        paymentMethod: source.paymentMethod || "none",
+      };
+    }
+    if (eventType === "room_booking") {
+      return {
+        ...base,
+        bookingType: null,
+        peopleCount: null,
+        price: isAdmin ? Number(source.price || 0) || null : null,
+        paymentMethod: "none",
+      };
+    }
+    if (eventType === "cleaning") {
+      return {
+        ...base,
+        bookingType: "cleaning",
+        peopleCount: null,
+        price: null,
+        paymentMethod: "none",
+      };
+    }
+    return {
+      ...base,
+      bookingType: null,
+      peopleCount: null,
+      price: null,
+      paymentMethod: "none",
+    };
+  };
+
   const saveBooking = async () => {
     if (!canManageBookings) return;
     const st = toMin(draft.startTime);
@@ -435,32 +519,10 @@ export default function ScheduleTab({
       en <= st
     )
       return alert("Перевірте дату/час/назву");
-    const payload = {
+    const payload = normalizeBookingPayload({
       ...draft,
       title: draft.title.trim(),
-      trainerId: draft.trainerId || null,
-      trainerName: draft.trainerName || null,
-      peopleCount:
-        draft.eventType === "custom_admin_event"
-          ? null
-          : Number(draft.peopleCount || 0) || null,
-      price:
-        draft.eventType === "custom_admin_event"
-          ? null
-          : Number(draft.price || 0) || null,
-      bookingType:
-        draft.eventType === "custom_admin_event" ? null : draft.bookingType,
-      paymentMethod:
-        draft.eventType === "custom_admin_event"
-          ? "none"
-          : draft.paymentMethod || "none",
-      recurrence: draft.recurrence || "none",
-      recurrenceUntil:
-        draft.recurrence === "none" ? null : draft.recurrenceUntil || null,
-      color: draft.color || null,
-      description: draft.description || null,
-      status: draft.status || "active",
-    };
+    });
     if (editingId) await onUpdateBooking(editingId, payload);
     else await onAddBooking(payload);
     setShowForm(false);
@@ -475,10 +537,11 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
+      trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
       trainerName: e.trainer || "",
       title: e.title || "",
       note: e.note || "",
@@ -499,10 +562,11 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || DEFAULT_TYPES[0].id,
+      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
+      trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
       trainerName: e.trainer || "",
       title: e.title || "",
       note: e.note || "",
@@ -523,12 +587,12 @@ export default function ScheduleTab({
       status: "active",
       recurrence: "none",
       title: "",
-      trainerId: "",
-      trainerName: "",
-      bookingType: DEFAULT_TYPES[0].id,
+      trainerId: isAdmin ? "" : currentTrainerId,
+      trainerName: isAdmin ? "" : currentTrainerName,
+      bookingType: tariffTypes[0]?.id || "individual_1_2",
       peopleCount: 1,
-      price: DEFAULT_TYPES[0].price,
-      paymentMethod: "card",
+      price: 0,
+      paymentMethod: "none",
     };
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -555,17 +619,13 @@ export default function ScheduleTab({
   };
   const saveQuickCreate = async () => {
     if (!quickCreate?.title?.trim()) return alert("Вкажіть назву події");
-    const payload = {
+    const payload = normalizeBookingPayload({
       ...quickCreate,
       title: quickCreate.title.trim(),
-      bookingType: quickCreate.eventType === "custom_admin_event" ? null : quickCreate.bookingType,
-      peopleCount: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.peopleCount || 0) || null,
-      price: quickCreate.eventType === "custom_admin_event" ? null : Number(quickCreate.price || 0) || null,
-      paymentMethod: quickCreate.bookingType === "cleaning" ? "none" : (quickCreate.eventType === "custom_admin_event" ? "none" : (quickCreate.paymentMethod || "none")),
       recurrence: "none",
       recurrenceUntil: null,
       status: "active",
-    };
+    });
     await onAddBooking(payload);
     setQuickCreate(null);
   };
@@ -657,11 +717,11 @@ export default function ScheduleTab({
       setQuickCreate(null);
     };
     const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
-    const t = setTimeout(() => document.addEventListener("click", onDoc), 0);
+    const t = setTimeout(() => document.addEventListener("pointerdown", onDoc), 0);
     document.addEventListener("keydown", onEsc);
     return () => {
       clearTimeout(t);
-      document.removeEventListener("click", onDoc);
+      document.removeEventListener("pointerdown", onDoc);
       document.removeEventListener("keydown", onEsc);
     };
   }, [quickCreate]);
@@ -723,13 +783,21 @@ export default function ScheduleTab({
             <select
               style={inputSt}
               value={draft.eventType}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, eventType: e.target.value }))
-              }
+              onChange={(e) => {
+                const eventType = e.target.value;
+                setDraft((p) => ({
+                  ...p,
+                  eventType,
+                  bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null,
+                  peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null,
+                  price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0,
+                  paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none",
+                }));
+              }}
             >
-              <option value="room_booking">{getEventTypeLabel("room_booking")}</option>
-              <option value="individual_training">{getEventTypeLabel("individual_training")}</option>
-              {isAdmin && <option value="custom_admin_event">{getEventTypeLabel("custom_admin_event")}</option>}
+              {allowedEventTypes.map((eventType) => (
+                <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
+              ))}
             </select>
             <input
               style={inputSt}
@@ -755,23 +823,21 @@ export default function ScheduleTab({
                 setDraft((p) => ({ ...p, endTime: e.target.value }))
               }
             />
-            {draft.eventType !== "custom_admin_event" && (
+            {draft.eventType === "individual_training" && (
               <>
                 <select
                   style={inputSt}
-                  value={draft.bookingType}
+                  value={draft.bookingType || tariffTypes[0]?.id || ""}
                   onChange={(e) => {
-                    const bt = bookingTypes.find(
-                      (x) => x.id === e.target.value,
-                    );
+                    const nextPrice = getTariffPrice(e.target.value);
                     setDraft((p) => ({
                       ...p,
                       bookingType: e.target.value,
-                      price: bt?.price || p.price,
+                      price: nextPrice,
                     }));
                   }}
                 >
-                  {bookingTypes.map((b) => (
+                  {tariffTypes.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.label}
                     </option>
@@ -781,7 +847,7 @@ export default function ScheduleTab({
                   style={inputSt}
                   type="number"
                   placeholder="К-ть людей"
-                  value={draft.peopleCount}
+                  value={draft.peopleCount ?? ""}
                   onChange={(e) =>
                     setDraft((p) => ({
                       ...p,
@@ -793,7 +859,9 @@ export default function ScheduleTab({
                   style={inputSt}
                   type="number"
                   placeholder="Ціна"
-                  value={draft.price}
+                  value={draft.price ?? ""}
+                  readOnly={!isAdmin}
+                  disabled={!isAdmin}
                   onChange={(e) =>
                     setDraft((p) => ({
                       ...p,
@@ -803,7 +871,7 @@ export default function ScheduleTab({
                 />
                 <select
                   style={inputSt}
-                  value={draft.paymentMethod}
+                  value={draft.paymentMethod || "none"}
                   onChange={(e) =>
                     setDraft((p) => ({ ...p, paymentMethod: e.target.value }))
                   }
@@ -814,18 +882,35 @@ export default function ScheduleTab({
                 </select>
               </>
             )}
+            {draft.eventType === "room_booking" && isAdmin && (
+              <input
+                style={inputSt}
+                type="number"
+                placeholder="Ціна"
+                value={draft.price ?? ""}
+                onChange={(e) =>
+                  setDraft((p) => ({
+                    ...p,
+                    price: Number(e.target.value || 0),
+                  }))
+                }
+              />
+            )}
             <select
               style={inputSt}
-              value={draft.trainerId}
+              value={isAdmin ? draft.trainerId || "" : currentTrainerId}
+              disabled={!isAdmin}
               onChange={(e) =>
                 setDraft((p) => ({ ...p, trainerId: e.target.value }))
               }
             >
-              <option value="">Тренер</option>
+              {isAdmin ? <option value="">Тренер</option> : null}
+              {!isAdmin && currentTrainerId ? (
+                <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option>
+              ) : null}
               {safeTrainers.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name ||
-                    [t.firstName, t.lastName].filter(Boolean).join(" ")}
+                  {getTrainerDisplayName(t)}
                 </option>
               ))}
             </select>
@@ -1074,6 +1159,7 @@ export default function ScheduleTab({
                       ? { bg: `${e.color}22`, border: e.color }
                       : palette[colorKey(e)] || palette.default;
                     const stView = statusStyles[e.status] || statusStyles.active;
+                    const canMutateThisEvent = canMutateEvent(e);
                     return (
                       <div
                         key={e.id}
@@ -1090,7 +1176,7 @@ export default function ScheduleTab({
                           borderRadius: 10,
                           padding: 6,
                           fontSize: 11,
-                          overflow: "visible",
+                          overflow: "hidden",
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
@@ -1102,7 +1188,7 @@ export default function ScheduleTab({
                             gap: 6,
                           }}
                         >
-                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
                             {e.title}
                           </div>
                           {(isAdmin || e.kind === "booking") && (
@@ -1157,36 +1243,49 @@ export default function ScheduleTab({
                                         style={btnS}
                                         onClick={() => {
                                           setOpenMenuState(null);
-                                          startEdit(e);
+                                          setSelectedEventDetails(e);
                                         }}
                                       >
-                                        Редагувати
+                                        Деталі події
                                       </button>
-                                      <button
-                                        style={btnS}
-                                        onClick={() => {
-                                          setOpenMenuState(null);
-                                          duplicateBookingLikeEvent(e);
-                                        }}
-                                      >
-                                        Дублювати
-                                      </button>
-                                      <button
-                                        style={btnS}
-                                        onClick={() => {
-                                          setOpenMenuState(null);
-                                          if (window.confirm("Видалити подію/серію?"))
-                                            onDeleteBooking(e.parentId || e.id);
-                                        }}
-                                      >
-                                        Видалити
-                                      </button>
-                                      <div style={{ fontSize: 11, color: theme.textLight, padding: "2px 4px" }}>Статус події</div>
-                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Позначити як попередню</button>
-                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "cancelled" }); }}>Позначити як скасовану</button>
-                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Повернути в активні</button>
-                                      <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Прибрати власний колір</button>
-                                      <div style={{ fontSize: 10, color: theme.textLight, padding: "0 4px" }}>не видаляє подію, лише змінює статус</div>
+                                      {canMutateThisEvent ? (
+                                        <>
+                                          <button
+                                            style={btnS}
+                                            onClick={() => {
+                                              setOpenMenuState(null);
+                                              startEdit(e);
+                                            }}
+                                          >
+                                            Редагувати
+                                          </button>
+                                          <button
+                                            style={btnS}
+                                            onClick={() => {
+                                              setOpenMenuState(null);
+                                              duplicateBookingLikeEvent(e);
+                                            }}
+                                          >
+                                            Дублювати
+                                          </button>
+                                          <button
+                                            style={btnS}
+                                            onClick={() => {
+                                              setOpenMenuState(null);
+                                              if (window.confirm("Видалити подію/серію?"))
+                                                onDeleteBooking(e.parentId || e.id);
+                                            }}
+                                          >
+                                            Видалити
+                                          </button>
+                                          <div style={{ fontSize: 11, color: theme.textLight, padding: "2px 4px" }}>Статус події</div>
+                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Позначити як попередню</button>
+                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "cancelled" }); }}>Позначити як скасовану</button>
+                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Повернути в активні</button>
+                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Прибрати власний колір</button>
+                                          <div style={{ fontSize: 10, color: theme.textLight, padding: "0 4px" }}>не видаляє подію, лише змінює статус</div>
+                                        </>
+                                      ) : null}
                                     </>
                                   ) : (
                                     <>
@@ -1218,18 +1317,14 @@ export default function ScheduleTab({
                             </div>
                           )}
                         </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em" }}>
-                          <div style={{ color: theme.text, fontSize: 11 }}>{e.startTime}–{e.endTime}</div>
+                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em", wordBreak: "break-word" }}>
+                          <div style={{ color: theme.text, fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
                           {height > 44 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {e.kind === "booking" && height > 56 ? <div>{stView.text}</div> : null}
-                          {e.kind === "booking" && height > 68 ? <div>{getEventTypeLabel(e.eventType)}</div> : null}
+                          {e.kind === "booking" && height > 56 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
+                          {e.kind === "booking" && height > 68 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
                           {e.description && height > 82 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {e.peopleCount && height > 92 ? <div>{e.peopleCount} ос.</div> : null}
-                          {e.price && height > 100 ? <div>{e.price}₴</div> : null}
+                          {e.peopleCount && height > 92 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
-                        {e.paymentMethod && e.paymentMethod !== "none" ? (
-                          <div style={{ fontSize: 10.5, color: theme.textLight }}>{paymentLabel(e.paymentMethod)}</div>
-                        ) : null}
                       </div>
                     );
                   })}
@@ -1241,26 +1336,57 @@ export default function ScheduleTab({
       </div>
 
       {canManageBookings && quickCreate && createPortal(
-        <div data-quick-create="1" onClick={(e)=>e.stopPropagation()} style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}>
+        <div
+          data-quick-create="1"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}
+        >
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
-          <select style={inputSt} value={quickCreate.trainerId || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, trainerId: e.target.value }))}>
-            <option value="">Тренер</option>{safeTrainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ")}</option>)}
+          <select
+            style={inputSt}
+            value={isAdmin ? quickCreate.trainerId || "" : currentTrainerId}
+            disabled={!isAdmin}
+            onChange={(e)=>setQuickCreate((p)=>({ ...p, trainerId: e.target.value }))}
+          >
+            {isAdmin ? <option value="">Тренер</option> : null}
+            {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
+            {safeTrainers.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
           </select>
-          <select style={inputSt} value={quickCreate.eventType} onChange={(e)=>setQuickCreate((p)=>({ ...p, eventType: e.target.value }))}>
-            <option value="room_booking">Резерв залу</option><option value="individual_training">Індивідуальне тренування</option>{isAdmin && <option value="custom_admin_event">Кастомна подія</option>}
+          <select
+            style={inputSt}
+            value={quickCreate.eventType}
+            onChange={(e)=>{
+              const eventType = e.target.value;
+              setQuickCreate((p)=>({
+                ...p,
+                eventType,
+                bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null,
+                peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null,
+                price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0,
+                paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none",
+              }));
+            }}
+          >
+            {allowedEventTypes.map((eventType) => (
+              <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
+            ))}
           </select>
-          {quickCreate.eventType !== "custom_admin_event" ? <>
-            <select style={inputSt} value={quickCreate.bookingType} onChange={(e)=>setQuickCreate((p)=>({ ...p, bookingType: e.target.value }))}>{bookingTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
-            <div style={{ display: "grid", gridTemplateColumns: quickCreate.bookingType === "cleaning" ? "1fr" : "1fr 1fr", gap: 6 }}>
-              {quickCreate.bookingType !== "cleaning" ? <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} /> : null}
-              <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
+          {quickCreate.eventType === "individual_training" ? <>
+            <select style={inputSt} value={quickCreate.bookingType || tariffTypes[0]?.id || ""} onChange={(e)=>{ const nextPrice = getTariffPrice(e.target.value); setQuickCreate((p)=>({ ...p, bookingType: e.target.value, price: nextPrice })); }}>{tariffTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} />
+              <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} readOnly={!isAdmin} disabled={!isAdmin} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
             </div>
-            <select style={inputSt} value={quickCreate.bookingType === "cleaning" ? "none" : (quickCreate.paymentMethod || "card")} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
+            <select style={inputSt} value={quickCreate.paymentMethod || "none"} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
               <option value="card">Карта</option><option value="cash">Готівка</option><option value="none">Без оплати</option>
             </select>
           </> : null}
+          {quickCreate.eventType === "room_booking" && isAdmin ? (
+            <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
+          ) : null}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
             <button style={{...btnP, padding:"6px 8px", fontSize:12}} onClick={saveQuickCreate}>Створити</button>
             <button style={{...btnS, padding:"6px 8px", fontSize:12}} onClick={applyQuickToFullForm}>Більше</button>

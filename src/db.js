@@ -220,6 +220,7 @@ export async function deleteDirection(id) {
 // ─── TRAINERS ───
 const mapTrainer = (t) => ({
   id: t.id,
+  authUserId: t.auth_user_id || "",
   name: t.name || "",
   firstName: t.first_name || "",
   lastName: t.last_name || "",
@@ -234,6 +235,18 @@ export async function fetchTrainers() {
   const { data, error } = await supabase.from('trainers').select('*').order('name', { ascending: true });
   if (error) throw error;
   return (data || []).map(mapTrainer);
+}
+
+export async function fetchMyTrainerProfile(authUserId) {
+  const userId = authUserId || (await supabase.auth.getUser()).data?.user?.id;
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from('trainers')
+    .select('*')
+    .eq('auth_user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapTrainer(data) : null;
 }
 
 export async function insertTrainer(trainer) {
