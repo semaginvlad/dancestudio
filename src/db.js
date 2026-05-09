@@ -237,17 +237,12 @@ export async function fetchTrainers() {
   return (data || []).map(mapTrainer);
 }
 
-export async function fetchMyTrainerProfile(authUserId) {
-  const userId = authUserId || (await getSessionUser())?.id;
-  if (!userId) return null;
-
-  const { data, error } = await supabase
-    .from('trainers')
-    .select('*')
-    .eq('auth_user_id', userId)
-    .maybeSingle();
+export async function fetchMyTrainerProfile() {
+  const { data, error } = await supabase.rpc('crm_get_my_trainer_profile');
   if (error) throw error;
-  return data ? mapTrainer(data) : null;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? mapTrainer(row) : null;
 }
 
 export async function insertTrainer(trainer) {
