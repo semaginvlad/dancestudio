@@ -132,15 +132,23 @@ export async function removeStudentGroup(studentId, groupId) {
 }
 
 // ─── GROUPS ───
+const mapGroup = (g) => ({
+  ...g,
+  directionId: g.direction_id,
+  trainerPct: g.trainer_pct,
+  trainer_id: g.trainer_id,
+})
+
 export async function fetchGroups() {
   const { data, error } = await supabase.from('groups').select('*')
   if (error) throw error
-  return data.map(g => ({
-    ...g,
-    directionId: g.direction_id,
-    trainerPct: g.trainer_pct,
-    trainer_id: g.trainer_id,
-  }))
+  return (data || []).map(mapGroup)
+}
+
+export async function fetchScheduleGroups() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_groups')
+  if (error) throw error
+  return (data || []).map(mapGroup)
 }
 
 export async function updateGroup(id, g) {
