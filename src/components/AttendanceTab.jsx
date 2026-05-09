@@ -611,6 +611,9 @@ export default function AttendanceTab({
   subs,
   setSubs,
   isAdmin = false,
+  fetchSubscriptions = isAdmin
+    ? () => db.fetchSubs({ includeFinancial: true })
+    : db.fetchMyAttendanceSubscriptions,
   attn,
   setAttn,
   students,
@@ -1162,7 +1165,7 @@ export default function AttendanceTab({
   const reloadFromDb = async () => {
     const [freshAttn, freshSubs, freshCancelled] = await Promise.all([
       db.fetchAttendance(),
-      db.fetchSubs({ includeFinancial: isAdmin }),
+      fetchSubscriptions(),
       db.fetchCancelled(),
     ]);
     setAttn(freshAttn);

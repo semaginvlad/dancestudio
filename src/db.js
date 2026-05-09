@@ -345,6 +345,12 @@ export async function fetchSubs({ includeFinancial = true } = {}) {
   return data.map(mapSub)
 }
 
+export async function fetchMyAttendanceSubscriptions() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_attendance_subscriptions')
+  if (error) throw error
+  return (data || []).map(mapSub)
+}
+
 export async function insertSub(s) {
   const payload = {
     student_id: s.studentId,
