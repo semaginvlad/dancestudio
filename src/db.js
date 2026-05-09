@@ -898,6 +898,16 @@ export async function upsertWarnedStudent(groupId, studentId, warned) {
   return data;
 }
 
+// ─── CUSTOM ORDERS ───
+export async function fetchMyCustomOrders() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_custom_orders');
+  if (error) throw error;
+  return (data || []).reduce((acc, row) => {
+    acc[row.group_id] = Array.isArray(row.student_ids) ? row.student_ids : [];
+    return acc;
+  }, {});
+}
+
 // ─── WAITLIST ───
 export async function fetchWaitlist() {
   const { data, error } = await supabase.from('waitlist').select('*');
