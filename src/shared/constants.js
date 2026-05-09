@@ -119,6 +119,29 @@ const cardSt = {
   boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"
 };
 
+const applyThemeBindings = () => {
+  STATUS_COLORS.active = theme.success;
+  STATUS_COLORS.warning = theme.warning;
+  STATUS_COLORS.expired = theme.danger;
+
+  const kpop = DIRECTIONS.find((d) => d.id === "kpop");
+  if (kpop) kpop.color = theme.primary;
+
+  inputSt.background = theme.input;
+  inputSt.color = theme.textMain;
+
+  btnP.background = theme.primary;
+  btnP.boxShadow = `0 8px 24px ${theme.primary}40`;
+
+  btnS.background = theme.input;
+  btnS.color = theme.textMuted;
+
+  cardSt.background = theme.card;
+  cardSt.boxShadow = theme.bg === "#0F131A" ? "0 10px 40px rgba(0, 0, 0, 0.32)" : "0 10px 40px rgba(168, 177, 206, 0.15)";
+};
+
+applyThemeBindings();
+
 export {
   theme,
   WEEKDAYS,
@@ -133,4 +156,5 @@ export {
   cardSt,
   STATUS_LABELS,
   STATUS_COLORS,
+  applyThemeBindings,
 };
