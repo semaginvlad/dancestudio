@@ -232,9 +232,15 @@ export default function App() {
       const fetchScheduleGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchScheduleGroups;
-      const [st, gr, scheduleGr, su, at, ca, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
-        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(() => db.fetchSubs({ includeFinancial: isCurrentAdmin })),
-        safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(db.fetchStudentGroups),
+      const fetchScheduleCancelled = isCurrentAdmin
+        ? db.fetchCancelled
+        : db.fetchScheduleCancelled;
+      const fetchSubscriptionRows = isCurrentAdmin
+        ? () => db.fetchSubs({ includeFinancial: true })
+        : db.fetchMyAttendanceSubscriptions;
+      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
+        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(fetchSubscriptionRows),
+        safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(fetchScheduleCancelled), safeFetch(db.fetchStudentGroups),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
         safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
@@ -265,7 +271,7 @@ export default function App() {
       setSubs(scopedSubs);
       setAttn(scopedAttn);
       setCancelled(scopedCancelled);
-      setScheduleCancelled(ca || []);
+      setScheduleCancelled(isCurrentAdmin ? (ca || []) : (scheduleCa || []));
       setStudentGrps(scopedStudentGrps);
       setWaitlist(wl || []);
       setCustomOrders(ord || {});
@@ -1116,7 +1122,7 @@ export default function App() {
           />
         )}
 
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} isAdmin={isAdmin} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
