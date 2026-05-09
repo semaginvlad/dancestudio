@@ -742,14 +742,24 @@ const removeOneOffPaymentIfOrphan = async (attendanceRow) => {
 };
 
 // ─── CANCELLED ───
+const mapCancelled = (c) => {
+  let parsed = null;
+  try {
+    parsed = c.reason ? (typeof c.reason === 'string' ? JSON.parse(c.reason) : c.reason) : null;
+  } catch (e) {}
+  return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
+};
+
 export async function fetchCancelled() {
   const { data, error } = await supabase.from('cancelled_trainings').select('*')
   if (error) throw error
-  return data.map(c => {
-    let parsed = null;
-    try { parsed = c.reason ? JSON.parse(c.reason) : null; } catch (e) {}
-    return { id: c.id, groupId: c.group_id, date: c.date, originalEnds: parsed };
-  })
+  return (data || []).map(mapCancelled)
+}
+
+export async function fetchScheduleCancelled() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_cancelled_trainings')
+  if (error) throw error
+  return (data || []).map(mapCancelled)
 }
 
 export async function insertCancelled(c) {
@@ -761,7 +771,7 @@ export async function insertCancelled(c) {
   if (error) throw error
   const row = Array.isArray(data) ? data[0] : data
   if (!row) return { id: c.id, groupId: c.groupId, date: c.date, originalEnds: c.originalEnds || null }
-  return { id: row.id, groupId: row.group_id, date: row.date, originalEnds: row.reason ? JSON.parse(row.reason) : null }
+  return mapCancelled(row)
 }
 
 export async function deleteCancelled(id) {
