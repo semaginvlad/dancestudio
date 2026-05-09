@@ -127,6 +127,12 @@ export default function App() {
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
 
+  useEffect(() => {
+    if (user && !isAdmin && !["attendance", "schedule"].includes(tab)) {
+      setTab("attendance");
+    }
+  }, [isAdmin, setTab, tab, user]);
+
   useLayoutEffect(() => {
     const dark = {
       primary: "#5A81FA",
@@ -949,16 +955,23 @@ export default function App() {
     return !!booking && String(booking.trainerId || "") === String(user?.id || "");
   };
 
+  const normalizeTrainerSchedulePayload = (payload = {}) => {
+    const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
+      ? payload.eventType
+      : "room_booking";
+    return {
+      ...payload,
+      trainerId: user?.id || null,
+      eventType,
+      bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
+      peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
+      price: eventType === "individual_training" ? payload.price || null : null,
+      paymentMethod: eventType === "individual_training" ? payload.paymentMethod || "none" : "none",
+    };
+  };
+
   const addRoomBookingAction = async (payload) => {
-    const safePayload = isAdmin
-      ? payload
-      : {
-          ...payload,
-          trainerId: user?.id || null,
-          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
-            ? payload.eventType
-            : "room_booking",
-        };
+    const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
     const created = await db.insertRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
   };
@@ -982,13 +995,11 @@ export default function App() {
     }
     const safePayload = isAdmin
       ? payload
-      : {
+      : normalizeTrainerSchedulePayload({
+          ...booking,
           ...payload,
-          trainerId: booking.trainerId || user?.id || null,
-          eventType: ["room_booking", "individual_training"].includes(String(payload?.eventType || booking.eventType || ""))
-            ? (payload.eventType || booking.eventType)
-            : "room_booking",
-        };
+          eventType: payload?.eventType || booking.eventType || "room_booking",
+        });
     const updated = await db.updateRoomBooking(id, safePayload);
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
   };
@@ -1087,10 +1098,11 @@ export default function App() {
             onDeleteBooking={deleteRoomBookingAction}
             onUpdateBooking={updateRoomBookingAction}
             onUpdateGroupSchedule={updateGroupScheduleAction}
+            currentUser={user}
           />
         )}
 
-        {(!isAdmin || tab==="attendance") && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
