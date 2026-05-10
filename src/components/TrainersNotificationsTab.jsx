@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { theme } from "../shared/constants";
 import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerGroupIds, parseTrainerGroups } from "../shared/trainerDigest";
 import { today, useStickyState } from "../shared/utils";
 
 export default function TrainersNotificationsTab({
   groups = [],
+  trainers = [],
+  trainerGroups = [],
   students = [],
   studentGrps = [],
   subs = [],
@@ -26,6 +28,7 @@ export default function TrainersNotificationsTab({
   const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "", scheduler: { active: false, reason: "unknown" } });
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
+  const generatedTextByChatGroupRef = useRef({});
 
   const membershipByStudent = useMemo(
     () =>
@@ -145,13 +148,60 @@ export default function TrainersNotificationsTab({
 
   const selectedDialog = useMemo(() => trainerDialogs.find((d) => d.id === selectedChatId) || trainerDialogs[0] || null, [trainerDialogs, selectedChatId]);
 
+  const normalizeTelegram = (value = "") => String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+
+  const getTrainerDisplayName = (trainer) => (
+    [trainer?.firstName || "", trainer?.lastName || ""].filter(Boolean).join(" ").trim()
+    || trainer?.name
+    || ""
+  );
+
+  const resolveDialogTrainerIds = (dialog) => {
+    if (!dialog) return [];
+    const note = String(dialog.note || "");
+    const trainerGroupIds = parseTrainerGroupIds(note);
+    const trainerGroupNames = parseTrainerGroups(note).map((x) => x.toLowerCase());
+    const noteGroupIds = trainerGroupIds.length
+      ? trainerGroupIds.map(String)
+      : groups
+        .filter((g) => trainerGroupNames.includes(String(g.name || "").toLowerCase()))
+        .map((g) => String(g.id));
+    const trainerIdsFromGroups = trainerGroups
+      .filter((tg) => noteGroupIds.includes(String(tg.groupId)))
+      .map((tg) => String(tg.trainerId || ""))
+      .filter(Boolean);
+
+    if (trainerIdsFromGroups.length) return Array.from(new Set(trainerIdsFromGroups));
+
+    const dialogUsername = normalizeTelegram(dialog.username);
+    const dialogTitle = String(dialog.title || "").trim().toLowerCase();
+    const matchedTrainer = trainers.find((trainer) => {
+      const trainerTelegram = normalizeTelegram(trainer.telegram);
+      const trainerName = getTrainerDisplayName(trainer).trim().toLowerCase();
+      return (trainerTelegram && trainerTelegram === dialogUsername) || (trainerName && trainerName === dialogTitle);
+    });
+    return matchedTrainer?.id ? [String(matchedTrainer.id)] : [];
+  };
+
   const digest = useMemo(() => {
     if (!selectedDialog) return { text: "", groupNames: [], groupsData: [], selectedGroupData: null, persistedHistory: [] };
     const trainerGroupIds = parseTrainerGroupIds(selectedDialog.note || "");
-    const trainerGroups = parseTrainerGroups(selectedDialog.note || "");
-    const parsedGroups = trainerGroupIds.length
-      ? groups.filter((g) => trainerGroupIds.includes(String(g.id)))
-      : groups.filter((g) => trainerGroups.map((x) => x.toLowerCase()).includes((g.name || "").toLowerCase()));
+    const trainerGroupNames = parseTrainerGroups(selectedDialog.note || "").map((x) => x.toLowerCase());
+    const trainerIds = resolveDialogTrainerIds(selectedDialog);
+    const assignedGroupIds = trainerGroups
+      .filter((tg) => trainerIds.includes(String(tg.trainerId)))
+      .map((tg) => String(tg.groupId));
+    const selectedGroupIds = new Set([
+      ...trainerGroupIds.map(String),
+      ...groups
+        .filter((g) => trainerGroupNames.includes(String(g.name || "").toLowerCase()))
+        .map((g) => String(g.id)),
+      ...assignedGroupIds,
+    ]);
+    const parsedGroups = groups.filter((g) => selectedGroupIds.has(String(g.id)));
     const stateMap = stateByChatGroup[selectedDialog.id] || {};
     const persistedHistory = historyByChat[selectedDialog.id] || [];
 
@@ -189,7 +239,38 @@ export default function TrainersNotificationsTab({
       selectedGroupData,
       persistedHistory,
     };
-  }, [selectedDialog, groups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat, stateByChatGroup, historyByChat]);
+  }, [selectedDialog, groups, trainers, trainerGroups, students, membershipByStudent, subsByStudent, attn, refreshVersion, cancelled, draftByChat, selectedGroupIdByChat, stateByChatGroup, historyByChat]);
+
+  useEffect(() => {
+    if (!selectedDialog?.id) return;
+    const previousGeneratedByKey = generatedTextByChatGroupRef.current || {};
+    const staleKeys = [];
+    const nextGeneratedByKey = { ...previousGeneratedByKey };
+
+    (digest.groupsData || []).forEach((groupData) => {
+      const key = `${selectedDialog.id}:${groupData.groupId}`;
+      const previousGenerated = previousGeneratedByKey[key];
+      const currentGenerated = groupData.generatedText || "";
+      if (previousGenerated !== undefined && draftByChat[key] === previousGenerated && previousGenerated !== currentGenerated) {
+        staleKeys.push(key);
+      }
+      nextGeneratedByKey[key] = currentGenerated;
+    });
+
+    generatedTextByChatGroupRef.current = nextGeneratedByKey;
+    if (!staleKeys.length) return;
+    setDraftByChat((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      staleKeys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(next, key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [digest.groupsData, draftByChat, selectedDialog?.id]);
 
   const activeDraft = digest.selectedGroupData?.activeText || "";
   const activeGroupId = digest.selectedGroupData?.groupId || "";
@@ -273,9 +354,11 @@ export default function TrainersNotificationsTab({
 
   const saveManualDraft = async (groupId, value) => {
     if (!selectedDialog?.id || !groupId) return;
+    const fresh = buildFreshTrainerAttendanceMessage({ groupId });
+    const customTemplate = String(value || "") === String(fresh.text || "") ? "" : value;
     setSavingDraft(true);
     try {
-      await upsertGroupState(groupId, { customTemplate: value });
+      await upsertGroupState(groupId, { customTemplate });
     } catch (error) {
       if (String(error?.message || "").includes("storage_not_ready")) {
         alert("Сховище не готове. Застосуйте SQL: trainer_notification_state.sql та trainer_dispatch_history.sql");
@@ -347,7 +430,6 @@ export default function TrainersNotificationsTab({
 
     setSendingNow(true);
     try {
-      updateDraft(text);
       const res = await fetch("/api/telegram?op=sendTrainerDigest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
