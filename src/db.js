@@ -652,6 +652,31 @@ export async function deleteCancelled(id) {
   if (error) throw error;
 }
 
+export async function cancelTrainingForGroup(groupId, date) {
+  const { data, error } = await supabase.rpc('crm_cancel_training_for_group', {
+    p_group_id: groupId,
+    p_date: date,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    cancelled: row?.cancelled_training ? mapCancelled(row.cancelled_training) : null,
+    subscriptions: (row?.subscriptions || []).map(mapSub),
+  }
+}
+
+export async function restoreCancelledTraining(cancelledId) {
+  const { data, error } = await supabase.rpc('crm_restore_cancelled_training', {
+    p_cancelled_id: cancelledId,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    cancelled: row?.cancelled_training ? mapCancelled(row.cancelled_training) : null,
+    subscriptions: (row?.subscriptions || []).map(mapSub),
+  }
+}
+
 // ─── ROOM BOOKINGS ───
 const mapRoomBooking = (b) => ({
   id: b.id,
