@@ -572,7 +572,7 @@ const isPackSubscription = (sub) => PACK_PLAN_TYPES.has(String(sub?.planType || 
 
 const getStudentStatusText = (subs, studentId, groupId) => {
   const groupSubs = subs
-    .filter((s) => s.studentId === studentId && s.groupId === groupId)
+    .filter((s) => String(s.studentId) === String(studentId) && String(s.groupId) === String(groupId))
     .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
   if (!groupSubs.length) return { text: "Без абонемента", tone: "neutral" };
 
@@ -909,7 +909,7 @@ export default function AttendanceTab({
   const handleEditSub = (student) => {
     const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, today());
     const lastSub = [...subsForAttendanceSemantics]
-      .filter((s) => s.studentId === student.id && s.groupId === gid)
+      .filter((s) => String(s.studentId) === String(student.id) && String(s.groupId) === String(gid))
       .sort((a, b) => {
         const aKey = a.activationDate || a.startDate || a.created_at || "";
         const bKey = b.activationDate || b.startDate || b.created_at || "";
@@ -1045,7 +1045,7 @@ export default function AttendanceTab({
     const map = {};
 
     subsForAttendanceSemantics
-      .filter((s) => s.groupId === gid)
+      .filter((s) => String(s.groupId) === String(gid))
       .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""))
       .forEach((s) => {
         const start = s.activationDate || s.startDate || "0000-00-00";
@@ -1116,7 +1116,7 @@ export default function AttendanceTab({
     );
 
     return attn.some((a) => {
-      if (!directionGroupIds.has(a.groupId)) return false;
+      if (!directionGroupIds.has(String(a.groupId))) return false;
       return sameStudentByRecord(a, student);
     });
   };
@@ -1673,10 +1673,10 @@ export default function AttendanceTab({
                 );
               }
               const statusInfo = getStudentStatusText(subsForAttendanceSemantics, student.id, gid);
-              const hasPack = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && isPackSubscription(s));
-              const oneOffHistory = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && ["trial", "single"].includes(String(s.planType || "").toLowerCase()))
+              const hasPack = rawSubs.some((s) => String(s.groupId) === String(gid) && String(s.studentId) === String(student.id) && isPackSubscription(s));
+              const oneOffHistory = rawSubs.some((s) => String(s.groupId) === String(gid) && String(s.studentId) === String(student.id) && ["trial", "single"].includes(String(s.planType || "").toLowerCase()))
                 || attn.some((a) => String(a.groupId) === String(gid) && String(a.studentId) === String(student.id) && ["trial", "single"].includes(String(a.entryType || a.guestType || "").toLowerCase()));
-              const hasNonOneOff = rawSubs.some((s) => s.groupId === gid && s.studentId === student.id && !["trial", "single"].includes(String(s.planType || "").toLowerCase()));
+              const hasNonOneOff = rawSubs.some((s) => String(s.groupId) === String(gid) && String(s.studentId) === String(student.id) && !["trial", "single"].includes(String(s.planType || "").toLowerCase()));
               const isOnlyOneOffNoPack = !hasPack && oneOffHistory && !hasNonOneOff;
               const warnedDone = isWarned(student.id);
               const isDark = theme.bg === "#0F131A";
