@@ -1076,9 +1076,9 @@ export default function App() {
             [
               {id:"dashboard", label:"Дашборд"},
               {id:"schedule", label:"Графік"},
+              {id:"attendance", label:"Відвідування"},
               {id:"students", label:"Учениці"},
               {id:"subs", label:"Оплати"},
-              {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
               {id:"admin", label:"Адмін"},
               {id:"analytics", label:"📊 Instagram"}
