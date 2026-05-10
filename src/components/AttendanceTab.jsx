@@ -615,7 +615,7 @@ const getStudentStatusText = (subs, studentId, groupId) => {
 
 export default function AttendanceTab({
   groups,
-  rawSubs,
+  rawSubs = [],
   subs,
   setSubs,
   isAdmin = false,
@@ -779,17 +779,11 @@ export default function AttendanceTab({
   }, [students]);
 
   const studentIdsInGroup = useMemo(() => {
-    const fromLinks = studentGrps
+    return [...new Set((studentGrps || [])
       .filter((sg) => String(sg.groupId) === String(gid))
-      .map((sg) => sg.studentId);
-
-    const fromSubs = rawSubs
-      .filter((s) => String(s.groupId) === String(gid))
-      .map((s) => s.studentId);
-
-    return [...new Set([...fromLinks, ...fromSubs].map(String))]
+      .map((sg) => String(sg.studentId)))]
       .filter((studentId) => activeStudentMap[studentId]);
-  }, [studentGrps, rawSubs, gid, activeStudentMap]);
+  }, [studentGrps, gid, activeStudentMap]);
 
   const orderedStudents = useMemo(() => {
     const list = studentIdsInGroup
