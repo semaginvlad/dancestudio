@@ -1,5 +1,4 @@
 import { supabase } from './supabase'
-import { PLAN_TYPES } from './shared/constants'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -345,6 +344,12 @@ export async function fetchSubs({ includeFinancial = true } = {}) {
   return data.map(mapSub)
 }
 
+export async function fetchMyAttendanceSubscriptions() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_attendance_subscriptions')
+  if (error) throw error
+  return (data || []).map(mapSub)
+}
+
 export async function insertSub(s) {
   const payload = {
     student_id: s.studentId,
@@ -433,80 +438,15 @@ function mapSub(s) {
 // 🆕 СИНХРОНІЗАЦІЯ used_trainings + activation_date при кожній дії в журналі
 // ═══════════════════════════════════════════════════════════════════
 export async function syncSubUsedTrainings(subId) {
-  if (!subId) return;
+  if (!subId) return null
   try {
-    // Читаємо всі відмітки по абонементу
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('date, quantity')
-      .eq('sub_id', subId)
-      .order('date', { ascending: true });
-
-    if (error) throw error;
-
-    const total = (data || []).reduce((s, r) => s + (r.quantity || 1), 0);
-    const firstDate = data && data.length > 0 ? data[0].date : null;
-    const lastDate = data && data.length > 0 ? data[data.length - 1].date : null;
-
-    // Читаємо поточний стан абонемента
-    const { data: currentSub, error: getErr } = await supabase
-      .from('subscriptions')
-      .select('activation_date, start_date, end_date, original_end_date, plan_type, total_trainings')
-      .eq('id', subId)
-      .single();
-
-    if (getErr) throw getErr;
-
-    const payload = { used_trainings: total };
-    if (!currentSub?.original_end_date && currentSub?.end_date) {
-      payload.original_end_date = currentSub.end_date;
-    }
-
-    if (firstDate) {
-      // Є відвідування — оновлюємо activation_date якщо треба
-      if (!currentSub?.activation_date || currentSub.activation_date !== firstDate) {
-        payload.activation_date = firstDate;
-        // І перераховуємо end_date = firstDate + 1 місяць
-        const d = new Date(firstDate + "T12:00:00");
-        d.setMonth(d.getMonth() + 1);
-        payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      }
-      const planType = String(currentSub?.plan_type || "").toLowerCase();
-      const isPack = planType === "4pack" || planType === "8pack" || planType === "12pack";
-      const totalTrainings = Number(currentSub?.total_trainings || 0);
-      const isFullyUsed = totalTrainings > 0 && total >= totalTrainings;
-      if (isPack) {
-        if (isFullyUsed && lastDate && currentSub?.end_date && lastDate < currentSub.end_date) {
-          payload.end_date = lastDate;
-        } else if (!isFullyUsed) {
-          const originalEnd = currentSub?.original_end_date || currentSub?.end_date || null;
-          if (originalEnd && currentSub?.end_date && currentSub.end_date < originalEnd) {
-            payload.end_date = originalEnd;
-          }
-        }
-      }
-    } else {
-      // Відвідувань не залишилось — скидаємо activation_date і повертаємо end_date = startDate + 1 міс
-      if (currentSub?.activation_date) {
-        payload.activation_date = null;
-        if (currentSub.start_date) {
-          const d = new Date(currentSub.start_date + "T12:00:00");
-          d.setMonth(d.getMonth() + 1);
-          payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        }
-      }
-    }
-
-    const { error: updErr } = await supabase
-      .from('subscriptions')
-      .update(payload)
-      .eq('id', subId);
-
-    if (updErr) throw updErr;
-    return total;
+    const { data, error } = await supabase.rpc('crm_sync_subscription_usage', { p_sub_id: subId })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    return row ? mapSub(row) : null
   } catch (e) {
-    console.warn('syncSubUsedTrainings failed for', subId, e);
-    return null;
+    console.warn('syncSubUsedTrainings failed for', subId, e)
+    return null
   }
 }
 
@@ -605,13 +545,13 @@ export async function deleteAttendance(id) {
     .select('id, sub_id, student_id, group_id, date, entry_type, guest_type')
     .eq('id', id)
     .maybeSingle();
+  if (existing) {
+    await removeOneOffPaymentIfOrphan(existing);
+  }
   const { error } = await supabase.from('attendance').delete().eq('id', id)
   if (error) throw error
   if (existing?.sub_id) {
     await syncSubUsedTrainings(existing.sub_id);
-  }
-  if (existing) {
-    await removeOneOffPaymentIfOrphan(existing);
   }
 }
 
@@ -656,90 +596,23 @@ export async function relinkGuestAttendanceToStudent({ groupId, studentId, atten
   }));
 }
 
-const ONE_OFF_PLAN_TYPES = new Set(["trial", "single"]);
-const ONE_OFF_PRICE_BY_PLAN = Object.fromEntries(
-  (Array.isArray(PLAN_TYPES) ? PLAN_TYPES : [])
-    .filter((p) => ONE_OFF_PLAN_TYPES.has(String(p?.id || "").trim().toLowerCase()))
-    .map((p) => [String(p.id).trim().toLowerCase(), Number(p.price || 0)])
-);
-const normalizeOneOffType = (value) => String(value || "").trim().toLowerCase();
-
 const ensureOneOffPaymentForAttendance = async (attendanceRow) => {
-  const entryType = normalizeOneOffType(attendanceRow?.entry_type || attendanceRow?.guest_type || "");
-  if (!ONE_OFF_PLAN_TYPES.has(entryType)) return;
-  const studentId = attendanceRow?.student_id;
-  const groupId = attendanceRow?.group_id;
-  const date = String(attendanceRow?.date || "").slice(0, 10);
-  if (!studentId || !groupId || !date) return;
-  const amount = Number(ONE_OFF_PRICE_BY_PLAN[entryType] || 0);
-
-  const { data: existing, error: existingErr } = await supabase
-    .from('subscriptions')
-    .select('id')
-    .eq('student_id', studentId)
-    .eq('group_id', groupId)
-    .eq('plan_type', entryType)
-    .eq('activation_date', date)
-    .eq('start_date', date)
-    .eq('end_date', date)
-    .eq('paid', true)
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throw existingErr;
-  if (existing?.id) return;
-
-  const { error } = await supabase.from('subscriptions').insert({
-    student_id: studentId,
-    group_id: groupId,
-    plan_type: entryType,
-    start_date: date,
-    end_date: date,
-    activation_date: date,
-    total_trainings: 1,
-    used_trainings: 1,
-    amount,
-    base_price: amount,
-    discount_pct: 0,
-    discount_source: 'studio',
-    paid: true,
-    pay_method: 'card',
-    notification_sent: false,
-    notes: `auto_one_off_from_attendance:${attendanceRow?.id || ''}`,
-  });
-  if (error) throw error;
-};
+  if (!attendanceRow?.id) return null
+  const { data, error } = await supabase.rpc('crm_ensure_one_off_payment_for_attendance', {
+    p_attendance_id: attendanceRow.id,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  return row ? mapSub(row) : null
+}
 
 const removeOneOffPaymentIfOrphan = async (attendanceRow) => {
-  const entryType = normalizeOneOffType(attendanceRow?.entry_type || attendanceRow?.guest_type || "");
-  if (!ONE_OFF_PLAN_TYPES.has(entryType)) return;
-  const studentId = attendanceRow?.student_id;
-  const groupId = attendanceRow?.group_id;
-  const date = String(attendanceRow?.date || "").slice(0, 10);
-  if (!studentId || !groupId || !date) return;
-
-  const { data: stillHasAttendance, error: attnErr } = await supabase
-    .from('attendance')
-    .select('id')
-    .eq('student_id', studentId)
-    .eq('group_id', groupId)
-    .eq('date', date)
-    .eq('entry_type', entryType)
-    .limit(1)
-    .maybeSingle();
-  if (attnErr) throw attnErr;
-  if (stillHasAttendance?.id) return;
-
-  const { error: delErr } = await supabase
-    .from('subscriptions')
-    .delete()
-    .eq('student_id', studentId)
-    .eq('group_id', groupId)
-    .eq('plan_type', entryType)
-    .eq('activation_date', date)
-    .eq('start_date', date)
-    .eq('end_date', date);
-  if (delErr) throw delErr;
-};
+  if (!attendanceRow?.id) return
+  const { error } = await supabase.rpc('crm_remove_one_off_payment_if_orphan', {
+    p_attendance_id: attendanceRow.id,
+  })
+  if (error) throw error
+}
 
 // ─── CANCELLED ───
 const mapCancelled = (c) => {
@@ -777,6 +650,31 @@ export async function insertCancelled(c) {
 export async function deleteCancelled(id) {
   const { error } = await supabase.from('cancelled_trainings').delete().eq('id', id);
   if (error) throw error;
+}
+
+export async function cancelTrainingForGroup(groupId, date) {
+  const { data, error } = await supabase.rpc('crm_cancel_training_for_group', {
+    p_group_id: groupId,
+    p_date: date,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    cancelled: row?.cancelled_training ? mapCancelled(row.cancelled_training) : null,
+    subscriptions: (row?.subscriptions || []).map(mapSub),
+  }
+}
+
+export async function restoreCancelledTraining(cancelledId) {
+  const { data, error } = await supabase.rpc('crm_restore_cancelled_training', {
+    p_cancelled_id: cancelledId,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    cancelled: row?.cancelled_training ? mapCancelled(row.cancelled_training) : null,
+    subscriptions: (row?.subscriptions || []).map(mapSub),
+  }
 }
 
 // ─── ROOM BOOKINGS ───
