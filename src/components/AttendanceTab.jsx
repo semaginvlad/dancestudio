@@ -20,6 +20,16 @@ const MONTH_NAMES = [
 
 const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
+const isVisibleAttendanceStudent = (student) => {
+  if (!student) return false;
+  if (student.deleted_at || student.deletedAt || student.isDeleted === true) return false;
+  if (student.archived_at || student.archivedAt || student.isArchived === true) return false;
+  if (student.is_active === false || student.active === false) return false;
+  const status = String(student.status || "").toLowerCase();
+  if (["archived", "archive", "deleted", "removed"].includes(status)) return false;
+  return true;
+};
+
 const makeStyles = () => {
   const isDark = theme.bg === "#0F131A";
   const CELL_SIZE = 40;
@@ -759,33 +769,41 @@ export default function AttendanceTab({
     return map;
   }, [visibleDays]);
 
+  const activeStudentMap = useMemo(() => {
+    const map = {};
+    (students || []).forEach((student) => {
+      if (!isVisibleAttendanceStudent(student)) return;
+      map[String(student.id)] = student;
+    });
+    return map;
+  }, [students]);
+
   const studentIdsInGroup = useMemo(() => {
     const fromLinks = studentGrps
       .filter((sg) => String(sg.groupId) === String(gid))
       .map((sg) => sg.studentId);
 
-    const fromSubs = rawSubs
-      .filter((s) => String(s.groupId) === String(gid))
-      .map((s) => s.studentId);
-
-    return [...new Set([...fromLinks, ...fromSubs].map(String))];
-  }, [studentGrps, rawSubs, gid]);
+    return [...new Set(fromLinks.map(String))]
+      .filter((studentId) => activeStudentMap[studentId]);
+  }, [studentGrps, gid, activeStudentMap]);
 
   const orderedStudents = useMemo(() => {
     const list = studentIdsInGroup
-      .map((id) => studentMap[id])
+      .map((id) => activeStudentMap[id])
       .filter(Boolean);
 
     const savedOrder = localOrders?.[gid] || customOrders?.[gid] || [];
-    const orderIndex = new Map(savedOrder.map((id, idx) => [id, idx]));
+    const orderIndex = new Map(savedOrder.map((id, idx) => [String(id), idx]));
 
     return [...list].sort((a, b) => {
-      const aIdx = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
-      const bIdx = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
+      const aId = String(a.id);
+      const bId = String(b.id);
+      const aIdx = orderIndex.has(aId) ? orderIndex.get(aId) : Number.MAX_SAFE_INTEGER;
+      const bIdx = orderIndex.has(bId) ? orderIndex.get(bId) : Number.MAX_SAFE_INTEGER;
       if (aIdx !== bIdx) return aIdx - bIdx;
       return getDisplayName(a).localeCompare(getDisplayName(b), "uk");
     });
-  }, [studentIdsInGroup, studentMap, customOrders, localOrders, gid]);
+  }, [studentIdsInGroup, activeStudentMap, customOrders, localOrders, gid]);
 
   const handleCreateStudentInGroup = async () => {
     const name = (newStudentName || "").trim();
@@ -814,13 +832,13 @@ export default function AttendanceTab({
       if (typeof setStudentGrps === "function") {
         setStudentGrps((prev) => {
           const list = prev || [];
-          if (list.some((sg) => sg.studentId === createdStudent.id && sg.groupId === gid)) return list;
+          if (list.some((sg) => String(sg.studentId) === String(createdStudent.id) && String(sg.groupId) === String(gid))) return list;
           return [...list, link || { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid }];
         });
       }
       setLocalOrders((prev) => {
         const arr = prev?.[gid] || customOrders?.[gid] || [];
-        if (arr.includes(createdStudent.id)) return prev;
+        if (arr.some((id) => String(id) === String(createdStudent.id))) return prev;
         return { ...(prev || {}), [gid]: [...arr, createdStudent.id] };
       });
       setNewStudentName("");
@@ -833,10 +851,10 @@ export default function AttendanceTab({
 
   const moveStudent = (studentId, direction) => {
     setLocalOrders((prev) => {
-      const idsInGroup = orderedStudents.map((s) => s.id);
-      const base = ((prev?.[gid] || customOrders?.[gid] || [])).filter((id) => idsInGroup.includes(id));
+      const idsInGroup = orderedStudents.map((s) => String(s.id));
+      const base = ((prev?.[gid] || customOrders?.[gid] || [])).map(String).filter((id) => idsInGroup.includes(id));
       const full = [...base, ...idsInGroup.filter((id) => !base.includes(id))];
-      const idx = full.indexOf(studentId);
+      const idx = full.indexOf(String(studentId));
       if (idx < 0) return prev;
       const nextIdx = direction === "up" ? idx - 1 : idx + 1;
       if (nextIdx < 0 || nextIdx >= full.length) return prev;
@@ -873,17 +891,27 @@ export default function AttendanceTab({
 
   const handleRemoveFromGroup = async (student) => {
     if (!gid || !student?.id) return;
+    const hasStudentGroupLink = (studentGrps || []).some(
+      (sg) => String(sg.studentId) === String(student.id) && String(sg.groupId) === String(gid)
+    );
+    if (!hasStudentGroupLink) {
+      alert("Учениця показується через абонемент або історію відвідувань цієї групи. Абонементи та історію не видаляємо з цієї дії.");
+      return;
+    }
+
     const ok = window.confirm(`Прибрати ${getDisplayName(student)} з групи "${currentGroup?.name || gid}"?`);
     if (!ok) return;
     try {
       await db.removeStudentGroup(student.id, gid);
       if (typeof setStudentGrps === "function") {
-        setStudentGrps((prev) => prev.filter((sg) => !(sg.studentId === student.id && sg.groupId === gid)));
+        setStudentGrps((prev) => (prev || []).filter((sg) => !(
+          String(sg.studentId) === String(student.id) && String(sg.groupId) === String(gid)
+        )));
       }
       setLocalOrders((prev) => {
         const arr = prev?.[gid] || [];
-        if (!arr.includes(student.id)) return prev;
-        return { ...(prev || {}), [gid]: arr.filter((id) => id !== student.id) };
+        if (!arr.some((id) => String(id) === String(student.id))) return prev;
+        return { ...(prev || {}), [gid]: arr.filter((id) => String(id) !== String(student.id)) };
       });
     } catch (err) {
       alert(err?.message || "Не вдалося прибрати ученицю з групи");
