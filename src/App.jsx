@@ -1075,12 +1075,12 @@ export default function App() {
           {isAdmin ? (
             [
               {id:"dashboard", label:"Дашборд"},
+              {id:"admin", label:"Адмін"},
               {id:"schedule", label:"Графік"},
-              {id:"students", label:"Учениці"},
-              {id:"subs", label:"Оплати"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
-              {id:"admin", label:"Адмін"},
+              {id:"subs", label:"Оплати"},
+              {id:"students", label:"Учениці"},
               {id:"analytics", label:"📊 Instagram"}
             ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)
           ) : (
@@ -1201,6 +1201,8 @@ export default function App() {
             ) : (
               <TrainersNotificationsTab
                 groups={groups}
+                trainers={trainers}
+                trainerGroups={trainerGroups}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
@@ -1211,6 +1213,8 @@ export default function App() {
             {adminTab === "notifications" && (
               <TrainersNotificationsTab
                 groups={groups}
+                trainers={trainers}
+                trainerGroups={trainerGroups}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
