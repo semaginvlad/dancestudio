@@ -38,6 +38,14 @@ export async function fetchStudents() {
   return data.map(mapStudent)
 }
 
+export async function fetchStudentsByIds(ids = []) {
+  const uniqueIds = [...new Set((ids || []).map((id) => String(id)).filter(Boolean))]
+  if (!uniqueIds.length) return []
+  const { data, error } = await supabase.from('students').select('*').in('id', uniqueIds)
+  if (error) throw error
+  return (data || []).map(mapStudent)
+}
+
 export async function insertStudent(s) {
   const fullName = [s.last_name, s.first_name].filter(Boolean).join(' ') || s.name || ''
   const { data, error } = await supabase.from('students').insert({

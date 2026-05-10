@@ -262,7 +262,20 @@ export default function App() {
         ...scopedSubs.map((sub) => String(sub.studentId)),
         ...scopedAttn.map((row) => String(row.studentId || "")).filter(Boolean),
       ]);
-      const scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+      let scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+      if (!isCurrentAdmin) {
+        const loadedStudentIds = new Set(scopedStudents.map((student) => String(student.id)));
+        const missingHistoryStudentIds = [...allowedStudentIds].filter((studentId) => !loadedStudentIds.has(String(studentId)));
+        const historyStudents = missingHistoryStudentIds.length
+          ? (await safeFetch(() => db.fetchStudentsByIds(missingHistoryStudentIds))) || []
+          : [];
+        const byId = new Map(
+          [...scopedStudents, ...historyStudents]
+            .filter((student) => student?.id && allowedStudentIds.has(String(student.id)))
+            .map((student) => [String(student.id), student])
+        );
+        scopedStudents = [...byId.values()];
+      }
 
       // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
       setStudents(scopedStudents);
