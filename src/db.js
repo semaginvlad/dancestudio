@@ -345,6 +345,12 @@ export async function fetchSubs({ includeFinancial = true } = {}) {
   return data.map(mapSub)
 }
 
+export async function fetchMyAttendanceSubscriptions() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_attendance_subscriptions')
+  if (error) throw error
+  return (data || []).map(mapSub)
+}
+
 export async function insertSub(s) {
   const payload = {
     student_id: s.studentId,
@@ -433,80 +439,15 @@ function mapSub(s) {
 // 🆕 СИНХРОНІЗАЦІЯ used_trainings + activation_date при кожній дії в журналі
 // ═══════════════════════════════════════════════════════════════════
 export async function syncSubUsedTrainings(subId) {
-  if (!subId) return;
+  if (!subId) return null
   try {
-    // Читаємо всі відмітки по абонементу
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('date, quantity')
-      .eq('sub_id', subId)
-      .order('date', { ascending: true });
-
-    if (error) throw error;
-
-    const total = (data || []).reduce((s, r) => s + (r.quantity || 1), 0);
-    const firstDate = data && data.length > 0 ? data[0].date : null;
-    const lastDate = data && data.length > 0 ? data[data.length - 1].date : null;
-
-    // Читаємо поточний стан абонемента
-    const { data: currentSub, error: getErr } = await supabase
-      .from('subscriptions')
-      .select('activation_date, start_date, end_date, original_end_date, plan_type, total_trainings')
-      .eq('id', subId)
-      .single();
-
-    if (getErr) throw getErr;
-
-    const payload = { used_trainings: total };
-    if (!currentSub?.original_end_date && currentSub?.end_date) {
-      payload.original_end_date = currentSub.end_date;
-    }
-
-    if (firstDate) {
-      // Є відвідування — оновлюємо activation_date якщо треба
-      if (!currentSub?.activation_date || currentSub.activation_date !== firstDate) {
-        payload.activation_date = firstDate;
-        // І перераховуємо end_date = firstDate + 1 місяць
-        const d = new Date(firstDate + "T12:00:00");
-        d.setMonth(d.getMonth() + 1);
-        payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      }
-      const planType = String(currentSub?.plan_type || "").toLowerCase();
-      const isPack = planType === "4pack" || planType === "8pack" || planType === "12pack";
-      const totalTrainings = Number(currentSub?.total_trainings || 0);
-      const isFullyUsed = totalTrainings > 0 && total >= totalTrainings;
-      if (isPack) {
-        if (isFullyUsed && lastDate && currentSub?.end_date && lastDate < currentSub.end_date) {
-          payload.end_date = lastDate;
-        } else if (!isFullyUsed) {
-          const originalEnd = currentSub?.original_end_date || currentSub?.end_date || null;
-          if (originalEnd && currentSub?.end_date && currentSub.end_date < originalEnd) {
-            payload.end_date = originalEnd;
-          }
-        }
-      }
-    } else {
-      // Відвідувань не залишилось — скидаємо activation_date і повертаємо end_date = startDate + 1 міс
-      if (currentSub?.activation_date) {
-        payload.activation_date = null;
-        if (currentSub.start_date) {
-          const d = new Date(currentSub.start_date + "T12:00:00");
-          d.setMonth(d.getMonth() + 1);
-          payload.end_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        }
-      }
-    }
-
-    const { error: updErr } = await supabase
-      .from('subscriptions')
-      .update(payload)
-      .eq('id', subId);
-
-    if (updErr) throw updErr;
-    return total;
+    const { data, error } = await supabase.rpc('crm_sync_subscription_usage', { p_sub_id: subId })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    return row ? mapSub(row) : null
   } catch (e) {
-    console.warn('syncSubUsedTrainings failed for', subId, e);
-    return null;
+    console.warn('syncSubUsedTrainings failed for', subId, e)
+    return null
   }
 }
 
