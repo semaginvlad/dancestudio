@@ -10,8 +10,6 @@ import {
   getEffectiveEndDate,
   isSubExhausted,
   getActiveSubOnDateForCoverage,
-  getNextTrainingDate,
-  getPreviousTrainingDate,
 } from "../shared/utils";
 import { theme } from "../shared/constants";
 
@@ -611,6 +609,9 @@ export default function AttendanceTab({
   subs,
   setSubs,
   isAdmin = false,
+  fetchSubscriptions = isAdmin
+    ? () => db.fetchSubs({ includeFinancial: true })
+    : db.fetchMyAttendanceSubscriptions,
   attn,
   setAttn,
   students,
@@ -1162,7 +1163,7 @@ export default function AttendanceTab({
   const reloadFromDb = async () => {
     const [freshAttn, freshSubs, freshCancelled] = await Promise.all([
       db.fetchAttendance(),
-      db.fetchSubs({ includeFinancial: isAdmin }),
+      fetchSubscriptions(),
       db.fetchCancelled(),
     ]);
     setAttn(freshAttn);
@@ -1274,33 +1275,7 @@ export default function AttendanceTab({
         const ok = window.confirm(`Скасувати тренування ${dateStr}?`);
         if (!ok) return;
 
-        const affected = rawSubs.filter((s) => {
-          if (!isPackSubscription(s)) return false;
-          if (s.groupId !== gid) return false;
-          const end = getEffectiveEndDate(s) || s.endDate || "2099-12-31";
-          return (s.startDate || "0000-00-00") <= dateStr && end >= dateStr;
-        });
-
-        const originalEnds = [];
-
-        for (const sub of affected) {
-          const oldEndDate = sub.endDate;
-          const newEnd = getNextTrainingDate(schedule, oldEndDate);
-          await db.updateSub(sub.id, { endDate: newEnd });
-          originalEnds.push({
-            subId: sub.id,
-            oldEndDate,
-            newEndDate: newEnd,
-          });
-        }
-
-        await db.insertCancelled({
-          id: uid(),
-          groupId: gid,
-          date: dateStr,
-          originalEnds,
-        });
-
+        await db.cancelTrainingForGroup(gid, dateStr);
         await reloadFromDb();
         return;
       }
@@ -1308,28 +1283,7 @@ export default function AttendanceTab({
       const ok = window.confirm(`Відновити тренування ${dateStr}?`);
       if (!ok) return;
 
-      const originalEnds = existing.originalEnds;
-      const hasNewFormat = Array.isArray(originalEnds) && originalEnds.length > 0;
-      const hasLegacyFormat = !hasNewFormat && originalEnds && Object.keys(originalEnds).length;
-
-      if (hasNewFormat) {
-        for (const item of originalEnds) {
-          if (!item?.subId) continue;
-          await db.updateSub(item.subId, { endDate: item.oldEndDate || null });
-        }
-      } else if (hasLegacyFormat) {
-        for (const [subId, oldEnd] of Object.entries(originalEnds)) {
-          await db.updateSub(subId, { endDate: oldEnd });
-        }
-      } else {
-        const affected = rawSubs.filter((s) => isPackSubscription(s) && s.groupId === gid && (s.endDate || "") >= dateStr);
-        for (const sub of affected) {
-          const reverted = getPreviousTrainingDate(schedule, sub.endDate);
-          await db.updateSub(sub.id, { endDate: reverted });
-        }
-      }
-
-      await db.deleteCancelled(existing.id);
+      await db.restoreCancelledTraining(existing.id);
       await reloadFromDb();
     } catch (err) {
       alert(err?.message || "Не вдалося змінити статус тренування");
