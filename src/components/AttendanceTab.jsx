@@ -564,6 +564,9 @@ const toDateKey = (value) => {
   if (value instanceof Date) return ymd(value);
   return String(value).slice(0, 10);
 };
+
+const FUTURE_ATTENDANCE_MESSAGE = "Майбутні тренування не можна відмічати.";
+const isFutureAttendanceDate = (dateStr) => toDateKey(dateStr) > today();
 const ANON_GUEST_PREFIX = "__anon_guest__:";
 const isAnonymousGuestLabel = (value) => String(value || "").startsWith(ANON_GUEST_PREFIX);
 const makeAnonymousGuestLabel = ({ groupId, dateStr }) =>
@@ -1206,6 +1209,10 @@ export default function AttendanceTab({
   const handleToggleCell = async (student, dateStr) => {
     if (!gid) return;
     if (isCancelledDate(dateStr)) return;
+    if (isFutureAttendanceDate(dateStr)) {
+      alert(FUTURE_ATTENDANCE_MESSAGE);
+      return;
+    }
 
     const cellKey = `${student.id}_${dateStr}`;
     setBusyCell(cellKey);
@@ -1325,6 +1332,10 @@ export default function AttendanceTab({
 
   const handleToggleGuestCell = async (guestRow, dateStr) => {
     if (!gid || isCancelledDate(dateStr)) return;
+    if (isFutureAttendanceDate(dateStr)) {
+      alert(FUTURE_ATTENDANCE_MESSAGE);
+      return;
+    }
     let guestIdentity = String(guestRow?.guestName || "").trim();
     if (isAnonymousGuestLabel(guestIdentity) && guestIdentity.includes(":pending:")) {
       guestIdentity = makeAnonymousGuestLabel({ groupId: gid, dateStr });
@@ -1674,6 +1685,7 @@ export default function AttendanceTab({
                       </div>
                     </td>
                     {visibleDays.map((dateStr) => {
+                      const futureDay = isFutureAttendanceDate(dateStr);
                       const dayIdx = visibleDayIndex[dateStr];
                       const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                       const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
@@ -1697,7 +1709,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div style={styles.cellShell}><button type="button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr), false)}>{cellView.mark}</button></div>
+                          <div style={styles.cellShell}><button type="button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, false)} title={futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr}>{cellView.mark}</button></div>
                         </td>
                       );
                     })}
@@ -1770,6 +1782,7 @@ export default function AttendanceTab({
 
                 {visibleDays.map((dateStr) => {
                   const cancelledDay = isCancelledDate(dateStr);
+                  const futureDay = isFutureAttendanceDate(dateStr);
                   const monthKey = dateStr.slice(0, 7);
                   const isCurrentMonth = monthKey === centerMonth;
                   const isMutedMonth = monthKey !== centerMonth;
@@ -1810,8 +1823,8 @@ export default function AttendanceTab({
                         type="button"
                         disabled={cancelledDay || saving}
                         onClick={() => handleToggleCell(student, dateStr)}
-                        style={styles.cellBtn(buttonBg, cancelledDay, saving)}
-                        title={cancelledDay ? "Тренування скасоване" : dateStr}
+                        style={styles.cellBtn(buttonBg, cancelledDay || futureDay, saving)}
+                        title={cancelledDay ? "Тренування скасоване" : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}
                       >
                         {cellView.mark}
                       </button>
