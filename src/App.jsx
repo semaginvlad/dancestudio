@@ -940,6 +940,62 @@ export default function App() {
     } catch(e) { console.warn("Помилка видалення абонемента:", e); }
   };
 
+  const syncStudentGroupLinks = async (studentId, selectedGroups) => {
+    if (!studentId || !Array.isArray(selectedGroups)) return;
+    const desiredIds = Array.from(new Set(selectedGroups.map((id) => String(id || "").trim()).filter(Boolean)));
+    const desiredSet = new Set(desiredIds);
+    const currentRows = studentGrps.filter((sg) => String(sg.studentId) === String(studentId));
+    const currentIds = new Set(currentRows.map((sg) => String(sg.groupId)));
+    const addedLinks = [];
+
+    for (const row of currentRows) {
+      if (!desiredSet.has(String(row.groupId))) await db.removeStudentGroup(studentId, row.groupId);
+    }
+    for (const groupId of desiredIds) {
+      if (!currentIds.has(String(groupId))) {
+        const link = await db.addStudentGroup(studentId, groupId);
+        addedLinks.push(link || { id: uid(), studentId, groupId });
+      }
+    }
+
+    setStudentGrps((prev) => {
+      const withoutRemoved = (prev || []).filter((sg) => !(String(sg.studentId) === String(studentId) && !desiredSet.has(String(sg.groupId))));
+      return desiredIds.reduce((acc, groupId) => {
+        if (acc.some((sg) => String(sg.studentId) === String(studentId) && String(sg.groupId) === String(groupId))) return acc;
+        const added = addedLinks.find((sg) => String(sg.groupId) === String(groupId));
+        return [...acc, added || { id: uid(), studentId, groupId }];
+      }, withoutRemoved);
+    });
+  };
+
+  const createStudentAction = async (d) => {
+    const { selectedGroups, ...studentPayload } = d;
+    try {
+      const s = await db.insertStudent(studentPayload);
+      const created = s || { id: uid(), ...studentPayload };
+      setStudents((p) => [...p, created]);
+      if (Array.isArray(selectedGroups)) await syncStudentGroupLinks(created.id, selectedGroups);
+      setModal(null);
+    } catch(e) {
+      console.warn(e);
+      setStudents((p) => [...p, { id: uid(), ...studentPayload }]);
+      setModal(null);
+    }
+  };
+
+  const updateStudentAction = async (d) => {
+    const { selectedGroups, ...studentPayload } = d;
+    try {
+      if(db.updateStudent) await db.updateStudent(editItem.id, studentPayload);
+      if (Array.isArray(selectedGroups)) await syncStudentGroupLinks(editItem.id, selectedGroups);
+      const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean);
+      const newName = getDisplayName({...editItem, ...studentPayload});
+      setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...studentPayload}:x));
+      setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; }));
+      setModal(null);setEditItem(null);
+    }catch(e){console.warn(e);}
+  };
+
   const restoreStudentToGroup = async (studentId) => {
     const groupId = restoreGroupByStudent[studentId];
     if (!groupId) {
@@ -1624,7 +1680,7 @@ export default function App() {
           </div>
         </div>
       </Modal>
-      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const s=await db.insertStudent(d);setStudents(p=>[...p,s||{id:uid(),...d}]);setModal(null);}catch(e){console.warn(e);setStudents(p=>[...p,{id:uid(),...d}]);setModal(null);}}} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
@@ -1755,7 +1811,7 @@ export default function App() {
         )}
       </Modal>
       
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateStudent)await db.updateStudent(editItem.id,d); const oldNames = [editItem.name, getDisplayName(editItem)].filter(Boolean); const newName = getDisplayName({...editItem, ...d}); setStudents(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x)); setAttn(p=>p.map(a=>{ if(a.guestName && oldNames.includes(a.guestName)){ return {...a, guestName: newName}; } return a; })); setModal(null);setEditItem(null);}catch(e){console.warn(e);}} } studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
       
       {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}

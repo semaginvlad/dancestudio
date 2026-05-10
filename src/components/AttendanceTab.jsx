@@ -761,15 +761,14 @@ export default function AttendanceTab({
 
   const studentIdsInGroup = useMemo(() => {
     const fromLinks = studentGrps
-      .filter((sg) => sg.groupId === gid)
+      .filter((sg) => String(sg.groupId) === String(gid))
       .map((sg) => sg.studentId);
 
     const fromSubs = rawSubs
-      .filter((s) => s.groupId === gid)
+      .filter((s) => String(s.groupId) === String(gid))
       .map((s) => s.studentId);
 
-    if (fromLinks.length) return [...new Set(fromLinks)];
-    return [...new Set(fromSubs)];
+    return [...new Set([...fromLinks, ...fromSubs].map(String))];
   }, [studentGrps, rawSubs, gid]);
 
   const orderedStudents = useMemo(() => {
