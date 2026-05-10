@@ -1201,6 +1201,8 @@ export default function App() {
             ) : (
               <TrainersNotificationsTab
                 groups={groups}
+                trainers={trainers}
+                trainerGroups={trainerGroups}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
@@ -1211,6 +1213,8 @@ export default function App() {
             {adminTab === "notifications" && (
               <TrainersNotificationsTab
                 groups={groups}
+                trainers={trainers}
+                trainerGroups={trainerGroups}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
