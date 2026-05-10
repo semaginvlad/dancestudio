@@ -1010,7 +1010,7 @@ export default function App() {
     try {
       const link = await db.addStudentGroup(studentId, groupId);
       setStudentGrps((prev) => {
-        if (prev.some((sg) => sg.studentId === studentId && sg.groupId === groupId)) return prev;
+        if (prev.some((sg) => String(sg.studentId) === String(studentId) && String(sg.groupId) === String(groupId))) return prev;
         return [...prev, link || { id: uid(), studentId, groupId }];
       });
       setRestoreGroupByStudent((prev) => {
