@@ -38,6 +38,21 @@ export async function fetchStudents() {
   return data.map(mapStudent)
 }
 
+export async function fetchRestoreCandidatesForGroup(groupId) {
+  if (!groupId) return []
+  const { data, error } = await supabase.rpc('crm_fetch_restore_candidates_for_group', { p_group_id: groupId })
+  if (error) throw error
+  return (data || []).map((row) => ({
+    student: mapStudent({
+      id: row.student_id,
+      name: row.name || '',
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
+    }),
+    hasHistory: !!row.has_history,
+  }))
+}
+
 export async function insertStudent(s) {
   const fullName = [s.last_name, s.first_name].filter(Boolean).join(' ') || s.name || ''
   const { data, error } = await supabase.from('students').insert({
