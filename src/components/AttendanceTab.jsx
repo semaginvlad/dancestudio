@@ -650,6 +650,8 @@ export default function AttendanceTab({
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
   const [addMode, setAddMode] = useState("student");
+  const [restoreStudentId, setRestoreStudentId] = useState("");
+  const [restoringStudent, setRestoringStudent] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState("");
   const [guestEntryType, setGuestEntryType] = useState("trial");
   const [creatingGuest, setCreatingGuest] = useState(false);
@@ -809,6 +811,32 @@ export default function AttendanceTab({
     });
   }, [studentIdsInGroup, activeStudentMap, customOrders, localOrders, gid]);
 
+  const restoreCandidates = useMemo(() => {
+    if (!gid) return [];
+
+    const linkedStudentIds = new Set(
+      (studentGrps || [])
+        .filter((sg) => String(sg.groupId) === String(gid))
+        .map((sg) => String(sg.studentId))
+    );
+
+    const hasGroupHistory = (studentId) => (
+      (rawSubs || []).some((s) => String(s.groupId) === String(gid) && String(s.studentId) === String(studentId)) ||
+      (attn || []).some((a) => String(a.groupId) === String(gid) && String(a.studentId) === String(studentId))
+    );
+
+    return Object.values(activeStudentMap)
+      .filter((student) => student?.id && !linkedStudentIds.has(String(student.id)))
+      .map((student) => ({
+        student,
+        hasHistory: hasGroupHistory(student.id),
+      }))
+      .sort((a, b) => {
+        if (a.hasHistory !== b.hasHistory) return a.hasHistory ? -1 : 1;
+        return getDisplayName(a.student).localeCompare(getDisplayName(b.student), "uk");
+      });
+  }, [activeStudentMap, attn, gid, rawSubs, studentGrps]);
+
   const handleCreateStudentInGroup = async () => {
     const name = (newStudentName || "").trim();
     if (!gid) return;
@@ -850,6 +878,40 @@ export default function AttendanceTab({
       alert(`Не вдалося створити ученицю через CRM RPC. ${err?.message || "Перевір, що функція crm_create_student_for_group застосована в Supabase."}`);
     } finally {
       setCreatingStudent(false);
+    }
+  };
+
+  const handleRestoreStudentToGroup = async () => {
+    if (!gid || !restoreStudentId) return;
+
+    const alreadyLinked = (studentGrps || []).some(
+      (sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid)
+    );
+    if (alreadyLinked) {
+      setRestoreStudentId("");
+      return;
+    }
+
+    setRestoringStudent(true);
+    try {
+      const link = await db.addStudentGroup(restoreStudentId, gid);
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => {
+          const list = prev || [];
+          if (list.some((sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid))) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: restoreStudentId, groupId: gid }];
+        });
+      }
+      setLocalOrders((prev) => {
+        const arr = prev?.[gid] || customOrders?.[gid] || [];
+        if (arr.some((id) => String(id) === String(restoreStudentId))) return prev;
+        return { ...(prev || {}), [gid]: [...arr, restoreStudentId] };
+      });
+      setRestoreStudentId("");
+    } catch (err) {
+      alert(err?.message || "Не вдалося відновити ученицю в групі");
+    } finally {
+      setRestoringStudent(false);
     }
   };
 
@@ -1833,17 +1895,32 @@ export default function AttendanceTab({
 
             <tr>
               <td style={styles.rowHead}>
-                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
                   <button type="button" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
                   <button type="button" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+                  <button type="button" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={!restoreCandidates.length}>Відновити</button>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : "Додати гостя"}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
                 <div style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
                   {addMode === "student" ? (
                     <>
                       <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
                       <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
                     </>
+                  ) : addMode === "restore" ? (
+                    restoreCandidates.length ? (
+                      <>
+                        <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
+                          <option value="">Вибери ученицю</option>
+                          {restoreCandidates.map(({ student, hasHistory }) => (
+                            <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
+                          ))}
+                        </select>
+                        <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
+                      </>
+                    ) : (
+                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>Немає учениць для відновлення</div>
+                    )
                   ) : (
                     <form
                       onSubmit={(e) => {
