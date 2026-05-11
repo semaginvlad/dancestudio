@@ -694,7 +694,12 @@ export default function AttendanceTab({
       const btn = groupPickerRef.current?.querySelector("button");
       if (!btn) return;
       const rect = btn.getBoundingClientRect();
-      setGroupPickerPos({ top: rect.bottom + 6, left: rect.left, width: Math.max(300, rect.width) });
+      const margin = 8;
+      const viewportWidth = window.innerWidth || 320;
+      const maxPanelWidth = Math.max(160, viewportWidth - margin * 2);
+      const width = Math.min(Math.max(300, rect.width), maxPanelWidth);
+      const left = Math.max(margin, Math.min(rect.left, viewportWidth - margin - width));
+      setGroupPickerPos({ top: rect.bottom + 6, left, width });
     };
     syncPos();
     const onDocClick = (e) => {
@@ -1582,10 +1587,98 @@ export default function AttendanceTab({
   }, {});
 
   return (
-    <div style={styles.wrap}>
-      <div style={styles.toolbar}>
-        <div style={styles.toolbarLeft}>
-          <div style={styles.groupPickerWrap} ref={groupPickerRef}>
+    <div className="attendance-root" style={styles.wrap}>
+      <style>{`
+        .attendance-mobile-hint {
+          display: none;
+        }
+
+        @media (max-width: 768px) {
+          .attendance-root {
+            gap: 12px !important;
+          }
+
+          .attendance-toolbar {
+            align-items: stretch !important;
+          }
+
+          .attendance-toolbar-left {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 10px !important;
+            width: 100% !important;
+          }
+
+          .attendance-group-picker {
+            min-width: 0 !important;
+            width: 100% !important;
+          }
+
+          .attendance-group-picker button,
+          .attendance-toolbar-left input,
+          .attendance-toolbar-left select {
+            min-height: 42px !important;
+          }
+
+          .attendance-group-panel {
+            max-width: calc(100vw - 16px) !important;
+          }
+
+          .attendance-mobile-hint {
+            display: inline-flex;
+            align-items: center;
+            align-self: flex-start;
+            gap: 6px;
+            padding: 7px 10px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.1);
+            color: ${theme.textMuted};
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1;
+          }
+
+          .attendance-day-cancel {
+            width: 36px !important;
+            height: 36px !important;
+            line-height: 34px !important;
+            font-size: 16px !important;
+          }
+
+          .attendance-menu-btn {
+            width: 40px !important;
+            height: 40px !important;
+            line-height: 38px !important;
+            font-size: 18px !important;
+          }
+
+          .attendance-add-mode-btn,
+          .attendance-add-action {
+            min-height: 38px !important;
+            height: 38px !important;
+            padding: 0 12px !important;
+          }
+
+          .attendance-add-controls,
+          .attendance-add-controls form {
+            flex-wrap: wrap !important;
+          }
+
+          .attendance-add-controls input,
+          .attendance-add-controls select {
+            min-height: 38px !important;
+          }
+
+          .attendance-menu-popup button,
+          .attendance-menu-popup label {
+            min-height: 38px !important;
+          }
+        }
+      `}</style>
+      <div className="attendance-toolbar" style={styles.toolbar}>
+        <div className="attendance-toolbar-left" style={styles.toolbarLeft}>
+          <div className="attendance-group-picker" style={styles.groupPickerWrap} ref={groupPickerRef}>
             <button type="button" style={styles.groupPickerBtn(groupPickerOpen)} onClick={() => setGroupPickerOpen((v) => !v)}>
               <span>{currentGroup?.name || "Вибери групу"}</span>
               <span style={{ color: theme.textMuted }}>{groupPickerOpen ? "▲" : "▼"}</span>
@@ -1646,7 +1739,7 @@ export default function AttendanceTab({
         </div>
       </div>
       {groupPickerOpen && createPortal(
-        <div style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>
+        <div className="attendance-group-panel" style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>
           {groupedByDirection.map((section) => (
             <div key={section.directionId}>
               <div style={styles.groupSectionTitle}>{section.label}</div>
@@ -1671,6 +1764,8 @@ export default function AttendanceTab({
         </div>,
         document.body
       )}
+
+      <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>
 
       <div style={styles.tableWrap}>
         <table style={styles.table}>
@@ -1719,6 +1814,7 @@ export default function AttendanceTab({
                     <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
                     <button
                       type="button"
+                      className="attendance-day-cancel"
                       disabled={isBusy}
                       onClick={() => handleToggleCancelled(dateStr)}
                       style={styles.cancelBtn(cancelledDay)}
@@ -1776,7 +1872,7 @@ export default function AttendanceTab({
                         <div style={styles.studentNameRow}>
                           <div style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
                           <div style={styles.menuWrap}>
-                            <button type="button" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
+                            <button type="button" className="attendance-menu-btn" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
                           </div>
                         </div>
                         <div style={styles.studentMeta}>Тимчасовий гість (trial/single)</div>
@@ -1855,6 +1951,7 @@ export default function AttendanceTab({
                         <div style={styles.menuWrap}>
                         <button
                           type="button"
+                          className="attendance-menu-btn"
                           style={styles.menuBtn}
                           title="Дії"
                           data-attn-menu-btn="1"
@@ -1945,16 +2042,16 @@ export default function AttendanceTab({
             <tr>
               <td style={styles.rowHead}>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                  <button type="button" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
-                  <button type="button" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
-                  <button type="button" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
+                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
+                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
-                <div style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
+                <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
                   {addMode === "student" ? (
                     <>
                       <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                      <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
+                      <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
                     </>
                   ) : addMode === "restore" ? (
                     restoreCandidates.length ? (
@@ -1965,7 +2062,7 @@ export default function AttendanceTab({
                             <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
                           ))}
                         </select>
-                        <button type="button" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
+                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
                       </>
                     ) : (
                       <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення"}</div>
@@ -1985,6 +2082,7 @@ export default function AttendanceTab({
                       </select>
                       <button
                         type="submit"
+                        className="attendance-add-action"
                         style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
                         onClick={(e) => {
                           e.preventDefault();
@@ -2031,6 +2129,7 @@ export default function AttendanceTab({
       {openMenuState && createPortal(
         <div
           ref={menuPopupRef}
+          className="attendance-menu-popup"
           style={{ ...styles.menu, top: openMenuState.top, left: openMenuState.left }}
         >
           {(() => {
