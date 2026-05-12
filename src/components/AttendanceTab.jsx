@@ -1309,6 +1309,69 @@ export default function AttendanceTab({
     return { freshAttn, freshSubs, freshCancelled };
   };
 
+  const refreshSubscriptionsAfterAttendanceChange = async () => {
+    try {
+      const freshSubs = await fetchSubscriptions();
+      setSubs(freshSubs);
+      return freshSubs;
+    } catch (err) {
+      console.warn("refresh subscriptions after attendance change:", err?.message || err);
+      return null;
+    }
+  };
+
+  const makeTempAttendanceId = () => `temp_attendance_${Date.now()}_${uid()}`;
+
+  const buildOptimisticAttendanceRecord = (payload) => ({
+    id: makeTempAttendanceId(),
+    subId: payload.subId || null,
+    studentId: payload.studentId || null,
+    date: payload.date,
+    guestName: payload.guestName || null,
+    guestType: payload.guestType || null,
+    groupId: payload.groupId || null,
+    quantity: payload.quantity || 1,
+    entryType: payload.entryType || "subscription",
+  });
+
+  const applyAttendanceStateChange = ({ removeIds = [], addRows = [] } = {}) => {
+    const removeSet = new Set(removeIds.filter(Boolean).map(String));
+    const addIdSet = new Set(addRows.map((row) => String(row.id)));
+    setAttn((prev) => [
+      ...((prev || []).filter((row) => !removeSet.has(String(row.id)) && !addIdSet.has(String(row.id)))),
+      ...addRows,
+    ]);
+  };
+
+  const replaceOptimisticAttendanceRecord = (tempId, realRow) => {
+    if (!tempId || !realRow?.id) return;
+    setAttn((prev) => {
+      let replaced = false;
+      const withoutRealDuplicate = (prev || []).filter((row) => String(row.id) === String(tempId) || String(row.id) !== String(realRow.id));
+      const next = withoutRealDuplicate.map((row) => {
+        if (String(row.id) !== String(tempId)) return row;
+        replaced = true;
+        return realRow;
+      });
+      return replaced ? next : [...next, realRow];
+    });
+  };
+
+  const rollbackAttendanceStateChange = ({ removeIds = [], restoreRows = [] } = {}) => {
+    const removeSet = new Set(removeIds.filter(Boolean).map(String));
+    setAttn((prev) => {
+      const next = (prev || []).filter((row) => !removeSet.has(String(row.id)));
+      const existingIds = new Set(next.map((row) => String(row.id)));
+      restoreRows.forEach((row) => {
+        if (row?.id && !existingIds.has(String(row.id))) {
+          next.push(row);
+          existingIds.add(String(row.id));
+        }
+      });
+      return next;
+    });
+  };
+
   const handleToggleCell = async (student, dateStr) => {
     if (!gid) return;
     if (isCancelledDate(dateStr)) return;
@@ -1320,13 +1383,16 @@ export default function AttendanceTab({
     const cellKey = `${student.id}_${dateStr}`;
     setBusyCell(cellKey);
 
+    let rollbackOptimisticChange = null;
+    let shouldReconcileDuplicate = false;
+    let backendMutationStarted = false;
+
     try {
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
         if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
           const rec = existing[0];
-          await db.deleteAttendance(rec.id);
           const payload = {
             id: `tmp_${uid()}`,
             subId: rec.subId,
@@ -1342,16 +1408,28 @@ export default function AttendanceTab({
                   ? "single"
                   : (String(rec.entryType || "").toLowerCase() === "unpaid" ? "unpaid" : "debt")),
           };
+          const optimisticRecord = buildOptimisticAttendanceRecord(payload);
+          applyAttendanceStateChange({ removeIds: [rec.id], addRows: [optimisticRecord] });
+          rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id], restoreRows: [rec] });
+
+          backendMutationStarted = true;
+          await db.deleteAttendance(rec.id);
           if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-          await db.insertAttendance(payload);
+          const savedRecord = await db.insertAttendance(payload);
+          replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
+          rollbackOptimisticChange = null;
           if (rec.subId) {
             await db.syncSubUsedTrainings(rec.subId);
           }
-          await reloadFromDb();
+          await refreshSubscriptionsAfterAttendanceChange();
           return;
         }
 
         const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
+        applyAttendanceStateChange({ removeIds: existing.map((rec) => rec.id) });
+        rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: existing });
+
+        backendMutationStarted = true;
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
@@ -1360,7 +1438,8 @@ export default function AttendanceTab({
         for (const subId of subIdsToSync) {
           await db.syncSubUsedTrainings(subId);
         }
-        await reloadFromDb();
+        rollbackOptimisticChange = null;
+        await refreshSubscriptionsAfterAttendanceChange();
         return;
       }
 
@@ -1378,26 +1457,49 @@ export default function AttendanceTab({
         entryType: nextEntry.entryType,
         explicitEntryType: entryMode === "trial" || entryMode === "single",
       };
+      const optimisticRecord = buildOptimisticAttendanceRecord(payload);
+      applyAttendanceStateChange({ addRows: [optimisticRecord] });
+      rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
+      shouldReconcileDuplicate = true;
+
       if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-      await db.insertAttendance(payload);
+      backendMutationStarted = true;
+      const savedRecord = await db.insertAttendance(payload);
+      replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
+      rollbackOptimisticChange = null;
+      shouldReconcileDuplicate = false;
 
       if (nextEntry.subId) {
         await db.syncSubUsedTrainings(nextEntry.subId);
       }
-      await reloadFromDb();
+      await refreshSubscriptionsAfterAttendanceChange();
     } catch (err) {
       const msg = err?.message || "Невідома помилка";
-      if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+      const isDuplicateError = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique");
+
+      if (backendMutationStarted) {
         try {
           const { freshAttn } = await reloadFromDb();
-          const existsAfterReload = freshAttn.some((a) => recordMatchesCell(a, student, dateStr));
-          if (!existsAfterReload) {
-            alert("Не вдалося додати відвідування. Спробуй ще раз.");
+          if (shouldReconcileDuplicate && isDuplicateError) {
+            const existsAfterReload = freshAttn.some((a) => recordMatchesCell(a, student, dateStr));
+            if (!existsAfterReload) {
+              alert("Не вдалося додати відвідування. Спробуй ще раз.");
+            }
+          } else {
+            alert(msg);
           }
-        } catch {
-          alert("Запис уже є в базі.");
+        } catch (reloadErr) {
+          console.warn("attendance reconciliation failed:", reloadErr?.message || reloadErr);
+          if (shouldReconcileDuplicate && isDuplicateError) {
+            alert("Запис уже є в базі.");
+          } else {
+            alert(msg);
+          }
         }
       } else {
+        if (typeof rollbackOptimisticChange === "function") {
+          rollbackOptimisticChange();
+        }
         alert(msg);
       }
     } finally {
@@ -1450,18 +1552,29 @@ export default function AttendanceTab({
       }
     }
     if (!guestIdentity) return;
-    const existingById = (guestRow.attendanceIds || [])
-      .map((id) => attn.find((a) => a.id === id))
-      .find((a) => a && toDateKey(a.date) === toDateKey(dateStr));
-    const existingByName = attn.find((a) =>
-      String(a.groupId) === String(gid) &&
-      !a.studentId &&
-      normalizeName(a.guestName) === normalizeName(guestIdentity) &&
-      toDateKey(a.date) === toDateKey(dateStr)
-    );
-    const existing = existingById || existingByName || null;
+
+    const guestCellKey = `guest_${guestRow?.id || normalizeName(guestIdentity)}_${dateStr}`;
+    setBusyCell(guestCellKey);
+
+    let rollbackOptimisticChange = null;
+    let backendMutationStarted = false;
+
     try {
+      const existingById = (guestRow.attendanceIds || [])
+        .map((id) => attn.find((a) => a.id === id))
+        .find((a) => a && toDateKey(a.date) === toDateKey(dateStr));
+      const existingByName = attn.find((a) =>
+        String(a.groupId) === String(gid) &&
+        !a.studentId &&
+        normalizeName(a.guestName) === normalizeName(guestIdentity) &&
+        toDateKey(a.date) === toDateKey(dateStr)
+      );
+      const existing = existingById || existingByName || null;
+
       if (existing?.id) {
+        applyAttendanceStateChange({ removeIds: [existing.id] });
+        rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: [existing] });
+        backendMutationStarted = true;
         await db.deleteAttendance(existing.id);
       } else {
         const entry = guestRow.guestEntryType || guestEntryType || "trial";
@@ -1478,11 +1591,30 @@ export default function AttendanceTab({
             return;
           }
         }
-        await db.insertAttendance({ id: `tmp_${uid()}`, subId: null, studentId: null, date: dateStr, guestName: guestIdentity, guestType: entry, groupId: gid, quantity: 1, entryType: entry });
+        const payload = { id: `tmp_${uid()}`, subId: null, studentId: null, date: dateStr, guestName: guestIdentity, guestType: entry, groupId: gid, quantity: 1, entryType: entry };
+        const optimisticRecord = buildOptimisticAttendanceRecord(payload);
+        applyAttendanceStateChange({ addRows: [optimisticRecord] });
+        rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
+        backendMutationStarted = true;
+        const savedRecord = await db.insertAttendance(payload);
+        replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       }
-      await reloadFromDb();
+
+      rollbackOptimisticChange = null;
+      await refreshSubscriptionsAfterAttendanceChange();
     } catch (err) {
+      if (backendMutationStarted) {
+        try {
+          await reloadFromDb();
+        } catch (reloadErr) {
+          console.warn("guest attendance reconciliation failed:", reloadErr?.message || reloadErr);
+        }
+      } else if (typeof rollbackOptimisticChange === "function") {
+        rollbackOptimisticChange();
+      }
       alert(err?.message || "Не вдалося змінити відвідування гостя.");
+    } finally {
+      setBusyCell("");
     }
   };
 
@@ -1988,6 +2120,7 @@ export default function AttendanceTab({
                         normalizeName(a.guestName) === normalizeName(student.guestName) &&
                         toDateKey(a.date) === toDateKey(dateStr)
                       );
+                      const saving = busyCell === `guest_${student?.id || normalizeName(student.guestName)}_${dateStr}`;
                       const t = String(rec?.entryType || rec?.guestType || "subscription").toLowerCase();
                       const mark = rec ? ((rec.quantity || 1) >= 2 ? "2" : "✓") : "";
                       const cellView = !rec
@@ -2001,7 +2134,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, false)} title={futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr}>{cellView.mark}</button></div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr}>{cellView.mark}</button></div>
                         </td>
                       );
                     })}
