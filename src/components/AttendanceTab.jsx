@@ -498,6 +498,168 @@ const makeStyles = () => {
     background: matrixBase,
     color: theme.textMuted,
   },
+  historyOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 4000,
+    background: isDark ? "rgba(2,6,23,0.72)" : "rgba(15,23,42,0.28)",
+    display: "flex",
+    justifyContent: "flex-end",
+    padding: 16,
+    boxSizing: "border-box",
+  },
+  historyPanel: {
+    width: "min(560px, 100%)",
+    height: "100%",
+    overflow: "hidden",
+    borderRadius: 18,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : theme.border}`,
+    background: isDark ? "#111827" : "#ffffff",
+    boxShadow: isDark ? "0 24px 60px rgba(0,0,0,0.55)" : "0 24px 60px rgba(15,23,42,0.22)",
+    display: "flex",
+    flexDirection: "column",
+  },
+  historyHeader: {
+    padding: "16px 18px",
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : theme.border}`,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  historyTitle: {
+    margin: 0,
+    fontSize: 18,
+    color: theme.textMain,
+  },
+  historySubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  historyBody: {
+    padding: 16,
+    overflowY: "auto",
+    display: "grid",
+    gap: 10,
+  },
+  historyRow: {
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : theme.border}`,
+    borderRadius: 16,
+    padding: 14,
+    background: isDark ? "linear-gradient(180deg, rgba(30,41,59,0.92), rgba(15,23,42,0.86))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))",
+    boxShadow: isDark ? "0 10px 22px rgba(0,0,0,0.22)" : "0 10px 22px rgba(15,23,42,0.07)",
+  },
+  historyRowTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    alignItems: "center",
+    marginBottom: 10,
+    fontSize: 12,
+    color: theme.textLight,
+  },
+  historyTime: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontWeight: 700,
+    color: theme.textMuted,
+  },
+  historySourceChip: {
+    borderRadius: 999,
+    padding: "3px 8px",
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: 0.2,
+    color: theme.textLight,
+    background: isDark ? "rgba(148,163,184,0.12)" : "rgba(148,163,184,0.14)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.22)"}`,
+  },
+  historyActorLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+    marginBottom: 10,
+  },
+  historyRoleBadge: (role) => ({
+    borderRadius: 999,
+    padding: "4px 9px",
+    fontSize: 11,
+    fontWeight: 800,
+    color: role === "admin" ? (isDark ? "#bfdbfe" : "#1d4ed8") : role === "trainer" ? (isDark ? "#bbf7d0" : "#047857") : theme.textMuted,
+    background: role === "admin" ? (isDark ? "rgba(37,99,235,0.18)" : "rgba(37,99,235,0.1)") : role === "trainer" ? (isDark ? "rgba(16,185,129,0.16)" : "rgba(16,185,129,0.1)") : (isDark ? "rgba(148,163,184,0.12)" : "rgba(148,163,184,0.14)"),
+    border: `1px solid ${role === "admin" ? (isDark ? "rgba(96,165,250,0.35)" : "rgba(37,99,235,0.22)") : role === "trainer" ? (isDark ? "rgba(74,222,128,0.32)" : "rgba(16,185,129,0.24)") : (isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.24)")}`,
+  }),
+  historyActorName: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+    fontWeight: 700,
+    color: theme.textMain,
+  },
+  historyFocus: {
+    display: "grid",
+    gridTemplateColumns: "auto 18px minmax(0, 1fr)",
+    gap: 9,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  historyActionBadge: (tone) => {
+    const palette = {
+      add: { fg: isDark ? "#bbf7d0" : "#047857", bg: isDark ? "rgba(16,185,129,0.16)" : "rgba(16,185,129,0.1)", border: isDark ? "rgba(74,222,128,0.32)" : "rgba(16,185,129,0.24)" },
+      addStrong: { fg: isDark ? "#bfdbfe" : "#1d4ed8", bg: isDark ? "rgba(37,99,235,0.18)" : "rgba(37,99,235,0.1)", border: isDark ? "rgba(96,165,250,0.35)" : "rgba(37,99,235,0.24)" },
+      remove: { fg: isDark ? "#fed7aa" : "#c2410c", bg: isDark ? "rgba(249,115,22,0.16)" : "rgba(249,115,22,0.1)", border: isDark ? "rgba(251,146,60,0.32)" : "rgba(249,115,22,0.22)" },
+      removeStrong: { fg: isDark ? "#fecaca" : "#b91c1c", bg: isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.09)", border: isDark ? "rgba(248,113,113,0.34)" : "rgba(239,68,68,0.22)" },
+      guest: { fg: isDark ? "#ddd6fe" : "#6d28d9", bg: isDark ? "rgba(139,92,246,0.18)" : "rgba(139,92,246,0.1)", border: isDark ? "rgba(167,139,250,0.34)" : "rgba(139,92,246,0.24)" },
+      update: { fg: isDark ? "#fde68a" : "#a16207", bg: isDark ? "rgba(234,179,8,0.16)" : "rgba(234,179,8,0.12)", border: isDark ? "rgba(250,204,21,0.3)" : "rgba(202,138,4,0.22)" },
+      muted: { fg: theme.textMuted, bg: isDark ? "rgba(148,163,184,0.12)" : "rgba(148,163,184,0.14)", border: isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.24)" },
+    };
+    const next = palette[tone] || palette.muted;
+    return {
+      borderRadius: 12,
+      padding: "8px 10px",
+      fontSize: 13,
+      fontWeight: 900,
+      color: next.fg,
+      background: next.bg,
+      border: `1px solid ${next.border}`,
+      whiteSpace: "nowrap",
+    };
+  },
+  historyArrow: {
+    color: theme.textLight,
+    fontWeight: 900,
+    textAlign: "center",
+  },
+  historyTargetName: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 15,
+    fontWeight: 900,
+    color: theme.textMain,
+  },
+  historyMeta: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  historyMetaChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    padding: "5px 8px",
+    background: isDark ? "rgba(148,163,184,0.09)" : "rgba(148,163,184,0.1)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.18)"}`,
+  },
 });
 };
 
@@ -616,6 +778,77 @@ const getStudentStatusText = (subs, studentId, groupId) => {
   };
 };
 
+const formatAuditDateTime = (value) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const getAuditActorRoleLabel = (row) => {
+  if (row.actorType === "admin") return "Адмін";
+  if (row.actorType === "trainer") return "Тренер";
+  return "Невідомо";
+};
+
+const getAuditActorLabel = (row) => row.actorName || row.actorEmail || "Невідомий користувач";
+
+const getAuditActorRoleTone = (row) => {
+  if (row.actorType === "admin") return "admin";
+  if (row.actorType === "trainer") return "trainer";
+  return "unknown";
+};
+
+const getAuditTargetLabel = (row) => {
+  if (row.studentName) return row.studentName;
+  if (row.guestName) return `Гість: ${row.guestName}`;
+  return "Учениця/гість не вказані";
+};
+
+const getAuditEntryLabel = (entryType) => {
+  const type = String(entryType || "").toLowerCase();
+  if (type === "subscription") return "абонемент";
+  if (type === "trial") return "пробне";
+  if (type === "single") return "разове";
+  if (type === "debt") return "борг";
+  if (type === "unpaid") return "неоплачено";
+  return entryType || "";
+};
+
+const getAuditActionLabel = (row) => {
+  const action = row.actionType;
+  const change = row.changeType;
+  const qty = Number(row.quantity || 1);
+
+  if (action === "create" && change === "guest_added") return "додано гостя";
+  if (action === "delete" && change === "guest_removed") return "видалено гостя";
+  if (action === "create" && change === "mark_added") return qty >= 2 ? "додано 2" : "додано ✓";
+  if (action === "delete" && change === "mark_removed") return qty >= 2 ? "видалено 2" : "видалено ✓";
+  if (action === "update" && change === "quantity_changed") return "змінено кількість";
+  if (action === "update" && change === "guest_relinked") return "гість привʼязаний до учениці";
+
+  return "зміна";
+};
+
+const getAuditActionTone = (row) => {
+  const action = row.actionType;
+  const change = row.changeType;
+  const qty = Number(row.quantity || 1);
+
+  if (action === "create" && change === "guest_added") return "guest";
+  if (action === "delete" && change === "guest_removed") return "removeStrong";
+  if (action === "create" && change === "mark_added") return qty >= 2 ? "addStrong" : "add";
+  if (action === "delete" && change === "mark_removed") return qty >= 2 ? "removeStrong" : "remove";
+  if (action === "update" && (change === "quantity_changed" || change === "guest_relinked")) return "update";
+
+  return "muted";
+};
+
 export default function AttendanceTab({
   groups,
   rawSubs = [],
@@ -667,6 +900,10 @@ export default function AttendanceTab({
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
 
@@ -1244,6 +1481,31 @@ export default function AttendanceTab({
 
   const isCancelledDate = (dateStr) =>
     cancelled.some((c) => c.groupId === gid && c.date === dateStr);
+
+  const loadAttendanceHistory = async () => {
+    if (!isAdmin) return;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const rows = await db.fetchAttendanceChangeLog({
+        groupId: gid || undefined,
+        limit: 100,
+      });
+      setHistoryRows(rows);
+    } catch (err) {
+      console.warn("fetch attendance change log failed:", err?.message || err);
+      setHistoryError("Не вдалося завантажити історію змін.");
+      setHistoryRows([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const openAttendanceHistory = () => {
+    if (!isAdmin) return;
+    setHistoryOpen(true);
+    loadAttendanceHistory();
+  };
 
   const hasAttendanceInDirection = (student) => {
     if (!currentDirectionId) return false;
@@ -1932,6 +2194,16 @@ export default function AttendanceTab({
             <option value="debt">Борг</option>
           </select>
 
+          {isAdmin && (
+            <button
+              type="button"
+              style={{ ...styles.control, cursor: "pointer", fontWeight: 700 }}
+              onClick={openAttendanceHistory}
+            >
+              Історія змін
+            </button>
+          )}
+
         </div>
 
         <div style={styles.legend}>
@@ -1989,6 +2261,76 @@ export default function AttendanceTab({
               })}
             </div>
           ))}
+        </div>,
+        document.body
+      )}
+
+      {isAdmin && historyOpen && createPortal(
+        <div style={styles.historyOverlay} onClick={() => setHistoryOpen(false)}>
+          <div style={styles.historyPanel} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.historyHeader}>
+              <div>
+                <h3 style={styles.historyTitle}>Історія змін відвідування</h3>
+                <div style={styles.historySubtitle}>
+                  {currentGroup?.name ? `Група: ${currentGroup.name}` : "Останні 100 записів"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  style={{ ...styles.control, height: 32, cursor: "pointer", fontSize: 12 }}
+                  onClick={loadAttendanceHistory}
+                  disabled={historyLoading}
+                >
+                  Оновити
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.control, height: 32, cursor: "pointer", fontSize: 12 }}
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  Закрити
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.historyBody}>
+              {historyLoading && <div style={styles.emptyState}>Завантаження історії…</div>}
+              {!historyLoading && historyError && <div style={styles.emptyState}>{historyError}</div>}
+              {!historyLoading && !historyError && !historyRows.length && (
+                <div style={styles.emptyState}>Історія змін поки порожня.</div>
+              )}
+              {!historyLoading && !historyError && historyRows.map((row) => {
+                const entryLabel = getAuditEntryLabel(row.entryType || row.guestType);
+                const actionLabel = getAuditActionLabel(row);
+                return (
+                  <div key={row.id} style={styles.historyRow}>
+                    <div style={styles.historyRowTop}>
+                      <span style={styles.historyTime}>⏱ {formatAuditDateTime(row.createdAt)}</span>
+                      <span style={styles.historySourceChip}>{row.source || "unknown"}</span>
+                    </div>
+
+                    <div style={styles.historyActorLine}>
+                      <span style={styles.historyRoleBadge(getAuditActorRoleTone(row))}>{getAuditActorRoleLabel(row)}</span>
+                      <span style={styles.historyActorName}>{getAuditActorLabel(row)}</span>
+                    </div>
+
+                    <div style={styles.historyFocus}>
+                      <span style={styles.historyActionBadge(getAuditActionTone(row))}>{actionLabel}</span>
+                      <span style={styles.historyArrow}>→</span>
+                      <span style={styles.historyTargetName}>{getAuditTargetLabel(row)}</span>
+                    </div>
+
+                    <div style={styles.historyMeta}>
+                      <span style={styles.historyMetaChip}>📍 {row.groupName || row.groupId || "Група не вказана"}</span>
+                      <span style={styles.historyMetaChip}>🗓 тренування {fmtUaShortDate(row.attendanceDate)}</span>
+                      {entryLabel && <span style={styles.historyMetaChip}>🏷 {entryLabel}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>,
         document.body
       )}

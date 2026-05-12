@@ -505,6 +505,71 @@ export async function fetchAttendance() {
   }))
 }
 
+const mapAttendanceChangeLog = (row) => ({
+  id: row.id,
+  createdAt: row.created_at,
+  actorType: row.actor_type || 'unknown',
+  actorEmail: row.actor_email || null,
+  actorTrainerId: row.actor_trainer_id || null,
+  actorName: row.actor_name || null,
+  groupId: row.group_id || null,
+  groupName: row.group_name || null,
+  studentId: row.student_id || null,
+  studentName: row.student_name || null,
+  guestName: row.guest_name || null,
+  attendanceDate: row.attendance_date || null,
+  actionType: row.action_type || 'update',
+  changeType: row.change_type || 'unknown',
+  previousValue: row.previous_value || null,
+  newValue: row.new_value || null,
+  subId: row.sub_id || null,
+  entryType: row.entry_type || null,
+  guestType: row.guest_type || null,
+  quantity: row.quantity || null,
+  source: row.source || 'unknown',
+  details: row.details || null,
+})
+
+export async function fetchAttendanceChangeLog({ groupId, dateFrom, dateTo, limit = 100 } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  let query = supabase
+    .from('attendance_change_log')
+    .select([
+      'id',
+      'created_at',
+      'actor_type',
+      'actor_email',
+      'actor_trainer_id',
+      'actor_name',
+      'group_id',
+      'group_name',
+      'student_id',
+      'student_name',
+      'guest_name',
+      'attendance_date',
+      'action_type',
+      'change_type',
+      'previous_value',
+      'new_value',
+      'sub_id',
+      'entry_type',
+      'guest_type',
+      'quantity',
+      'source',
+      'details',
+    ].join(','))
+    .order('created_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (groupId) query = query.eq('group_id', groupId);
+  if (dateFrom) query = query.gte('attendance_date', dateFrom);
+  if (dateTo) query = query.lte('attendance_date', dateTo);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapAttendanceChangeLog);
+}
+
 export async function insertAttendance(a) {
   const entryType = String(a.entryType || 'subscription').trim().toLowerCase();
   let guestType = a.guestType ? String(a.guestType).trim().toLowerCase() : null;
