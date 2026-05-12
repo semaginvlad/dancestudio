@@ -498,6 +498,75 @@ const makeStyles = () => {
     background: matrixBase,
     color: theme.textMuted,
   },
+  historyOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 4000,
+    background: isDark ? "rgba(2,6,23,0.72)" : "rgba(15,23,42,0.28)",
+    display: "flex",
+    justifyContent: "flex-end",
+    padding: 16,
+    boxSizing: "border-box",
+  },
+  historyPanel: {
+    width: "min(560px, 100%)",
+    height: "100%",
+    overflow: "hidden",
+    borderRadius: 18,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : theme.border}`,
+    background: isDark ? "#111827" : "#ffffff",
+    boxShadow: isDark ? "0 24px 60px rgba(0,0,0,0.55)" : "0 24px 60px rgba(15,23,42,0.22)",
+    display: "flex",
+    flexDirection: "column",
+  },
+  historyHeader: {
+    padding: "16px 18px",
+    borderBottom: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : theme.border}`,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  historyTitle: {
+    margin: 0,
+    fontSize: 18,
+    color: theme.textMain,
+  },
+  historySubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  historyBody: {
+    padding: 16,
+    overflowY: "auto",
+    display: "grid",
+    gap: 10,
+  },
+  historyRow: {
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : theme.border}`,
+    borderRadius: 14,
+    padding: 12,
+    background: isDark ? "rgba(148,163,184,0.08)" : "rgba(248,250,252,0.92)",
+  },
+  historyRowTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 7,
+    fontSize: 12,
+    color: theme.textLight,
+  },
+  historyRowMain: {
+    fontSize: 13,
+    lineHeight: 1.45,
+    color: theme.textMain,
+  },
+  historyMeta: {
+    marginTop: 6,
+    fontSize: 12,
+    color: theme.textMuted,
+  },
 });
 };
 
@@ -616,6 +685,56 @@ const getStudentStatusText = (subs, studentId, groupId) => {
   };
 };
 
+const formatAuditDateTime = (value) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const getAuditActorLabel = (row) => {
+  const name = row.actorName || row.actorEmail || "";
+  if (row.actorType === "admin") return name ? `Адмін ${name}` : "Адмін";
+  if (row.actorType === "trainer") return name ? `Тренер ${name}` : "Тренер";
+  return name || "Невідомо";
+};
+
+const getAuditTargetLabel = (row) => {
+  if (row.studentName) return row.studentName;
+  if (row.guestName) return `Гість: ${row.guestName}`;
+  return "Учениця/гість не вказані";
+};
+
+const getAuditEntryLabel = (entryType) => {
+  const type = String(entryType || "").toLowerCase();
+  if (type === "subscription") return "абонемент";
+  if (type === "trial") return "пробне";
+  if (type === "single") return "разове";
+  if (type === "debt") return "борг";
+  if (type === "unpaid") return "неоплачено";
+  return entryType || "";
+};
+
+const getAuditActionLabel = (row) => {
+  const action = row.actionType;
+  const change = row.changeType;
+  const qty = Number(row.quantity || 1);
+
+  if (action === "create" && change === "guest_added") return "додано гостя";
+  if (action === "delete" && change === "guest_removed") return "видалено гостя";
+  if (action === "create" && change === "mark_added") return qty >= 2 ? "додано 2" : "додано ✓";
+  if (action === "delete" && change === "mark_removed") return qty >= 2 ? "видалено 2" : "видалено ✓";
+  if (action === "update" && change === "quantity_changed") return "змінено кількість";
+  if (action === "update" && change === "guest_relinked") return "гість привʼязаний до учениці";
+
+  return "зміна";
+};
+
 export default function AttendanceTab({
   groups,
   rawSubs = [],
@@ -667,6 +786,10 @@ export default function AttendanceTab({
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
 
@@ -1244,6 +1367,31 @@ export default function AttendanceTab({
 
   const isCancelledDate = (dateStr) =>
     cancelled.some((c) => c.groupId === gid && c.date === dateStr);
+
+  const loadAttendanceHistory = async () => {
+    if (!isAdmin) return;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const rows = await db.fetchAttendanceChangeLog({
+        groupId: gid || undefined,
+        limit: 100,
+      });
+      setHistoryRows(rows);
+    } catch (err) {
+      console.warn("fetch attendance change log failed:", err?.message || err);
+      setHistoryError("Не вдалося завантажити історію змін.");
+      setHistoryRows([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const openAttendanceHistory = () => {
+    if (!isAdmin) return;
+    setHistoryOpen(true);
+    loadAttendanceHistory();
+  };
 
   const hasAttendanceInDirection = (student) => {
     if (!currentDirectionId) return false;
@@ -1932,6 +2080,16 @@ export default function AttendanceTab({
             <option value="debt">Борг</option>
           </select>
 
+          {isAdmin && (
+            <button
+              type="button"
+              style={{ ...styles.control, cursor: "pointer", fontWeight: 700 }}
+              onClick={openAttendanceHistory}
+            >
+              Історія змін
+            </button>
+          )}
+
         </div>
 
         <div style={styles.legend}>
@@ -1989,6 +2147,67 @@ export default function AttendanceTab({
               })}
             </div>
           ))}
+        </div>,
+        document.body
+      )}
+
+      {isAdmin && historyOpen && createPortal(
+        <div style={styles.historyOverlay} onClick={() => setHistoryOpen(false)}>
+          <div style={styles.historyPanel} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.historyHeader}>
+              <div>
+                <h3 style={styles.historyTitle}>Історія змін відвідування</h3>
+                <div style={styles.historySubtitle}>
+                  {currentGroup?.name ? `Група: ${currentGroup.name}` : "Останні 100 записів"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  style={{ ...styles.control, height: 32, cursor: "pointer", fontSize: 12 }}
+                  onClick={loadAttendanceHistory}
+                  disabled={historyLoading}
+                >
+                  Оновити
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.control, height: 32, cursor: "pointer", fontSize: 12 }}
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  Закрити
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.historyBody}>
+              {historyLoading && <div style={styles.emptyState}>Завантаження історії…</div>}
+              {!historyLoading && historyError && <div style={styles.emptyState}>{historyError}</div>}
+              {!historyLoading && !historyError && !historyRows.length && (
+                <div style={styles.emptyState}>Історія змін поки порожня.</div>
+              )}
+              {!historyLoading && !historyError && historyRows.map((row) => {
+                const entryLabel = getAuditEntryLabel(row.entryType || row.guestType);
+                return (
+                  <div key={row.id} style={styles.historyRow}>
+                    <div style={styles.historyRowTop}>
+                      <span>{formatAuditDateTime(row.createdAt)}</span>
+                      <span>{row.source || "unknown"}</span>
+                    </div>
+                    <div style={styles.historyRowMain}>
+                      <strong>{getAuditActorLabel(row)}</strong> — {getAuditActionLabel(row)}: {getAuditTargetLabel(row)}
+                    </div>
+                    <div style={styles.historyMeta}>
+                      {row.groupName || row.groupId || "Група не вказана"}
+                      {" · "}
+                      тренування {fmtUaShortDate(row.attendanceDate)}
+                      {entryLabel ? ` · ${entryLabel}` : ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>,
         document.body
       )}
