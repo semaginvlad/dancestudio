@@ -570,6 +570,100 @@ export async function fetchAttendanceChangeLog({ groupId, dateFrom, dateTo, limi
   return (data || []).map(mapAttendanceChangeLog);
 }
 
+const mapSubscriptionChangeLog = (row) => ({
+  id: row.id,
+  createdAt: row.created_at,
+  actorType: row.actor_type || 'unknown',
+  actorAuthUserId: row.actor_auth_user_id || null,
+  actorEmail: row.actor_email || null,
+  actorTrainerId: row.actor_trainer_id || null,
+  actorName: row.actor_name || null,
+  subscriptionId: row.subscription_id || null,
+  studentId: row.student_id || null,
+  studentName: row.student_name || null,
+  groupId: row.group_id || null,
+  groupName: row.group_name || null,
+  actionType: row.action_type || 'update',
+  changeType: row.change_type || 'unknown',
+  previousValue: row.previous_value || null,
+  newValue: row.new_value || null,
+  subscriptionType: row.subscription_type || null,
+  status: row.status || null,
+  startDate: row.start_date || null,
+  endDate: row.end_date || null,
+  activationDate: row.activation_date || null,
+  originalEndDate: row.original_end_date || null,
+  totalTrainings: row.total_trainings ?? null,
+  usedTrainings: row.used_trainings ?? null,
+  amount: row.amount ?? null,
+  basePrice: row.base_price ?? null,
+  discountPct: row.discount_pct ?? null,
+  discountSource: row.discount_source || null,
+  paid: row.paid,
+  payMethod: row.pay_method || null,
+  notes: row.notes || null,
+  source: row.source || 'unknown',
+  details: row.details || null,
+})
+
+const normalizeLogDateTo = (value) => {
+  if (!value) return value;
+  const str = String(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(str) ? `${str}T23:59:59.999Z` : str;
+}
+
+export async function fetchSubscriptionChangeLog({ groupId, studentId, dateFrom, dateTo, limit = 100 } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  let query = supabase
+    .from('subscription_change_log')
+    .select([
+      'id',
+      'created_at',
+      'actor_type',
+      'actor_auth_user_id',
+      'actor_email',
+      'actor_name',
+      'actor_trainer_id',
+      'subscription_id',
+      'student_id',
+      'student_name',
+      'group_id',
+      'group_name',
+      'action_type',
+      'change_type',
+      'previous_value',
+      'new_value',
+      'subscription_type',
+      'status',
+      'start_date',
+      'end_date',
+      'activation_date',
+      'original_end_date',
+      'total_trainings',
+      'used_trainings',
+      'amount',
+      'base_price',
+      'discount_pct',
+      'discount_source',
+      'paid',
+      'pay_method',
+      'notes',
+      'source',
+      'details',
+    ].join(','))
+    .order('created_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (groupId) query = query.eq('group_id', groupId);
+  if (studentId) query = query.eq('student_id', studentId);
+  if (dateFrom) query = query.gte('created_at', dateFrom);
+  if (dateTo) query = query.lte('created_at', normalizeLogDateTo(dateTo));
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapSubscriptionChangeLog);
+}
+
 export async function insertAttendance(a) {
   const entryType = String(a.entryType || 'subscription').trim().toLowerCase();
   let guestType = a.guestType ? String(a.guestType).trim().toLowerCase() : null;

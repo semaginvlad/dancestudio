@@ -537,35 +537,120 @@ const makeStyles = () => {
     fontSize: 12,
     color: theme.textMuted,
   },
+  historyTabs: {
+    padding: "12px 16px 0",
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 6,
+  },
+  historyTab: (active) => ({
+    border: `1px solid ${active ? theme.primary : (isDark ? "rgba(148,163,184,0.24)" : theme.border)}`,
+    borderRadius: 999,
+    padding: "8px 10px",
+    background: active ? (isDark ? "rgba(37,99,235,0.22)" : "rgba(37,99,235,0.1)") : (isDark ? "rgba(148,163,184,0.07)" : "rgba(248,250,252,0.92)"),
+    color: active ? theme.textMain : theme.textMuted,
+    fontSize: 12,
+    fontWeight: active ? 800 : 700,
+    cursor: "pointer",
+  }),
   historyBody: {
     padding: 16,
     overflowY: "auto",
     display: "grid",
-    gap: 10,
+    gap: 12,
   },
   historyRow: {
-    border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : theme.border}`,
-    borderRadius: 14,
-    padding: 12,
-    background: isDark ? "rgba(148,163,184,0.08)" : "rgba(248,250,252,0.92)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : theme.border}`,
+    borderRadius: 16,
+    padding: 14,
+    background: isDark ? "linear-gradient(180deg, rgba(30,41,59,0.82), rgba(15,23,42,0.74))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94))",
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.05)" : "0 8px 20px rgba(15,23,42,0.06)",
   },
   historyRowTop: {
     display: "flex",
     justifyContent: "space-between",
+    alignItems: "center",
     gap: 10,
-    marginBottom: 7,
+    marginBottom: 10,
     fontSize: 12,
     color: theme.textLight,
   },
-  historyRowMain: {
-    fontSize: 13,
-    lineHeight: 1.45,
+  historyActorRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+    minWidth: 0,
+  },
+  historyActorName: {
     color: theme.textMain,
+    fontSize: 13,
+    fontWeight: 700,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  historyFocusRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+    minWidth: 0,
+    color: theme.textMain,
+    fontSize: 14,
+    fontWeight: 800,
+  },
+  historyArrow: {
+    color: theme.textLight,
+    fontSize: 16,
+    lineHeight: 1,
+  },
+  historyTarget: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   historyMeta: {
-    marginTop: 6,
+    marginTop: 12,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  historySummary: {
+    marginTop: 10,
     fontSize: 12,
     color: theme.textMuted,
+    lineHeight: 1.4,
+  },
+  historyChip: (tone = "neutral") => {
+    const palette = {
+      neutral: { bg: isDark ? "rgba(148,163,184,0.12)" : "rgba(226,232,240,0.75)", border: isDark ? "rgba(148,163,184,0.22)" : "rgba(203,213,225,0.9)", color: theme.textMuted },
+      quiet: { bg: isDark ? "rgba(148,163,184,0.07)" : "rgba(241,245,249,0.78)", border: isDark ? "rgba(148,163,184,0.14)" : "rgba(226,232,240,0.9)", color: theme.textLight },
+      admin: { bg: isDark ? "rgba(59,130,246,0.16)" : "rgba(219,234,254,0.88)", border: isDark ? "rgba(96,165,250,0.26)" : "rgba(147,197,253,0.9)", color: isDark ? "#bfdbfe" : "#1d4ed8" },
+      trainer: { bg: isDark ? "rgba(16,185,129,0.14)" : "rgba(209,250,229,0.86)", border: isDark ? "rgba(52,211,153,0.24)" : "rgba(110,231,183,0.86)", color: isDark ? "#a7f3d0" : "#047857" },
+      system: { bg: isDark ? "rgba(148,163,184,0.14)" : "rgba(226,232,240,0.9)", border: isDark ? "rgba(148,163,184,0.25)" : "rgba(203,213,225,0.95)", color: theme.textMain },
+      added: { bg: isDark ? "rgba(34,197,94,0.15)" : "rgba(220,252,231,0.9)", border: isDark ? "rgba(74,222,128,0.28)" : "rgba(134,239,172,0.92)", color: isDark ? "#bbf7d0" : "#15803d" },
+      removed: { bg: isDark ? "rgba(248,113,113,0.14)" : "rgba(254,226,226,0.9)", border: isDark ? "rgba(248,113,113,0.26)" : "rgba(252,165,165,0.86)", color: isDark ? "#fecaca" : "#b91c1c" },
+      changed: { bg: isDark ? "rgba(251,191,36,0.13)" : "rgba(254,243,199,0.88)", border: isDark ? "rgba(251,191,36,0.24)" : "rgba(252,211,77,0.8)", color: isDark ? "#fde68a" : "#92400e" },
+      info: { bg: isDark ? "rgba(56,189,248,0.13)" : "rgba(224,242,254,0.9)", border: isDark ? "rgba(56,189,248,0.24)" : "rgba(125,211,252,0.88)", color: isDark ? "#bae6fd" : "#0369a1" },
+      accent: { bg: isDark ? "rgba(168,85,247,0.14)" : "rgba(243,232,255,0.9)", border: isDark ? "rgba(192,132,252,0.24)" : "rgba(216,180,254,0.88)", color: isDark ? "#e9d5ff" : "#7e22ce" },
+    };
+    const picked = palette[tone] || palette.neutral;
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 4,
+      maxWidth: "100%",
+      border: `1px solid ${picked.border}`,
+      borderRadius: 999,
+      padding: "4px 8px",
+      background: picked.bg,
+      color: picked.color,
+      fontSize: 11,
+      fontWeight: 800,
+      lineHeight: 1.15,
+      whiteSpace: "nowrap",
+    };
   },
 });
 };
@@ -697,12 +782,21 @@ const formatAuditDateTime = (value) => {
   });
 };
 
-const getAuditActorLabel = (row) => {
-  const name = row.actorName || row.actorEmail || "";
-  if (row.actorType === "admin") return name ? `Адмін ${name}` : "Адмін";
-  if (row.actorType === "trainer") return name ? `Тренер ${name}` : "Тренер";
-  return name || "Невідомо";
+const getAuditActorRoleLabel = (row) => {
+  if (row.actorType === "admin") return "Адмін";
+  if (row.actorType === "trainer") return "Тренер";
+  if (row.actorType === "system") return "Система";
+  return "Невідомо";
 };
+
+const getAuditActorTone = (row) => {
+  if (row.actorType === "admin") return "admin";
+  if (row.actorType === "trainer") return "trainer";
+  if (row.actorType === "system") return "system";
+  return "neutral";
+};
+
+const getAuditActorName = (row) => row.actorName || row.actorEmail || (row.actorType === "system" ? "Автоматично" : "Імʼя не визначено");
 
 const getAuditTargetLabel = (row) => {
   if (row.studentName) return row.studentName;
@@ -729,10 +823,128 @@ const getAuditActionLabel = (row) => {
   if (action === "delete" && change === "guest_removed") return "видалено гостя";
   if (action === "create" && change === "mark_added") return qty >= 2 ? "додано 2" : "додано ✓";
   if (action === "delete" && change === "mark_removed") return qty >= 2 ? "видалено 2" : "видалено ✓";
-  if (action === "update" && change === "quantity_changed") return "змінено кількість";
-  if (action === "update" && change === "guest_relinked") return "гість привʼязаний до учениці";
+  if (action === "update" && change === "quantity_changed") return "зміна";
+  if (action === "update" && change === "guest_relinked") return "зміна";
 
   return "зміна";
+};
+
+const getAuditActionTone = (row) => {
+  if (row.actionType === "create") return "added";
+  if (row.actionType === "delete") return "removed";
+  return "changed";
+};
+
+const SUBSCRIPTION_TYPE_LABELS = {
+  trial: "пробне",
+  single: "разове",
+  "4pack": "4 заняття",
+  "8pack": "8 занять",
+  "12pack": "12 занять",
+};
+
+const getSubscriptionTypeLabel = (value) => {
+  const type = String(value || "").toLowerCase();
+  return SUBSCRIPTION_TYPE_LABELS[type] || value || "тип не вказано";
+};
+
+const formatMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toLocaleString("uk-UA")} грн` : String(value);
+};
+
+const formatSubscriptionActionLabel = (row) => {
+  const action = row.actionType;
+  const change = row.changeType;
+  const type = String(row.subscriptionType || "").toLowerCase();
+
+  if (action === "create" && change === "subscription_created") return "створено абонемент";
+  if (action === "delete" && change === "subscription_deleted") return "видалено абонемент";
+  if (action === "create" && change === "one_off_created") {
+    if (type === "trial") return "створено пробне";
+    if (type === "single") return "створено разове";
+    return "створено разове/пробне";
+  }
+  if (action === "delete" && change === "one_off_removed") {
+    if (type === "trial") return "видалено пробне";
+    if (type === "single") return "видалено разове";
+    return "видалено разове/пробне";
+  }
+  if (action === "update" && change === "usage_changed") return "оновлено використання";
+  if (action === "update" && change === "payment_changed") return "змінено оплату";
+  if (action === "update" && change === "financial_changed") return "змінено суму";
+  if (action === "update" && change === "date_changed") return "змінено дати";
+  if (action === "update" && change === "activation_changed") return "змінено активацію";
+  if (action === "update" && change === "plan_changed") return "змінено тариф";
+  if (action === "update" && change === "student_or_group_changed") return "змінено ученицю/групу";
+  if (action === "update" && change === "notification_changed") return "змінено сповіщення";
+
+  return "зміна абонемента";
+};
+
+const getSubscriptionActionTone = (row) => {
+  const change = row.changeType;
+  if (change === "subscription_created") return "added";
+  if (change === "subscription_deleted") return "removed";
+  if (change === "one_off_created") return "accent";
+  if (change === "one_off_removed") return "removed";
+  if (change === "usage_changed") return "info";
+  if (change === "payment_changed" || change === "financial_changed") return "changed";
+  if (["date_changed", "activation_changed", "plan_changed", "student_or_group_changed"].includes(change)) return "info";
+  return "neutral";
+};
+
+const getSubscriptionTargetLabel = (row) => row.studentName || row.studentId || "Учениця не вказана";
+
+const getSnapshotValue = (snapshot, key) => {
+  if (!snapshot || typeof snapshot !== "object") return undefined;
+  return snapshot[key];
+};
+
+const formatPaidValue = (value) => {
+  if (value === true) return "оплачено";
+  if (value === false) return "не оплачено";
+  return "—";
+};
+
+const formatSubscriptionChangeSummary = (row) => {
+  const prev = row.previousValue || {};
+  const next = row.newValue || {};
+  const change = row.changeType;
+
+  if (change === "usage_changed") {
+    const before = getSnapshotValue(prev, "used_trainings");
+    const after = getSnapshotValue(next, "used_trainings");
+    if (before !== undefined || after !== undefined) return `використано: ${before ?? "—"} → ${after ?? "—"}`;
+  }
+
+  if (change === "financial_changed") {
+    const before = getSnapshotValue(prev, "amount");
+    const after = getSnapshotValue(next, "amount");
+    if (before !== undefined || after !== undefined) return `сума: ${formatMoneyValue(before)} → ${formatMoneyValue(after)}`;
+  }
+
+  if (change === "payment_changed") {
+    const paidBefore = getSnapshotValue(prev, "paid");
+    const paidAfter = getSnapshotValue(next, "paid");
+    const methodBefore = getSnapshotValue(prev, "pay_method");
+    const methodAfter = getSnapshotValue(next, "pay_method");
+    if (paidBefore !== paidAfter) return `оплата: ${formatPaidValue(paidBefore)} → ${formatPaidValue(paidAfter)}`;
+    if (methodBefore !== methodAfter) return `метод: ${methodBefore || "—"} → ${methodAfter || "—"}`;
+  }
+
+  if (change === "plan_changed") {
+    const totalBefore = getSnapshotValue(prev, "total_trainings");
+    const totalAfter = getSnapshotValue(next, "total_trainings");
+    const typeBefore = getSnapshotValue(prev, "plan_type");
+    const typeAfter = getSnapshotValue(next, "plan_type");
+    if (totalBefore !== totalAfter) return `занять: ${totalBefore ?? "—"} → ${totalAfter ?? "—"}`;
+    if (typeBefore !== typeAfter) return `тип: ${getSubscriptionTypeLabel(typeBefore)} → ${getSubscriptionTypeLabel(typeAfter)}`;
+  }
+
+  if (change === "date_changed") return "дати змінено";
+  return "";
 };
 
 export default function AttendanceTab({
@@ -790,6 +1002,10 @@ export default function AttendanceTab({
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [historyTab, setHistoryTab] = useState("attendance");
+  const [subscriptionHistoryRows, setSubscriptionHistoryRows] = useState([]);
+  const [subscriptionHistoryLoading, setSubscriptionHistoryLoading] = useState(false);
+  const [subscriptionHistoryError, setSubscriptionHistoryError] = useState("");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
 
@@ -1387,8 +1603,43 @@ export default function AttendanceTab({
     }
   };
 
+  const loadSubscriptionHistory = async () => {
+    if (!isAdmin) return;
+    setSubscriptionHistoryLoading(true);
+    setSubscriptionHistoryError("");
+    try {
+      const rows = await db.fetchSubscriptionChangeLog({
+        groupId: gid || undefined,
+        limit: 100,
+      });
+      setSubscriptionHistoryRows(rows);
+    } catch (err) {
+      console.warn("fetch subscription change log failed:", err?.message || err);
+      setSubscriptionHistoryError("Не вдалося завантажити історію абонементів.");
+      setSubscriptionHistoryRows([]);
+    } finally {
+      setSubscriptionHistoryLoading(false);
+    }
+  };
+
+  const reloadActiveHistoryTab = () => {
+    if (historyTab === "subscriptions") {
+      loadSubscriptionHistory();
+      return;
+    }
+    if (historyTab === "attendance") loadAttendanceHistory();
+  };
+
+  const switchHistoryTab = (tabKey) => {
+    setHistoryTab(tabKey);
+    if (tabKey === "subscriptions" && !subscriptionHistoryLoading && !subscriptionHistoryRows.length) {
+      loadSubscriptionHistory();
+    }
+  };
+
   const openAttendanceHistory = () => {
     if (!isAdmin) return;
+    setHistoryTab("attendance");
     setHistoryOpen(true);
     loadAttendanceHistory();
   };
@@ -2165,8 +2416,8 @@ export default function AttendanceTab({
                 <button
                   type="button"
                   style={{ ...styles.control, height: 32, cursor: "pointer", fontSize: 12 }}
-                  onClick={loadAttendanceHistory}
-                  disabled={historyLoading}
+                  onClick={reloadActiveHistoryTab}
+                  disabled={historyTab === "subscriptions" ? subscriptionHistoryLoading : historyLoading}
                 >
                   Оновити
                 </button>
@@ -2180,32 +2431,105 @@ export default function AttendanceTab({
               </div>
             </div>
 
+            <div style={styles.historyTabs} role="tablist" aria-label="Розділи історії змін">
+              {[
+                ["attendance", "Відмітки"],
+                ["subscriptions", "Абонементи"],
+                ["logins", "Входи"],
+              ].map(([tabKey, label]) => (
+                <button
+                  key={tabKey}
+                  type="button"
+                  role="tab"
+                  aria-selected={historyTab === tabKey}
+                  style={styles.historyTab(historyTab === tabKey)}
+                  onClick={() => switchHistoryTab(tabKey)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             <div style={styles.historyBody}>
-              {historyLoading && <div style={styles.emptyState}>Завантаження історії…</div>}
-              {!historyLoading && historyError && <div style={styles.emptyState}>{historyError}</div>}
-              {!historyLoading && !historyError && !historyRows.length && (
-                <div style={styles.emptyState}>Історія змін поки порожня.</div>
+              {historyTab === "attendance" && (
+                <>
+                  {historyLoading && <div style={styles.emptyState}>Завантаження історії…</div>}
+                  {!historyLoading && historyError && <div style={styles.emptyState}>{historyError}</div>}
+                  {!historyLoading && !historyError && !historyRows.length && (
+                    <div style={styles.emptyState}>Історія змін поки порожня.</div>
+                  )}
+                  {!historyLoading && !historyError && historyRows.map((row) => {
+                    const entryLabel = getAuditEntryLabel(row.entryType || row.guestType) || "тип не вказано";
+                    return (
+                      <div key={row.id} style={styles.historyRow}>
+                        <div style={styles.historyRowTop}>
+                          <span>{formatAuditDateTime(row.createdAt)}</span>
+                          <span style={styles.historyChip("quiet")}>{row.source || "unknown"}</span>
+                        </div>
+                        <div style={styles.historyActorRow}>
+                          <span style={styles.historyChip(getAuditActorTone(row))}>{getAuditActorRoleLabel(row)}</span>
+                          <span style={styles.historyActorName}>{getAuditActorName(row)}</span>
+                        </div>
+                        <div style={styles.historyFocusRow}>
+                          <span style={styles.historyChip(getAuditActionTone(row))}>{getAuditActionLabel(row)}</span>
+                          <span style={styles.historyArrow}>→</span>
+                          <span style={styles.historyTarget}>{getAuditTargetLabel(row)}</span>
+                        </div>
+                        <div style={styles.historyMeta}>
+                          <span style={styles.historyChip("neutral")}>Група: {row.groupName || row.groupId || "не вказана"}</span>
+                          <span style={styles.historyChip("neutral")}>Тренування: {fmtUaShortDate(row.attendanceDate)}</span>
+                          <span style={styles.historyChip("neutral")}>Тип: {entryLabel}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
               )}
-              {!historyLoading && !historyError && historyRows.map((row) => {
-                const entryLabel = getAuditEntryLabel(row.entryType || row.guestType);
-                return (
-                  <div key={row.id} style={styles.historyRow}>
-                    <div style={styles.historyRowTop}>
-                      <span>{formatAuditDateTime(row.createdAt)}</span>
-                      <span>{row.source || "unknown"}</span>
-                    </div>
-                    <div style={styles.historyRowMain}>
-                      <strong>{getAuditActorLabel(row)}</strong> — {getAuditActionLabel(row)}: {getAuditTargetLabel(row)}
-                    </div>
-                    <div style={styles.historyMeta}>
-                      {row.groupName || row.groupId || "Група не вказана"}
-                      {" · "}
-                      тренування {fmtUaShortDate(row.attendanceDate)}
-                      {entryLabel ? ` · ${entryLabel}` : ""}
-                    </div>
-                  </div>
-                );
-              })}
+
+              {historyTab === "subscriptions" && (
+                <>
+                  {subscriptionHistoryLoading && <div style={styles.emptyState}>Завантаження історії абонементів…</div>}
+                  {!subscriptionHistoryLoading && subscriptionHistoryError && <div style={styles.emptyState}>{subscriptionHistoryError}</div>}
+                  {!subscriptionHistoryLoading && !subscriptionHistoryError && !subscriptionHistoryRows.length && (
+                    <div style={styles.emptyState}>Історія абонементів поки порожня.</div>
+                  )}
+                  {!subscriptionHistoryLoading && !subscriptionHistoryError && subscriptionHistoryRows.map((row) => {
+                    const summary = formatSubscriptionChangeSummary(row);
+                    const dateRange = [row.startDate ? fmtUaShortDate(row.startDate) : "", row.endDate ? fmtUaShortDate(row.endDate) : ""].filter(Boolean).join("–");
+                    return (
+                      <div key={row.id} style={styles.historyRow}>
+                        <div style={styles.historyRowTop}>
+                          <span>{formatAuditDateTime(row.createdAt)}</span>
+                          <span style={styles.historyChip("quiet")}>{row.source || "unknown"}</span>
+                        </div>
+                        <div style={styles.historyActorRow}>
+                          <span style={styles.historyChip(getAuditActorTone(row))}>{getAuditActorRoleLabel(row)}</span>
+                          <span style={styles.historyActorName}>{getAuditActorName(row)}</span>
+                        </div>
+                        <div style={styles.historyFocusRow}>
+                          <span style={styles.historyChip(getSubscriptionActionTone(row))}>{formatSubscriptionActionLabel(row)}</span>
+                          <span style={styles.historyArrow}>→</span>
+                          <span style={styles.historyTarget}>{getSubscriptionTargetLabel(row)}</span>
+                        </div>
+                        <div style={styles.historyMeta}>
+                          <span style={styles.historyChip("neutral")}>Група: {row.groupName || row.groupId || "не вказана"}</span>
+                          <span style={styles.historyChip("neutral")}>Тип: {getSubscriptionTypeLabel(row.subscriptionType)}</span>
+                          <span style={styles.historyChip("neutral")}>Заняття: {row.usedTrainings ?? "—"}/{row.totalTrainings ?? "—"}</span>
+                          <span style={styles.historyChip("neutral")}>Сума: {formatMoneyValue(row.amount)}</span>
+                          <span style={styles.historyChip(row.paid ? "added" : "neutral")}>{formatPaidValue(row.paid)}</span>
+                          {row.payMethod && <span style={styles.historyChip("neutral")}>Метод: {row.payMethod}</span>}
+                          {dateRange && <span style={styles.historyChip("neutral")}>Дати: {dateRange}</span>}
+                        </div>
+                        {summary && <div style={styles.historySummary}>{summary}</div>}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {historyTab === "logins" && (
+                <div style={styles.emptyState}>Історія входів ще не підключена.</div>
+              )}
             </div>
           </div>
         </div>,
