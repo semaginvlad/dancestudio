@@ -1154,6 +1154,7 @@ export default function AttendanceTab({
     }
 
     let alive = true;
+    setRpcRestoreCandidates([]);
     setLoadingRestoreCandidates(true);
     db.fetchRestoreCandidatesForGroup(gid)
       .then((rows) => {
@@ -1191,19 +1192,23 @@ export default function AttendanceTab({
     const byStudentId = new Map();
 
     (students || []).forEach((student) => {
-      if (!student?.id || linkedStudentIds.has(String(student.id))) return;
-      byStudentId.set(String(student.id), {
+      if (!student?.id) return;
+      const studentId = String(student.id);
+      if (linkedStudentIds.has(studentId) || !historyStudentIds.has(studentId)) return;
+      byStudentId.set(studentId, {
         student,
-        hasHistory: historyStudentIds.has(String(student.id)),
+        hasHistory: true,
       });
     });
 
-    (rpcRestoreCandidates || []).forEach(({ student, hasHistory }) => {
-      if (!student?.id || linkedStudentIds.has(String(student.id))) return;
-      const current = byStudentId.get(String(student.id));
-      byStudentId.set(String(student.id), {
+    (rpcRestoreCandidates || []).forEach(({ student }) => {
+      if (!student?.id) return;
+      const studentId = String(student.id);
+      if (linkedStudentIds.has(studentId)) return;
+      const current = byStudentId.get(studentId);
+      byStudentId.set(studentId, {
         student: current?.student || student,
-        hasHistory: !!hasHistory || !!current?.hasHistory || historyStudentIds.has(String(student.id)),
+        hasHistory: true,
       });
     });
 
@@ -1259,29 +1264,31 @@ export default function AttendanceTab({
 
   const handleRestoreStudentToGroup = async () => {
     if (!gid || !restoreStudentId) return;
+    const targetStudentId = restoreStudentId;
 
     const alreadyLinked = (studentGrps || []).some(
-      (sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid)
+      (sg) => String(sg.studentId) === String(targetStudentId) && String(sg.groupId) === String(gid)
     );
     if (alreadyLinked) {
+      alert("Учениця вже є в цій групі.");
       setRestoreStudentId("");
       return;
     }
 
     setRestoringStudent(true);
     try {
-      const link = await db.restoreStudentToGroup(gid, restoreStudentId);
+      const link = await db.restoreStudentToGroup(gid, targetStudentId);
       if (typeof setStudentGrps === "function") {
         setStudentGrps((prev) => {
           const list = prev || [];
-          if (list.some((sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid))) return list;
-          return [...list, link || { id: `sg_${uid()}`, studentId: restoreStudentId, groupId: gid }];
+          if (list.some((sg) => String(sg.studentId) === String(targetStudentId) && String(sg.groupId) === String(gid))) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: targetStudentId, groupId: gid }];
         });
       }
       setLocalOrders((prev) => {
         const arr = prev?.[gid] || customOrders?.[gid] || [];
-        if (arr.some((id) => String(id) === String(restoreStudentId))) return prev;
-        return { ...(prev || {}), [gid]: [...arr, restoreStudentId] };
+        if (arr.some((id) => String(id) === String(targetStudentId))) return prev;
+        return { ...(prev || {}), [gid]: [...arr, targetStudentId] };
       });
       setRestoreStudentId("");
     } catch (err) {
@@ -2840,7 +2847,7 @@ export default function AttendanceTab({
                         <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
                       </>
                     ) : (
-                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення"}</div>
+                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
                     )
                   ) : (
                     <form
