@@ -540,7 +540,7 @@ const makeStyles = () => {
   historyTabs: {
     padding: "12px 16px 0",
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: 6,
   },
   historyTab: (active) => ({
@@ -2432,7 +2432,6 @@ export default function AttendanceTab({
               {[
                 ["attendance", "Відмітки"],
                 ["subscriptions", "Абонементи"],
-                ["logins", "Входи"],
               ].map(([tabKey, label]) => (
                 <button
                   key={tabKey}
@@ -2530,9 +2529,6 @@ export default function AttendanceTab({
                     );
                   })}
                 </>
-              )}
-              {historyTab === "logins" && (
-                <div style={styles.emptyState}>Історія входів ще не підключена.</div>
               )}
             </div>
           </div>
