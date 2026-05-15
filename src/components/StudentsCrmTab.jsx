@@ -1,6 +1,5 @@
 import React from "react";
 import * as db from "../db";
-import { uid } from "../shared/utils";
 
 export default function StudentsCrmTab({
   theme,
@@ -13,6 +12,7 @@ export default function StudentsCrmTab({
   directionsList,
   studentGrps,
   setStudentGrps,
+  setStudents,
   attn,
   subsExt,
   waitlist,
@@ -37,6 +37,80 @@ export default function StudentsCrmTab({
   deleteStudentAction,
   getDisplayName,
 }) {
+
+  const activeWaitlist = waitlist.filter((w) => ["waiting", "contacted"].includes(String(w.status || "waiting")));
+
+  const updateWaitlistRow = (next) => {
+    setWaitlist((prev) => prev.map((row) => (row.id === next.id ? next : row)));
+  };
+
+  const ensureStudentGroupLocal = (link) => {
+    setStudentGrps((prev) => (
+      prev.some((sg) => String(sg.studentId) === String(link.studentId) && String(sg.groupId) === String(link.groupId))
+        ? prev
+        : [...prev, link]
+    ));
+  };
+
+  const buildStudentFromWaitlist = (w) => {
+    const contact = String(w.contact || "").trim();
+    const phoneLike = /^[+\d][\d\s().-]{5,}$/.test(contact);
+    const hasTelegram = contact.includes("@");
+    const student = {
+      name: w.name || "Новий контакт з резерву",
+      first_name: "",
+      last_name: "",
+      phone: phoneLike ? contact : null,
+      telegram: !phoneLike && hasTelegram ? contact : null,
+      notes: !phoneLike && !hasTelegram && contact ? `Контакт з резерву: ${contact}` : null,
+    };
+    return student;
+  };
+
+  const markWaitlistContacted = async (w) => {
+    try {
+      const next = await db.updateWaitlist(w.id, { status: "contacted" });
+      updateWaitlistRow(next);
+    } catch (e) {
+      console.error("Failed to mark waitlist entry as contacted:", e);
+      alert(`Не вдалося оновити резерв: ${e?.message || e}`);
+    }
+  };
+
+  const removeWaitlistEntry = async (w) => {
+    try {
+      const next = await db.updateWaitlist(w.id, { status: "removed" });
+      updateWaitlistRow(next);
+    } catch (e) {
+      console.error("Failed to remove waitlist entry:", e);
+      alert(`Не вдалося прибрати з резерву: ${e?.message || e}`);
+    }
+  };
+
+  const joinWaitlistEntry = async (w) => {
+    try {
+      let studentId = w.studentId;
+      let createdStudent = null;
+
+      if (!studentId) {
+        createdStudent = await db.insertStudent(buildStudentFromWaitlist(w));
+        studentId = createdStudent.id;
+      }
+
+      const link = await db.addStudentGroup(studentId, w.groupId);
+      const patch = { status: "joined" };
+      if (!w.studentId) patch.studentId = studentId;
+      const next = await db.updateWaitlist(w.id, patch);
+
+      if (createdStudent) setStudents((prev) => [...prev, createdStudent]);
+      ensureStudentGroupLocal(link);
+      updateWaitlistRow(next);
+    } catch (e) {
+      console.error("Failed to move waitlist entry to joined:", e);
+      alert(`Не вдалося перевести з резерву в групу: ${e?.message || e}`);
+    }
+  };
+
   const makeStatusChip = (label, color, background) => (
     <span
       key={label}
@@ -215,15 +289,15 @@ export default function StudentsCrmTab({
           </div>
         )}
       </div>
-      {waitlist.length > 0 && (
+      {activeWaitlist.length > 0 && (
         <div style={{background: theme.input, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
           <div style={{padding:'24px', display: "flex", justifyContent: "space-between"}}>
-            <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({waitlist.length})</span>
+            <span style={{fontSize:18,fontWeight:800,color:theme.warning}}>⏳ Лист очікування ({activeWaitlist.length})</span>
           </div>
           <div style={{padding:'0 24px 16px 24px'}}>
             <div style={{fontSize:15,fontWeight:700,color:theme.textMain, marginBottom:8}}>Можливі місця для резерву</div>
             <div style={{display:"grid", gap:8}}>
-              {groups.filter((g) => waitlist.some((w) => String(w.groupId) === String(g.id) && ["waiting","contacted"].includes(String(w.status || "waiting")))).map((g) => {
+              {groups.filter((g) => activeWaitlist.some((w) => String(w.groupId) === String(g.id))).map((g) => {
                 const groupSubs = subsExt.filter((s) => String(s.groupId) === String(g.id));
                 const hasExpiredOrNoActive = groupSubs.some((s) => ["4pack","8pack","12pack"].includes(String(s.planType || "").toLowerCase()) && s.status === "expired");
                 const staleAttendance = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).some((sg) => {
@@ -241,7 +315,7 @@ export default function StudentsCrmTab({
             </div>
           </div>
           <div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
-            {waitlist.map((w, i) => {
+            {activeWaitlist.map((w, i) => {
               const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
               if(!gr) return null;
               const displayName = st ? getDisplayName(st) : (w.name || "Новий контакт");
@@ -253,9 +327,9 @@ export default function StudentsCrmTab({
                     <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{displayName}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong> · статус: {w.status || "waiting"}{displayContact ? ` · ${displayContact}` : ""}</div>{w.note ? <div style={{color:theme.textLight,fontSize:12, marginTop:4}}>Нотатка: {w.note}</div> : null}</div>
                   </div>
                   <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
-                    <button style={{...btnS,padding:"10px 12px",fontSize:13}} onClick={async ()=>{ if(!db.updateWaitlist) return; const next = await db.updateWaitlist(w.id, { status: "contacted" }); setWaitlist(p=>p.map(x=>x.id===w.id?next:x)); }}>Позначити contacted</button>
-                    <button style={{...btnS,padding:"10px 12px",fontSize:13}} onClick={async ()=>{ if(!w.studentId) { alert("Для joined потрібна існуюча учениця"); return; } try { const link = await db.addStudentGroup(w.studentId, w.groupId); setStudentGrps(p=>p.some(sg=>String(sg.studentId)===String(w.studentId)&&String(sg.groupId)===String(w.groupId)) ? p : [...p, link || { id: uid(), studentId: w.studentId, groupId: w.groupId }]); if(db.updateWaitlist){ const next = await db.updateWaitlist(w.id, { status: "joined" }); setWaitlist(p=>p.map(x=>x.id===w.id?next:x)); } } catch(e){ console.warn(e); } }}>Move to joined</button>
-                    <button style={{...btnS,padding:"10px 12px",fontSize:13,color:theme.danger, background: theme.input}} onClick={async ()=>{ if(!db.updateWaitlist) return; const next = await db.updateWaitlist(w.id, { status: "removed" }); setWaitlist(p=>p.map(x=>x.id===w.id?next:x)); }}>Remove</button>
+                    <button style={{...btnS,padding:"10px 12px",fontSize:13}} onClick={() => markWaitlistContacted(w)}>Позначити contacted</button>
+                    <button style={{...btnS,padding:"10px 12px",fontSize:13}} onClick={() => joinWaitlistEntry(w)}>Move to joined</button>
+                    <button style={{...btnS,padding:"10px 12px",fontSize:13,color:theme.danger, background: theme.input}} onClick={() => removeWaitlistEntry(w)}>Remove</button>
                   </div>
                 </div>
               )
