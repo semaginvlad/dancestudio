@@ -986,6 +986,7 @@ export default function AttendanceTab({
   const [creatingGuest, setCreatingGuest] = useState(false);
   const [guestRosterByGroup, setGuestRosterByGroup] = useStickyState({}, "ds_attn_guest_roster_v1");
   const [creatingStudent, setCreatingStudent] = useState(false);
+  const [addingExistingStudentId, setAddingExistingStudentId] = useState("");
   const [guestGroupExpandedByGroup, setGuestGroupExpandedByGroup] = useState({});
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
@@ -1154,6 +1155,8 @@ export default function AttendanceTab({
     }
 
     let alive = true;
+    setRestoreStudentId("");
+    setRpcRestoreCandidates([]);
     setLoadingRestoreCandidates(true);
     db.fetchRestoreCandidatesForGroup(gid)
       .then((rows) => {
@@ -1172,38 +1175,66 @@ export default function AttendanceTab({
     };
   }, [gid]);
 
-  const restoreCandidates = useMemo(() => {
-    if (!gid) return [];
+  const currentGroupStudentState = useMemo(() => {
+    if (!gid) return { linkedStudentIds: new Set(), historyStudentIds: new Set() };
+
+    const currentGroupId = String(gid);
+    const getGroupId = (row) => row?.groupId ?? row?.group_id ?? "";
+    const getStudentId = (row) => row?.studentId ?? row?.student_id ?? "";
+    const getSubId = (row) => row?.subId ?? row?.sub_id ?? "";
+    const rawSubsById = new Map(
+      (rawSubs || [])
+        .filter((sub) => sub?.id)
+        .map((sub) => [String(sub.id), sub])
+    );
 
     const linkedStudentIds = new Set(
       (studentGrps || [])
-        .filter((sg) => String(sg.groupId) === String(gid))
-        .map((sg) => String(sg.studentId))
+        .filter((sg) => String(getGroupId(sg)) === currentGroupId)
+        .map((sg) => String(getStudentId(sg)))
+        .filter(Boolean)
     );
-    const historyStudentIds = new Set([
-      ...(rawSubs || [])
-        .filter((s) => String(s.groupId) === String(gid) && s.studentId)
-        .map((s) => String(s.studentId)),
-      ...(attn || [])
-        .filter((a) => String(a.groupId) === String(gid) && a.studentId)
-        .map((a) => String(a.studentId)),
-    ]);
+    const historyStudentIds = new Set();
+
+    (rawSubs || []).forEach((sub) => {
+      const studentId = getStudentId(sub);
+      if (String(getGroupId(sub)) === currentGroupId && studentId) historyStudentIds.add(String(studentId));
+    });
+
+    (attn || []).forEach((row) => {
+      if (String(getGroupId(row)) !== currentGroupId) return;
+      const linkedSub = rawSubsById.get(String(getSubId(row)));
+      const studentId = getStudentId(row) || getStudentId(linkedSub);
+      if (studentId) historyStudentIds.add(String(studentId));
+    });
+
+    return { linkedStudentIds, historyStudentIds };
+  }, [attn, gid, rawSubs, studentGrps]);
+
+  const restoreCandidates = useMemo(() => {
+    if (!gid) return [];
+
+    const { linkedStudentIds, historyStudentIds } = currentGroupStudentState;
     const byStudentId = new Map();
 
     (students || []).forEach((student) => {
-      if (!student?.id || linkedStudentIds.has(String(student.id))) return;
-      byStudentId.set(String(student.id), {
+      if (!student?.id) return;
+      const studentId = String(student.id);
+      if (linkedStudentIds.has(studentId) || !historyStudentIds.has(studentId)) return;
+      byStudentId.set(studentId, {
         student,
-        hasHistory: historyStudentIds.has(String(student.id)),
+        hasHistory: true,
       });
     });
 
-    (rpcRestoreCandidates || []).forEach(({ student, hasHistory }) => {
-      if (!student?.id || linkedStudentIds.has(String(student.id))) return;
-      const current = byStudentId.get(String(student.id));
-      byStudentId.set(String(student.id), {
+    (rpcRestoreCandidates || []).forEach(({ student }) => {
+      if (!student?.id) return;
+      const studentId = String(student.id);
+      if (linkedStudentIds.has(studentId)) return;
+      const current = byStudentId.get(studentId);
+      byStudentId.set(studentId, {
         student: current?.student || student,
-        hasHistory: !!hasHistory || !!current?.hasHistory || historyStudentIds.has(String(student.id)),
+        hasHistory: true,
       });
     });
 
@@ -1211,7 +1242,90 @@ export default function AttendanceTab({
       if (a.hasHistory !== b.hasHistory) return a.hasHistory ? -1 : 1;
       return getDisplayName(a.student).localeCompare(getDisplayName(b.student), "uk");
     });
-  }, [attn, gid, rawSubs, rpcRestoreCandidates, studentGrps, students]);
+  }, [currentGroupStudentState, gid, rpcRestoreCandidates, students]);
+
+  const restoreCandidateIds = useMemo(
+    () => new Set(restoreCandidates.map(({ student }) => String(student.id))),
+    [restoreCandidates]
+  );
+
+  const existingStudentMatches = useMemo(() => {
+    const query = normalizeName(newStudentName);
+    if (query.length < 2) return [];
+
+    return (students || [])
+      .map((student) => {
+        if (!student?.id) return null;
+        const displayName = getDisplayName(student);
+        const normalizedDisplayName = normalizeName(displayName);
+        if (!normalizedDisplayName) return null;
+
+        let score = null;
+        if (normalizedDisplayName === query) score = 0;
+        else if (normalizedDisplayName.startsWith(query)) score = 1;
+        else if (normalizedDisplayName.includes(query)) score = 2;
+        else if (query.split(" ").every((part) => normalizedDisplayName.includes(part))) score = 3;
+        if (score === null) return null;
+
+        const studentId = String(student.id);
+        const isLinkedToCurrentGroup = currentGroupStudentState.linkedStudentIds.has(studentId);
+        const canRestoreToCurrentGroup = !isLinkedToCurrentGroup && (
+          currentGroupStudentState.historyStudentIds.has(studentId) || restoreCandidateIds.has(studentId)
+        );
+        return {
+          student,
+          studentId,
+          displayName,
+          score,
+          isLinkedToCurrentGroup,
+          canRestoreToCurrentGroup,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        return a.displayName.localeCompare(b.displayName, "uk");
+      })
+      .slice(0, 8);
+  }, [currentGroupStudentState, newStudentName, restoreCandidateIds, students]);
+
+  const addStudentIdToLocalOrder = (studentId) => {
+    setLocalOrders((prev) => {
+      const arr = prev?.[gid] || customOrders?.[gid] || [];
+      if (arr.some((id) => String(id) === String(studentId))) return prev;
+      return { ...(prev || {}), [gid]: [...arr, studentId] };
+    });
+  };
+
+  const handleAddExistingStudentToGroup = async (student) => {
+    if (!gid || !student?.id) return;
+    const studentId = String(student.id);
+    const alreadyLinked = (studentGrps || []).some(
+      (sg) => String(sg.studentId) === studentId && String(sg.groupId) === String(gid)
+    );
+    if (alreadyLinked) {
+      alert("Така учениця вже є в цій групі.");
+      return;
+    }
+
+    setAddingExistingStudentId(studentId);
+    try {
+      const link = await db.addStudentGroup(student.id, gid);
+      if (typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => {
+          const list = prev || [];
+          if (list.some((sg) => String(sg.studentId) === studentId && String(sg.groupId) === String(gid))) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: student.id, groupId: gid }];
+        });
+      }
+      addStudentIdToLocalOrder(student.id);
+      setNewStudentName("");
+    } catch (err) {
+      alert(err?.message || "Не вдалося додати ученицю в цю групу");
+    } finally {
+      setAddingExistingStudentId("");
+    }
+  };
 
   const handleCreateStudentInGroup = async () => {
     const name = (newStudentName || "").trim();
@@ -1221,11 +1335,23 @@ export default function AttendanceTab({
       return;
     }
 
+    const normalizedName = normalizeName(name);
     const duplicateInGroup = orderedStudents.some(
-      (s) => normalizeName(getDisplayName(s)) === normalizeName(name)
+      (s) => normalizeName(getDisplayName(s)) === normalizedName
     );
     if (duplicateInGroup) {
-      alert("Учениця з таким ім'ям уже є в цій групі.");
+      alert("Така учениця вже є в цій групі.");
+      return;
+    }
+
+    const exactExistingStudent = (students || []).find((student) => normalizeName(getDisplayName(student)) === normalizedName);
+    if (exactExistingStudent) {
+      const exactStudentId = String(exactExistingStudent.id);
+      if (currentGroupStudentState.linkedStudentIds.has(exactStudentId)) {
+        alert("Така учениця вже є в цій групі.");
+      } else {
+        alert("Така учениця вже є в базі. Додай її в групу зі списку підказок.");
+      }
       return;
     }
 
@@ -1244,11 +1370,7 @@ export default function AttendanceTab({
           return [...list, link || { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid }];
         });
       }
-      setLocalOrders((prev) => {
-        const arr = prev?.[gid] || customOrders?.[gid] || [];
-        if (arr.some((id) => String(id) === String(createdStudent.id))) return prev;
-        return { ...(prev || {}), [gid]: [...arr, createdStudent.id] };
-      });
+      addStudentIdToLocalOrder(createdStudent.id);
       setNewStudentName("");
     } catch (err) {
       alert(`Не вдалося створити ученицю через CRM RPC. ${err?.message || "Перевір, що функція crm_create_student_for_group застосована в Supabase."}`);
@@ -1257,33 +1379,33 @@ export default function AttendanceTab({
     }
   };
 
-  const handleRestoreStudentToGroup = async () => {
-    if (!gid || !restoreStudentId) return;
+  const handleRestoreStudentToGroup = async (studentIdOverride = "") => {
+    const overrideStudentId = typeof studentIdOverride === "string" ? studentIdOverride : "";
+    const targetStudentId = overrideStudentId || restoreStudentId;
+    if (!gid || !targetStudentId) return;
 
     const alreadyLinked = (studentGrps || []).some(
-      (sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid)
+      (sg) => String(sg.studentId) === String(targetStudentId) && String(sg.groupId) === String(gid)
     );
     if (alreadyLinked) {
+      alert("Учениця вже є в цій групі.");
       setRestoreStudentId("");
       return;
     }
 
     setRestoringStudent(true);
     try {
-      const link = await db.restoreStudentToGroup(gid, restoreStudentId);
+      const link = await db.restoreStudentToGroup(gid, targetStudentId);
       if (typeof setStudentGrps === "function") {
         setStudentGrps((prev) => {
           const list = prev || [];
-          if (list.some((sg) => String(sg.studentId) === String(restoreStudentId) && String(sg.groupId) === String(gid))) return list;
-          return [...list, link || { id: `sg_${uid()}`, studentId: restoreStudentId, groupId: gid }];
+          if (list.some((sg) => String(sg.studentId) === String(targetStudentId) && String(sg.groupId) === String(gid))) return list;
+          return [...list, link || { id: `sg_${uid()}`, studentId: targetStudentId, groupId: gid }];
         });
       }
-      setLocalOrders((prev) => {
-        const arr = prev?.[gid] || customOrders?.[gid] || [];
-        if (arr.some((id) => String(id) === String(restoreStudentId))) return prev;
-        return { ...(prev || {}), [gid]: [...arr, restoreStudentId] };
-      });
+      addStudentIdToLocalOrder(targetStudentId);
       setRestoreStudentId("");
+      if (overrideStudentId) setNewStudentName("");
     } catch (err) {
       alert(err?.message || "Не вдалося відновити ученицю в групі");
     } finally {
@@ -1333,8 +1455,10 @@ export default function AttendanceTab({
 
   const handleRemoveFromGroup = async (student) => {
     if (!gid || !student?.id) return;
+    const targetGroupId = String(gid);
+    const targetStudentId = String(student.id);
     const hasStudentGroupLink = (studentGrps || []).some(
-      (sg) => String(sg.studentId) === String(student.id) && String(sg.groupId) === String(gid)
+      (sg) => String(sg.studentId) === targetStudentId && String(sg.groupId) === targetGroupId
     );
     if (!hasStudentGroupLink) {
       alert("Учениця показується через абонемент або історію відвідувань цієї групи. Абонементи та історію не видаляємо з цієї дії.");
@@ -1344,16 +1468,16 @@ export default function AttendanceTab({
     const ok = window.confirm(`Прибрати ${getDisplayName(student)} з групи "${currentGroup?.name || gid}"?`);
     if (!ok) return;
     try {
-      await db.removeStudentGroup(student.id, gid);
+      await db.removeStudentGroup(targetStudentId, targetGroupId);
       if (typeof setStudentGrps === "function") {
         setStudentGrps((prev) => (prev || []).filter((sg) => !(
-          String(sg.studentId) === String(student.id) && String(sg.groupId) === String(gid)
+          String(sg.studentId) === targetStudentId && String(sg.groupId) === targetGroupId
         )));
       }
       setLocalOrders((prev) => {
-        const arr = prev?.[gid] || [];
-        if (!arr.some((id) => String(id) === String(student.id))) return prev;
-        return { ...(prev || {}), [gid]: arr.filter((id) => String(id) !== String(student.id)) };
+        const arr = prev?.[targetGroupId] || [];
+        if (!arr.some((id) => String(id) === targetStudentId)) return prev;
+        return { ...(prev || {}), [targetGroupId]: arr.filter((id) => String(id) !== targetStudentId) };
       });
     } catch (err) {
       alert(err?.message || "Не вдалося прибрати ученицю з групи");
@@ -2824,10 +2948,37 @@ export default function AttendanceTab({
                 <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
                 <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
                   {addMode === "student" ? (
-                    <>
-                      <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                      <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
-                    </>
+                    <div style={{ display: "grid", gap: 6, width: "100%" }}>
+                      <div style={{ display: "flex", gap: 6, width: "100%" }}>
+                        <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
+                      </div>
+                      {normalizeName(newStudentName).length >= 2 && (
+                        <div style={{ display: "grid", gap: 6, padding: 8, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
+                          {existingStudentMatches.length ? existingStudentMatches.map((match) => {
+                            const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
+                            return (
+                              <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
+                                <div style={{ minWidth: 140 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMain }}>{match.displayName}</div>
+                                  {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
+                                </div>
+                                {match.isLinkedToCurrentGroup ? (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Вже є в цій групі</span>
+                                ) : match.canRestoreToCurrentGroup ? (
+                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleRestoreStudentToGroup(match.student.id)} disabled={restoringStudent}>Відновити</button>
+                                ) : (
+                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleAddExistingStudentToGroup(match.student)} disabled={addingExistingStudentId === String(match.student.id)}>Додати в цю групу</button>
+                                )}
+                              </div>
+                            );
+                          }) : (
+                            <div style={{ fontSize: 11, color: theme.textMuted }}>Схожих учениць не знайдено — можна створити нову.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   ) : addMode === "restore" ? (
                     restoreCandidates.length ? (
                       <>
@@ -2840,7 +2991,7 @@ export default function AttendanceTab({
                         <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
                       </>
                     ) : (
-                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення"}</div>
+                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
                     )
                   ) : (
                     <form
