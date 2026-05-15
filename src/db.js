@@ -1006,68 +1006,51 @@ export async function upsertWarnedStudent(groupId, studentId, warned) {
 }
 
 // ─── WAITLIST ───
+const mapWaitlist = (w) => ({
+  id: w.id,
+  studentId: w.student_id ?? w.studentId ?? null,
+  groupId: w.group_id ?? w.groupId ?? "",
+  dateAdded: w.date_added ?? w.dateAdded ?? null,
+  name: w.name || "",
+  contact: w.contact || "",
+  note: w.note || "",
+  status: w.status || "waiting",
+  createdAt: w.created_at || w.createdAt || null,
+});
+
 export async function fetchWaitlist() {
-  const { data, error } = await supabase.from('waitlist').select('*');
-  if (error) { console.warn('waitlist:', error.message); return []; }
-  return (data || []).map(w => ({
-    id: w.id,
-    studentId: w.studentId,
-    groupId: w.groupId,
-    dateAdded: w.dateAdded,
-    name: w.name || "",
-    contact: w.contact || "",
-    note: w.note || "",
-    status: w.status || "waiting",
-    createdAt: w.created_at || null,
-  }));
+  const { data, error } = await supabase.from('waitlist').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(mapWaitlist);
 }
 
 export async function insertWaitlist(item) {
-  const { data, error } = await supabase.from('waitlist').insert([{
-    studentId: item.studentId || null,
-    groupId: item.groupId,
-    dateAdded: item.dateAdded || new Date().toISOString().slice(0, 10),
+  const payload = {
+    student_id: item.studentId || null,
+    group_id: item.groupId,
+    date_added: item.dateAdded || new Date().toISOString().slice(0, 10),
     name: item.name || null,
     contact: item.contact || null,
     note: item.note || null,
     status: item.status || "waiting",
-  }]).select();
-  if (error) throw error;
-  const w = data[0];
-  return {
-    id: w.id,
-    studentId: w.studentId,
-    groupId: w.groupId,
-    dateAdded: w.dateAdded,
-    name: w.name || "",
-    contact: w.contact || "",
-    note: w.note || "",
-    status: w.status || "waiting",
-    createdAt: w.created_at || null,
   };
+  const { data, error } = await supabase.from('waitlist').insert(payload).select('*').single();
+  if (error) throw error;
+  return mapWaitlist(data);
 }
 
 export async function updateWaitlist(id, patch = {}) {
   const payload = {};
-  if (Object.prototype.hasOwnProperty.call(patch, "studentId")) payload.studentId = patch.studentId || null;
-  if (Object.prototype.hasOwnProperty.call(patch, "groupId")) payload.groupId = patch.groupId || null;
+  if (Object.prototype.hasOwnProperty.call(patch, "studentId")) payload.student_id = patch.studentId || null;
+  if (Object.prototype.hasOwnProperty.call(patch, "groupId")) payload.group_id = patch.groupId || null;
+  if (Object.prototype.hasOwnProperty.call(patch, "dateAdded")) payload.date_added = patch.dateAdded || null;
   if (Object.prototype.hasOwnProperty.call(patch, "name")) payload.name = patch.name || null;
   if (Object.prototype.hasOwnProperty.call(patch, "contact")) payload.contact = patch.contact || null;
   if (Object.prototype.hasOwnProperty.call(patch, "note")) payload.note = patch.note || null;
   if (Object.prototype.hasOwnProperty.call(patch, "status")) payload.status = patch.status || "waiting";
-  const { data, error } = await supabase.from("waitlist").update(payload).eq("id", id).select().single();
+  const { data, error } = await supabase.from("waitlist").update(payload).eq("id", id).select('*').single();
   if (error) throw error;
-  return {
-    id: data.id,
-    studentId: data.studentId,
-    groupId: data.groupId,
-    dateAdded: data.dateAdded,
-    name: data.name || "",
-    contact: data.contact || "",
-    note: data.note || "",
-    status: data.status || "waiting",
-    createdAt: data.created_at || null,
-  };
+  return mapWaitlist(data);
 }
 
 export async function deleteWaitlist(id) {
