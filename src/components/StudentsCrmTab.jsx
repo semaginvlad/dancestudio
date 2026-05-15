@@ -37,6 +37,139 @@ export default function StudentsCrmTab({
   deleteStudentAction,
   getDisplayName,
 }) {
+  const makeStatusChip = (label, color, background) => (
+    <span
+      key={label}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 24,
+        borderRadius: 999,
+        padding: "3px 9px",
+        background,
+        color,
+        fontSize: 12,
+        fontWeight: 800,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </span>
+  );
+
+  const getStudentSubscriptions = (studentId) => subsExt.filter((s) => String(s.studentId) === String(studentId));
+  const getActiveSubscriptions = (studentId) => getStudentSubscriptions(studentId).filter((s) => s.status !== "expired");
+  const getStudentAttendance = (studentId) => attn.filter((a) => String(a.studentId) === String(studentId));
+
+  const getStudentDirectionCount = (studentId) => {
+    const directionIds = new Set(
+      studentGrps
+        .filter((sg) => String(sg.studentId) === String(studentId))
+        .map((sg) => groupMap[sg.groupId]?.directionId)
+        .filter(Boolean)
+        .map(String)
+    );
+    return directionIds.size;
+  };
+
+  const getStatusChips = (st) => {
+    const active = getActiveSubscriptions(st.id);
+    const allSubs = getStudentSubscriptions(st.id);
+    const attendanceRows = getStudentAttendance(st.id);
+    const hasDebt = active.some((s) => !s.paid) || attendanceRows.some((a) => ["debt", "unpaid"].includes(String(a.entryType || a.guestType || "").toLowerCase()));
+    const hasTrial = allSubs.some((s) => String(s.planType || "").toLowerCase() === "trial") || attendanceRows.some((a) => String(a.entryType || a.guestType || "").toLowerCase() === "trial");
+    const hasSingle = allSubs.some((s) => String(s.planType || "").toLowerCase() === "single") || attendanceRows.some((a) => String(a.entryType || a.guestType || "").toLowerCase() === "single");
+    const directionCount = getStudentDirectionCount(st.id);
+    const chips = [];
+
+    chips.push(
+      active.length
+        ? makeStatusChip("Активна", theme.success || "#16a34a", "rgba(22, 163, 74, 0.12)")
+        : makeStatusChip("Без абонемента", theme.textMuted, "rgba(148, 163, 184, 0.16)")
+    );
+    if (hasDebt) chips.push(makeStatusChip("Борг", theme.danger || "#dc2626", "rgba(220, 38, 38, 0.12)"));
+    if (hasTrial) chips.push(makeStatusChip("Пробне", "#047857", "rgba(16, 185, 129, 0.14)"));
+    if (hasSingle) chips.push(makeStatusChip("Разове", "#b45309", "rgba(245, 158, 11, 0.16)"));
+    if (directionCount > 1) chips.push(makeStatusChip(`Кілька напрямків · ${directionCount}`, theme.secondary || "#7c3aed", "rgba(124, 58, 237, 0.12)"));
+
+    return chips;
+  };
+
+  const renderSubscriptionBadges = (st) => {
+    const active = getActiveSubscriptions(st.id);
+    if (!active.length) {
+      return <span style={{ color: theme.textLight, fontSize: 12, fontWeight: 700 }}>Активних абонементів немає</span>;
+    }
+
+    return active.map((s) => {
+      const g = groupMap[s.groupId];
+      const d = g ? dirMap[g.directionId] : null;
+      return (
+        <Badge key={s.id} color={d?.color || "#888"}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span>{g?.name || "Група"}</span>
+            <span style={{ opacity: 0.78 }}>{s.usedTrainings}/{s.totalTrainings}</span>
+          </span>
+        </Badge>
+      );
+    });
+  };
+
+  const renderStudentActions = (st, isArchive) => (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+      {isArchive && (
+        <>
+          <select
+            value={restoreGroupByStudent[st.id] || ""}
+            onChange={(e) => setRestoreGroupByStudent((prev) => ({ ...prev, [st.id]: e.target.value }))}
+            style={{ ...inputSt, width: 180, height: 38, padding: "0 12px", fontSize: 13, borderRadius: 12 }}
+          >
+            <option value="">Група для відновлення</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+          <button style={{ ...btnS, padding: "9px 14px", fontSize: 13, background: theme.bg }} onClick={() => restoreStudentToGroup(st.id)}>↩ Відновити</button>
+        </>
+      )}
+      <button style={{ ...btnS, padding: "9px 13px", fontSize: 14, background: isArchive ? theme.card : theme.bg }} onClick={() => { setEditItem(st); setModal("editStudent"); }}>✏️</button>
+      <button style={{ background: "none", border: "none", color: theme.danger, fontSize: 20, cursor: "pointer", padding: "0 8px" }} onClick={() => deleteStudentAction(st.id)}>🗑</button>
+    </div>
+  );
+
+  const renderStudentCard = (st, index, { isArchive = false } = {}) => {
+    const contact = [st.phone, st.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
+
+    return (
+      <div
+        key={st.id}
+        style={{
+          background: isArchive ? theme.card : theme.bg,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 18,
+          padding: "14px 16px",
+          display: "grid",
+          gridTemplateColumns: "minmax(220px, 1.15fr) minmax(220px, 1fr) auto",
+          alignItems: "center",
+          gap: 14,
+          opacity: isArchive ? 0.82 : 1,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+          <div style={{ color: theme.textLight, fontSize: 14, fontWeight: 800, minWidth: 24 }}>{index + 1}.</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: theme.textMain, fontWeight: 800, fontSize: 16, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getDisplayName(st)}</div>
+            <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 5, fontWeight: 600 }}>{contact}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>{getStatusChips(st)}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>{renderSubscriptionBadges(st)}</div>
+        {renderStudentActions(st, isArchive)}
+      </div>
+    );
+  };
+
   return (
     <div>
       <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",justifyContent:"space-between", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
@@ -59,25 +192,11 @@ export default function StudentsCrmTab({
                 <div style={{fontSize:18,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({dStudents.length})</span></div>
                 <div style={{color:theme.textLight, fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
               </button>
-              {isExpanded && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
-                {dStudents.map((st, index) => {
-                  const active=subsExt.filter(s=>s.studentId===st.id && s.status!=="expired");
-                  return <div key={st.id} style={{background: theme.bg, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
-                    <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
-                      <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
-                      <div>
-                        <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div>
-                        <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{active.map(s=>{const g=groupMap[s.groupId];const d=g?dirMap[g.directionId]:null;return <Badge key={s.id} color={d?.color||"#888"}>{g?.name} ({s.usedTrainings}/{s.totalTrainings})</Badge>})}</div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button style={{...btnS,padding:"10px 16px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
-                      <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
-                    </div>
-                  </div>
-                })}
-              </div>)}
+              {isExpanded && (
+                <div style={{ padding: '0 24px 24px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {dStudents.map((st, index) => renderStudentCard(st, index))}
+                </div>
+              )}
             </div>
           );
         })}
@@ -88,35 +207,11 @@ export default function StudentsCrmTab({
                 <div style={{fontSize:18,fontWeight:700,color: theme.textMuted}}>🗄️ Архів / Неактивні <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({studentsByDirection.inactive.length})</span></div>
                 <div style={{color:theme.textLight, fontSize: 16}}>{expandedDirs['archive'] ? "▲" : "▼"}</div>
               </button>
-              {expandedDirs['archive'] && (<div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
-                {studentsByDirection.inactive.map((st, index) => (
-                  <div key={st.id} style={{background: theme.card, borderRadius: 20, padding: "20px", display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16, opacity: 0.8}}>
-                    <div style={{display:"flex", gap: 16, alignItems: "center", minWidth: 200}}>
-                      <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{index + 1}.</div>
-                      <div>
-                        <div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div>
-                        <div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>{[st.phone,st.telegram].filter(Boolean).join(" · ")||"—"}</div>
-                      </div>
-                    </div>
-                    <Badge color={theme.textLight}>Немає активних груп</Badge>
-                    <div style={{display:"flex",gap:8}}>
-                      <select
-                        value={restoreGroupByStudent[st.id] || ""}
-                        onChange={(e) => setRestoreGroupByStudent((prev) => ({ ...prev, [st.id]: e.target.value }))}
-                        style={{ ...inputSt, width: 180, height: 40, padding: "0 12px", fontSize: 13, borderRadius: 10 }}
-                      >
-                        <option value="">Група для відновлення</option>
-                        {groups.map((g) => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                      </select>
-                      <button style={{...btnS,padding:"10px 14px",fontSize:13, background:theme.bg}} onClick={()=>restoreStudentToGroup(st.id)}>↩ Відновити</button>
-                      <button style={{...btnS,padding:"10px 12px",fontSize:14, background:theme.card}} onClick={()=>{setEditItem(st);setModal("editStudent")}}>✏️</button>
-                      <button style={{background:"none",border:"none",color:theme.danger,fontSize:20,cursor:"pointer",padding:"0 10px"}} onClick={()=>deleteStudentAction(st.id)}>🗑</button>
-                    </div>
-                  </div>
-                ))}
-              </div>)}
+              {expandedDirs['archive'] && (
+                <div style={{ padding: '0 24px 24px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {studentsByDirection.inactive.map((st, index) => renderStudentCard(st, index, { isArchive: true }))}
+                </div>
+              )}
           </div>
         )}
       </div>
