@@ -1299,6 +1299,7 @@ export default function App() {
             directionsList={directionsList}
             studentGrps={studentGrps}
             setStudentGrps={setStudentGrps}
+            setStudents={setStudents}
             attn={attn}
             subsExt={subsExt}
             waitlist={waitlist}
