@@ -1052,13 +1052,13 @@ export default function AttendanceTab({
 
   useEffect(() => {
     if (!groups?.length) return;
-    if (!gid || !groups.some((g) => g.id === gid)) {
+    if (!gid || !groups.some((g) => String(g.id) === String(gid))) {
       setGid(groups[0].id);
     }
   }, [groups, gid, setGid]);
 
   const currentGroup = useMemo(
-    () => groups.find((g) => g.id === gid) || null,
+    () => groups.find((g) => String(g.id) === String(gid)) || null,
     [groups, gid]
   );
   const groupedByDirection = useMemo(() => {
@@ -3010,11 +3010,6 @@ export default function AttendanceTab({
                         type="submit"
                         className="attendance-add-action"
                         style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleCreateGuestAttendance();
-                        }}
                         disabled={creatingGuest || !gid}
                       >
                         Додати
