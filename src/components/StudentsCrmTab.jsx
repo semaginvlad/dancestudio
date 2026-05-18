@@ -17,6 +17,8 @@ export default function StudentsCrmTab({
   subsExt,
   waitlist,
   setWaitlist,
+  trialBookings = [],
+  onCancelTrialBooking,
   studentMap,
   groupMap,
   dirMap,
@@ -39,7 +41,29 @@ export default function StudentsCrmTab({
 }) {
   const [selectedSummaryFilter, setSelectedSummaryFilter] = React.useState("all");
 
+  const [trialBookingOverrides, setTrialBookingOverrides] = React.useState({});
+  const visibleTrialBookings = trialBookings.map((booking) => trialBookingOverrides[booking.id] || booking);
   const activeWaitlist = waitlist.filter((w) => ["waiting", "contacted"].includes(String(w.status || "waiting")));
+  const activeTrialBookingStatuses = new Set(["new", "contacted", "confirmed"]);
+  const activeTrialBookings = visibleTrialBookings.filter((booking) => activeTrialBookingStatuses.has(String(booking.status || "new")));
+  const trialBookingStatusLabels = {
+    new: "Новий запис",
+    contacted: "Написали",
+    confirmed: "Підтвердила",
+    came: "Прийшла",
+    no_show: "Не прийшла",
+    became_student: "Стала ученицею",
+    declined: "Відмова",
+    cancelled: "Скасовано",
+  };
+  const trialBookingStatusActions = [
+    ["contacted", "Написали"],
+    ["confirmed", "Підтвердила"],
+    ["came", "Прийшла"],
+    ["no_show", "Не прийшла"],
+    ["declined", "Відмова"],
+    ["cancelled", "Скасувати"],
+  ];
 
   const updateWaitlistRow = (next) => {
     setWaitlist((prev) => prev.map((row) => (row.id === next.id ? next : row)));
@@ -167,6 +191,7 @@ export default function StudentsCrmTab({
     { filter: "no_subscription", label: "Без абонемента", value: studentsWithoutSubCount, hint: "є група, немає активного абонемента", color: theme.textMuted },
     { filter: "debt", label: "Борг", value: debtStudentIds.size, hint: "борг / unpaid у доступних даних", color: theme.danger || "#dc2626" },
     { filter: "reserve", label: "Резерв", value: activeWaitlist.length, hint: "waiting / contacted", color: theme.warning || "#f59e0b" },
+    { filter: "trials", label: "Пробні", value: activeTrialBookings.length, hint: "активні записи на пробне", color: theme.primary || "#2563eb" },
     { filter: "archive", label: "Архів", value: studentsByDirection.inactive.length, hint: "неактивні профілі", color: theme.textMuted },
   ];
 
@@ -185,6 +210,7 @@ export default function StudentsCrmTab({
 
   const shouldShowActiveSection = ["all", "active", "no_subscription", "debt"].includes(selectedSummaryFilter);
   const shouldShowReserveSection = ["all", "reserve"].includes(selectedSummaryFilter);
+  const shouldShowTrialSection = ["all", "trials"].includes(selectedSummaryFilter);
   const shouldShowArchiveSection = ["all", "archive"].includes(selectedSummaryFilter);
   const visibleGroupedStudents = studentsByDirection.grouped
     .map(({ direction, students }) => ({
@@ -329,6 +355,92 @@ export default function StudentsCrmTab({
     </div>
   );
 
+  const updateTrialBookingStatus = async (booking, nextStatus) => {
+    if (!booking?.id || !nextStatus || String(booking.status || "new") === String(nextStatus)) return;
+
+    try {
+      const saved = await db.updateTrialBooking(booking.id, { status: nextStatus });
+      setTrialBookingOverrides((prev) => ({ ...prev, [booking.id]: saved }));
+    } catch (e) {
+      console.error("Failed to update trial booking status:", e);
+      alert(`Не вдалося оновити статус пробного: ${e?.message || e}`);
+    }
+  };
+
+  const renderTrialBookingCard = (booking, index) => {
+    const st = studentMap[booking.studentId];
+    const gr = groupMap[booking.groupId];
+    const displayName = st ? getDisplayName(st) : (booking.name || "Новий контакт");
+    const displayContact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ") || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
+    const status = booking.status || "new";
+    const statusLabel = trialBookingStatusLabels[status] || status;
+
+    return (
+      <div key={booking.id} style={{
+        background: theme.card,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 18,
+        padding: 16,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+        gap: 14,
+        alignItems: "center",
+      }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
+          <div style={{
+            width: 30,
+            height: 30,
+            borderRadius: 10,
+            display: "grid",
+            placeItems: "center",
+            background: theme.input,
+            color: theme.primary,
+            fontSize: 13,
+            fontWeight: 900,
+            flex: "0 0 auto",
+          }}>{index + 1}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
+            <div style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
+            {booking.note ? <div style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
+          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
+          <div style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
+          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{statusLabel}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => { setEditItem(booking); setModal("editTrialBooking"); }}>Редагувати</button>
+          <details style={{ position: "relative" }}>
+            <summary style={{ ...btnS, padding: "10px 12px", fontSize: 13, listStyle: "none", cursor: "pointer", userSelect: "none" }}>Змінити статус</summary>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 8, maxWidth: 320 }}>
+              {trialBookingStatusActions.map(([nextStatus, label]) => (
+                <button
+                  key={nextStatus}
+                  type="button"
+                  disabled={status === nextStatus}
+                  style={{
+                    ...btnS,
+                    padding: "7px 9px",
+                    fontSize: 12,
+                    opacity: status === nextStatus ? 0.45 : 1,
+                    background: nextStatus === "cancelled" ? theme.input : theme.bg,
+                    color: ["declined", "cancelled", "no_show"].includes(nextStatus) ? theme.danger : theme.textMain,
+                  }}
+                  onClick={() => updateTrialBookingStatus(booking, nextStatus)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+      </div>
+    );
+  };
+
   const renderWaitlistCard = (w, index) => {
     const st = studentMap[w.studentId];
     const gr = groupMap[w.groupId];
@@ -465,7 +577,10 @@ export default function StudentsCrmTab({
             <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
           </div>
         </div>
-        <button style={{ ...btnP, background: theme.warning, boxShadow: "none", minHeight: 42, flex: "0 0 auto" }} onClick={() => setModal("addWaitlist")}>+ В резерв</button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button style={{ ...btnP, background: theme.primary, boxShadow: "none", minHeight: 42, flex: "0 0 auto" }} onClick={() => setModal("addTrialBooking")}>+ Запис на пробне</button>
+          <button style={{ ...btnP, background: theme.warning, boxShadow: "none", minHeight: 42, flex: "0 0 auto" }} onClick={() => setModal("addWaitlist")}>+ В резерв</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 18 }}>
@@ -496,6 +611,19 @@ export default function StudentsCrmTab({
                 })}
               </div>
             ) : (selectedSummaryFilter === "all" ? null : filterEmptyState)}
+          </section>
+        )}
+
+        {shouldShowTrialSection && (
+          <section style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+            {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Записи на пробне без автоматичного створення учениці або абонемента", theme.primary || "#2563eb")}
+            {activeTrialBookings.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {activeTrialBookings.map((booking, i) => renderTrialBookingCard(booking, i))}
+              </div>
+            ) : (selectedSummaryFilter === "trials" ? filterEmptyState : (
+              <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>Активних записів на пробне поки немає.</div>
+            ))}
           </section>
         )}
 
