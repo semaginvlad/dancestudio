@@ -1354,6 +1354,7 @@ export default function App() {
             waitlist={waitlist}
             setWaitlist={setWaitlist}
             trialBookings={trialBookings}
+            setTrialBookings={setTrialBookings}
             onCancelTrialBooking={cancelTrialBookingAction}
             studentMap={studentMap}
             groupMap={groupMap}
