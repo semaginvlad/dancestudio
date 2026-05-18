@@ -57,9 +57,16 @@ export async function restoreStudentToGroup(groupId, studentId) {
   if (!groupId || !studentId) throw new Error('groupId and studentId are required')
   const { data, error } = await supabase
     .rpc('crm_restore_student_to_group', { p_group_id: groupId, p_student_id: studentId })
-    .single()
   if (error) throw error
-  return { id: data.id, studentId: data.student_id, groupId: data.group_id }
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) throw new Error('RPC crm_restore_student_to_group did not return a link row')
+
+  return {
+    id: row.id,
+    studentId: row.student_id || studentId,
+    groupId: row.group_id || groupId,
+  }
 }
 
 export async function insertStudent(s) {
