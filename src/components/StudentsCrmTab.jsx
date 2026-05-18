@@ -18,6 +18,7 @@ export default function StudentsCrmTab({
   waitlist,
   setWaitlist,
   trialBookings = [],
+  setTrialBookings,
   onCancelTrialBooking,
   studentMap,
   groupMap,
@@ -47,6 +48,43 @@ export default function StudentsCrmTab({
 
   const updateWaitlistRow = (next) => {
     setWaitlist((prev) => prev.map((row) => (row.id === next.id ? next : row)));
+  };
+
+  const trialStatusLabels = {
+    new: "Новий запис",
+    contacted: "Написали",
+    confirmed: "Підтвердила",
+    came: "Прийшла",
+    no_show: "Не прийшла",
+    became_student: "Стала ученицею",
+    declined: "Відмова",
+    cancelled: "Скасовано",
+  };
+
+  const trialStatusActions = [
+    { label: "Написали", status: "contacted" },
+    { label: "Підтвердила", status: "confirmed" },
+    { label: "Прийшла", status: "came" },
+    { label: "Не прийшла", status: "no_show" },
+    { label: "Відмова", status: "declined" },
+    { label: "Скасувати", status: "cancelled" },
+  ];
+
+  const updateTrialBookingStatus = async (booking, nextStatus) => {
+    if (typeof setTrialBookings !== "function") {
+      const message = "Не вдалося оновити локальний список пробних записів: відсутній setTrialBookings";
+      console.error(message);
+      alert(message);
+      return;
+    }
+
+    try {
+      const next = await db.updateTrialBooking(booking.id, { status: nextStatus });
+      setTrialBookings((prev) => prev.map((row) => (row.id === booking.id ? next : row)));
+    } catch (e) {
+      console.error("Failed to update trial booking status:", e);
+      alert(`Не вдалося змінити статус пробного запису: ${e?.message || e}`);
+    }
   };
 
   const ensureStudentGroupLocal = (link) => {
@@ -376,11 +414,30 @@ export default function StudentsCrmTab({
           <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
           <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
           <div style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
-          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{status}</span>
+          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
+            Змінити статус
+            <select
+              value=""
+              onChange={(e) => {
+                const nextStatus = e.target.value;
+                if (!nextStatus) return;
+                updateTrialBookingStatus(booking, nextStatus);
+                e.target.value = "";
+              }}
+              style={{ ...inputSt, minWidth: 170, height: 34, fontSize: 12, borderRadius: 10, padding: "0 10px" }}
+            >
+              <option value="">Оберіть...</option>
+              {trialStatusActions
+                .filter((action) => action.status !== status)
+                .map((action) => (
+                  <option key={action.status} value={action.status}>{action.label}</option>
+                ))}
+            </select>
+          </label>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => { setEditItem(booking); setModal("editTrialBooking"); }}>Редагувати</button>
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => onCancelTrialBooking?.(booking)}>Скасувати</button>
         </div>
       </div>
     );
@@ -427,7 +484,7 @@ export default function StudentsCrmTab({
         <div style={{ minWidth: 0 }}>
           <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Група</div>
           <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr.name}</div>
-          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{status}</span>
+          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
