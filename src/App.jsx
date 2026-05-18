@@ -957,7 +957,7 @@ export default function App() {
     }
     for (const groupId of desiredIds) {
       if (!currentIds.has(String(groupId))) {
-        const link = await db.addStudentGroup(studentId, groupId);
+        const link = await db.restoreStudentToGroup(groupId, studentId);
         addedLinks.push(link || { id: uid(), studentId, groupId });
       }
     }
@@ -1012,7 +1012,7 @@ export default function App() {
     if (!ok) return;
 
     try {
-      const link = await db.addStudentGroup(studentId, groupId);
+      const link = await db.restoreStudentToGroup(groupId, studentId);
       setStudentGrps((prev) => {
         if (prev.some((sg) => String(sg.studentId) === String(studentId) && String(sg.groupId) === String(groupId))) return prev;
         return [...prev, link || { id: uid(), studentId, groupId }];
@@ -1023,7 +1023,7 @@ export default function App() {
         return next;
       });
     } catch (e) {
-      alert(e?.message || "Не вдалося відновити ученицю в групу");
+      alert(`Не вдалося відновити ученицю в групу: ${e?.message || e}`);
     }
   };
 
