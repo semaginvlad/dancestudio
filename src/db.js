@@ -1057,3 +1057,96 @@ export async function deleteWaitlist(id) {
   const { error } = await supabase.from('waitlist').delete().eq('id', id);
   if (error) throw error;
 }
+
+// ─── TRIAL BOOKINGS ───
+export const mapTrialBooking = (row) => ({
+  id: row.id,
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+  studentId: row.student_id || null,
+  name: row.name || "",
+  phone: row.phone || "",
+  telegram: row.telegram || "",
+  instagram: row.instagram || "",
+  contact: row.contact || "",
+  directionId: row.direction_id || null,
+  groupId: row.group_id || "",
+  trialDate: row.trial_date || null,
+  status: row.status || "new",
+  note: row.note || "",
+  source: row.source || "",
+  convertedStudentId: row.converted_student_id || null,
+});
+
+const trialBookingPayload = (input = {}, { includeDefaults = false } = {}) => {
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(input, "studentId")) payload.student_id = input.studentId || null;
+  if (Object.prototype.hasOwnProperty.call(input, "name")) payload.name = input.name;
+  if (Object.prototype.hasOwnProperty.call(input, "phone")) payload.phone = input.phone || null;
+  if (Object.prototype.hasOwnProperty.call(input, "telegram")) payload.telegram = input.telegram || null;
+  if (Object.prototype.hasOwnProperty.call(input, "instagram")) payload.instagram = input.instagram || null;
+  if (Object.prototype.hasOwnProperty.call(input, "contact")) payload.contact = input.contact || null;
+  if (Object.prototype.hasOwnProperty.call(input, "directionId")) payload.direction_id = input.directionId || null;
+  if (Object.prototype.hasOwnProperty.call(input, "groupId")) payload.group_id = input.groupId || null;
+  if (Object.prototype.hasOwnProperty.call(input, "trialDate")) payload.trial_date = input.trialDate || null;
+  if (Object.prototype.hasOwnProperty.call(input, "status")) payload.status = input.status || "new";
+  if (Object.prototype.hasOwnProperty.call(input, "note")) payload.note = input.note || null;
+  if (Object.prototype.hasOwnProperty.call(input, "source")) payload.source = input.source || null;
+  if (Object.prototype.hasOwnProperty.call(input, "convertedStudentId")) {
+    payload.converted_student_id = input.convertedStudentId || null;
+  }
+
+  if (includeDefaults && !Object.prototype.hasOwnProperty.call(payload, "status")) {
+    payload.status = "new";
+  }
+
+  return payload;
+};
+
+export async function fetchTrialBookings(filters = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 200, 500));
+  let query = supabase
+    .from('trial_bookings')
+    .select('*')
+    .order('trial_date', { ascending: true })
+    .order('created_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (filters.dateFrom) query = query.gte('trial_date', filters.dateFrom);
+  if (filters.dateTo) query = query.lte('trial_date', filters.dateTo);
+  if (filters.groupId) query = query.eq('group_id', filters.groupId);
+  if (filters.studentId) query = query.eq('student_id', filters.studentId);
+  if (Array.isArray(filters.status)) {
+    if (filters.status.length > 0) query = query.in('status', filters.status);
+  } else if (filters.status) {
+    query = query.eq('status', filters.status);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapTrialBooking);
+}
+
+export async function insertTrialBooking(input = {}) {
+  if (!String(input.name || '').trim()) throw new Error('Trial booking name is required');
+  if (!input.groupId) throw new Error('Trial booking groupId is required');
+  if (!input.trialDate) throw new Error('Trial booking trialDate is required');
+
+  const payload = trialBookingPayload(input, { includeDefaults: true });
+  const { data, error } = await supabase.from('trial_bookings').insert(payload).select('*').single();
+  if (error) throw error;
+  return mapTrialBooking(data);
+}
+
+export async function updateTrialBooking(id, patch = {}) {
+  const payload = trialBookingPayload(patch);
+  const { data, error } = await supabase.from('trial_bookings').update(payload).eq('id', id).select('*').single();
+  if (error) throw error;
+  return mapTrialBooking(data);
+}
+
+export async function deleteTrialBooking(id) {
+  const { error } = await supabase.from('trial_bookings').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+}
