@@ -294,6 +294,81 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   );
 }
 
+export function TrialBookingForm({ onDone, onCancel, students, groups, studentGrps }) {
+  const [mode, setMode] = useState("new");
+  const [studentId, setStudentId] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [trialDate, setTrialDate] = useState(today());
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [telegram, setTelegram] = useState("");
+  const [instagram, setInstagram] = useState("");
+  const [contact, setContact] = useState("");
+  const [note, setNote] = useState("");
+  const selectedStudent = students.find((st) => String(st.id) === String(studentId));
+  const displayName = [selectedStudent?.last_name, selectedStudent?.first_name].filter(Boolean).join(" ") || selectedStudent?.name || "";
+  const safeName = mode === "existing" ? displayName : name.trim();
+  const isReady = Boolean(safeName && groupId && trialDate);
+
+  return (
+    <div>
+      <Field label="Тип запису">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+          <button type="button" style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
+        </div>
+      </Field>
+
+      {mode === "existing" ? (
+        <Field label="Учениця *">
+          <StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} />
+        </Field>
+      ) : (
+        <>
+          <Field label="Ім'я *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} placeholder="Олена" /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <Field label="Телефон"><input style={inputSt} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." /></Field>
+            <Field label="Telegram"><input style={inputSt} value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="@username" /></Field>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <Field label="Instagram"><input style={inputSt} value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="@instagram" /></Field>
+            <Field label="Інший контакт"><input style={inputSt} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="будь-який контакт" /></Field>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+        <Field label="Дата пробного *"><input type="date" style={inputSt} value={trialDate} onChange={(e) => setTrialDate(e.target.value)} /></Field>
+      </div>
+      <Field label="Нотатка"><textarea style={{ ...inputSt, height: "auto", padding: "16px 20px", minHeight: 70, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+      <div style={{ color: theme.textLight, fontSize: 12, lineHeight: 1.45, marginTop: 8 }}>
+        Новий контакт створює тільки запис на пробне: без учениці, student_groups, attendance або абонемента.
+      </div>
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
+        <button type="button" style={{ ...btnP, opacity: isReady ? 1 : .4 }} onClick={() => {
+          if (!isReady) return;
+          onDone({
+            studentId: mode === "existing" ? studentId : null,
+            name: safeName,
+            phone: mode === "new" ? phone.trim() : (selectedStudent?.phone || ""),
+            telegram: mode === "new" ? telegram.trim() : (selectedStudent?.telegram || ""),
+            instagram: mode === "new" ? instagram.trim() : (selectedStudent?.instagram || ""),
+            contact: mode === "new" ? contact.trim() : "",
+            groupId,
+            trialDate,
+            status: "new",
+            note: note.trim(),
+          });
+        }}>
+          Додати запис
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps }) {
   const [mode, setMode] = useState("existing");
   const [studentId, setStudentId] = useState("");
