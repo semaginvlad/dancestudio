@@ -30,7 +30,7 @@ import {
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
-import { StudentForm, SubForm, WaitlistForm } from "./components/Forms";
+import { StudentForm, SubForm, TrialBookingForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
 import ProAnalyticsTab from "./components/ProAnalyticsTab";
 import DashboardTab from "./components/DashboardTab";
@@ -71,6 +71,7 @@ export default function App() {
   const [scheduleCancelled, setScheduleCancelled] = useState([]);
   const [studentGrps, setStudentGrps] = useState([]);
   const [waitlist, setWaitlist] = useState([]); 
+  const [trialBookings, setTrialBookings] = useState([]);
   const [trainers, setTrainers] = useState([]);
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
@@ -239,10 +240,11 @@ export default function App() {
       const fetchAttendanceSubscriptions = isCurrentAdmin
         ? () => db.fetchSubs({ includeFinancial: true })
         : db.fetchMyAttendanceSubscriptions;
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, ord, warned, tr, trg, dirs, rb] = await Promise.all([
+      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, trialRows, ord, warned, tr, trg, dirs, rb] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(fetchAttendanceSubscriptions),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(fetchScheduleCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
+        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), safeFetch(isCurrentAdmin ? () => db.fetchTrialBookings({ limit: 500 }) : async () => []),
+        fetchCustomOrders(), safeFetch(db.fetchWarnedStudents),
         safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups), safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
 
@@ -275,6 +277,7 @@ export default function App() {
       setScheduleCancelled(isCurrentAdmin ? (ca || []) : (scheduleCa || []));
       setStudentGrps(scopedStudentGrps);
       setWaitlist(wl || []);
+      setTrialBookings(isCurrentAdmin ? (trialRows || []) : []);
       setCustomOrders(ord || {});
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
@@ -1304,6 +1307,8 @@ export default function App() {
             subsExt={subsExt}
             waitlist={waitlist}
             setWaitlist={setWaitlist}
+            trialBookings={trialBookings}
+            setTrialBookings={setTrialBookings}
             studentMap={studentMap}
             groupMap={groupMap}
             dirMap={dirMap}
@@ -1728,6 +1733,7 @@ export default function App() {
       {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      {isAdmin && <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const saved=await db.insertTrialBooking(d);setTrialBookings(p=>[saved,...p]);setModal(null);}catch(e){console.error("Failed to add trial booking:", e);alert(`Не вдалося створити запис на пробне: ${e?.message || e}`);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>}
     </div>
   );
 }

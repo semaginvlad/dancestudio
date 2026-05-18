@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { theme, DIRECTIONS, PLAN_TYPES, PAY_METHODS, inputSt, btnP, btnS } from "../shared/constants";
-import { addMonth, today } from "../shared/utils";
+import { addMonth, getDisplayName, today } from "../shared/utils";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
@@ -329,4 +329,98 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps }
       </div>
     </div>
   )
+}
+
+export function TrialBookingForm({ onDone, onCancel, students, groups, studentGrps }) {
+  const [mode, setMode] = useState("existing");
+  const [studentId, setStudentId] = useState("");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [telegram, setTelegram] = useState("");
+  const [instagram, setInstagram] = useState("");
+  const [contact, setContact] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [trialDate, setTrialDate] = useState(today());
+  const [note, setNote] = useState("");
+  const [source, setSource] = useState("");
+
+  const selectedStudent = students.find((s) => String(s.id) === String(studentId));
+  const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
+  const resolvedName = mode === "existing" ? getDisplayName(selectedStudent || {}) : name.trim();
+  const disabledReason = !groupId
+    ? "Оберіть групу"
+    : !trialDate
+      ? "Оберіть дату пробного"
+      : mode === "existing" && !studentId
+        ? "Оберіть ученицю"
+        : mode === "new" && !name.trim()
+          ? "Введіть імʼя"
+          : "";
+  const disabled = !!disabledReason;
+
+  const submit = () => {
+    if (disabled) return;
+    onDone({
+      studentId: mode === "existing" ? studentId : null,
+      name: resolvedName,
+      phone: mode === "existing" ? selectedStudent?.phone || null : phone.trim(),
+      telegram: mode === "existing" ? selectedStudent?.telegram || null : telegram.trim(),
+      instagram: mode === "existing" ? selectedStudent?.instagram || null : instagram.trim(),
+      contact: mode === "existing" ? null : contact.trim(),
+      directionId: selectedGroup?.directionId || null,
+      groupId,
+      trialDate,
+      status: "new",
+      note: note.trim(),
+      source: source.trim(),
+    });
+  };
+
+  return (
+    <div>
+      <Field label="Тип контакту">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
+          <button type="button" style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+        </div>
+      </Field>
+
+      {mode === "existing" ? (
+        <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+      ) : (
+        <>
+          <Field label="Імʼя *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} placeholder="Олена" /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 12 }}>
+            <Field label="Телефон"><input style={inputSt} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." /></Field>
+            <Field label="Telegram"><input style={inputSt} value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="@username" /></Field>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 12 }}>
+            <Field label="Instagram"><input style={inputSt} value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="@instagram" /></Field>
+            <Field label="Інший контакт"><input style={inputSt} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="звідки написала / контакт" /></Field>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 12 }}>
+        <Field label="Група *">
+          <select style={{ ...inputSt, width: "100%" }} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+            <option value="">Оберіть групу</option>
+            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Дата пробного *"><input style={inputSt} type="date" value={trialDate} onChange={(e) => setTrialDate(e.target.value)} /></Field>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 12 }}>
+        <Field label="Джерело"><input style={inputSt} value={source} onChange={(e) => setSource(e.target.value)} placeholder="Instagram / Telegram / рекомендація" /></Field>
+        <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Що важливо перед пробним" /></Field>
+      </div>
+
+      {disabledReason ? <div style={{ color: theme.textLight, fontSize: 12, fontWeight: 700, marginTop: -4, marginBottom: 10 }}>{disabledReason}</div> : null}
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
+        <button type="button" disabled={disabled} style={{ ...btnP, opacity: disabled ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer" }} onClick={submit}>Створити запис</button>
+      </div>
+    </div>
+  );
 }
