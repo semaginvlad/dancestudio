@@ -965,6 +965,7 @@ export default function AttendanceTab({
   onActionMessageStudent,
   warnedStudents,
   setWarnedStudents,
+  trialBookings = [],
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -1052,15 +1053,17 @@ export default function AttendanceTab({
 
   useEffect(() => {
     if (!groups?.length) return;
-    if (!gid || !groups.some((g) => g.id === gid)) {
+    if (!gid || !groups.some((g) => String(g.id) === String(gid))) {
       setGid(groups[0].id);
     }
   }, [groups, gid, setGid]);
 
   const currentGroup = useMemo(
-    () => groups.find((g) => g.id === gid) || null,
+    () => groups.find((g) => String(g.id) === String(gid)) || null,
     [groups, gid]
   );
+
+
   const groupedByDirection = useMemo(() => {
     const map = new Map();
     (groups || []).forEach((g) => {
@@ -1097,6 +1100,22 @@ export default function AttendanceTab({
     if (!scheduleDays.length) return all;
     return all.filter((d) => scheduleDays.includes(getDayOfWeek(d)));
   }, [months, scheduleDays]);
+
+  const confirmedTrialBookingsByDate = useMemo(() => {
+    const filtered = (trialBookings || []).filter((booking) =>
+      String(booking?.groupId || "") === String(gid || "")
+      && visibleDays.includes(String(booking?.trialDate || ""))
+      && String(booking?.status || "").toLowerCase() === "confirmed"
+    );
+
+    return filtered.reduce((acc, booking) => {
+      const dateKey = String(booking?.trialDate || "");
+      if (!dateKey) return acc;
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(booking);
+      return acc;
+    }, {});
+  }, [trialBookings, gid, visibleDays]);
 
   const monthSpans = useMemo(() => {
     return months.map((month) => ({
@@ -2496,6 +2515,32 @@ export default function AttendanceTab({
           <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
+
+      {Object.keys(confirmedTrialBookingsByDate).length > 0 && (
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 12, marginTop: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain, marginBottom: 8 }}>Підтверджені пробні</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {visibleDays.filter((dateKey) => confirmedTrialBookingsByDate[dateKey]?.length).map((dateKey) => (
+              <div key={dateKey} style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: theme.textMuted }}>{fmtUaShortDate(dateKey)}</div>
+                {confirmedTrialBookingsByDate[dateKey].map((booking) => {
+                  const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
+                  return (
+                    <div key={booking.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.bg }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain }}>{booking.name || "Без імені"}</div>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: "#047857", background: "rgba(16,185,129,.14)", borderRadius: 999, padding: "3px 8px" }}>Підтвердила</span>
+                      </div>
+                      {contact ? <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>{contact}</div> : null}
+                      {booking.note ? <div style={{ fontSize: 12, color: theme.textMain, marginTop: 4 }}>Нотатка: {booking.note}</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {groupPickerOpen && createPortal(
         <div className="attendance-group-panel" style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>
           {groupedByDirection.map((section) => (
@@ -3010,11 +3055,6 @@ export default function AttendanceTab({
                         type="submit"
                         className="attendance-add-action"
                         style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleCreateGuestAttendance();
-                        }}
                         disabled={creatingGuest || !gid}
                       >
                         Додати
