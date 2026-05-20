@@ -39,6 +39,7 @@ import TrainersTab from "./components/TrainersTab";
 import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
 import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
+import { extractPushSubscriptionPayload, getPushStatus, PUSH_STATUS, requestPushSubscription, sendTestPushRequest } from "./push";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -60,6 +61,11 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+  const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushInfo, setPushInfo] = useState("");
+  const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushInfo, setTestPushInfo] = useState("");
 
   const [students, setStudents] = useState([]);
   const [subs, setSubs] = useState([]);
@@ -129,6 +135,91 @@ export default function App() {
 
   const adminEmails = ["semagin.vlad@gmail.com"]; 
   const isAdmin = user && adminEmails.includes(user.email);
+
+  const pushStatusLabel = useMemo(() => {
+    switch (pushStatus) {
+      case PUSH_STATUS.unsupported: return "Push не підтримується в цьому браузері";
+      case PUSH_STATUS.installRequired: return "Для iPhone встановіть додаток на головний екран";
+      case PUSH_STATUS.permissionDenied: return "Дозвіл на push заборонено";
+      case PUSH_STATUS.permissionGranted: return "Дозвіл надано, підписка ще не збережена";
+      case PUSH_STATUS.subscribed: return "Підписку збережено";
+      case PUSH_STATUS.missingVapidKey: return "Не налаштовано VAPID public key";
+      default: return "Push ще не увімкнено";
+    }
+  }, [pushStatus]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user) {
+      setPushStatus(PUSH_STATUS.permissionDefault);
+      setPushInfo("");
+      return;
+    }
+    getPushStatus()
+      .then((status) => {
+        if (mounted) setPushStatus(status);
+      })
+      .catch(() => {
+        if (mounted) setPushStatus(PUSH_STATUS.error);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
+
+
+  const handleSendTestPush = async () => {
+    if (!user || testPushBusy || pushStatus !== PUSH_STATUS.subscribed) return;
+    setTestPushBusy(true);
+    setTestPushInfo("Надсилається...");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data?.session?.access_token || "";
+      const result = await sendTestPushRequest(accessToken);
+      if (!result.ok) {
+        setTestPushInfo(`Помилка: ${result.error || "невідома"}`);
+        return;
+      }
+      if (result.status === "no_active_subscriptions" || result.total === 0) {
+        setTestPushInfo("Немає активних підписок");
+        return;
+      }
+      if (result.sent > 0) {
+        setTestPushInfo("Надіслано");
+        return;
+      }
+      setTestPushInfo("Помилка: не вдалося надіслати");
+    } catch (error) {
+      setTestPushInfo(`Помилка: ${String(error?.message || error)}`);
+    } finally {
+      setTestPushBusy(false);
+    }
+  };
+
+  const handleEnablePush = async () => {
+    if (!user || pushBusy) return;
+    setPushBusy(true);
+    setPushInfo("");
+    try {
+      const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY || "";
+      const result = await requestPushSubscription({ vapidPublicKey });
+      setPushStatus(result.status || PUSH_STATUS.error);
+      if (!result.ok) {
+        setPushInfo(result.error || "Не вдалося увімкнути push");
+        return;
+      }
+
+      const payload = extractPushSubscriptionPayload(result.subscription);
+      await db.upsertPushSubscription(user.id, payload);
+      setPushStatus(PUSH_STATUS.subscribed);
+      setPushInfo("Push підписку збережено");
+    } catch (error) {
+      setPushStatus(PUSH_STATUS.error);
+      setPushInfo(String(error?.message || error));
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (user && !isAdmin && !["attendance", "schedule"].includes(tab)) {
@@ -1187,6 +1278,24 @@ export default function App() {
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
           {isAdmin && <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
+          <div style={{display:"flex", flexDirection:"column", gap:6, alignItems:"flex-start"}}>
+            <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+              <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>
+                {pushBusy ? "Увімкнення..." : "Увімкнути push"}
+              </button>
+              <button
+                type="button"
+                style={{...btnS, opacity: (testPushBusy || pushStatus !== PUSH_STATUS.subscribed) ? 0.7 : 1}}
+                onClick={handleSendTestPush}
+                disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed}
+              >
+                {testPushBusy ? "Надсилання..." : "Надіслати тестовий push"}
+              </button>
+            </div>
+            <div style={{fontSize:11, color: theme.textMuted, maxWidth:280}}>{pushStatusLabel}</div>
+            {!!pushInfo && <div style={{fontSize:11, color: pushStatus === PUSH_STATUS.error ? theme.danger : theme.success, maxWidth:280}}>{pushInfo}</div>}
+            {!!testPushInfo && <div style={{fontSize:11, color: testPushInfo.startsWith("Помилка") ? theme.danger : theme.textMuted, maxWidth:280}}>{testPushInfo}</div>}
+          </div>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
       </header>
