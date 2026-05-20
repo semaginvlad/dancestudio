@@ -965,6 +965,8 @@ export default function AttendanceTab({
   onActionMessageStudent,
   warnedStudents,
   setWarnedStudents,
+  trialBookings = [],
+  setTrialBookings,
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -990,6 +992,8 @@ export default function AttendanceTab({
   const [guestGroupExpandedByGroup, setGuestGroupExpandedByGroup] = useState({});
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
+  const [trialPopoverState, setTrialPopoverState] = useState(null);
+  const [markingTrialId, setMarkingTrialId] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1052,15 +1056,21 @@ export default function AttendanceTab({
 
   useEffect(() => {
     if (!groups?.length) return;
-    if (!gid || !groups.some((g) => g.id === gid)) {
+    if (!gid || !groups.some((g) => String(g.id) === String(gid))) {
       setGid(groups[0].id);
     }
   }, [groups, gid, setGid]);
 
   const currentGroup = useMemo(
-    () => groups.find((g) => g.id === gid) || null,
+    () => groups.find((g) => String(g.id) === String(gid)) || null,
     [groups, gid]
   );
+
+  useEffect(() => {
+    setTrialPopoverState(null);
+  }, [gid, centerMonth]);
+
+
   const groupedByDirection = useMemo(() => {
     const map = new Map();
     (groups || []).forEach((g) => {
@@ -1097,6 +1107,22 @@ export default function AttendanceTab({
     if (!scheduleDays.length) return all;
     return all.filter((d) => scheduleDays.includes(getDayOfWeek(d)));
   }, [months, scheduleDays]);
+
+  const confirmedTrialBookingsByDate = useMemo(() => {
+    const filtered = (trialBookings || []).filter((booking) =>
+      String(booking?.groupId || "") === String(gid || "")
+      && visibleDays.includes(String(booking?.trialDate || ""))
+      && String(booking?.status || "").toLowerCase() === "confirmed"
+    );
+
+    return filtered.reduce((acc, booking) => {
+      const dateKey = String(booking?.trialDate || "");
+      if (!dateKey) return acc;
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(booking);
+      return acc;
+    }, {});
+  }, [trialBookings, gid, visibleDays]);
 
   const monthSpans = useMemo(() => {
     return months.map((month) => ({
@@ -2238,6 +2264,109 @@ export default function AttendanceTab({
     return acc;
   }, {});
 
+  const findExistingStudentForTrial = (booking) => {
+    const phone = String(booking?.phone || "").trim();
+    const telegram = String(booking?.telegram || "").trim().toLowerCase();
+    const instagram = String(booking?.instagram || "").trim().toLowerCase();
+
+    const byPhone = phone && (students || []).find((s) => String(s.phone || "").trim() === phone);
+    if (byPhone) return byPhone;
+    const byTelegram = telegram && (students || []).find((s) => String(s.telegram || "").trim().toLowerCase() === telegram);
+    if (byTelegram) return byTelegram;
+    const byInstagramInNotes = instagram && (students || []).find((s) => String(s.notes || "").toLowerCase().includes(instagram));
+    if (byInstagramInNotes) return byInstagramInNotes;
+    return null;
+  };
+
+  const handleMarkTrialCame = async (booking) => {
+    try {
+      if (!booking?.id || !booking?.groupId || !booking?.trialDate) throw new Error("Некоректні дані запису на пробне");
+      setMarkingTrialId(String(booking.id));
+
+      let resolvedStudent = null;
+      let resolvedStudentId = booking.studentId || booking.convertedStudentId || null;
+
+      if (resolvedStudentId) {
+        resolvedStudent = (students || []).find((s) => String(s.id) === String(resolvedStudentId)) || null;
+      }
+
+      if (!resolvedStudentId) {
+        resolvedStudent = findExistingStudentForTrial(booking);
+        if (resolvedStudent?.id) {
+          resolvedStudentId = resolvedStudent.id;
+        }
+      }
+
+      if (!resolvedStudentId) {
+        const notes = [booking.note, booking.source ? `source: ${booking.source}` : "", booking.instagram ? `instagram: ${booking.instagram}` : "", booking.contact ? `contact: ${booking.contact}` : ""].filter(Boolean).join("\n");
+        const created = await db.insertStudent({
+          name: booking.name || "",
+          first_name: "",
+          last_name: "",
+          phone: booking.phone || null,
+          telegram: booking.telegram || null,
+          notes: notes || null,
+        });
+        resolvedStudent = created;
+        resolvedStudentId = created?.id;
+        if (!resolvedStudentId) throw new Error("Не вдалося створити профіль учениці");
+        if (typeof setStudents === "function") setStudents((prev) => [...(prev || []), created]);
+      }
+
+      const alreadyLinked = (studentGrps || []).some((sg) => String(sg.studentId) === String(resolvedStudentId) && String(sg.groupId) === String(booking.groupId));
+      if (!alreadyLinked) {
+        const link = await db.restoreStudentToGroup(booking.groupId, resolvedStudentId);
+        if (typeof setStudentGrps === "function") {
+          setStudentGrps((prev) => {
+            const list = prev || [];
+            if (list.some((sg) => String(sg.studentId) === String(resolvedStudentId) && String(sg.groupId) === String(booking.groupId))) return list;
+            return [...list, link || { id: `sg_${uid()}`, studentId: resolvedStudentId, groupId: booking.groupId }];
+          });
+        }
+      }
+
+      const hasTrialAttendance = (attn || []).some((a) => String(a.studentId || "") === String(resolvedStudentId)
+        && String(a.groupId || "") === String(booking.groupId)
+        && toDateKey(a.date) === String(booking.trialDate)
+        && String(a.entryType || a.guestType || "").toLowerCase() === "trial");
+
+      if (!hasTrialAttendance) {
+        const payload = {
+          id: `tmp_${uid()}`,
+          subId: null,
+          studentId: resolvedStudentId,
+          date: booking.trialDate,
+          guestName: null,
+          guestType: null,
+          groupId: booking.groupId,
+          quantity: 1,
+          entryType: "trial",
+          explicitEntryType: true,
+        };
+        const savedRecord = await db.insertAttendance(payload);
+        setAttn((prev) => [...(prev || []), savedRecord]);
+      }
+
+      const updatedBooking = await db.updateTrialBooking(booking.id, {
+        status: "came",
+        studentId: resolvedStudentId,
+        convertedStudentId: resolvedStudentId,
+      });
+      if (typeof setTrialBookings === "function") {
+        setTrialBookings((prev) => (prev || []).map((row) => (String(row.id) === String(booking.id) ? updatedBooking : row)));
+      }
+      if (trialPopoverState?.dateStr && String(trialPopoverState.dateStr) === String(booking.trialDate)) {
+        const remaining = (confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).filter((row) => String(row.id) !== String(booking.id));
+        if (!remaining.length) setTrialPopoverState(null);
+      }
+    } catch (e) {
+      alert(`Не вдалося відмітити пробне: ${e?.message || e}`);
+    } finally {
+      setMarkingTrialId("");
+    }
+  };
+
+
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
@@ -2496,7 +2625,8 @@ export default function AttendanceTab({
           <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
-      {groupPickerOpen && createPortal(
+
+            {groupPickerOpen && createPortal(
         <div className="attendance-group-panel" style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>
           {groupedByDirection.map((section) => (
             <div key={section.directionId}>
@@ -2694,6 +2824,7 @@ export default function AttendanceTab({
                 const dayIdx = visibleDayIndex[dateStr];
                 const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
+                const dayBookings = confirmedTrialBookingsByDate[dateStr] || [];
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dayHead(cancelledDay, isMutedMonth, isCurrentMonth),
@@ -2718,6 +2849,34 @@ export default function AttendanceTab({
                     >
                       {cancelledDay ? "↺" : "×"}
                     </button>
+                    {dayBookings.length > 0 && (
+                      <button
+                        type="button"
+                        style={{
+                          marginTop: 4,
+                          cursor: "pointer",
+                          display: "inline-block",
+                          fontSize: 10,
+                          fontWeight: 800,
+                          color: "#047857",
+                          background: "rgba(16,185,129,.14)",
+                          borderRadius: 999,
+                          padding: "2px 7px",
+                          border: "none",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const isMobile = window.innerWidth < 700;
+                          const popoverWidth = Math.min(320, Math.max(260, window.innerWidth - 24));
+                          const left = isMobile ? 12 : Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
+                          const top = isMobile ? null : Math.min(rect.bottom + 8, window.innerHeight - 20);
+                          setTrialPopoverState({ dateStr, left, top, width: popoverWidth, mobile: isMobile });
+                        }}
+                      >
+                        {`${dayBookings.length} ${dayBookings.length === 1 ? "пробне" : (dayBookings.length < 5 ? "пробні" : "пробних")}`}
+                      </button>
+                    )}
                   </th>
                 );
               })}
@@ -3010,11 +3169,6 @@ export default function AttendanceTab({
                         type="submit"
                         className="attendance-add-action"
                         style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleCreateGuestAttendance();
-                        }}
                         disabled={creatingGuest || !gid}
                       >
                         Додати
@@ -3053,6 +3207,71 @@ export default function AttendanceTab({
           </tbody>
         </table>
       </div>
+
+      {trialPopoverState && createPortal(
+        <>
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 2998, background: "transparent" }}
+            onClick={() => setTrialPopoverState(null)}
+          />
+          <div
+            style={trialPopoverState.mobile
+              ? {
+                  position: "fixed",
+                  left: 12,
+                  right: 12,
+                  bottom: 12,
+                  maxHeight: "60vh",
+                  overflowY: "auto",
+                  zIndex: 2999,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 12,
+                  background: theme.card,
+                  padding: 12,
+                  boxShadow: "0 16px 40px rgba(0,0,0,0.28)",
+                }
+              : {
+                  position: "fixed",
+                  left: trialPopoverState.left,
+                  top: trialPopoverState.top,
+                  width: trialPopoverState.width,
+                  maxHeight: "60vh",
+                  overflowY: "auto",
+                  zIndex: 2999,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 12,
+                  background: theme.card,
+                  padding: 12,
+                  boxShadow: "0 16px 40px rgba(0,0,0,0.28)",
+                }
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain }}>{`Пробні · ${fmtUaShortDate(trialPopoverState.dateStr)}`}</div>
+              <button type="button" onClick={() => setTrialPopoverState(null)} style={{ border: `1px solid ${theme.border}`, background: theme.bg, borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: theme.textMain }}>Закрити</button>
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              {(confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).map((booking) => {
+                const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
+                return (
+                  <div key={booking.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.bg, padding: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMain }}>{booking.name || "Без імені"}</div>
+                    {contact ? <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
+                    {booking.note ? <div style={{ fontSize: 11, color: theme.textMain, marginTop: 2 }}>Нотатка: {booking.note}</div> : null}
+                    <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, color: "#047857", background: "rgba(16,185,129,.14)", borderRadius: 999, padding: "2px 7px" }}>Підтвердила</span>
+                    <button type="button" onClick={() => handleMarkTrialCame(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 6, border: "none", borderRadius: 8, background: theme.primary, color: "#fff", padding: "6px 9px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                      {markingTrialId === String(booking.id) ? "Зберігаємо..." : "Відмітити пробне"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
       {openMenuState && createPortal(
         <div
           ref={menuPopupRef}

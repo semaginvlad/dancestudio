@@ -957,7 +957,7 @@ export default function App() {
     }
     for (const groupId of desiredIds) {
       if (!currentIds.has(String(groupId))) {
-        const link = await db.addStudentGroup(studentId, groupId);
+        const link = await db.restoreStudentToGroup(groupId, studentId);
         addedLinks.push(link || { id: uid(), studentId, groupId });
       }
     }
@@ -1001,7 +1001,7 @@ export default function App() {
   };
 
   const restoreStudentToGroup = async (studentId) => {
-    const groupId = restoreGroupByStudent[studentId];
+    const groupId = String(restoreGroupByStudent[studentId] || "").trim();
     if (!groupId) {
       alert("Обери групу для відновлення");
       return;
@@ -1012,7 +1012,7 @@ export default function App() {
     if (!ok) return;
 
     try {
-      const link = await db.addStudentGroup(studentId, groupId);
+      const link = await db.restoreStudentToGroup(groupId, studentId);
       setStudentGrps((prev) => {
         if (prev.some((sg) => String(sg.studentId) === String(studentId) && String(sg.groupId) === String(groupId))) return prev;
         return [...prev, link || { id: uid(), studentId, groupId }];
@@ -1023,7 +1023,7 @@ export default function App() {
         return next;
       });
     } catch (e) {
-      alert(e?.message || "Не вдалося відновити ученицю в групу");
+      alert(`Не вдалося відновити ученицю в групу: ${e?.message || e}`);
     }
   };
 
@@ -1228,7 +1228,7 @@ export default function App() {
           />
         )}
 
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
