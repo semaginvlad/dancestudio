@@ -122,7 +122,6 @@ export default function App() {
   const [adminTab, setAdminTab] = useState("analytics");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
-  const [themeVersion, setThemeVersion] = useState(0);
   const safeThemeMode = themeMode === "light" || themeMode === "dark" ? themeMode : "dark";
   const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
   const [directionEdits, setDirectionEdits] = useState({});
@@ -186,7 +185,6 @@ export default function App() {
     const next = safeThemeMode === "light" ? light : dark;
     Object.assign(theme, next);
     applyThemeBindings();
-    setThemeVersion((v) => v + 1);
   }, [safeThemeMode]);
 
   useEffect(() => {
@@ -1156,7 +1154,7 @@ export default function App() {
   };
 
   return (
-    <div key={themeVersion} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
+    <div style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
