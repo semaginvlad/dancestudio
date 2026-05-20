@@ -1145,6 +1145,27 @@ export async function insertTrialBooking(input = {}) {
   return mapTrialBooking(data);
 }
 
+
+export async function convertTrialBookingToStudent(trialBookingId) {
+  if (!trialBookingId) throw new Error('trialBookingId is required');
+  const { data, error } = await supabase.rpc('crm_convert_trial_booking_to_student', {
+    p_trial_booking_id: trialBookingId,
+  });
+  if (error) throw error;
+
+  const payload = Array.isArray(data) ? data[0] : data;
+  if (!payload) throw new Error('RPC crm_convert_trial_booking_to_student did not return data');
+
+  const studentRow = payload.student || null;
+  const linkRow = payload.student_group || null;
+  const bookingRow = payload.trial_booking || null;
+
+  return {
+    student: studentRow ? mapStudent(studentRow) : null,
+    studentGroup: linkRow ? { id: linkRow.id, studentId: linkRow.student_id, groupId: linkRow.group_id } : null,
+    trialBooking: bookingRow ? mapTrialBooking(bookingRow) : null,
+  };
+}
 export async function updateTrialBooking(id, patch = {}) {
   const payload = trialBookingPayload(patch);
   const { data, error } = await supabase.from('trial_bookings').update(payload).eq('id', id).select('*').single();
