@@ -1,0 +1,15 @@
+{
+  "name": "Dance Studio CRM",
+  "short_name": "DanceCRM",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F9FD",
+  "theme_color": "#F8F9FD",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
