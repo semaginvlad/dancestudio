@@ -99,3 +99,37 @@ export const extractPushSubscriptionPayload = (subscription) => {
     is_active: true,
   };
 };
+
+
+export const sendTestPushRequest = async (accessToken) => {
+  if (!accessToken) {
+    return { ok: false, status: "auth_error", error: "Missing access token" };
+  }
+
+  const response = await fetch("/api/send-test-push", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    return {
+      ok: false,
+      status: data?.status || "error",
+      error: data?.error || `HTTP ${response.status}`,
+      sent: Number(data?.sent || 0),
+      deactivated: Number(data?.deactivated || 0),
+    };
+  }
+
+  return {
+    ok: true,
+    status: data.status || "sent",
+    sent: Number(data.sent || 0),
+    deactivated: Number(data.deactivated || 0),
+    failed: Number(data.failed || 0),
+  };
+};
