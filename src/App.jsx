@@ -39,7 +39,13 @@ import TrainersTab from "./components/TrainersTab";
 import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
 import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
-import { extractPushSubscriptionPayload, getPushStatus, PUSH_STATUS, requestPushSubscription } from "./push";
+import {
+  extractPushSubscriptionPayload,
+  getPushStatus,
+  PUSH_STATUS,
+  requestPushSubscription,
+  sendTestPushRequest,
+} from "./push";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -64,6 +70,8 @@ export default function App() {
   const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushInfo, setPushInfo] = useState("");
+  const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushInfo, setTestPushInfo] = useState("");
 
   const [students, setStudents] = useState([]);
   const [subs, setSubs] = useState([]);
@@ -164,6 +172,36 @@ export default function App() {
       mounted = false;
     };
   }, [user]);
+
+
+
+  const handleSendTestPush = async () => {
+    if (!user || pushStatus !== PUSH_STATUS.subscribed || testPushBusy) return;
+    setTestPushBusy(true);
+    setTestPushInfo("надсилається");
+
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data?.session?.access_token || "";
+      const result = await sendTestPushRequest(accessToken);
+
+      if (!result.ok) {
+        setTestPushInfo(`помилка: ${result.error || "невідома помилка"}`);
+        return;
+      }
+
+      if (result.status === "no_active_subscriptions") {
+        setTestPushInfo("немає активних підписок");
+        return;
+      }
+
+      setTestPushInfo("надіслано");
+    } catch (error) {
+      setTestPushInfo(`помилка: ${String(error?.message || error)}`);
+    } finally {
+      setTestPushBusy(false);
+    }
+  };
 
   const handleEnablePush = async () => {
     if (!user || pushBusy) return;
@@ -1251,8 +1289,17 @@ export default function App() {
             <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>
               {pushBusy ? "Увімкнення..." : "Увімкнути push"}
             </button>
+            <button
+              type="button"
+              style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1}}
+              onClick={handleSendTestPush}
+              disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}
+            >
+              {testPushBusy ? "Надсилання..." : "Надіслати тестовий push"}
+            </button>
             <div style={{fontSize:11, color: theme.textMuted, maxWidth:260}}>{pushStatusLabel}</div>
             {!!pushInfo && <div style={{fontSize:11, color: pushStatus === PUSH_STATUS.error ? theme.danger : theme.success, maxWidth:260}}>{pushInfo}</div>}
+            {!!testPushInfo && <div style={{fontSize:11, color: testPushInfo.startsWith("помилка") ? theme.danger : theme.success, maxWidth:260}}>{testPushInfo}</div>}
           </div>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
