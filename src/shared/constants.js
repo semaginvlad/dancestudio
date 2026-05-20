@@ -78,7 +78,7 @@ const STATUS_COLORS = {
   expired: theme.danger
 };
 
-const inputSt = {
+let inputSt = {
   width: "100%",
   padding: "16px 20px",
   background: theme.input,
@@ -93,7 +93,7 @@ const inputSt = {
   transition: "0.2s"
 };
 
-const btnP = {
+let btnP = {
   padding: "16px 28px",
   background: theme.primary,
   color: "#fff",
@@ -106,7 +106,7 @@ const btnP = {
   boxShadow: `0 8px 24px ${theme.primary}40`
 };
 
-const btnS = {
+let btnS = {
   padding: "16px 28px",
   background: theme.input,
   color: theme.textMuted,
@@ -118,7 +118,7 @@ const btnS = {
   fontFamily: "inherit"
 };
 
-const cardSt = {
+let cardSt = {
   background: theme.card,
   borderRadius: 24,
   padding: "24px",
@@ -134,17 +134,29 @@ const applyThemeBindings = () => {
   const kpop = DIRECTIONS.find((d) => d.id === "kpop");
   if (kpop) kpop.color = theme.primary;
 
-  inputSt.background = theme.input;
-  inputSt.color = theme.textMain;
+  inputSt = {
+    ...inputSt,
+    background: theme.input,
+    color: theme.textMain,
+  };
 
-  btnP.background = theme.primary;
-  btnP.boxShadow = `0 8px 24px ${theme.primary}40`;
+  btnP = {
+    ...btnP,
+    background: theme.primary,
+    boxShadow: `0 8px 24px ${theme.primary}40`,
+  };
 
-  btnS.background = theme.input;
-  btnS.color = theme.textMuted;
+  btnS = {
+    ...btnS,
+    background: theme.input,
+    color: theme.textMuted,
+  };
 
-  cardSt.background = theme.card;
-  cardSt.boxShadow = theme.bg === "#0F131A" ? "0 10px 40px rgba(0, 0, 0, 0.32)" : "0 10px 40px rgba(168, 177, 206, 0.15)";
+  cardSt = {
+    ...cardSt,
+    background: theme.card,
+    boxShadow: theme.bg === "#0F131A" ? "0 10px 40px rgba(0, 0, 0, 0.32)" : "0 10px 40px rgba(168, 177, 206, 0.15)",
+  };
 
   // Backward-compatible aliases used across tabs
   theme.text = theme.textMain;
