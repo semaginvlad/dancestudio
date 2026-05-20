@@ -2278,7 +2278,7 @@ export default function AttendanceTab({
     return null;
   };
 
-  const handleMarkTrialCame = async (booking) => {
+  const handleAddTrialBookingToGroup = async (booking) => {
     try {
       if (!booking?.id || !booking?.groupId || !booking?.trialDate) throw new Error("Некоректні дані запису на пробне");
       setMarkingTrialId(String(booking.id));
@@ -2342,30 +2342,8 @@ export default function AttendanceTab({
         }
       }
 
-      const hasTrialAttendance = (attn || []).some((a) => String(a.studentId || "") === String(resolvedStudentId)
-        && String(a.groupId || "") === String(booking.groupId)
-        && toDateKey(a.date) === String(booking.trialDate)
-        && String(a.entryType || a.guestType || "").toLowerCase() === "trial");
-
-      if (!hasTrialAttendance) {
-        const payload = {
-          id: `tmp_${uid()}`,
-          subId: null,
-          studentId: resolvedStudentId,
-          date: booking.trialDate,
-          guestName: null,
-          guestType: null,
-          groupId: booking.groupId,
-          quantity: 1,
-          entryType: "trial",
-          explicitEntryType: true,
-        };
-        const savedRecord = await db.insertAttendance(payload);
-        setAttn((prev) => [...(prev || []), savedRecord]);
-      }
-
       const updatedBooking = await db.updateTrialBooking(booking.id, {
-        status: "came",
+        status: "became_student",
         studentId: resolvedStudentId,
         convertedStudentId: resolvedStudentId,
       });
@@ -2377,7 +2355,7 @@ export default function AttendanceTab({
         if (!remaining.length) setTrialPopoverState(null);
       }
     } catch (e) {
-      alert(`Не вдалося відмітити пробне: ${e?.message || e}`);
+      alert(`Не вдалося додати в групу: ${e?.message || e}`);
     } finally {
       setMarkingTrialId("");
     }
@@ -2885,7 +2863,7 @@ export default function AttendanceTab({
                           e.stopPropagation();
                           const rect = e.currentTarget.getBoundingClientRect();
                           const isMobile = window.innerWidth < 700;
-                          const popoverWidth = Math.min(360, Math.max(320, window.innerWidth - 24));
+                          const popoverWidth = Math.min(320, Math.max(260, window.innerWidth - 24));
                           const left = isMobile ? 12 : Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
                           const top = isMobile ? null : Math.min(rect.bottom + 8, window.innerHeight - 20);
                           setTrialPopoverState({ dateStr, left, top, width: popoverWidth, mobile: isMobile });
@@ -3252,8 +3230,8 @@ export default function AttendanceTab({
                   left: trialPopoverState.left,
                   top: trialPopoverState.top,
                   width: trialPopoverState.width,
-                  minWidth: 320,
-                  maxWidth: 360,
+                  minWidth: 260,
+                  maxWidth: 320,
                   maxHeight: "60vh",
                   overflowY: "auto",
                   zIndex: 2999,
@@ -3279,8 +3257,8 @@ export default function AttendanceTab({
                     {contact ? <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
                     {booking.note ? <div style={{ fontSize: 11, color: theme.textMain, marginTop: 2 }}>Нотатка: {booking.note}</div> : null}
                     <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, color: "#047857", background: "rgba(16,185,129,.14)", borderRadius: 999, padding: "2px 7px" }}>Підтвердила</span>
-                    <button type="button" onClick={() => handleMarkTrialCame(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 8, width: "100%", border: "none", borderRadius: 8, background: theme.primary, color: "#fff", padding: "8px 10px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
-                      {markingTrialId === String(booking.id) ? "Зберігаємо..." : "Відмітити пробне"}
+                    <button type="button" title="Додати пробну в групу" aria-label="Додати пробну в групу" onClick={() => handleAddTrialBookingToGroup(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 6, border: `1px solid ${theme.border}`, borderRadius: 999, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                      {markingTrialId === String(booking.id) ? "Додаємо..." : "+ В групу"}
                     </button>
                   </div>
                 );
