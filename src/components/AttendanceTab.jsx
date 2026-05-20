@@ -2847,17 +2847,25 @@ export default function AttendanceTab({
                     {dayBookings.length > 0 && (
                       <button
                         type="button"
+                        title={`${dayBookings.length} ${dayBookings.length === 1 ? "підтверджене пробне" : (dayBookings.length < 5 ? "підтверджені пробні" : "підтверджених пробних")}`}
+                        aria-label={`${dayBookings.length} ${dayBookings.length === 1 ? "підтверджене пробне" : (dayBookings.length < 5 ? "підтверджені пробні" : "підтверджених пробних")}`}
                         style={{
                           marginTop: 4,
                           cursor: "pointer",
-                          display: "inline-block",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           fontSize: 10,
                           fontWeight: 800,
-                          color: "#047857",
-                          background: "rgba(16,185,129,.14)",
+                          color: "#065f46",
+                          background: "rgba(16,185,129,.16)",
                           borderRadius: 999,
-                          padding: "2px 7px",
-                          border: "none",
+                          minWidth: 22,
+                          minHeight: 22,
+                          padding: "0 6px",
+                          border: "1px solid rgba(16,185,129,.35)",
+                          boxShadow: "0 0 0 1px rgba(16,185,129,.08) inset",
+                          lineHeight: 1,
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -2869,7 +2877,7 @@ export default function AttendanceTab({
                           setTrialPopoverState({ dateStr, left, top, width: popoverWidth, mobile: isMobile });
                         }}
                       >
-                        {`${dayBookings.length} ${dayBookings.length === 1 ? "пробне" : (dayBookings.length < 5 ? "пробні" : "пробних")}`}
+                        {dayBookings.length}
                       </button>
                     )}
                   </th>
