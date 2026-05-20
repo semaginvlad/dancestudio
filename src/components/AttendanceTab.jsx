@@ -96,7 +96,7 @@ const makeStyles = () => {
     background: isDark ? "rgba(16,23,34,0.98)" : "rgba(255,255,255,0.98)",
     boxShadow: isDark ? "0 16px 32px rgba(0,0,0,0.45)" : "0 14px 30px rgba(15,23,42,0.16)",
     backdropFilter: "blur(8px)",
-    padding: 8,
+    padding: 7,
   },
   groupSectionTitle: {
     fontSize: 11,
@@ -2863,7 +2863,7 @@ export default function AttendanceTab({
                           e.stopPropagation();
                           const rect = e.currentTarget.getBoundingClientRect();
                           const isMobile = window.innerWidth < 700;
-                          const popoverWidth = Math.min(320, Math.max(260, window.innerWidth - 24));
+                          const popoverWidth = Math.min(300, Math.max(240, window.innerWidth - 24));
                           const left = isMobile ? 12 : Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
                           const top = isMobile ? null : Math.min(rect.bottom + 8, window.innerHeight - 20);
                           setTrialPopoverState({ dateStr, left, top, width: popoverWidth, mobile: isMobile });
@@ -3102,20 +3102,20 @@ export default function AttendanceTab({
                 <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
                 <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
                   {addMode === "student" ? (
-                    <div style={{ display: "grid", gap: 6, width: "100%" }}>
+                    <div style={{ display: "grid", gap: 5, width: "100%" }}>
                       <div style={{ display: "flex", gap: 6, width: "100%" }}>
                         <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
                         <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
                       </div>
                       {normalizeName(newStudentName).length >= 2 && (
-                        <div style={{ display: "grid", gap: 6, padding: 8, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
+                        <div style={{ display: "grid", gap: 5, padding: 7, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
                           {existingStudentMatches.length ? existingStudentMatches.map((match) => {
                             const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
                             return (
                               <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
                                 <div style={{ minWidth: 140 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMain }}>{match.displayName}</div>
+                                  <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{match.displayName}</div>
                                   {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
                                 </div>
                                 {match.isLinkedToCurrentGroup ? (
@@ -3222,42 +3222,42 @@ export default function AttendanceTab({
                   border: `1px solid ${theme.border}`,
                   borderRadius: 12,
                   background: theme.card,
-                  padding: 12,
-                  boxShadow: "0 16px 40px rgba(0,0,0,0.28)",
+                  padding: 10,
+                  boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
                 }
               : {
                   position: "fixed",
                   left: trialPopoverState.left,
                   top: trialPopoverState.top,
                   width: trialPopoverState.width,
-                  minWidth: 260,
-                  maxWidth: 320,
+                  minWidth: 240,
+                  maxWidth: 300,
                   maxHeight: "60vh",
                   overflowY: "auto",
                   zIndex: 2999,
                   border: `1px solid ${theme.border}`,
                   borderRadius: 12,
                   background: theme.card,
-                  padding: 12,
-                  boxShadow: "0 16px 40px rgba(0,0,0,0.28)",
+                  padding: 10,
+                  boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
                 }
             }
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: theme.textMain }}>{`Пробні · ${fmtUaShortDate(trialPopoverState.dateStr)}`}</div>
-              <button type="button" onClick={() => setTrialPopoverState(null)} style={{ border: `1px solid ${theme.border}`, background: theme.bg, borderRadius: 8, padding: "4px 8px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: theme.textMain }}>Закрити</button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: theme.textMain }}>{`Пробні · ${fmtUaShortDate(trialPopoverState.dateStr)}`}</div>
+              <button type="button" onClick={() => setTrialPopoverState(null)} style={{ border: `1px solid ${theme.border}`, background: "transparent", borderRadius: 999, width: 22, height: 22, lineHeight: "20px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: theme.textMuted, padding: 0 }}>✕</button>
             </div>
-            <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gap: 5 }}>
               {(confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).map((booking) => {
                 const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
                 return (
-                  <div key={booking.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.bg, padding: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMain }}>{booking.name || "Без імені"}</div>
-                    {contact ? <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
-                    {booking.note ? <div style={{ fontSize: 11, color: theme.textMain, marginTop: 2 }}>Нотатка: {booking.note}</div> : null}
+                  <div key={booking.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.bg, padding: 7 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{booking.name || "Без імені"}</div>
+                    {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
+                    {booking.note ? <div style={{ fontSize: 10, color: theme.textMain, marginTop: 2 }}>Нотатка: {booking.note}</div> : null}
                     <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, color: "#047857", background: "rgba(16,185,129,.14)", borderRadius: 999, padding: "2px 7px" }}>Підтвердила</span>
-                    <button type="button" title="Додати пробну в групу" aria-label="Додати пробну в групу" onClick={() => handleAddTrialBookingToGroup(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 6, border: `1px solid ${theme.border}`, borderRadius: 999, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                    <button type="button" title="Додати пробну в групу" aria-label="Додати пробну в групу" onClick={() => handleAddTrialBookingToGroup(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 6, border: `1px solid ${theme.border}`, borderRadius: 999, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, minHeight: trialPopoverState.mobile ? 34 : undefined }}>
                       {markingTrialId === String(booking.id) ? "Додаємо..." : "+ В групу"}
                     </button>
                   </div>
