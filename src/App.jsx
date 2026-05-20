@@ -214,7 +214,7 @@ export default function App() {
   const loadAllData = async (currentUser = user) => {
     setLoading(true);
     try {
-      const safeFetch = async (fn) => { try { return await fn(); } catch (e) { return null; } };
+      const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
       const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
       
       const fetchCustomOrders = async () => {
@@ -256,11 +256,11 @@ export default function App() {
         ? () => db.fetchSubs({ includeFinancial: true })
         : db.fetchMyAttendanceSubscriptions;
       const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb] = await Promise.all([
-        safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(fetchAttendanceSubscriptions),
-        safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(fetchScheduleCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), safeFetch(db.fetchTrialBookings),
-        fetchCustomOrders(), safeFetch(db.fetchWarnedStudents), safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups),
-        safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
+        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
+        safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
+        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
+        fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
+        safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings")
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
