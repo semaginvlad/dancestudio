@@ -123,6 +123,7 @@ export default function App() {
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [themeVersion, setThemeVersion] = useState(0);
+  const safeThemeMode = themeMode === "light" || themeMode === "dark" ? themeMode : "dark";
   const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
   const [directionEdits, setDirectionEdits] = useState({});
 
@@ -151,6 +152,13 @@ export default function App() {
       danger: "#EA5455",
       exhausted: "#A8B1CE",
       archive: "#1A2230",
+      text: "#E7EEFC",
+      textSoft: "#8093B1",
+      panel: "#171D27",
+      panelSoft: "#1E2633",
+      good: "#25B87A",
+      warn: "#F59F3A",
+      bad: "#EA5455",
     };
     const light = {
       primary: "#4A6FE3",
@@ -167,12 +175,19 @@ export default function App() {
       danger: "#FF453A",
       exhausted: "#A8B1CE",
       archive: "#E2E8F0",
+      text: "#1F1F1F",
+      textSoft: "#A8B1CE",
+      panel: "#FFFFFF",
+      panelSoft: "#F2F5FF",
+      good: "#34C759",
+      warn: "#FF9500",
+      bad: "#FF453A",
     };
-    const next = themeMode === "light" ? light : dark;
+    const next = safeThemeMode === "light" ? light : dark;
     Object.assign(theme, next);
     applyThemeBindings();
     setThemeVersion((v) => v + 1);
-  }, [themeMode]);
+  }, [safeThemeMode]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1166,7 +1181,7 @@ export default function App() {
         <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
-            {themeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
+            {safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
           </button>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}

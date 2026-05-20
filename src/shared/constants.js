@@ -12,7 +12,14 @@ const theme = {
   warning: "#FF9500",
   danger: "#FF453A",
   exhausted: "#A8B1CE",
-  archive: "#E2E8F0"
+  archive: "#E2E8F0",
+  text: "#1F1F1F",
+  textSoft: "#A8B1CE",
+  panel: "#FFFFFF",
+  panelSoft: "#F2F5FF",
+  good: "#34C759",
+  warn: "#FF9500",
+  bad: "#FF453A"
 };
 
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -138,6 +145,15 @@ const applyThemeBindings = () => {
 
   cardSt.background = theme.card;
   cardSt.boxShadow = theme.bg === "#0F131A" ? "0 10px 40px rgba(0, 0, 0, 0.32)" : "0 10px 40px rgba(168, 177, 206, 0.15)";
+
+  // Backward-compatible aliases used across tabs
+  theme.text = theme.textMain;
+  theme.textSoft = theme.textLight;
+  theme.panel = theme.card;
+  theme.panelSoft = theme.input;
+  theme.good = theme.success;
+  theme.warn = theme.warning;
+  theme.bad = theme.danger;
 };
 
 applyThemeBindings();
