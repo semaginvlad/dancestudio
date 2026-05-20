@@ -24,6 +24,39 @@ export const onAuthChange = (callback) => {
   return data.subscription;
 };
 
+export async function upsertPushSubscription(userId, payload = {}) {
+  if (!userId) throw new Error("userId is required");
+  if (!payload.endpoint || !payload.p256dh || !payload.auth) {
+    throw new Error("endpoint, p256dh and auth are required");
+  }
+
+  const { data, error } = await supabase
+    .from("push_subscriptions")
+    .upsert({
+      user_id: userId,
+      endpoint: payload.endpoint,
+      p256dh: payload.p256dh,
+      auth: payload.auth,
+      user_agent: payload.user_agent || null,
+      platform: payload.platform || null,
+      is_active: payload.is_active !== false,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "endpoint" })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    userId: data.user_id,
+    endpoint: data.endpoint,
+    isActive: data.is_active,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  };
+}
+
 // ─── STUDENTS ───
 const mapStudent = (s) => ({
   ...s,
