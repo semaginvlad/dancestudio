@@ -258,7 +258,7 @@ export default function App() {
       const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb] = await Promise.all([
         safeFetch(db.fetchStudents), safeFetch(db.fetchGroups), safeFetch(fetchScheduleGroupRows), safeFetch(fetchAttendanceSubscriptions),
         safeFetch(db.fetchAttendance), safeFetch(db.fetchCancelled), safeFetch(fetchScheduleCancelled), safeFetch(db.fetchStudentGroups),
-        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), safeFetch(isCurrentAdmin ? db.fetchTrialBookings : async () => []),
+        safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => []), safeFetch(db.fetchTrialBookings),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents), safeFetch(fetchTrainerProfiles), safeFetch(db.fetchTrainerGroups),
         safeFetch(db.fetchDirections), safeFetch(fetchScheduleBookings)
       ]);
