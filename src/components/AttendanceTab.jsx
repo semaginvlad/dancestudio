@@ -2264,92 +2264,38 @@ export default function AttendanceTab({
     return acc;
   }, {});
 
-  const findExistingStudentForTrial = (booking) => {
-    const phone = String(booking?.phone || "").trim();
-    const telegram = String(booking?.telegram || "").trim().toLowerCase();
-    const instagram = String(booking?.instagram || "").trim().toLowerCase();
-
-    const byPhone = phone && (students || []).find((s) => String(s.phone || "").trim() === phone);
-    if (byPhone) return byPhone;
-    const byTelegram = telegram && (students || []).find((s) => String(s.telegram || "").trim().toLowerCase() === telegram);
-    if (byTelegram) return byTelegram;
-    const byInstagramInNotes = instagram && (students || []).find((s) => String(s.notes || "").toLowerCase().includes(instagram));
-    if (byInstagramInNotes) return byInstagramInNotes;
-    return null;
-  };
-
   const handleAddTrialBookingToGroup = async (booking) => {
     try {
-      if (!booking?.id || !booking?.groupId || !booking?.trialDate) throw new Error("Некоректні дані запису на пробне");
+      if (!booking?.id) throw new Error("Некоректні дані запису на пробне");
       setMarkingTrialId(String(booking.id));
 
-      let resolvedStudent = null;
-      let resolvedStudentId = booking.studentId || booking.convertedStudentId || null;
+      const result = await db.convertTrialBookingToStudent(booking.id);
+      const resolvedStudent = result?.student || null;
+      const resolvedLink = result?.studentGroup || null;
+      const updatedBooking = result?.trialBooking || null;
 
-      if (resolvedStudentId) {
-        resolvedStudent = (students || []).find((s) => String(s.id) === String(resolvedStudentId)) || null;
-      }
-
-      if (!resolvedStudentId) {
-        resolvedStudent = findExistingStudentForTrial(booking);
-        if (resolvedStudent?.id) {
-          resolvedStudentId = resolvedStudent.id;
-        }
-      }
-
-      let createdInThisFlow = false;
-      if (!resolvedStudentId) {
-        const notes = [booking.note, booking.source ? `source: ${booking.source}` : "", booking.instagram ? `instagram: ${booking.instagram}` : "", booking.contact ? `contact: ${booking.contact}` : ""].filter(Boolean).join("\n");
-        const created = await db.insertStudent({
-          name: booking.name || "",
-          first_name: "",
-          last_name: "",
-          phone: booking.phone || null,
-          telegram: booking.telegram || null,
-          notes: notes || null,
-        });
-        resolvedStudent = created;
-        resolvedStudentId = created?.id;
-        createdInThisFlow = true;
-        if (!resolvedStudentId) throw new Error("Не вдалося створити профіль учениці");
-        if (typeof setStudents === "function") setStudents((prev) => [...(prev || []), created]);
-      }
-
-      const alreadyLinked = (studentGrps || []).some((sg) => String(sg.studentId) === String(resolvedStudentId) && String(sg.groupId) === String(booking.groupId));
-      if (!alreadyLinked) {
-        let link = null;
-        if (createdInThisFlow) {
-          link = await db.addStudentGroup(resolvedStudentId, booking.groupId);
-        } else {
-          try {
-            link = await db.restoreStudentToGroup(booking.groupId, resolvedStudentId);
-          } catch (err) {
-            const msg = String(err?.message || err || "").toLowerCase();
-            if (msg.includes("no restore history")) {
-              link = await db.addStudentGroup(resolvedStudentId, booking.groupId);
-            } else {
-              throw err;
-            }
+      if (resolvedStudent?.id && typeof setStudents === "function") {
+        setStudents((prev) => {
+          const list = prev || [];
+          if (list.some((s) => String(s.id) === String(resolvedStudent.id))) {
+            return list.map((s) => (String(s.id) === String(resolvedStudent.id) ? { ...s, ...resolvedStudent } : s));
           }
-        }
-
-        if (typeof setStudentGrps === "function") {
-          setStudentGrps((prev) => {
-            const list = prev || [];
-            if (list.some((sg) => String(sg.studentId) === String(resolvedStudentId) && String(sg.groupId) === String(booking.groupId))) return list;
-            return [...list, link || { id: `sg_${uid()}`, studentId: resolvedStudentId, groupId: booking.groupId }];
-          });
-        }
+          return [...list, resolvedStudent];
+        });
       }
 
-      const updatedBooking = await db.updateTrialBooking(booking.id, {
-        status: "became_student",
-        studentId: resolvedStudentId,
-        convertedStudentId: resolvedStudentId,
-      });
-      if (typeof setTrialBookings === "function") {
+      if (resolvedLink?.studentId && resolvedLink?.groupId && typeof setStudentGrps === "function") {
+        setStudentGrps((prev) => {
+          const list = prev || [];
+          if (list.some((sg) => String(sg.studentId) === String(resolvedLink.studentId) && String(sg.groupId) === String(resolvedLink.groupId))) return list;
+          return [...list, resolvedLink];
+        });
+      }
+
+      if (updatedBooking && typeof setTrialBookings === "function") {
         setTrialBookings((prev) => (prev || []).map((row) => (String(row.id) === String(booking.id) ? updatedBooking : row)));
       }
+
       if (trialPopoverState?.dateStr && String(trialPopoverState.dateStr) === String(booking.trialDate)) {
         const remaining = (confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).filter((row) => String(row.id) !== String(booking.id));
         if (!remaining.length) setTrialPopoverState(null);
@@ -2360,7 +2306,6 @@ export default function AttendanceTab({
       setMarkingTrialId("");
     }
   };
-
 
   return (
     <div className="attendance-root" style={styles.wrap}>
