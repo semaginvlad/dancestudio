@@ -39,6 +39,59 @@ const withTimeout = async (promise, timeoutMs, timeoutMessage) => {
   }
 };
 
+
+const waitForServiceWorkerActivation = (registration, timeoutMs = 10000) => {
+  const candidate = registration?.active || registration?.installing || registration?.waiting;
+  if (!candidate) {
+    throw new Error("Service worker не готовий. Оновіть сторінку або перевідкрийте PWA.");
+  }
+  if (candidate.state === "activated") return Promise.resolve(registration);
+
+  return withTimeout(new Promise((resolve, reject) => {
+    const onStateChange = () => {
+      if (candidate.state === "activated") {
+        candidate.removeEventListener("statechange", onStateChange);
+        resolve(registration);
+      } else if (candidate.state === "redundant") {
+        candidate.removeEventListener("statechange", onStateChange);
+        reject(new Error("Service worker став невалідним (redundant)."));
+      }
+    };
+    candidate.addEventListener("statechange", onStateChange);
+    onStateChange();
+  }), timeoutMs, "Service worker не готовий. Оновіть сторінку або перевідкрийте PWA.");
+};
+
+export const ensureServiceWorkerRegistration = async (timeoutMs = 10000) => {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    throw new Error("Service worker не підтримується в цьому браузері.");
+  }
+
+  try {
+    let registration = await withTimeout(
+      navigator.serviceWorker.getRegistration(),
+      timeoutMs,
+      "Service worker не готовий. Оновіть сторінку або перевідкрийте PWA.",
+    );
+
+    if (!registration) {
+      registration = await withTimeout(
+        navigator.serviceWorker.register("/sw.js"),
+        timeoutMs,
+        "Service worker не готовий. Оновіть сторінку або перевідкрийте PWA.",
+      );
+    }
+
+    if (registration.installing || registration.waiting || !registration.active) {
+      registration = await waitForServiceWorkerActivation(registration, timeoutMs);
+    }
+
+    return registration;
+  } catch (error) {
+    throw new Error(String(error?.message || error || "Service worker registration failed"));
+  }
+};
+
 const base64ToUint8Array = (base64String) => {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -84,11 +137,7 @@ export const requestPushSubscription = async ({ vapidPublicKey }) => {
       return { ok: false, status: PUSH_STATUS.permissionDefault, error: "Permission not granted" };
     }
 
-    const reg = await withTimeout(
-      navigator.serviceWorker.ready,
-      10000,
-      "Service worker не готовий. Оновіть сторінку або перевідкрийте PWA.",
-    );
+    const reg = await ensureServiceWorkerRegistration(10000);
 
     let subscription = await reg.pushManager.getSubscription();
     if (!subscription) {
