@@ -28,6 +28,8 @@ export default function TrainersNotificationsTab({
   const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "", scheduler: { active: false, reason: "unknown" } });
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
+  const [ruleSettings, setRuleSettings] = useState({ key: "trainer_pre_lesson_digest", enabled: true, channel: "push", minutes_before_lesson: 30, include_trial_bookings: true, include_unpaid_students: true, include_attendance_reminder: false });
+  const [savingRuleSettings, setSavingRuleSettings] = useState(false);
   const generatedTextByChatGroupRef = useRef({});
 
   const membershipByStudent = useMemo(
@@ -90,6 +92,12 @@ export default function TrainersNotificationsTab({
         } catch {
           if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Перевірка readiness не вдалася", scheduler: { active: false, reason: "readiness_failed" } });
         }
+
+        try {
+          const ruleRes = await fetch("/api/trainer-notifications?op=rule");
+          const rulePayload = await ruleRes.json();
+          if (!cancelled && ruleRes.ok && rulePayload?.rule) setRuleSettings((prev) => ({ ...prev, ...rulePayload.rule }));
+        } catch {}
 
         const stateRows = await Promise.all(
           loaded.map(async (dlg) => {
@@ -725,6 +733,21 @@ export default function TrainersNotificationsTab({
         </div>
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
+
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Налаштування нагадувань тренерам</div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.enabled} onChange={(e) => setRuleSettings((prev) => ({ ...prev, enabled: e.target.checked }))} /> увімкнути / вимкнути</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>Канал<select value={ruleSettings.channel || "push"} onChange={(e) => setRuleSettings((prev) => ({ ...prev, channel: e.target.value }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }}><option value="push">push</option><option value="telegram">Telegram</option><option value="both">обидва</option></select></label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>За скільки хвилин до заняття<input type="number" min={0} max={1440} value={ruleSettings.minutes_before_lesson ?? 30} onChange={(e) => setRuleSettings((prev) => ({ ...prev, minutes_before_lesson: Number(e.target.value || 0) }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }} /></label>
+          </div>
+          <div style={{ display: "grid", gap: 6, fontSize: 13, color: theme.textMain }}>
+            <label><input type="checkbox" checked={!!ruleSettings.include_trial_bookings} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_trial_bookings: e.target.checked }))} /> Пробні</label>
+            <label><input type="checkbox" checked={!!ruleSettings.include_unpaid_students} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_unpaid_students: e.target.checked }))} /> Проблеми з оплатами</label>
+            <label><input type="checkbox" checked={!!ruleSettings.include_attendance_reminder} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_attendance_reminder: e.target.checked }))} /> Нагадати відмітити відвідування</label>
+          </div>
+          <button type="button" disabled={savingRuleSettings} onClick={async () => { setSavingRuleSettings(true); try { const res = await fetch('/api/trainer-notifications?op=rule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ruleSettings) }); const payload = await res.json().catch(() => ({})); if (!res.ok) throw new Error(payload?.details || payload?.error || 'rule save failed'); setRuleSettings((prev) => ({ ...prev, ...(payload.rule || {}) })); } catch (error) { alert(`Не вдалося зберегти налаштування: ${String(error?.message || error)}`); } finally { setSavingRuleSettings(false); } }} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Зберегти</button>
+        </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
