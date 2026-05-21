@@ -61,6 +61,17 @@ const runTrialReminders = async ({ req, res, adminClient }) => {
       .maybeSingle();
 
     if (groupError) {
+      const deliveryKey = `trial_confirmed:${bookingId}:${trialDate}:group_lookup_error`;
+      await adminClient.from("push_notification_deliveries").upsert({
+        kind: "trial_confirmed_reminder",
+        target_user_id: "00000000-0000-0000-0000-000000000000",
+        entity_type: "trial_booking",
+        entity_id: bookingId,
+        delivery_key: deliveryKey,
+        payload: { error: String(groupError?.message || groupError) },
+        status: "failed",
+        error: String(groupError?.message || groupError),
+      }, { onConflict: "delivery_key" });
       results.push({ bookingId, status: "failed", reason: "group_lookup_failed" });
       continue;
     }
