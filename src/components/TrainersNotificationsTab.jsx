@@ -30,6 +30,7 @@ export default function TrainersNotificationsTab({
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
   const [ruleSettings, setRuleSettings] = useState({ key: "trainer_pre_lesson_digest", enabled: true, channel: "push", minutes_before_lesson: 30, include_trial_bookings: true, include_unpaid_students: true, include_attendance_reminder: false });
   const [savingRuleSettings, setSavingRuleSettings] = useState(false);
+  const [savedRuleSettings, setSavedRuleSettings] = useState({ key: "trainer_pre_lesson_digest", enabled: true, channel: "push", minutes_before_lesson: 30, include_trial_bookings: true, include_unpaid_students: true, include_attendance_reminder: false });
   const generatedTextByChatGroupRef = useRef({});
 
   const membershipByStudent = useMemo(
@@ -96,7 +97,7 @@ export default function TrainersNotificationsTab({
         try {
           const ruleRes = await fetch("/api/trainer-notifications?op=rule");
           const rulePayload = await ruleRes.json();
-          if (!cancelled && ruleRes.ok && rulePayload?.rule) setRuleSettings((prev) => ({ ...prev, ...rulePayload.rule }));
+          if (!cancelled && ruleRes.ok && rulePayload?.rule) { const next = { ...rulePayload.rule }; setRuleSettings((prev) => ({ ...prev, ...next })); setSavedRuleSettings((prev) => ({ ...prev, ...next })); }
         } catch {}
 
         const stateRows = await Promise.all(
@@ -592,6 +593,29 @@ export default function TrainersNotificationsTab({
     border: `1px solid ${ok ? `${theme.success}55` : `${theme.warning}55`}`,
   });
 
+
+  const normalizedRuleChannel = ["push", "telegram", "both"].includes(String(ruleSettings.channel || "").toLowerCase()) ? String(ruleSettings.channel).toLowerCase() : "push";
+  const normalizedRuleMinutes = Math.min(1440, Math.max(0, Number(ruleSettings.minutes_before_lesson ?? 30) || 0));
+  const normalizedRuleDraft = {
+    key: "trainer_pre_lesson_digest",
+    enabled: ruleSettings.enabled !== false,
+    channel: normalizedRuleChannel,
+    minutes_before_lesson: normalizedRuleMinutes,
+    include_trial_bookings: ruleSettings.include_trial_bookings !== false,
+    include_unpaid_students: ruleSettings.include_unpaid_students !== false,
+    include_attendance_reminder: !!ruleSettings.include_attendance_reminder,
+  };
+  const ruleSummary = `${normalizedRuleDraft.enabled ? "Увімкнено" : "Вимкнено"} • за ${normalizedRuleDraft.minutes_before_lesson} хв • канал: ${normalizedRuleDraft.channel} • ${normalizedRuleDraft.include_trial_bookings ? "пробні" : "без пробних"}${normalizedRuleDraft.include_unpaid_students ? " + неоплати" : ""}${normalizedRuleDraft.include_attendance_reminder ? " + відвідування" : ""}`;
+  const hasRuleUnsavedChanges = JSON.stringify(normalizedRuleDraft) !== JSON.stringify({
+    key: "trainer_pre_lesson_digest",
+    enabled: savedRuleSettings.enabled !== false,
+    channel: ["push", "telegram", "both"].includes(String(savedRuleSettings.channel || "").toLowerCase()) ? String(savedRuleSettings.channel).toLowerCase() : "push",
+    minutes_before_lesson: Math.min(1440, Math.max(0, Number(savedRuleSettings.minutes_before_lesson ?? 30) || 0)),
+    include_trial_bookings: savedRuleSettings.include_trial_bookings !== false,
+    include_unpaid_students: savedRuleSettings.include_unpaid_students !== false,
+    include_attendance_reminder: !!savedRuleSettings.include_attendance_reminder,
+  });
+
   const sendStatusStyle = (status) => {
     if (status === "sent") return { color: theme.success, border: `${theme.success}44`, bg: `${theme.success}18` };
     if (status === "failed" || status === "skipped" || status === "cancelled") return { color: theme.danger, border: `${theme.danger}44`, bg: `${theme.danger}18` };
@@ -734,19 +758,41 @@ export default function TrainersNotificationsTab({
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
 
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Налаштування нагадувань тренерам</div>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.enabled} onChange={(e) => setRuleSettings((prev) => ({ ...prev, enabled: e.target.checked }))} /> увімкнути / вимкнути</label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
-            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>Канал<select value={ruleSettings.channel || "push"} onChange={(e) => setRuleSettings((prev) => ({ ...prev, channel: e.target.value }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }}><option value="push">push</option><option value="telegram">Telegram</option><option value="both">обидва</option></select></label>
-            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>За скільки хвилин до заняття<input type="number" min={0} max={1440} value={ruleSettings.minutes_before_lesson ?? 30} onChange={(e) => setRuleSettings((prev) => ({ ...prev, minutes_before_lesson: Number(e.target.value || 0) }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }} /></label>
+        <div style={{ border: `1px solid ${theme.primary}55`, borderRadius: 16, background: `${theme.primary}10`, padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: theme.textMain }}>Нагадування тренерам перед заняттям</div>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>{ruleSummary}</div>
           </div>
-          <div style={{ display: "grid", gap: 6, fontSize: 13, color: theme.textMain }}>
-            <label><input type="checkbox" checked={!!ruleSettings.include_trial_bookings} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_trial_bookings: e.target.checked }))} /> Пробні</label>
-            <label><input type="checkbox" checked={!!ruleSettings.include_unpaid_students} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_unpaid_students: e.target.checked }))} /> Проблеми з оплатами</label>
-            <label><input type="checkbox" checked={!!ruleSettings.include_attendance_reminder} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_attendance_reminder: e.target.checked }))} /> Нагадати відмітити відвідування</label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Коли надсилати</div>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.enabled} onChange={(e) => setRuleSettings((prev) => ({ ...prev, enabled: e.target.checked }))} /> увімкнено / вимкнено</label>
+              <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>За скільки хвилин до заняття<input type="number" min={0} max={1440} value={ruleSettings.minutes_before_lesson ?? 30} onChange={(e) => setRuleSettings((prev) => ({ ...prev, minutes_before_lesson: Number(e.target.value || 0) }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 10px" }} /></label>
+            </div>
+
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Куди надсилати</div>
+              <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>Канал<select value={ruleSettings.channel || "push"} onChange={(e) => setRuleSettings((prev) => ({ ...prev, channel: e.target.value }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 10px" }}><option value="push">push</option><option value="telegram">telegram</option><option value="both">обидва</option></select></label>
+            </div>
+
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Що включати</div>
+              <label style={{ color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.include_trial_bookings} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_trial_bookings: e.target.checked }))} /> Пробні</label>
+              <label style={{ color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.include_unpaid_students} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_unpaid_students: e.target.checked }))} /> Проблеми з оплатами</label>
+              <label style={{ color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!ruleSettings.include_attendance_reminder} onChange={(e) => setRuleSettings((prev) => ({ ...prev, include_attendance_reminder: e.target.checked }))} /> Нагадати відмітити відвідування</label>
+            </div>
           </div>
-          <button type="button" disabled={savingRuleSettings} onClick={async () => { setSavingRuleSettings(true); try { const res = await fetch('/api/trainer-notifications?op=rule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ruleSettings) }); const payload = await res.json().catch(() => ({})); if (!res.ok) throw new Error(payload?.details || payload?.error || 'rule save failed'); setRuleSettings((prev) => ({ ...prev, ...(payload.rule || {}) })); } catch (error) { alert(`Не вдалося зберегти налаштування: ${String(error?.message || error)}`); } finally { setSavingRuleSettings(false); } }} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Зберегти</button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button type="button" disabled={savingRuleSettings} onClick={async () => { setSavingRuleSettings(true); try { const res = await fetch('/api/trainer-notifications?op=rule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ruleSettings) }); const payload = await res.json().catch(() => ({})); if (!res.ok) throw new Error(payload?.details || payload?.error || 'rule save failed'); setRuleSettings((prev) => ({ ...prev, ...(payload.rule || {}) })); setSavedRuleSettings((prev) => ({ ...prev, ...(payload.rule || {}) })); } catch (error) { alert(`Не вдалося зберегти налаштування: ${String(error?.message || error)}`); } finally { setSavingRuleSettings(false); } }} style={{ border: "none", borderRadius: 12, background: theme.primary, color: "#fff", padding: "10px 16px", cursor: "pointer", fontWeight: 800, fontSize: 13 }}>Зберегти</button>
+            <div style={{ fontSize: 12, fontWeight: 700, color: hasRuleUnsavedChanges ? theme.warning : theme.success, border: `1px solid ${hasRuleUnsavedChanges ? `${theme.warning}66` : `${theme.success}66`}`, borderRadius: 999, padding: "4px 10px", background: hasRuleUnsavedChanges ? `${theme.warning}20` : `${theme.success}20` }}>{hasRuleUnsavedChanges ? "Є незбережені зміни" : "Збережено"}</div>
+          </div>
+        </div>
+
+        <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 6 }}>
+          <div style={{ fontWeight: 800, color: theme.textMain, fontSize: 14 }}>Стара система Telegram / ручні шаблони</div>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>Нижче — існуючий Telegram-first функціонал без змін логіки.</div>
         </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
