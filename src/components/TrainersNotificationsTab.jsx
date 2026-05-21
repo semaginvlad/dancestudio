@@ -28,6 +28,18 @@ export default function TrainersNotificationsTab({
   const [readiness, setReadiness] = useState({ ready: null, adminConfigured: false, details: "", scheduler: { active: false, reason: "unknown" } });
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
+  const [reminderRule, setReminderRule] = useState({
+    key: "trainer_pre_lesson_digest",
+    enabled: true,
+    channel: "push",
+    minutes_before_lesson: 30,
+    include_trial_bookings: true,
+    include_unpaid_students: true,
+    include_attendance_reminder: false,
+  });
+  const [ruleLoading, setRuleLoading] = useState(false);
+  const [ruleSaving, setRuleSaving] = useState(false);
+  const [ruleMessage, setRuleMessage] = useState("");
   const generatedTextByChatGroupRef = useRef({});
 
   const membershipByStudent = useMemo(
@@ -89,6 +101,19 @@ export default function TrainersNotificationsTab({
           }
         } catch {
           if (!cancelled) setReadiness({ ready: false, adminConfigured: false, details: "Перевірка readiness не вдалася", scheduler: { active: false, reason: "readiness_failed" } });
+        }
+
+        try {
+          setRuleLoading(true);
+          const ruleRes = await fetch("/api/trainer-notifications?op=rule&key=trainer_pre_lesson_digest");
+          const rulePayload = await ruleRes.json();
+          if (!cancelled && ruleRes.ok && rulePayload?.row) {
+            setReminderRule((prev) => ({ ...prev, ...rulePayload.row }));
+          }
+        } catch {
+          if (!cancelled) setRuleMessage("Не вдалося завантажити правила нагадувань");
+        } finally {
+          if (!cancelled) setRuleLoading(false);
         }
 
         const stateRows = await Promise.all(
@@ -627,6 +652,34 @@ export default function TrainersNotificationsTab({
     });
   };
 
+  const saveReminderRule = async () => {
+    setRuleSaving(true);
+    setRuleMessage("");
+    try {
+      const res = await fetch("/api/trainer-notifications?op=rule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: "trainer_pre_lesson_digest",
+          enabled: !!reminderRule.enabled,
+          channel: reminderRule.channel,
+          minutes_before_lesson: Number(reminderRule.minutes_before_lesson || 0),
+          include_trial_bookings: !!reminderRule.include_trial_bookings,
+          include_unpaid_students: !!reminderRule.include_unpaid_students,
+          include_attendance_reminder: !!reminderRule.include_attendance_reminder,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "rule save failed");
+      setReminderRule((prev) => ({ ...prev, ...(payload?.row || {}) }));
+      setRuleMessage("Збережено");
+    } catch (error) {
+      setRuleMessage(`Не вдалося зберегти: ${String(error?.message || error)}`);
+    } finally {
+      setRuleSaving(false);
+    }
+  };
+
   const applySendOverride = async () => {
     if (!activeGroupId) return;
     if (effectiveDraftMode === "default") {
@@ -725,6 +778,37 @@ export default function TrainersNotificationsTab({
         </div>
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
+
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ fontWeight: 800, color: theme.textMain }}>Налаштування нагадувань тренерам</div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontSize: 13 }}>
+            <input type="checkbox" checked={!!reminderRule.enabled} onChange={(e) => setReminderRule((p) => ({ ...p, enabled: e.target.checked }))} />
+            Увімкнути / вимкнути
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>
+              Канал
+              <select value={reminderRule.channel || "push"} onChange={(e) => setReminderRule((p) => ({ ...p, channel: e.target.value }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }}>
+                <option value="push">push</option>
+                <option value="telegram">Telegram</option>
+                <option value="both">обидва</option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: theme.textMuted }}>
+              За скільки хвилин до заняття
+              <input type="number" min={0} max={1440} value={Number(reminderRule.minutes_before_lesson ?? 30)} onChange={(e) => setReminderRule((p) => ({ ...p, minutes_before_lesson: Number(e.target.value || 0) }))} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 10px" }} />
+            </label>
+          </div>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!reminderRule.include_trial_bookings} onChange={(e) => setReminderRule((p) => ({ ...p, include_trial_bookings: e.target.checked }))} />Пробні</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!reminderRule.include_unpaid_students} onChange={(e) => setReminderRule((p) => ({ ...p, include_unpaid_students: e.target.checked }))} />Проблеми з оплатами</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontSize: 13 }}><input type="checkbox" checked={!!reminderRule.include_attendance_reminder} onChange={(e) => setReminderRule((p) => ({ ...p, include_attendance_reminder: e.target.checked }))} />Нагадати відмітити відвідування</label>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button type="button" onClick={saveReminderRule} disabled={ruleSaving || ruleLoading} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", fontWeight: 700, padding: "9px 12px", cursor: "pointer", opacity: ruleSaving || ruleLoading ? 0.7 : 1 }}>Зберегти</button>
+            <div style={{ fontSize: 12, color: theme.textMuted }}>{ruleLoading ? "Завантаження…" : ruleMessage}</div>
+          </div>
+        </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>

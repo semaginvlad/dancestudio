@@ -19,6 +19,17 @@ const readinessError = (res, error) => res.status(503).json({
 
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
 
+const DEFAULT_RULE = {
+  key: "trainer_pre_lesson_digest",
+  enabled: true,
+  channel: "push",
+  minutes_before_lesson: 30,
+  include_trial_bookings: true,
+  include_unpaid_students: true,
+  include_attendance_reminder: false,
+};
+
+
 const detectSchedulerStatus = () => {
   try {
     const vercelPath = path.join(process.cwd(), "vercel.json");
@@ -170,13 +181,78 @@ const handleHistory = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+
+const handleRule = async (req, res) => {
+  const supabase = buildSupabase();
+  const key = String(req.query?.key || req.body?.key || DEFAULT_RULE.key || "").trim();
+  if (!key) return res.status(400).json({ error: "key is required" });
+
+  if (req.method === "GET") {
+    const { data, error } = await supabase
+      .from("notification_rules")
+      .select("*")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) {
+      if (String(error.message || error).includes("schema cache") || String(error.message || error).includes("notification_rules")) {
+        return readinessError(res, error);
+      }
+      return res.status(500).json({ error: "Failed to load notification rule", details: String(error.message || error) });
+    }
+    if (data) return res.status(200).json({ success: true, row: data });
+
+    const { data: created, error: createError } = await supabase
+      .from("notification_rules")
+      .upsert({ ...DEFAULT_RULE, key, updated_at: new Date().toISOString() }, { onConflict: "key" })
+      .select("*")
+      .single();
+    if (createError) {
+      if (String(createError.message || createError).includes("schema cache") || String(createError.message || createError).includes("notification_rules")) {
+        return readinessError(res, createError);
+      }
+      return res.status(500).json({ error: "Failed to initialize notification rule", details: String(createError.message || createError) });
+    }
+    return res.status(200).json({ success: true, row: created });
+  }
+
+  if (req.method === "POST") {
+    const body = req.body || {};
+    const payload = {
+      key,
+      updated_at: new Date().toISOString(),
+    };
+    if (Object.prototype.hasOwnProperty.call(body, "enabled")) payload.enabled = !!body.enabled;
+    if (Object.prototype.hasOwnProperty.call(body, "channel")) payload.channel = String(body.channel || "push");
+    if (Object.prototype.hasOwnProperty.call(body, "minutes_before_lesson")) payload.minutes_before_lesson = Number(body.minutes_before_lesson || 0);
+    if (Object.prototype.hasOwnProperty.call(body, "include_trial_bookings")) payload.include_trial_bookings = !!body.include_trial_bookings;
+    if (Object.prototype.hasOwnProperty.call(body, "include_unpaid_students")) payload.include_unpaid_students = !!body.include_unpaid_students;
+    if (Object.prototype.hasOwnProperty.call(body, "include_attendance_reminder")) payload.include_attendance_reminder = !!body.include_attendance_reminder;
+
+    const { data, error } = await supabase
+      .from("notification_rules")
+      .upsert(payload, { onConflict: "key" })
+      .select("*")
+      .single();
+    if (error) {
+      if (String(error.message || error).includes("schema cache") || String(error.message || error).includes("notification_rules")) {
+        return readinessError(res, error);
+      }
+      return res.status(500).json({ error: "Failed to save notification rule", details: String(error.message || error) });
+    }
+    return res.status(200).json({ success: true, row: data });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+};
+
 export default async function handler(req, res) {
   const op = getOp(req);
   try {
     if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history"] });
+    if ((req.method === "GET" || req.method === "POST") && op === "rule") return await handleRule(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "rule"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
