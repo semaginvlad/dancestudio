@@ -103,6 +103,104 @@ const handleState = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+
+const RULE_KEYS = {
+  pre: "trainer_pre_lesson_digest",
+  post: "trainer_post_lesson_attendance",
+};
+
+const DEFAULT_RULES = {
+  [RULE_KEYS.pre]: {
+    key: RULE_KEYS.pre,
+    enabled: true,
+    channel: "push",
+    minutes_before_lesson: 30,
+    include_trial_bookings: true,
+    include_unpaid_students: true,
+    include_attendance_reminder: false,
+  },
+  [RULE_KEYS.post]: {
+    key: RULE_KEYS.post,
+    enabled: false,
+    channel: "push",
+    minutes_before_lesson: 30,
+    include_trial_bookings: false,
+    include_unpaid_students: false,
+    include_attendance_reminder: true,
+  },
+};
+
+const normalizeRule = (row = {}, fallbackKey = RULE_KEYS.pre) => {
+  const base = DEFAULT_RULES[fallbackKey] || DEFAULT_RULES[RULE_KEYS.pre];
+  return {
+    key: String(row.key || base.key),
+    enabled: row.enabled !== false,
+    channel: ["push", "telegram", "both"].includes(String(row.channel || "").toLowerCase()) ? String(row.channel).toLowerCase() : base.channel,
+    minutes_before_lesson: Math.min(1440, Math.max(0, Number(row.minutes_before_lesson ?? base.minutes_before_lesson) || 0)),
+    include_trial_bookings: row.include_trial_bookings !== false,
+    include_unpaid_students: row.include_unpaid_students !== false,
+    include_attendance_reminder: !!row.include_attendance_reminder,
+  };
+};
+
+const upsertDefaultRule = async (supabase, key) => {
+  const payload = { ...DEFAULT_RULES[key], updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from("notification_rules").upsert(payload, { onConflict: "key" }).select("*").single();
+  if (error) throw error;
+  return normalizeRule(data, key);
+};
+
+const handleRule = async (req, res) => {
+  const supabase = buildSupabase();
+
+  if (req.method === "GET") {
+    const keyParam = String(req.query?.key || "").trim();
+    if (keyParam) {
+      if (!DEFAULT_RULES[keyParam]) return res.status(400).json({ error: "Unsupported rule key" });
+      const { data, error } = await supabase.from("notification_rules").select("*").eq("key", keyParam).maybeSingle();
+      if (error) return res.status(500).json({ error: "Failed to load notification rule", details: String(error.message || error) });
+      if (data) return res.status(200).json({ success: true, rule: normalizeRule(data, keyParam) });
+      try {
+        const created = await upsertDefaultRule(supabase, keyParam);
+        return res.status(200).json({ success: true, rule: created });
+      } catch (insertError) {
+        return res.status(500).json({ error: "Failed to create default notification rule", details: String(insertError.message || insertError) });
+      }
+    }
+
+    const keys = Object.values(RULE_KEYS);
+    const { data, error } = await supabase.from("notification_rules").select("*").in("key", keys);
+    if (error) return res.status(500).json({ error: "Failed to load notification rules", details: String(error.message || error) });
+    const byKey = new Map((data || []).map((r) => [String(r.key), r]));
+    const rules = [];
+    for (const key of keys) {
+      if (byKey.has(key)) {
+        rules.push(normalizeRule(byKey.get(key), key));
+      } else {
+        try {
+          rules.push(await upsertDefaultRule(supabase, key));
+        } catch (insertError) {
+          return res.status(500).json({ error: "Failed to create default notification rule", details: String(insertError.message || insertError), key });
+        }
+      }
+    }
+    return res.status(200).json({ success: true, rules, rule: rules.find((r) => r.key === RULE_KEYS.pre) || null });
+  }
+
+  if (req.method === "POST") {
+    const body = req.body || {};
+    const key = String(body.key || "").trim();
+    if (!DEFAULT_RULES[key]) return res.status(400).json({ error: "Unsupported rule key" });
+    const normalized = normalizeRule(body, key);
+    const payload = { ...normalized, key, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase.from("notification_rules").upsert(payload, { onConflict: "key" }).select("*").single();
+    if (error) return res.status(500).json({ error: "Failed to save notification rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, rule: normalizeRule(data, key) });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+};
+
 const handleHistory = async (req, res) => {
   const supabase = buildSupabase();
   if (req.method === "GET") {
@@ -176,7 +274,8 @@ export default async function handler(req, res) {
     if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history"] });
+    if ((req.method === "GET" || req.method === "POST") && op === "rule") return await handleRule(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "rule"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
