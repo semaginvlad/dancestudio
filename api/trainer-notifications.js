@@ -65,6 +65,10 @@ const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {
 
   if (has("timezone") || requireCoreFields) payload.timezone = String(body.timezone || "Europe/Kyiv").trim() || "Europe/Kyiv";
   if (has("enabled")) payload.enabled = !!body.enabled;
+  if (has("message_template")) {
+    if (body.message_template == null) payload.message_template = null;
+    else payload.message_template = String(body.message_template).trim();
+  }
   if (has("include_trial_bookings")) payload.include_trial_bookings = !!body.include_trial_bookings;
   if (has("include_unpaid_students")) payload.include_unpaid_students = !!body.include_unpaid_students;
   if (has("include_attendance_reminder")) payload.include_attendance_reminder = !!body.include_attendance_reminder;
@@ -295,14 +299,9 @@ const handleScheduleRules = async (req, res) => {
 
     if (action === "delete") {
       if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
-      const { data, error } = await supabase
-        .from("notification_schedule_rules")
-        .update({ enabled: false, updated_at: new Date().toISOString() })
-        .eq("id", ruleId)
-        .select("*")
-        .single();
-      if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
-      return res.status(200).json({ success: true, mode: "disabled", row: data });
+      const { error } = await supabase.from("notification_schedule_rules").delete().eq("id", ruleId);
+      if (error) return res.status(500).json({ error: "Failed to delete schedule rule", details: String(error.message || error) });
+      return res.status(200).json({ success: true, mode: "deleted", id: ruleId });
     }
 
     if (ruleId) {
@@ -350,14 +349,9 @@ const handleScheduleRules = async (req, res) => {
   if (req.method === "DELETE") {
     const ruleId = String(req.query?.id || req.body?.id || "").trim();
     if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
-    const { data, error } = await supabase
-      .from("notification_schedule_rules")
-      .update({ enabled: false, updated_at: new Date().toISOString() })
-      .eq("id", ruleId)
-      .select("*")
-      .single();
-    if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
-    return res.status(200).json({ success: true, mode: "disabled", row: data });
+    const { error } = await supabase.from("notification_schedule_rules").delete().eq("id", ruleId);
+    if (error) return res.status(500).json({ error: "Failed to delete schedule rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, mode: "deleted", id: ruleId });
   }
 
   return res.status(405).json({ error: "Method not allowed" });
