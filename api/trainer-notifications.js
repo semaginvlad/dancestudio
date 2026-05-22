@@ -253,15 +253,21 @@ const handleScheduleRules = async (req, res) => {
       groupsById = Object.fromEntries((groupsRows || []).map((g) => [String(g.id), g]));
     }
     if (trainerIds.length) {
-      const { data: trainerRows } = await supabase.from("trainers").select("id,auth_user_id,first_name,last_name,name,email,telegram,login");
-      const rowsSafe = trainerRows || [];
-      const byId = Object.fromEntries(rowsSafe.map((t) => [String(t.id), t]));
-      const byAuthUserId = Object.fromEntries(
-        rowsSafe
-          .filter((t) => t?.auth_user_id)
-          .map((t) => [String(t.auth_user_id), t])
-      );
-      trainersById = { byId, byAuthUserId };
+      const { data: trainerRows, error: trainerLookupError } = await supabase
+        .from("trainers")
+        .select("id,auth_user_id,first_name,last_name,name,telegram,instagram_handle");
+      if (trainerLookupError) {
+        console.error("[schedule-rules] trainer enrichment lookup failed", String(trainerLookupError?.message || trainerLookupError));
+      } else {
+        const rowsSafe = trainerRows || [];
+        const byId = Object.fromEntries(rowsSafe.map((t) => [String(t.id), t]));
+        const byAuthUserId = Object.fromEntries(
+          rowsSafe
+            .filter((t) => t?.auth_user_id)
+            .map((t) => [String(t.auth_user_id), t])
+        );
+        trainersById = { byId, byAuthUserId };
+      }
     }
     const enriched = rows.map((r) => {
       const group = groupsById[String(r.group_id)] || null;
@@ -270,13 +276,13 @@ const handleScheduleRules = async (req, res) => {
       const trainerName = trainer
         ? ([trainer.first_name || trainer.firstName || "", trainer.last_name || trainer.lastName || ""].filter(Boolean).join(" ").trim() || trainer.name || null)
         : null;
-      const trainerEmail = trainer?.email || trainer?.login || trainer?.telegram || null;
+      const trainerContact = trainer?.telegram || trainer?.instagram_handle || null;
       return {
         ...r,
         group_name: r.group_name || group?.name || null,
         trainer_name: r.trainer_name || trainerName,
-        trainer_email: r.trainer_email || trainerEmail,
-        trainer_display: r.trainer_display || trainerName || trainerEmail || null,
+        trainer_email: r.trainer_email || trainerContact,
+        trainer_display: r.trainer_display || trainerName || trainerContact || null,
       };
     });
     return res.status(200).json({ success: true, rows: enriched });
