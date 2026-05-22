@@ -817,6 +817,33 @@ export default function TrainersNotificationsTab({
     includeAttendance: { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" },
   };
   const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
+  const fieldStyle = {
+    width: "100%",
+    border: `1px solid ${theme.border}`,
+    borderRadius: 10,
+    background: theme.card,
+    color: theme.textMain,
+    padding: "10px 12px",
+    fontSize: 13,
+    fontWeight: 600,
+  };
+  const findTrainerById = (trainerId) => trainers.find((t) => String(t?.id) === String(trainerId));
+  const trainerDisplayFromId = (trainerId) => {
+    const trainer = findTrainerById(trainerId);
+    const fullName = [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ").trim() || trainer?.name || "";
+    const contact = trainer?.email || trainer?.login || trainer?.telegram || "";
+    if (fullName) return fullName;
+    if (contact) return contact;
+    const raw = String(trainerId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
+  const groupDisplayFromId = (groupId, fallbackName) => {
+    const group = groups.find((g) => String(g?.id) === String(groupId));
+    if (group?.name) return group.name;
+    if (fallbackName) return fallbackName;
+    const raw = String(groupId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
@@ -895,28 +922,38 @@ export default function TrainersNotificationsTab({
             Текст повідомлення не зберігається вручну. Він має генеруватись автоматично перед відправкою з актуальних даних групи.
           </div>
           <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
-            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="назва" />
+            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Назва правила" style={fieldStyle} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+              
               <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
                 const groupId = e.target.value;
                 const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
                 return { ...p, groupId, trainerId: String(selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
-              })}><option value="">група</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
+              })} style={fieldStyle}><option value="">Оберіть групу</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
               <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", padding: "0 4px" }}>
                 {String(scheduleRuleDraft.trainerId || "").trim() ? "Отримувач: тренер цієї групи" : "У цієї групи не вказаний trainer_id"}
               </div>
-              <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))}><option value="push">push</option><option value="telegram">telegram</option><option value="both">both</option></select>
+              <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))} style={fieldStyle}><option value="push">Push</option><option value="telegram">Telegram</option><option value="both">Push + Telegram</option></select>
             </div>
-            <div>{scheduleDayOptions.map((d) => <label key={d.value}><input type="checkbox" checked={scheduleRuleDraft.daysOfWeek.includes(d.value)} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: e.target.checked ? [...p.daysOfWeek, d.value] : p.daysOfWeek.filter((x) => x !== d.value) }))} />{d.label} </label>)}</div>
-            <div><input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} />
-              <label><input type="checkbox" checked={scheduleRuleDraft.enabled} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, enabled: e.target.checked }))} />увімкнено</label>
-              <label><input type="checkbox" checked={scheduleRuleDraft.includeTrial} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includeTrial: e.target.checked }))} />пробні</label>
-              <label><input type="checkbox" checked={scheduleRuleDraft.includePaymentIssues} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includePaymentIssues: e.target.checked }))} />оплати</label>
-              <label><input type="checkbox" checked={scheduleRuleDraft.includeAttendanceReminder} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includeAttendanceReminder: e.target.checked }))} />нагадати відмітити</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
+              const active = scheduleRuleDraft.daysOfWeek.includes(d.value);
+              return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#BBD7FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{d.label}</button>;
+            })}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} style={{ ...fieldStyle, width: "fit-content" }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[["enabled", "увімкнено"], ["includeTrial", "пробні"], ["includePaymentIssues", "оплати"], ["includeAttendanceReminder", "нагадати відмітити"]].map(([k, label]) => {
+                  const active = !!scheduleRuleDraft[k];
+                  return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#D7E6FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{label}</button>;
+                })}
+              </div>
             </div>
             {!!scheduleRuleFormError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRuleFormError}</div>}
             {!!scheduleRuleFormSuccess && <div style={{ fontSize: 12, color: theme.success }}>{scheduleRuleFormSuccess}</div>}
-            <div><button type="submit" disabled={scheduleRuleSaving}>{editingRuleId ? "Оновити правило" : "Створити правило"}</button> <button type="button" onClick={resetScheduleRuleDraft}>Очистити</button></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="submit" disabled={scheduleRuleSaving} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>{editingRuleId ? "Оновити правило" : "Створити правило"}</button>
+              <button type="button" onClick={resetScheduleRuleDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>Очистити</button>
+            </div>
           </form>
           {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
           {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
@@ -932,8 +969,8 @@ export default function TrainersNotificationsTab({
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {rule.group_name || rule.group_id || "—"}</span>
-                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_name || rule.trainer_id || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {groupDisplayFromId(rule.group_id, rule.group_name)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_name || rule.trainer_display || trainerDisplayFromId(rule.trainer_id)}</span>
                     <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
                     <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
                     <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
