@@ -243,7 +243,49 @@ const handleScheduleRules = async (req, res) => {
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: "Failed to load schedule rules", details: String(error.message || error) });
-    return res.status(200).json({ success: true, rows: data || [] });
+    const rows = data || [];
+    const groupIds = Array.from(new Set(rows.map((r) => String(r?.group_id || "")).filter(Boolean)));
+    const trainerIds = Array.from(new Set(rows.map((r) => String(r?.trainer_id || "")).filter(Boolean)));
+    let groupsById = {};
+    let trainersById = {};
+    if (groupIds.length) {
+      const { data: groupsRows } = await supabase.from("groups").select("id,name").in("id", groupIds);
+      groupsById = Object.fromEntries((groupsRows || []).map((g) => [String(g.id), g]));
+    }
+    if (trainerIds.length) {
+      const { data: trainerRows, error: trainerLookupError } = await supabase
+        .from("trainers")
+        .select("id,auth_user_id,first_name,last_name,name,telegram,instagram_handle");
+      if (trainerLookupError) {
+        console.error("[schedule-rules] trainer enrichment lookup failed", String(trainerLookupError?.message || trainerLookupError));
+      } else {
+        const rowsSafe = trainerRows || [];
+        const byId = Object.fromEntries(rowsSafe.map((t) => [String(t.id), t]));
+        const byAuthUserId = Object.fromEntries(
+          rowsSafe
+            .filter((t) => t?.auth_user_id)
+            .map((t) => [String(t.auth_user_id), t])
+        );
+        trainersById = { byId, byAuthUserId };
+      }
+    }
+    const enriched = rows.map((r) => {
+      const group = groupsById[String(r.group_id)] || null;
+      const trainerKey = String(r.trainer_id || "");
+      const trainer = trainersById?.byAuthUserId?.[trainerKey] || trainersById?.byId?.[trainerKey] || null;
+      const trainerName = trainer
+        ? ([trainer.first_name || trainer.firstName || "", trainer.last_name || trainer.lastName || ""].filter(Boolean).join(" ").trim() || trainer.name || null)
+        : null;
+      const trainerContact = trainer?.telegram || trainer?.instagram_handle || null;
+      return {
+        ...r,
+        group_name: r.group_name || group?.name || null,
+        trainer_name: r.trainer_name || trainerName,
+        trainer_email: r.trainer_email || trainerContact,
+        trainer_display: r.trainer_display || trainerName || trainerContact || null,
+      };
+    });
+    return res.status(200).json({ success: true, rows: enriched });
   }
 
   if (req.method === "POST") {
