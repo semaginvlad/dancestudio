@@ -18,6 +18,65 @@ const readinessError = (res, error) => res.status(503).json({
 });
 
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
+const VALID_CHANNELS = new Set(["push", "telegram", "both"]);
+const TIME_RE = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+const parseDaysOfWeek = (value) => {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return null;
+  const normalized = value.map((d) => Number(d));
+  if (normalized.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) return null;
+  return normalized;
+};
+
+const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {}) => {
+  const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+  const errors = [];
+  const payload = {};
+
+  if (requireCoreFields || has("name")) {
+    const name = String(body.name || "").trim();
+    if (!name) errors.push("name is required");
+    else payload.name = name;
+  }
+
+  if (requireCoreFields || has("group_id")) {
+    const groupId = String(body.group_id || "").trim();
+    if (!groupId) errors.push("group_id is required");
+    else payload.group_id = groupId;
+  }
+
+  if (requireCoreFields || has("send_time_local")) {
+    const sendTimeLocal = String(body.send_time_local || "").trim();
+    if (!TIME_RE.test(sendTimeLocal)) errors.push("send_time_local must be in HH:mm format");
+    else payload.send_time_local = sendTimeLocal;
+  }
+
+  if (has("trainer_id") || requireCoreFields) {
+    const trainerIdRaw = body.trainer_id;
+    payload.trainer_id = trainerIdRaw ? String(trainerIdRaw).trim() : null;
+  }
+
+  if (has("channel") || requireCoreFields) {
+    const channel = String(body.channel || "push").trim();
+    if (!VALID_CHANNELS.has(channel)) errors.push("channel must be one of: push, telegram, both");
+    else payload.channel = channel;
+  }
+
+  if (has("timezone") || requireCoreFields) payload.timezone = String(body.timezone || "Europe/Kyiv").trim() || "Europe/Kyiv";
+  if (has("enabled")) payload.enabled = !!body.enabled;
+  if (has("include_trial_bookings")) payload.include_trial_bookings = !!body.include_trial_bookings;
+  if (has("include_unpaid_students")) payload.include_unpaid_students = !!body.include_unpaid_students;
+  if (has("include_attendance_reminder")) payload.include_attendance_reminder = !!body.include_attendance_reminder;
+
+  if (has("days_of_week") || requireCoreFields) {
+    const days = parseDaysOfWeek(body.days_of_week);
+    if (!days) errors.push("days_of_week must be an array of integers in range 1..7");
+    else payload.days_of_week = days;
+  }
+
+  return { errors, payload };
+};
 
 const detectSchedulerStatus = () => {
   try {
@@ -170,13 +229,106 @@ const handleHistory = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+const handleScheduleRules = async (req, res) => {
+  const supabase = buildSupabase();
+
+  if (req.method === "GET") {
+    const sortField = String(req.query.sort || "").trim();
+    const sortOrder = String(req.query.order || "asc").toLowerCase() === "desc" ? false : true;
+    const allowedSorts = new Set(["enabled", "group_id", "send_time_local"]);
+
+    let query = supabase.from("notification_schedule_rules").select("*");
+    if (allowedSorts.has(sortField)) query = query.order(sortField, { ascending: sortOrder });
+    else query = query.order("created_at", { ascending: false });
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: "Failed to load schedule rules", details: String(error.message || error) });
+    return res.status(200).json({ success: true, rows: data || [] });
+  }
+
+  if (req.method === "POST") {
+    const body = req.body || {};
+    const action = String(body.action || "").trim();
+    const ruleId = body.id ? String(body.id).trim() : "";
+
+    if (action === "delete") {
+      if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
+      const { data, error } = await supabase
+        .from("notification_schedule_rules")
+        .update({ enabled: false, updated_at: new Date().toISOString() })
+        .eq("id", ruleId)
+        .select("*")
+        .single();
+      if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
+      return res.status(200).json({ success: true, mode: "disabled", row: data });
+    }
+
+    if (ruleId) {
+      const { errors, payload } = normalizeScheduleRuleInput(body, { requireCoreFields: false });
+      if (errors.length) return res.status(400).json({ error: "Invalid schedule rule payload", details: errors });
+      if (!Object.keys(payload).length) return res.status(400).json({ error: "No updatable fields provided" });
+      payload.updated_at = new Date().toISOString();
+      const { data, error } = await supabase
+        .from("notification_schedule_rules")
+        .update(payload)
+        .eq("id", ruleId)
+        .select("*")
+        .single();
+      if (error) return res.status(500).json({ error: "Failed to update schedule rule", details: String(error.message || error) });
+      return res.status(200).json({ success: true, row: data });
+    }
+
+    const { errors, payload } = normalizeScheduleRuleInput(body, { requireCoreFields: true });
+    if (errors.length) return res.status(400).json({ error: "Invalid schedule rule payload", details: errors });
+
+    const { data, error } = await supabase.from("notification_schedule_rules").insert(payload).select("*").single();
+    if (error) return res.status(500).json({ error: "Failed to create schedule rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, row: data });
+  }
+
+  if (req.method === "PATCH") {
+    const body = req.body || {};
+    const ruleId = body.id ? String(body.id).trim() : "";
+    if (!ruleId) return res.status(400).json({ error: "id is required for patch" });
+    const { errors, payload } = normalizeScheduleRuleInput(body, { requireCoreFields: false });
+    if (errors.length) return res.status(400).json({ error: "Invalid schedule rule payload", details: errors });
+    if (!Object.keys(payload).length) return res.status(400).json({ error: "No updatable fields provided" });
+    payload.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("notification_schedule_rules")
+      .update(payload)
+      .eq("id", ruleId)
+      .select("*")
+      .single();
+    if (error) return res.status(500).json({ error: "Failed to update schedule rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, row: data });
+  }
+
+  if (req.method === "DELETE") {
+    const ruleId = String(req.query?.id || req.body?.id || "").trim();
+    if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
+    const { data, error } = await supabase
+      .from("notification_schedule_rules")
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .eq("id", ruleId)
+      .select("*")
+      .single();
+    if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, mode: "disabled", row: data });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+};
+
 export default async function handler(req, res) {
   const op = getOp(req);
   try {
     if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history"] });
+    if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
