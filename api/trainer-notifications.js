@@ -243,7 +243,35 @@ const handleScheduleRules = async (req, res) => {
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: "Failed to load schedule rules", details: String(error.message || error) });
-    return res.status(200).json({ success: true, rows: data || [] });
+    const rows = data || [];
+    const groupIds = Array.from(new Set(rows.map((r) => String(r?.group_id || "")).filter(Boolean)));
+    const trainerIds = Array.from(new Set(rows.map((r) => String(r?.trainer_id || "")).filter(Boolean)));
+    let groupsById = {};
+    let trainersById = {};
+    if (groupIds.length) {
+      const { data: groupsRows } = await supabase.from("groups").select("id,name").in("id", groupIds);
+      groupsById = Object.fromEntries((groupsRows || []).map((g) => [String(g.id), g]));
+    }
+    if (trainerIds.length) {
+      const { data: trainerRows } = await supabase.from("trainers").select("id,firstName,lastName,name,email,telegram,login").in("id", trainerIds);
+      trainersById = Object.fromEntries((trainerRows || []).map((t) => [String(t.id), t]));
+    }
+    const enriched = rows.map((r) => {
+      const group = groupsById[String(r.group_id)] || null;
+      const trainer = trainersById[String(r.trainer_id)] || null;
+      const trainerName = trainer
+        ? ([trainer.firstName || "", trainer.lastName || ""].filter(Boolean).join(" ").trim() || trainer.name || null)
+        : null;
+      const trainerEmail = trainer?.email || trainer?.login || trainer?.telegram || null;
+      return {
+        ...r,
+        group_name: r.group_name || group?.name || null,
+        trainer_name: r.trainer_name || trainerName,
+        trainer_email: r.trainer_email || trainerEmail,
+        trainer_display: r.trainer_display || trainerName || trainerEmail || null,
+      };
+    });
+    return res.status(200).json({ success: true, rows: enriched });
   }
 
   if (req.method === "POST") {

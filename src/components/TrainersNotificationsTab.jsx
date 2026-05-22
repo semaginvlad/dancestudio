@@ -596,10 +596,10 @@ export default function TrainersNotificationsTab({
   const nextSendLabel = selectedPlan?.sendAtLocal || "—";
   const trainingLabel = selectedPlan?.trainingAtLocal || (selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—");
   const schedulerStatusLabel = readiness?.scheduler?.active
-    ? "автовідправка активна"
+    ? "Автозапуск налаштовано"
     : readiness?.ready
-      ? "розклад готовий, тригер відсутній"
-      : "планувальник не налаштований";
+      ? "Автозапуск не налаштований"
+      : "Потрібно перевірити налаштування";
 
   const statusChip = (ok) => ({
     background: ok ? `${theme.success}20` : `${theme.warning}20`,
@@ -875,7 +875,8 @@ export default function TrainersNotificationsTab({
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <div>
-              <div style={{ fontWeight: 800, color: theme.textMain }}>Сповіщення / дайджест тренера</div>
+              <div style={{ fontWeight: 800, color: theme.textMain }}>Правила автоматичних сповіщень</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Ці правила самі сформують повідомлення з актуальних даних групи у вибраний день і час.</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Повʼязані групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}</div>
             </div>
             <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Режим планера</div>
@@ -894,24 +895,29 @@ export default function TrainersNotificationsTab({
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
               <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Адмін лог</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
-                {readiness.adminConfigured ? "готово" : "відсутнє"}
+            <details style={{ gridColumn: "1/-1", border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+              <summary style={{ cursor: "pointer", color: theme.textMain, fontSize: 12, fontWeight: 700 }}>Технічний статус</summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Дані готові</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
+                    {readiness.ready ? "так" : "ні"}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Автозапуск</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
+                    {schedulerStatusLabel}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Лог сповіщень</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
+                    {readiness.adminConfigured ? "налаштовано" : "не налаштовано"}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Сховище</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
-                {readiness.ready ? "готово" : "відсутнє"}
-              </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Планувальник</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
-                {schedulerStatusLabel}
-              </div>
-            </div>
+            </details>
           </div>
         </div>
 
@@ -970,7 +976,7 @@ export default function TrainersNotificationsTab({
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {groupDisplayFromId(rule.group_id, rule.group_name)}</span>
-                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_name || rule.trainer_display || trainerDisplayFromId(rule.trainer_id)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_display || rule.trainer_email || rule.trainer_name || trainerDisplayFromId(rule.trainer_id)}</span>
                     <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
                     <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
                     <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
