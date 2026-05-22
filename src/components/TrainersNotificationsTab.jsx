@@ -29,6 +29,27 @@ export default function TrainersNotificationsTab({
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
   const generatedTextByChatGroupRef = useRef({});
+  const [scheduleRules, setScheduleRules] = useState([]);
+  const [scheduleRulesLoading, setScheduleRulesLoading] = useState(false);
+  const [scheduleRulesError, setScheduleRulesError] = useState("");
+  const [scheduleRuleSaving, setScheduleRuleSaving] = useState(false);
+  const [scheduleRuleFormError, setScheduleRuleFormError] = useState("");
+  const [scheduleRuleFormSuccess, setScheduleRuleFormSuccess] = useState("");
+  const [editingRuleId, setEditingRuleId] = useState(null);
+  const emptyScheduleRuleDraft = {
+    name: "",
+    groupId: "",
+    trainerId: "",
+    channel: "push",
+    daysOfWeek: [],
+    sendTime: "09:00",
+    enabled: true,
+    includeTrial: true,
+    includePaymentIssues: true,
+    includeAttendanceReminder: true,
+    timezone: "Europe/Kyiv",
+  };
+  const [scheduleRuleDraft, setScheduleRuleDraft] = useState(emptyScheduleRuleDraft);
 
   const membershipByStudent = useMemo(
     () =>
@@ -654,6 +675,117 @@ export default function TrainersNotificationsTab({
     }
   };
 
+  const scheduleDayOptions = [
+    { value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" },
+    { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 7, label: "Нд" },
+  ];
+  const resetScheduleRuleDraft = () => {
+    setEditingRuleId(null);
+    setScheduleRuleDraft({ ...emptyScheduleRuleDraft });
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+  };
+  const loadScheduleRules = async () => {
+    setScheduleRulesLoading(true);
+    setScheduleRulesError("");
+    try {
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules");
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити правила");
+      setScheduleRules(payload?.rows || payload?.rules || []);
+    } catch (error) {
+      setScheduleRulesError(String(error?.message || error));
+      setScheduleRules([]);
+    } finally {
+      setScheduleRulesLoading(false);
+    }
+  };
+  useEffect(() => { loadScheduleRules(); }, []);
+  const mapRuleToDraft = (rule) => ({
+    name: String(rule?.name || ""),
+    groupId: String(rule?.group_id || ""),
+    trainerId: String(rule?.trainer_id || ""),
+    channel: String(rule?.channel || "push"),
+    daysOfWeek: Array.isArray(rule?.days_of_week) ? rule.days_of_week.map(Number) : [],
+    sendTime: String(rule?.send_time_local || "09:00"),
+    enabled: rule?.enabled !== false,
+    includeTrial: rule?.include_trial_bookings !== false,
+    includePaymentIssues: rule?.include_unpaid_students !== false,
+    includeAttendanceReminder: rule?.include_attendance_reminder !== false,
+    timezone: String(rule?.timezone || "Europe/Kyiv"),
+  });
+  const saveScheduleRule = async (event) => {
+    event?.preventDefault?.();
+    const selectedGroup = groups.find((g) => String(g.id) === String(scheduleRuleDraft.groupId));
+    const resolvedTrainerId = String(scheduleRuleDraft.trainerId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "").trim();
+    if (!scheduleRuleDraft.name.trim()) {
+      setScheduleRuleFormError("Вкажіть назву правила");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.groupId) {
+      setScheduleRuleFormError("Оберіть групу");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!resolvedTrainerId) {
+      setScheduleRuleFormError("У цієї групи не вказаний trainer_id");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.sendTime) {
+      setScheduleRuleFormError("Вкажіть час відправки");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!Array.isArray(scheduleRuleDraft.daysOfWeek) || !scheduleRuleDraft.daysOfWeek.length) {
+      setScheduleRuleFormError("Оберіть хоча б один день");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+    setScheduleRuleSaving(true);
+    try {
+      const payload = {
+        name: scheduleRuleDraft.name.trim(),
+        group_id: scheduleRuleDraft.groupId,
+        trainer_id: resolvedTrainerId,
+        channel: scheduleRuleDraft.channel,
+        enabled: !!scheduleRuleDraft.enabled,
+        timezone: scheduleRuleDraft.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        days_of_week: scheduleRuleDraft.daysOfWeek,
+        send_time_local: scheduleRuleDraft.sendTime,
+        include_trial_bookings: !!scheduleRuleDraft.includeTrial,
+        include_unpaid_students: !!scheduleRuleDraft.includePaymentIssues,
+        include_attendance_reminder: !!scheduleRuleDraft.includeAttendanceReminder,
+      };
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+        method: editingRuleId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingRuleId ? { id: editingRuleId, ...payload } : payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося зберегти правило");
+      await loadScheduleRules();
+      resetScheduleRuleDraft();
+      setScheduleRuleFormSuccess("Збережено");
+    } catch (error) {
+      setScheduleRuleFormError(String(error?.message || error));
+      setScheduleRuleFormSuccess("");
+    } finally {
+      setScheduleRuleSaving(false);
+    }
+  };
+  const toggleScheduleRule = async (rule) => {
+    const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: rule.id, enabled: !(rule.enabled !== false) }),
+    });
+    if (res.ok) await loadScheduleRules();
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
@@ -725,6 +857,36 @@ export default function TrainersNotificationsTab({
         </div>
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила schedule notifications</div><button type="button" onClick={loadScheduleRules}>Оновити</button></div>
+          <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
+            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="назва" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+              <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
+                const groupId = e.target.value;
+                const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
+                return { ...p, groupId, trainerId: String(selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
+              })}><option value="">група</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
+              <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", padding: "0 4px" }}>
+                {String(scheduleRuleDraft.trainerId || "").trim() ? "Отримувач: тренер цієї групи" : "У цієї групи не вказаний trainer_id"}
+              </div>
+              <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))}><option value="push">push</option><option value="telegram">telegram</option><option value="both">both</option></select>
+            </div>
+            <div>{scheduleDayOptions.map((d) => <label key={d.value}><input type="checkbox" checked={scheduleRuleDraft.daysOfWeek.includes(d.value)} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: e.target.checked ? [...p.daysOfWeek, d.value] : p.daysOfWeek.filter((x) => x !== d.value) }))} />{d.label} </label>)}</div>
+            <div><input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} />
+              <label><input type="checkbox" checked={scheduleRuleDraft.enabled} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, enabled: e.target.checked }))} />увімкнено</label>
+              <label><input type="checkbox" checked={scheduleRuleDraft.includeTrial} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includeTrial: e.target.checked }))} />пробні</label>
+              <label><input type="checkbox" checked={scheduleRuleDraft.includePaymentIssues} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includePaymentIssues: e.target.checked }))} />оплати</label>
+              <label><input type="checkbox" checked={scheduleRuleDraft.includeAttendanceReminder} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, includeAttendanceReminder: e.target.checked }))} />нагадати відмітити</label>
+            </div>
+            {!!scheduleRuleFormError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRuleFormError}</div>}
+            {!!scheduleRuleFormSuccess && <div style={{ fontSize: 12, color: theme.success }}>{scheduleRuleFormSuccess}</div>}
+            <div><button type="submit" disabled={scheduleRuleSaving}>{editingRuleId ? "Оновити правило" : "Створити правило"}</button> <button type="button" onClick={resetScheduleRuleDraft}>Очистити</button></div>
+          </form>
+          {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
+          {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
+          <div style={{ display: "grid", gap: 6 }}>{scheduleRules.map((rule) => <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8 }}><div style={{ fontWeight: 700 }}>{rule.name || `Rule #${rule.id}`}</div><div style={{ fontSize: 12, color: theme.textMuted }}>{rule.channel || "push"} • {rule.send_time_local || "—"} • {rule.enabled !== false ? "увімкнено" : "вимкнено"}</div><button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }}>Редагувати</button> <button type="button" onClick={() => toggleScheduleRule(rule)}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button></div>)}</div>
+        </div>
 
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
