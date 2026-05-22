@@ -35,6 +35,8 @@ export default function TrainersNotificationsTab({
   const [scheduleRuleSaving, setScheduleRuleSaving] = useState(false);
   const [scheduleRuleFormError, setScheduleRuleFormError] = useState("");
   const [scheduleRuleFormSuccess, setScheduleRuleFormSuccess] = useState("");
+  const [previewRuleId, setPreviewRuleId] = useState(null);
+  const [legacyManualExpanded, setLegacyManualExpanded] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState(null);
   const emptyScheduleRuleDraft = {
     name: "",
@@ -785,6 +787,14 @@ export default function TrainersNotificationsTab({
     });
     if (res.ok) await loadScheduleRules();
   };
+  const weekdayLabelByValue = { 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Нд" };
+  const channelLabel = (value) => ({ push: "Push", telegram: "Telegram", both: "Push + Telegram" }[String(value || "").toLowerCase()] || String(value || "Push"));
+  const includeItemsFromRule = (rule) => ([
+    rule?.include_trial_bookings !== false ? "будуть перевірені пробні" : null,
+    rule?.include_unpaid_students !== false ? "будуть перевірені оплати" : null,
+    rule?.include_attendance_reminder !== false ? "буде перевірено відвідування" : null,
+  ].filter(Boolean));
+  const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
@@ -858,7 +868,10 @@ export default function TrainersNotificationsTab({
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила schedule notifications</div><button type="button" onClick={loadScheduleRules}>Оновити</button></div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила schedule notifications</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
+          <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
+            Текст повідомлення не зберігається вручну. Він має генеруватись автоматично перед відправкою з актуальних даних групи.
+          </div>
           <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
             <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="назва" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
@@ -885,9 +898,53 @@ export default function TrainersNotificationsTab({
           </form>
           {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
           {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
-          <div style={{ display: "grid", gap: 6 }}>{scheduleRules.map((rule) => <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8 }}><div style={{ fontWeight: 700 }}>{rule.name || `Rule #${rule.id}`}</div><div style={{ fontSize: 12, color: theme.textMuted }}>{rule.channel || "push"} • {rule.send_time_local || "—"} • {rule.enabled !== false ? "увімкнено" : "вимкнено"}</div><button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }}>Редагувати</button> <button type="button" onClick={() => toggleScheduleRule(rule)}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button></div>)}</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {scheduleRules.map((rule) => {
+              const includeItems = includeItemsFromRule(rule);
+              return (
+                <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 800, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
+                    <span style={{ fontSize: 11, borderRadius: 999, padding: "3px 8px", border: `1px solid ${rule.enabled !== false ? `${theme.success}55` : `${theme.warning}55`}`, color: rule.enabled !== false ? theme.success : theme.warning, background: rule.enabled !== false ? `${theme.success}18` : `${theme.warning}18`, fontWeight: 700 }}>
+                      {rule.enabled !== false ? "увімкнено" : "вимкнено"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Група: {rule.group_name || rule.group_id || "—"}</span>
+                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Отримувач: {rule.trainer_name || rule.trainer_id || "—"}</span>
+                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Канал: {channelLabel(rule.channel)}</span>
+                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Час: {rule.send_time_local || "—"}</span>
+                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    Це правило автоматично формує повідомлення перед відправкою для обраної групи у вказаний час.
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMain }}>Включає: {includeItems.length ? includeItems.join(" • ") : "нічого не включено"}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
+                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? theme.warning : theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${theme.primary}`, borderRadius: 10, background: `${theme.primary}18`, color: theme.primary, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {!!previewRule && (
+            <div style={{ border: `1px solid ${theme.primary}55`, borderRadius: 12, padding: 10, background: `${theme.primary}10`, display: "grid", gap: 6 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain }}>Попередній перегляд: {previewRule.name || `Rule #${previewRule.id}`}</div>
+              {includeItemsFromRule(previewRule).map((item) => <div key={item} style={{ fontSize: 12, color: theme.textMain }}>• {item}</div>)}
+              {!includeItemsFromRule(previewRule).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Немає активних прапорців для перевірки.</div>}
+              <button type="button" onClick={() => setPreviewRuleId(null)} style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "4px 8px", cursor: "pointer" }}>Закрити</button>
+            </div>
+          )}
         </div>
-
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "grid", gap: 8 }}>
+          <button type="button" onClick={() => setLegacyManualExpanded((v) => !v)} style={{ border: "none", background: "transparent", color: theme.textMain, fontWeight: 800, textAlign: "left", cursor: "pointer", padding: 0 }}>
+            {legacyManualExpanded ? "▾" : "▸"} Стара ручна система. Не оновлює дані автоматично.
+          </button>
+        </div>
+        {legacyManualExpanded && (
+          <>
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
@@ -1102,6 +1159,8 @@ export default function TrainersNotificationsTab({
             })}
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
