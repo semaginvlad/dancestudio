@@ -29,6 +29,30 @@ export default function TrainersNotificationsTab({
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
   const generatedTextByChatGroupRef = useRef({});
+  const [scheduleRules, setScheduleRules] = useState([]);
+  const [scheduleRulesLoading, setScheduleRulesLoading] = useState(false);
+  const [scheduleRulesError, setScheduleRulesError] = useState("");
+  const [scheduleRuleSaving, setScheduleRuleSaving] = useState(false);
+  const [scheduleRuleFormError, setScheduleRuleFormError] = useState("");
+  const [scheduleRuleFormSuccess, setScheduleRuleFormSuccess] = useState("");
+  const [previewRuleId, setPreviewRuleId] = useState(null);
+  const [selectedRecipientId, setSelectedRecipientId] = useState("");
+  const [editingRuleId, setEditingRuleId] = useState(null);
+  const emptyScheduleRuleDraft = {
+    name: "",
+    groupId: "",
+    trainerId: "",
+    channel: "push",
+    daysOfWeek: [],
+    sendTime: "09:00",
+    enabled: true,
+    includeTrial: true,
+    includePaymentIssues: true,
+    includeAttendanceReminder: true,
+    timezone: "Europe/Kyiv",
+    messageTemplate: "",
+  };
+  const [scheduleRuleDraft, setScheduleRuleDraft] = useState(emptyScheduleRuleDraft);
 
   const membershipByStudent = useMemo(
     () =>
@@ -573,10 +597,10 @@ export default function TrainersNotificationsTab({
   const nextSendLabel = selectedPlan?.sendAtLocal || "—";
   const trainingLabel = selectedPlan?.trainingAtLocal || (selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—");
   const schedulerStatusLabel = readiness?.scheduler?.active
-    ? "автовідправка активна"
+    ? "Автозапуск налаштовано"
     : readiness?.ready
-      ? "розклад готовий, тригер відсутній"
-      : "планувальник не налаштований";
+      ? "Автозапуск не налаштований"
+      : "Потрібно перевірити налаштування";
 
   const statusChip = (ok) => ({
     background: ok ? `${theme.success}20` : `${theme.warning}20`,
@@ -654,28 +678,216 @@ export default function TrainersNotificationsTab({
     }
   };
 
+  const scheduleDayOptions = [
+    { value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" },
+    { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 7, label: "Нд" },
+  ];
+  const resetScheduleRuleDraft = () => {
+    setEditingRuleId(null);
+    setScheduleRuleDraft({ ...emptyScheduleRuleDraft });
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+  };
+  const loadScheduleRules = async () => {
+    setScheduleRulesLoading(true);
+    setScheduleRulesError("");
+    try {
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules");
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити правила");
+      setScheduleRules(payload?.rows || payload?.rules || []);
+    } catch (error) {
+      setScheduleRulesError(String(error?.message || error));
+      setScheduleRules([]);
+    } finally {
+      setScheduleRulesLoading(false);
+    }
+  };
+  useEffect(() => { loadScheduleRules(); }, []);
+  const mapRuleToDraft = (rule) => ({
+    name: String(rule?.name || ""),
+    groupId: String(rule?.group_id || ""),
+    trainerId: String(rule?.trainer_id || ""),
+    channel: String(rule?.channel || "push"),
+    daysOfWeek: Array.isArray(rule?.days_of_week) ? rule.days_of_week.map(Number) : [],
+    sendTime: String(rule?.send_time_local || "09:00"),
+    enabled: rule?.enabled !== false,
+    includeTrial: rule?.include_trial_bookings !== false,
+    includePaymentIssues: rule?.include_unpaid_students !== false,
+    includeAttendanceReminder: rule?.include_attendance_reminder !== false,
+    timezone: String(rule?.timezone || "Europe/Kyiv"),
+    messageTemplate: String(rule?.message_template || ""),
+  });
+  const saveScheduleRule = async (event) => {
+    event?.preventDefault?.();
+    const selectedGroup = groups.find((g) => String(g.id) === String(scheduleRuleDraft.groupId));
+    const resolvedTrainerId = String(selectedRecipient?.id || scheduleRuleDraft.trainerId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "").trim();
+    if (!scheduleRuleDraft.name.trim()) {
+      setScheduleRuleFormError("Вкажіть назву правила");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.groupId) {
+      setScheduleRuleFormError("Оберіть групу");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!resolvedTrainerId) {
+      setScheduleRuleFormError("Оберіть отримувача сповіщень зліва");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.sendTime) {
+      setScheduleRuleFormError("Вкажіть час відправки");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!Array.isArray(scheduleRuleDraft.daysOfWeek) || !scheduleRuleDraft.daysOfWeek.length) {
+      setScheduleRuleFormError("Оберіть хоча б один день");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+    setScheduleRuleSaving(true);
+    try {
+      const payload = {
+        name: scheduleRuleDraft.name.trim(),
+        group_id: scheduleRuleDraft.groupId,
+        trainer_id: resolvedTrainerId,
+        channel: scheduleRuleDraft.channel,
+        enabled: !!scheduleRuleDraft.enabled,
+        timezone: scheduleRuleDraft.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        days_of_week: scheduleRuleDraft.daysOfWeek,
+        send_time_local: scheduleRuleDraft.sendTime,
+        include_trial_bookings: !!scheduleRuleDraft.includeTrial,
+        include_unpaid_students: !!scheduleRuleDraft.includePaymentIssues,
+        include_attendance_reminder: !!scheduleRuleDraft.includeAttendanceReminder,
+        message_template: scheduleRuleDraft.messageTemplate ? String(scheduleRuleDraft.messageTemplate).trim() : null,
+      };
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+        method: editingRuleId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingRuleId ? { id: editingRuleId, ...payload } : payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося зберегти правило");
+      await loadScheduleRules();
+      resetScheduleRuleDraft();
+      setScheduleRuleFormSuccess("Збережено");
+    } catch (error) {
+      setScheduleRuleFormError(String(error?.message || error));
+      setScheduleRuleFormSuccess("");
+    } finally {
+      setScheduleRuleSaving(false);
+    }
+  };
+  const toggleScheduleRule = async (rule) => {
+    const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: rule.id, enabled: !(rule.enabled !== false) }),
+    });
+    if (res.ok) await loadScheduleRules();
+  };
+  const weekdayLabelByValue = { 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Нд" };
+  const channelLabel = (value) => ({ push: "Push", telegram: "Telegram", both: "Push + Telegram" }[String(value || "").toLowerCase()] || String(value || "Push"));
+  const includeItemsFromRule = (rule) => ([
+    rule?.include_trial_bookings !== false ? "будуть перевірені пробні" : null,
+    rule?.include_unpaid_students !== false ? "будуть перевірені оплати" : null,
+    rule?.include_attendance_reminder !== false ? "буде перевірено відвідування" : null,
+  ].filter(Boolean));
+  const badgeBase = {
+    fontSize: 12,
+    borderRadius: 999,
+    padding: "4px 10px",
+    border: `1px solid ${theme.border}`,
+    fontWeight: 700,
+    lineHeight: 1.25,
+  };
+  const badgeTone = {
+    statusEnabled: { color: "#9FF5C6", background: "#1F5D3A", border: "#2D7B4E" },
+    statusDisabled: { color: "#FFD9A8", background: "#5A4632", border: "#7A6244" },
+    group: { color: "#C9DBFF", background: "#263A63", border: "#355289" },
+    recipient: { color: "#E0D2FF", background: "#3C315E", border: "#55457F" },
+    channelPush: { color: "#CDE3FF", background: "#28466E", border: "#396194" },
+    channelTelegram: { color: "#CDEFFF", background: "#24505E", border: "#337182" },
+    channelBoth: { color: "#E2D3FF", background: "#4A376E", border: "#684C98" },
+    time: { color: "#E5E7EB", background: "#2F3541", border: "#495063" },
+    days: { color: "#D5DBE6", background: "#343B47", border: "#495163" },
+    includeTrial: { color: "#BDF6E8", background: "#1E5B53", border: "#2C7F74" },
+    includePayments: { color: "#FFE0B3", background: "#5E4830", border: "#836444" },
+    includeAttendance: { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" },
+  };
+  const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
+  const fieldStyle = {
+    width: "100%",
+    border: `1px solid ${theme.border}`,
+    borderRadius: 10,
+    background: theme.card,
+    color: theme.textMain,
+    padding: "10px 12px",
+    fontSize: 13,
+    fontWeight: 600,
+  };
+  const findTrainerById = (trainerId) => trainers.find((t) => String(t?.id) === String(trainerId));
+  const trainerDisplayFromId = (trainerId) => {
+    const trainer = findTrainerById(trainerId);
+    const fullName = [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ").trim() || trainer?.name || "";
+    const contact = trainer?.email || trainer?.login || trainer?.telegram || "";
+    if (fullName) return fullName;
+    if (contact) return contact;
+    const raw = String(trainerId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
+  const groupDisplayFromId = (groupId, fallbackName) => {
+    const group = groups.find((g) => String(g?.id) === String(groupId));
+    if (group?.name) return group.name;
+    if (fallbackName) return fallbackName;
+    const raw = String(groupId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
+
+  const notificationRecipients = useMemo(() => {
+    const mapped = (trainers || []).map((t) => {
+      const authId = String(t?.authUserId || t?.auth_user_id || t?.id || "").trim();
+      if (!authId) return null;
+      const name = [t?.first_name || t?.firstName || "", t?.last_name || t?.lastName || ""].filter(Boolean).join(" ").trim() || t?.name || null;
+      const contact = t?.telegram || t?.instagram_handle || null;
+      return { id: authId, title: name || contact || `${authId.slice(0, 8)}…`, subtitle: contact || authId, isTest: String(t?.name || "").toLowerCase().includes("влад") || String(t?.name || "").toLowerCase().includes("semagin") };
+    }).filter(Boolean);
+    const uniq = []; const seen = new Set();
+    mapped.forEach((x) => { if (!seen.has(x.id)) { seen.add(x.id); uniq.push(x); } });
+    return uniq;
+  }, [trainers]);
+
+  const selectedRecipient = notificationRecipients.find((r) => r.id === selectedRecipientId) || notificationRecipients[0] || null;
+  const visibleScheduleRules = selectedRecipient
+    ? scheduleRules.filter((rule) => String(rule?.trainer_id || "") === String(selectedRecipient.id))
+    : scheduleRules;
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
-        <div style={{ fontWeight: 800, color: theme.textMain }}>Тренерські контакти</div>
-        {!trainerDialogs.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає тренерських чатів.</div>}
-        {trainerDialogs.map((d) => (
+        <div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div>
+        {!notificationRecipients.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає отримувачів.</div>}
+        {notificationRecipients.map((d) => (
           <button
             key={d.id}
             type="button"
-            onClick={() => setSelectedChatId(d.id)}
+            onClick={() => setSelectedRecipientId(d.id)}
             style={{
               textAlign: "left",
-              border: `1px solid ${selectedDialog?.id === d.id ? theme.primary : theme.border}`,
+              border: `1px solid ${selectedRecipient?.id === d.id ? theme.primary : theme.border}`,
               borderRadius: 10,
-              background: selectedDialog?.id === d.id ? `${theme.primary}18` : theme.input,
+              background: selectedRecipient?.id === d.id ? `${theme.primary}18` : theme.input,
               color: theme.textMain,
               padding: "8px 10px",
               cursor: "pointer",
             }}
           >
-            <div style={{ fontWeight: 700 }}>{d.title || d.id}</div>
-            <div style={{ fontSize: 11, color: theme.textMuted }}>{(d.username && `@${d.username}`) || d.id}</div>
+            <div style={{ fontWeight: 700 }}>{d.title || d.id}{d.isTest ? " (test)" : ""}</div>
+            <div style={{ fontSize: 11, color: theme.textMuted }}>{d.subtitle || d.id}</div>
           </button>
         ))}
       </div>
@@ -684,7 +896,8 @@ export default function TrainersNotificationsTab({
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <div>
-              <div style={{ fontWeight: 800, color: theme.textMain }}>Сповіщення / дайджест тренера</div>
+              <div style={{ fontWeight: 800, color: theme.textMain }}>Правила автоматичних сповіщень</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Ці правила самі сформують повідомлення з актуальних даних групи у вибраний день і час.</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Повʼязані групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}</div>
             </div>
             <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Режим планера</div>
@@ -703,242 +916,129 @@ export default function TrainersNotificationsTab({
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
               <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Адмін лог</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
-                {readiness.adminConfigured ? "готово" : "відсутнє"}
+            <details style={{ gridColumn: "1/-1", border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+              <summary style={{ cursor: "pointer", color: theme.textMain, fontSize: 12, fontWeight: 700 }}>Технічний статус</summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Дані готові</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
+                    {readiness.ready ? "так" : "ні"}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Автозапуск</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
+                    {schedulerStatusLabel}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Лог сповіщень</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
+                    {readiness.adminConfigured ? "налаштовано" : "не налаштовано"}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Сховище</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
-                {readiness.ready ? "готово" : "відсутнє"}
-              </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Планувальник</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
-                {schedulerStatusLabel}
-              </div>
-            </div>
+            </details>
           </div>
         </div>
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
-            <div style={{ display: "grid", gap: 6 }}>
-              <label style={{ color: theme.textMuted, fontSize: 12 }}>Активна група</label>
-              <select
-                value={activeGroupId}
-                onChange={(e) => setSelectedGroupIdByChat((prev) => ({ ...prev, [selectedDialog?.id || ""]: e.target.value }))}
-                style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "10px 12px", fontWeight: 700 }}
-              >
-                {(digest.groupsData || []).map((g) => <option key={g.groupId} value={g.groupId}>{g.groupName}</option>)}
-              </select>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 8 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Найближче заняття</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{trainingLabel}</div>
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Активний режим</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: theme.textMain, overflowWrap: "anywhere" }}>{modeLabel(persistedSendMode)}</div>
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Автоматизація</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: digest.selectedGroupData?.enabled ? theme.success : theme.warning }}>
-                    {digest.selectedGroupData?.enabled ? "увімкнено" : "вимкнено"}
-                  </div>
-                </div>
-              </div>
-              {!!digest.selectedGroupData?.plan && (
-                <div style={{ fontSize: 12, color: isDispatchDueNow(digest.selectedGroupData.plan, new Date(), 15) ? theme.warning : theme.textMuted }}>
-                  Планер: відправка {digest.selectedGroupData.plan.sendAtLocal || digest.selectedGroupData.plan.sendAtIso}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 2: Режим надсилання</div>
-            <div style={{ fontSize: 11, color: scheduleDraft.dirty ? theme.warning : theme.textMuted }}>
-              {scheduleDraft.dirty ? "Є незбережені зміни розкладу" : "Розклад синхронізований"}
-            </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила автоматичних сповіщень</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
+          <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
+            Текст повідомлення не зберігається вручну. Він має генеруватись автоматично перед відправкою з актуальних даних групи.
           </div>
-          <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10, display: "grid", gap: 10 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "default" })} style={{ border: `1px solid ${effectiveDraftMode === "default" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "default" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "default" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Типовий (−60 хв)</button>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_time" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_time" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_time" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_time" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Кастомний час (HH:mm)</button>
-              <button type="button" onClick={() => updateScheduleDraft({ mode: "custom_datetime" })} style={{ border: `1px solid ${effectiveDraftMode === "custom_datetime" ? theme.primary : theme.border}`, borderRadius: 999, background: effectiveDraftMode === "custom_datetime" ? `${theme.primary}20` : theme.input, color: effectiveDraftMode === "custom_datetime" ? theme.primary : theme.textMain, padding: "6px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Кастомні дата й час</button>
-            </div>
-
-            {effectiveDraftMode === "default" && (
-              <div style={{ fontSize: 12, color: theme.textMuted }}>Буде використано стандартне правило: відправка за 60 хвилин до найближчого заняття.</div>
-            )}
-            {effectiveDraftMode === "custom_time" && (
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, color: theme.textMuted }}>Час відправки (HH:mm) для дати найближчого заняття</label>
-                <input
-                  type="time"
-                  value={scheduleDraft.timeValue || ""}
-                  onChange={(e) => updateScheduleDraft({ timeValue: e.target.value || "" })}
-                  style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "8px 10px" }}
-                />
+          <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
+            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Назва правила" style={fieldStyle} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+              
+              <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
+                const groupId = e.target.value;
+                const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
+                return { ...p, groupId, trainerId: String(selectedRecipient?.id || selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
+              })} style={fieldStyle}><option value="">Оберіть групу</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
+              <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", padding: "0 4px" }}>
+                {selectedRecipient?.id ? `Отримувач: ${selectedRecipient.title}` : "Отримувача не вибрано"}
               </div>
-            )}
-            {effectiveDraftMode === "custom_datetime" && (
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 12, color: theme.textMuted }}>Конкретні дата і час відправки</label>
-                <input
-                  type="datetime-local"
-                  value={scheduleDraft.datetimeValue || ""}
-                  onChange={(e) => updateScheduleDraft({ datetimeValue: e.target.value || "" })}
-                  style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.input, color: theme.textMain, padding: "8px 10px" }}
-                />
+              <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))} style={fieldStyle}><option value="push">Push</option><option value="telegram">Telegram</option><option value="both">Push + Telegram</option></select>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
+              const active = scheduleRuleDraft.daysOfWeek.includes(d.value);
+              return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#BBD7FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{d.label}</button>;
+            })}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} style={{ ...fieldStyle, width: "fit-content" }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[["enabled", "увімкнено"], ["includeTrial", "пробні"], ["includePaymentIssues", "оплати"], ["includeAttendanceReminder", "нагадати відмітити"]].map(([k, label]) => {
+                  const active = !!scheduleRuleDraft[k];
+                  return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#D7E6FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{label}</button>;
+                })}
               </div>
-            )}
-
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8, display: "grid", gap: 6 }}>
-              <div style={{ fontSize: 12, color: theme.textMuted }}>Що буде збережено після застосування:</div>
-              <div style={{ fontSize: 12, color: theme.textMain, fontWeight: 700 }}>
-                {effectiveDraftMode === "default" && "sendTimeOverride = null (типовий -60 хв)"}
-                {effectiveDraftMode === "custom_time" && `sendTimeOverride = "${scheduleDraft.timeValue || ""}"`}
-                {effectiveDraftMode === "custom_datetime" && `sendTimeOverride = "${scheduleDraft.datetimeValue || ""}"`}
-              </div>
-              <button type="button" onClick={applySendOverride} style={{ width: "fit-content", border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Застосувати розклад</button>
             </div>
-          </div>
-        </div>
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Крок 3: Редагування шаблону</div>
-              <div style={{ fontSize: 12, color: theme.textMuted }}>Головний фокус: текст повідомлення для обраної групи</div>
+            <textarea
+              value={scheduleRuleDraft.messageTemplate || ""}
+              onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, messageTemplate: e.target.value }))}
+              rows={5}
+              placeholder={"Група: {group_name}\nПробні: {trial_bookings}\nПроблеми з оплатами: {unpaid_students}\nВідвідування: {attendance_reminder}"}
+              style={{ ...fieldStyle, resize: "vertical" }}
+            />
+            <div style={{ fontSize: 12, color: theme.textMuted }}>Шаблон зберігається як текст. Перед відправкою система все одно має підставляти актуальні дані групи.</div>
+            {!!scheduleRuleFormError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRuleFormError}</div>}
+            {!!scheduleRuleFormSuccess && <div style={{ fontSize: 12, color: theme.success }}>{scheduleRuleFormSuccess}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="submit" disabled={scheduleRuleSaving} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>{editingRuleId ? "Оновити правило" : "Створити правило"}</button>
+              <button type="button" onClick={resetScheduleRuleDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>Очистити</button>
             </div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: isDraftDirty ? theme.warning : theme.success, border: `1px solid ${isDraftDirty ? `${theme.warning}66` : `${theme.success}66`}`, borderRadius: 999, padding: "4px 8px", background: isDraftDirty ? `${theme.warning}20` : `${theme.success}20` }}>
-              {isDraftDirty ? "Є незбережені зміни" : "Збережено"}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button type="button" onClick={regenerateFromTemplate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Шаблон</button>
-            <button type="button" disabled={savingDraft || !activeGroupId} onClick={() => saveManualDraft(activeGroupId, activeDraft)} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Зберегти</button>
-            <button type="button" onClick={copyToClipboard} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 9px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Копія</button>
-          </div>
-
-          <textarea
-            value={activeDraft}
-            onChange={(e) => updateDraft(e.target.value)}
-            onBlur={() => saveManualDraft(activeGroupId, activeDraft)}
-            rows={14}
-            style={{ width: "100%", resize: "vertical", minHeight: 240, maxHeight: 540, overflow: "auto", background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, color: theme.textMain, lineHeight: 1.45, fontSize: 13 }}
-            placeholder="Немає даних для дайджесту або не задано trainer_groups."
-          />
-          {savingDraft && <div style={{ fontSize: 12, color: theme.textMuted }}>Зберігаємо чернетку…</div>}
-        </div>
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, fontSize: 13 }}>Крок 4: Збереження / тест / ручна відправка</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: true })} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Перевірити</button>
-            <button type="button" disabled={sendingNow || !readiness.adminConfigured} onClick={(e) => testToAdmin(e)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 8px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Тест адміну</button>
-            <button type="button" disabled={sendingNow} onClick={() => sendNow({ dryRun: false })} style={{ border: "none", borderRadius: 10, background: theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{sendingNow ? "Надсилання..." : "Надіслати"}</button>
-          </div>
-        </div>
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Крок 5: Статус автоматизації</div>
+          </form>
+          {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
+          {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
           <div style={{ display: "grid", gap: 8 }}>
-            {(digest.groupsData || []).map((g) => (
-              <label key={g.groupId} style={{ display: "grid", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={g.enabled}
-                      onChange={(e) => saveAutoSendToggle(g.groupId, e.target.checked)}
-                    />
-                    <span style={{ color: theme.textMain, fontWeight: 700 }}>{g.groupName}</span>
+            {visibleScheduleRules.map((rule) => {
+              const includeItems = includeItemsFromRule(rule);
+              return (
+                <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 800, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
+                    <span style={{ ...badgeBase, ...((rule.enabled !== false) ? badgeTone.statusEnabled : badgeTone.statusDisabled) }}>
+                      {rule.enabled !== false ? "увімкнено" : "вимкнено"}
+                    </span>
                   </div>
-                  <span style={{ fontSize: 11, border: `1px solid ${g.enabled ? `${theme.success}55` : `${theme.warning}55`}`, color: g.enabled ? theme.success : theme.warning, background: g.enabled ? `${theme.success}18` : `${theme.warning}18`, borderRadius: 999, padding: "2px 7px", fontWeight: 700 }}>
-                    {g.enabled ? "увімкнено" : "вимкнено"}
-                  </span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {groupDisplayFromId(rule.group_id, rule.group_name)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_display || rule.trainer_email || rule.trainer_name || trainerDisplayFromId(rule.trainer_id)}</span>
+                    <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    Це правило автоматично формує повідомлення перед відправкою для обраної групи у вказаний час.
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Включає:</span>
+                    {rule?.include_trial_bookings !== false && <span style={{ ...badgeBase, ...badgeTone.includeTrial }}>пробні</span>}
+                    {rule?.include_unpaid_students !== false && <span style={{ ...badgeBase, ...badgeTone.includePayments }}>оплати</span>}
+                    {rule?.include_attendance_reminder !== false && <span style={{ ...badgeBase, ...badgeTone.includeAttendance }}>відвідування</span>}
+                    {!includeItems.length && <span style={{ ...badgeBase, ...badgeTone.days }}>нічого не включено</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
+                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? "#6E5337" : "#2C6A47", color: "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid #425A80`, borderRadius: 10, background: "#2B3E5B", color: "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                                      <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await fetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: theme.textMuted }}>
-                  {g.plan
-                    ? `наступна відправка ${g.plan.sendAtLocal || g.plan.sendAtIso} • заняття ${g.plan.trainingDate} ${g.plan.trainingTime}`
-                    : "Немає валідного розкладу"}
-                </div>
-              </label>
-            ))}
+              );
+            })}
           </div>
-        </div>
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Надсилання на сьогодні / статуси</div>
-          {todaySends.length ? (
-            <div style={{ display: "grid", gap: 6 }}>
-              {todaySends.map((x, i) => {
-                const tone = sendStatusStyle(x.status);
-                return (
-                  <div key={`${x.groupName}_${x.sendAt}_${i}`} style={{ border: `1px solid ${tone.border}`, background: tone.bg, borderRadius: 10, padding: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: theme.textMain, fontWeight: 700, fontSize: 12 }}>{x.groupName}</div>
-                      <div style={{ color: theme.textMuted, fontSize: 11 }}>
-                        {x.sendAtLocal || (x.sendAt ? x.sendAt.slice(0, 16).replace("T", " ") : "—")}{x.trainingDate ? ` • заняття ${x.trainingDate}` : ""}{x.details ? ` • ${x.details}` : ""}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color, textTransform: "uppercase" }}>{sendStatusLabel(x.status)}</div>
-                  </div>
-                );
-              })}
+          {!visibleScheduleRules.length && !scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Для цього отримувача ще немає правил</div>}
+          {!!previewRule && (
+            <div style={{ border: `1px solid ${theme.primary}55`, borderRadius: 12, padding: 10, background: `${theme.primary}10`, display: "grid", gap: 6 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain }}>Попередній перегляд: {previewRule.name || `Rule #${previewRule.id}`}</div>
+              {includeItemsFromRule(previewRule).map((item) => <div key={item} style={{ fontSize: 12, color: theme.textMain }}>• {item}</div>)}
+              {!includeItemsFromRule(previewRule).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Немає активних прапорців для перевірки.</div>}
+              <button type="button" onClick={() => setPreviewRuleId(null)} style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "4px 8px", cursor: "pointer" }}>Закрити</button>
             </div>
-          ) : (
-            <div style={{ fontSize: 12, color: theme.textMuted }}>Немає груп для показу статусів.</div>
           )}
-        </div>
-
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.input }}>
-          <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Історія</div>
-          {!lastActions.length && !(digest.persistedHistory || []).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Ще немає дій.</div>}
-          <div style={{ display: "grid", gap: 6 }}>
-            {lastActions.map((a) => {
-              const tone = sendStatusStyle(a.status);
-              return (
-                <div key={a.id} style={{ border: `1px solid ${tone.border}`, background: tone.bg, borderRadius: 10, padding: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{ color: theme.textMain, fontSize: 12, fontWeight: 700 }}>{a.chatTitle}</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{sendStatusLabel(a.status)}</div>
-                  </div>
-                  <div style={{ fontSize: 11, color: theme.textMuted }}>{a.time.slice(0, 16).replace("T", " ")} • учениць: {a.students}{a.details ? ` • ${a.details}` : ""}</div>
-                </div>
-              );
-            })}
-            {(digest.persistedHistory || []).slice(0, 20).map((h) => {
-              const tone = sendStatusStyle(h.status);
-              return (
-                <div key={`persisted_${h.id || `${h.timestamp}_${h.groupId}`}`} style={{ border: `1px solid ${tone.border}`, background: tone.bg, borderRadius: 10, padding: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{ color: theme.textMain, fontSize: 12, fontWeight: 700 }}>{h.chatTitle || h.chatId} / {h.groupName || h.groupId}</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>{sendStatusLabel(h.status)}</div>
-                  </div>
-                  <div style={{ fontSize: 11, color: theme.textMuted }}>{(h.timestamp || "").slice(0, 16).replace("T", " ")} • {h.triggerType} • учениць: {h.studentsCount || 0}{h.details ? ` • ${h.details}` : ""}</div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
     </div>
