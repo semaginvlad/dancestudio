@@ -794,6 +794,28 @@ export default function TrainersNotificationsTab({
     rule?.include_unpaid_students !== false ? "будуть перевірені оплати" : null,
     rule?.include_attendance_reminder !== false ? "буде перевірено відвідування" : null,
   ].filter(Boolean));
+  const badgeBase = {
+    fontSize: 12,
+    borderRadius: 999,
+    padding: "4px 10px",
+    border: `1px solid ${theme.border}`,
+    fontWeight: 700,
+    lineHeight: 1.25,
+  };
+  const badgeTone = {
+    statusEnabled: { color: "#9FF5C6", background: "#1F5D3A", border: "#2D7B4E" },
+    statusDisabled: { color: "#FFD9A8", background: "#5A4632", border: "#7A6244" },
+    group: { color: "#C9DBFF", background: "#263A63", border: "#355289" },
+    recipient: { color: "#E0D2FF", background: "#3C315E", border: "#55457F" },
+    channelPush: { color: "#CDE3FF", background: "#28466E", border: "#396194" },
+    channelTelegram: { color: "#CDEFFF", background: "#24505E", border: "#337182" },
+    channelBoth: { color: "#E2D3FF", background: "#4A376E", border: "#684C98" },
+    time: { color: "#E5E7EB", background: "#2F3541", border: "#495063" },
+    days: { color: "#D5DBE6", background: "#343B47", border: "#495163" },
+    includeTrial: { color: "#BDF6E8", background: "#1E5B53", border: "#2C7F74" },
+    includePayments: { color: "#FFE0B3", background: "#5E4830", border: "#836444" },
+    includeAttendance: { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" },
+  };
   const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
 
   return (
@@ -905,25 +927,31 @@ export default function TrainersNotificationsTab({
                 <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <div style={{ fontWeight: 800, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
-                    <span style={{ fontSize: 11, borderRadius: 999, padding: "3px 8px", border: `1px solid ${rule.enabled !== false ? `${theme.success}55` : `${theme.warning}55`}`, color: rule.enabled !== false ? theme.success : theme.warning, background: rule.enabled !== false ? `${theme.success}18` : `${theme.warning}18`, fontWeight: 700 }}>
+                    <span style={{ ...badgeBase, ...((rule.enabled !== false) ? badgeTone.statusEnabled : badgeTone.statusDisabled) }}>
                       {rule.enabled !== false ? "увімкнено" : "вимкнено"}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Група: {rule.group_name || rule.group_id || "—"}</span>
-                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Отримувач: {rule.trainer_name || rule.trainer_id || "—"}</span>
-                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Канал: {channelLabel(rule.channel)}</span>
-                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Час: {rule.send_time_local || "—"}</span>
-                    <span style={{ fontSize: 11, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", color: theme.textMuted }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {rule.group_name || rule.group_id || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_name || rule.trainer_id || "—"}</span>
+                    <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
                   </div>
                   <div style={{ fontSize: 12, color: theme.textMuted }}>
                     Це правило автоматично формує повідомлення перед відправкою для обраної групи у вказаний час.
                   </div>
-                  <div style={{ fontSize: 12, color: theme.textMain }}>Включає: {includeItems.length ? includeItems.join(" • ") : "нічого не включено"}</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Включає:</span>
+                    {rule?.include_trial_bookings !== false && <span style={{ ...badgeBase, ...badgeTone.includeTrial }}>пробні</span>}
+                    {rule?.include_unpaid_students !== false && <span style={{ ...badgeBase, ...badgeTone.includePayments }}>оплати</span>}
+                    {rule?.include_attendance_reminder !== false && <span style={{ ...badgeBase, ...badgeTone.includeAttendance }}>відвідування</span>}
+                    {!includeItems.length && <span style={{ ...badgeBase, ...badgeTone.days }}>нічого не включено</span>}
+                  </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
-                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? theme.warning : theme.success, color: "#fff", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
-                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${theme.primary}`, borderRadius: 10, background: `${theme.primary}18`, color: theme.primary, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
+                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? "#6E5337" : "#2C6A47", color: "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid #425A80`, borderRadius: 10, background: "#2B3E5B", color: "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
                   </div>
                 </div>
               );
