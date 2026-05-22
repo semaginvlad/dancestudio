@@ -65,6 +65,10 @@ const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {
 
   if (has("timezone") || requireCoreFields) payload.timezone = String(body.timezone || "Europe/Kyiv").trim() || "Europe/Kyiv";
   if (has("enabled")) payload.enabled = !!body.enabled;
+  if (has("message_template")) {
+    if (body.message_template == null) payload.message_template = null;
+    else payload.message_template = String(body.message_template).trim();
+  }
   if (has("include_trial_bookings")) payload.include_trial_bookings = !!body.include_trial_bookings;
   if (has("include_unpaid_students")) payload.include_unpaid_students = !!body.include_unpaid_students;
   if (has("include_attendance_reminder")) payload.include_attendance_reminder = !!body.include_attendance_reminder;
@@ -243,7 +247,49 @@ const handleScheduleRules = async (req, res) => {
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: "Failed to load schedule rules", details: String(error.message || error) });
-    return res.status(200).json({ success: true, rows: data || [] });
+    const rows = data || [];
+    const groupIds = Array.from(new Set(rows.map((r) => String(r?.group_id || "")).filter(Boolean)));
+    const trainerIds = Array.from(new Set(rows.map((r) => String(r?.trainer_id || "")).filter(Boolean)));
+    let groupsById = {};
+    let trainersById = {};
+    if (groupIds.length) {
+      const { data: groupsRows } = await supabase.from("groups").select("id,name").in("id", groupIds);
+      groupsById = Object.fromEntries((groupsRows || []).map((g) => [String(g.id), g]));
+    }
+    if (trainerIds.length) {
+      const { data: trainerRows, error: trainerLookupError } = await supabase
+        .from("trainers")
+        .select("id,auth_user_id,first_name,last_name,name,telegram,instagram_handle");
+      if (trainerLookupError) {
+        console.error("[schedule-rules] trainer enrichment lookup failed", String(trainerLookupError?.message || trainerLookupError));
+      } else {
+        const rowsSafe = trainerRows || [];
+        const byId = Object.fromEntries(rowsSafe.map((t) => [String(t.id), t]));
+        const byAuthUserId = Object.fromEntries(
+          rowsSafe
+            .filter((t) => t?.auth_user_id)
+            .map((t) => [String(t.auth_user_id), t])
+        );
+        trainersById = { byId, byAuthUserId };
+      }
+    }
+    const enriched = rows.map((r) => {
+      const group = groupsById[String(r.group_id)] || null;
+      const trainerKey = String(r.trainer_id || "");
+      const trainer = trainersById?.byAuthUserId?.[trainerKey] || trainersById?.byId?.[trainerKey] || null;
+      const trainerName = trainer
+        ? ([trainer.first_name || trainer.firstName || "", trainer.last_name || trainer.lastName || ""].filter(Boolean).join(" ").trim() || trainer.name || null)
+        : null;
+      const trainerContact = trainer?.telegram || trainer?.instagram_handle || null;
+      return {
+        ...r,
+        group_name: r.group_name || group?.name || null,
+        trainer_name: r.trainer_name || trainerName,
+        trainer_email: r.trainer_email || trainerContact,
+        trainer_display: r.trainer_display || trainerName || trainerContact || null,
+      };
+    });
+    return res.status(200).json({ success: true, rows: enriched });
   }
 
   if (req.method === "POST") {
@@ -253,14 +299,9 @@ const handleScheduleRules = async (req, res) => {
 
     if (action === "delete") {
       if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
-      const { data, error } = await supabase
-        .from("notification_schedule_rules")
-        .update({ enabled: false, updated_at: new Date().toISOString() })
-        .eq("id", ruleId)
-        .select("*")
-        .single();
-      if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
-      return res.status(200).json({ success: true, mode: "disabled", row: data });
+      const { error } = await supabase.from("notification_schedule_rules").delete().eq("id", ruleId);
+      if (error) return res.status(500).json({ error: "Failed to delete schedule rule", details: String(error.message || error) });
+      return res.status(200).json({ success: true, mode: "deleted", id: ruleId });
     }
 
     if (ruleId) {
@@ -308,14 +349,9 @@ const handleScheduleRules = async (req, res) => {
   if (req.method === "DELETE") {
     const ruleId = String(req.query?.id || req.body?.id || "").trim();
     if (!ruleId) return res.status(400).json({ error: "id is required for delete" });
-    const { data, error } = await supabase
-      .from("notification_schedule_rules")
-      .update({ enabled: false, updated_at: new Date().toISOString() })
-      .eq("id", ruleId)
-      .select("*")
-      .single();
-    if (error) return res.status(500).json({ error: "Failed to disable schedule rule", details: String(error.message || error) });
-    return res.status(200).json({ success: true, mode: "disabled", row: data });
+    const { error } = await supabase.from("notification_schedule_rules").delete().eq("id", ruleId);
+    if (error) return res.status(500).json({ error: "Failed to delete schedule rule", details: String(error.message || error) });
+    return res.status(200).json({ success: true, mode: "deleted", id: ruleId });
   }
 
   return res.status(405).json({ error: "Method not allowed" });
