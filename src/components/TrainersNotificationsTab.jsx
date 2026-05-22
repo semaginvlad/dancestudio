@@ -29,6 +29,29 @@ export default function TrainersNotificationsTab({
   const [testResult, setTestResult] = useState("");
   const [scheduleDraftByGroup, setScheduleDraftByGroup] = useState({});
   const generatedTextByChatGroupRef = useRef({});
+  const [scheduleRules, setScheduleRules] = useState([]);
+  const [scheduleRulesLoading, setScheduleRulesLoading] = useState(false);
+  const [scheduleRulesError, setScheduleRulesError] = useState("");
+  const [scheduleRuleSaving, setScheduleRuleSaving] = useState(false);
+  const [scheduleRuleFormError, setScheduleRuleFormError] = useState("");
+  const [scheduleRuleFormSuccess, setScheduleRuleFormSuccess] = useState("");
+  const [previewRuleId, setPreviewRuleId] = useState(null);
+  const [legacyManualExpanded, setLegacyManualExpanded] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState(null);
+  const emptyScheduleRuleDraft = {
+    name: "",
+    groupId: "",
+    trainerId: "",
+    channel: "push",
+    daysOfWeek: [],
+    sendTime: "09:00",
+    enabled: true,
+    includeTrial: true,
+    includePaymentIssues: true,
+    includeAttendanceReminder: true,
+    timezone: "Europe/Kyiv",
+  };
+  const [scheduleRuleDraft, setScheduleRuleDraft] = useState(emptyScheduleRuleDraft);
 
   const membershipByStudent = useMemo(
     () =>
@@ -573,10 +596,10 @@ export default function TrainersNotificationsTab({
   const nextSendLabel = selectedPlan?.sendAtLocal || "—";
   const trainingLabel = selectedPlan?.trainingAtLocal || (selectedPlan ? `${selectedPlan.trainingDate} ${selectedPlan.trainingTime}` : "—");
   const schedulerStatusLabel = readiness?.scheduler?.active
-    ? "автовідправка активна"
+    ? "Автозапуск налаштовано"
     : readiness?.ready
-      ? "розклад готовий, тригер відсутній"
-      : "планувальник не налаштований";
+      ? "Автозапуск не налаштований"
+      : "Потрібно перевірити налаштування";
 
   const statusChip = (ok) => ({
     background: ok ? `${theme.success}20` : `${theme.warning}20`,
@@ -654,6 +677,189 @@ export default function TrainersNotificationsTab({
     }
   };
 
+  const scheduleDayOptions = [
+    { value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" },
+    { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 7, label: "Нд" },
+  ];
+  const resetScheduleRuleDraft = () => {
+    setEditingRuleId(null);
+    setScheduleRuleDraft({ ...emptyScheduleRuleDraft });
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+  };
+  const loadScheduleRules = async () => {
+    setScheduleRulesLoading(true);
+    setScheduleRulesError("");
+    try {
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules");
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити правила");
+      setScheduleRules(payload?.rows || payload?.rules || []);
+    } catch (error) {
+      setScheduleRulesError(String(error?.message || error));
+      setScheduleRules([]);
+    } finally {
+      setScheduleRulesLoading(false);
+    }
+  };
+  useEffect(() => { loadScheduleRules(); }, []);
+  const mapRuleToDraft = (rule) => ({
+    name: String(rule?.name || ""),
+    groupId: String(rule?.group_id || ""),
+    trainerId: String(rule?.trainer_id || ""),
+    channel: String(rule?.channel || "push"),
+    daysOfWeek: Array.isArray(rule?.days_of_week) ? rule.days_of_week.map(Number) : [],
+    sendTime: String(rule?.send_time_local || "09:00"),
+    enabled: rule?.enabled !== false,
+    includeTrial: rule?.include_trial_bookings !== false,
+    includePaymentIssues: rule?.include_unpaid_students !== false,
+    includeAttendanceReminder: rule?.include_attendance_reminder !== false,
+    timezone: String(rule?.timezone || "Europe/Kyiv"),
+  });
+  const saveScheduleRule = async (event) => {
+    event?.preventDefault?.();
+    const selectedGroup = groups.find((g) => String(g.id) === String(scheduleRuleDraft.groupId));
+    const resolvedTrainerId = String(scheduleRuleDraft.trainerId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "").trim();
+    if (!scheduleRuleDraft.name.trim()) {
+      setScheduleRuleFormError("Вкажіть назву правила");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.groupId) {
+      setScheduleRuleFormError("Оберіть групу");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!resolvedTrainerId) {
+      setScheduleRuleFormError("У цієї групи не вказаний trainer_id");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!scheduleRuleDraft.sendTime) {
+      setScheduleRuleFormError("Вкажіть час відправки");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    if (!Array.isArray(scheduleRuleDraft.daysOfWeek) || !scheduleRuleDraft.daysOfWeek.length) {
+      setScheduleRuleFormError("Оберіть хоча б один день");
+      setScheduleRuleFormSuccess("");
+      return;
+    }
+    setScheduleRuleFormError("");
+    setScheduleRuleFormSuccess("");
+    setScheduleRuleSaving(true);
+    try {
+      const payload = {
+        name: scheduleRuleDraft.name.trim(),
+        group_id: scheduleRuleDraft.groupId,
+        trainer_id: resolvedTrainerId,
+        channel: scheduleRuleDraft.channel,
+        enabled: !!scheduleRuleDraft.enabled,
+        timezone: scheduleRuleDraft.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        days_of_week: scheduleRuleDraft.daysOfWeek,
+        send_time_local: scheduleRuleDraft.sendTime,
+        include_trial_bookings: !!scheduleRuleDraft.includeTrial,
+        include_unpaid_students: !!scheduleRuleDraft.includePaymentIssues,
+        include_attendance_reminder: !!scheduleRuleDraft.includeAttendanceReminder,
+      };
+      const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+        method: editingRuleId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingRuleId ? { id: editingRuleId, ...payload } : payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося зберегти правило");
+      await loadScheduleRules();
+      resetScheduleRuleDraft();
+      setScheduleRuleFormSuccess("Збережено");
+    } catch (error) {
+      setScheduleRuleFormError(String(error?.message || error));
+      setScheduleRuleFormSuccess("");
+    } finally {
+      setScheduleRuleSaving(false);
+    }
+  };
+  const toggleScheduleRule = async (rule) => {
+    const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: rule.id, enabled: !(rule.enabled !== false) }),
+    });
+    if (res.ok) await loadScheduleRules();
+  };
+  const weekdayLabelByValue = { 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Нд" };
+  const channelLabel = (value) => ({ push: "Push", telegram: "Telegram", both: "Push + Telegram" }[String(value || "").toLowerCase()] || String(value || "Push"));
+  const includeItemsFromRule = (rule) => ([
+    rule?.include_trial_bookings !== false ? "будуть перевірені пробні" : null,
+    rule?.include_unpaid_students !== false ? "будуть перевірені оплати" : null,
+    rule?.include_attendance_reminder !== false ? "буде перевірено відвідування" : null,
+  ].filter(Boolean));
+  const badgeBase = {
+    fontSize: 12,
+    borderRadius: 999,
+    padding: "4px 10px",
+    border: `1px solid ${theme.border}`,
+    fontWeight: 700,
+    lineHeight: 1.25,
+  };
+  const badgeTone = {
+    statusEnabled: { color: "#9FF5C6", background: "#1F5D3A", border: "#2D7B4E" },
+    statusDisabled: { color: "#FFD9A8", background: "#5A4632", border: "#7A6244" },
+    group: { color: "#C9DBFF", background: "#263A63", border: "#355289" },
+    recipient: { color: "#E0D2FF", background: "#3C315E", border: "#55457F" },
+    channelPush: { color: "#CDE3FF", background: "#28466E", border: "#396194" },
+    channelTelegram: { color: "#CDEFFF", background: "#24505E", border: "#337182" },
+    channelBoth: { color: "#E2D3FF", background: "#4A376E", border: "#684C98" },
+    time: { color: "#E5E7EB", background: "#2F3541", border: "#495063" },
+    days: { color: "#D5DBE6", background: "#343B47", border: "#495163" },
+    includeTrial: { color: "#BDF6E8", background: "#1E5B53", border: "#2C7F74" },
+    includePayments: { color: "#FFE0B3", background: "#5E4830", border: "#836444" },
+    includeAttendance: { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" },
+  };
+  const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
+  const fieldStyle = {
+    width: "100%",
+    border: `1px solid ${theme.border}`,
+    borderRadius: 10,
+    background: theme.card,
+    color: theme.textMain,
+    padding: "10px 12px",
+    fontSize: 13,
+    fontWeight: 600,
+  };
+  const findTrainerById = (trainerId) => trainers.find((t) => String(t?.id) === String(trainerId));
+  const trainerDisplayFromId = (trainerId) => {
+    const trainer = findTrainerById(trainerId);
+    const fullName = [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ").trim() || trainer?.name || "";
+    const contact = trainer?.email || trainer?.login || trainer?.telegram || "";
+    if (fullName) return fullName;
+    if (contact) return contact;
+    const raw = String(trainerId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
+  const groupDisplayFromId = (groupId, fallbackName) => {
+    const group = groups.find((g) => String(g?.id) === String(groupId));
+    if (group?.name) return group.name;
+    if (fallbackName) return fallbackName;
+    const raw = String(groupId || "");
+    return raw ? `${raw.slice(0, 8)}…` : "—";
+  };
+  const selectedDialogTrainerIds = resolveDialogTrainerIds(selectedDialog);
+  const selectedDialogTrainerAuthIds = Array.from(new Set(
+    selectedDialogTrainerIds
+      .map((trainerId) => {
+        const trainer = trainers.find((t) => String(t?.id) === String(trainerId));
+        return String(trainer?.authUserId || trainer?.auth_user_id || trainer?.id || "").trim();
+      })
+      .filter(Boolean)
+  ));
+  const visibleScheduleRules = selectedDialogTrainerAuthIds.length
+    ? scheduleRules.filter((rule) => {
+      const ruleTrainerId = String(rule?.trainer_id || "").trim();
+      return selectedDialogTrainerAuthIds.includes(ruleTrainerId);
+    })
+    : scheduleRules;
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
@@ -684,7 +890,8 @@ export default function TrainersNotificationsTab({
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <div>
-              <div style={{ fontWeight: 800, color: theme.textMain }}>Сповіщення / дайджест тренера</div>
+              <div style={{ fontWeight: 800, color: theme.textMain }}>Правила автоматичних сповіщень</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Ці правила самі сформують повідомлення з актуальних даних групи у вибраний день і час.</div>
               <div style={{ fontSize: 12, color: theme.textMuted }}>Повʼязані групи: {digest.groupNames?.length ? digest.groupNames.join(", ") : "—"}</div>
             </div>
             <div style={{ fontSize: 11, color: theme.textMuted, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 8px", background: theme.card }}>Режим планера</div>
@@ -703,29 +910,128 @@ export default function TrainersNotificationsTab({
               <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Наступна відправка</div>
               <div style={{ fontSize: 13, color: theme.textMain, fontWeight: 700, marginTop: 2, overflowWrap: "anywhere" }}>{nextSendLabel}</div>
             </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Адмін лог</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
-                {readiness.adminConfigured ? "готово" : "відсутнє"}
+            <details style={{ gridColumn: "1/-1", border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card }}>
+              <summary style={{ cursor: "pointer", color: theme.textMain, fontSize: 12, fontWeight: 700 }}>Технічний статус</summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Дані готові</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
+                    {readiness.ready ? "так" : "ні"}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Автозапуск</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
+                    {schedulerStatusLabel}
+                  </div>
+                </div>
+                <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 8, background: theme.input }}>
+                  <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Лог сповіщень</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.adminConfigured) }}>
+                    {readiness.adminConfigured ? "налаштовано" : "не налаштовано"}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Сховище</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(readiness.ready) }}>
-                {readiness.ready ? "готово" : "відсутнє"}
-              </div>
-            </div>
-            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 8, background: theme.card, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase" }}>Планувальник</div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-flex", borderRadius: 999, padding: "2px 8px", ...statusChip(!!readiness?.scheduler?.active) }}>
-                {schedulerStatusLabel}
-              </div>
-            </div>
+            </details>
           </div>
         </div>
 
         {!!testResult && <div style={{ fontSize: 12, color: theme.textMuted }}>{testResult}</div>}
-
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила schedule notifications</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
+          <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
+            Текст повідомлення не зберігається вручну. Він має генеруватись автоматично перед відправкою з актуальних даних групи.
+          </div>
+          <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
+            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Назва правила" style={fieldStyle} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+              
+              <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
+                const groupId = e.target.value;
+                const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
+                return { ...p, groupId, trainerId: String(selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
+              })} style={fieldStyle}><option value="">Оберіть групу</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
+              <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", padding: "0 4px" }}>
+                {String(scheduleRuleDraft.trainerId || "").trim() ? "Отримувач: тренер цієї групи" : "У цієї групи не вказаний trainer_id"}
+              </div>
+              <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))} style={fieldStyle}><option value="push">Push</option><option value="telegram">Telegram</option><option value="both">Push + Telegram</option></select>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
+              const active = scheduleRuleDraft.daysOfWeek.includes(d.value);
+              return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#BBD7FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{d.label}</button>;
+            })}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} style={{ ...fieldStyle, width: "fit-content" }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[["enabled", "увімкнено"], ["includeTrial", "пробні"], ["includePaymentIssues", "оплати"], ["includeAttendanceReminder", "нагадати відмітити"]].map(([k, label]) => {
+                  const active = !!scheduleRuleDraft[k];
+                  return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#D7E6FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{label}</button>;
+                })}
+              </div>
+            </div>
+            {!!scheduleRuleFormError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRuleFormError}</div>}
+            {!!scheduleRuleFormSuccess && <div style={{ fontSize: 12, color: theme.success }}>{scheduleRuleFormSuccess}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="submit" disabled={scheduleRuleSaving} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>{editingRuleId ? "Оновити правило" : "Створити правило"}</button>
+              <button type="button" onClick={resetScheduleRuleDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>Очистити</button>
+            </div>
+          </form>
+          {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
+          {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
+          <div style={{ display: "grid", gap: 8 }}>
+            {visibleScheduleRules.map((rule) => {
+              const includeItems = includeItemsFromRule(rule);
+              return (
+                <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 800, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
+                    <span style={{ ...badgeBase, ...((rule.enabled !== false) ? badgeTone.statusEnabled : badgeTone.statusDisabled) }}>
+                      {rule.enabled !== false ? "увімкнено" : "вимкнено"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {groupDisplayFromId(rule.group_id, rule.group_name)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_display || rule.trainer_email || rule.trainer_name || trainerDisplayFromId(rule.trainer_id)}</span>
+                    <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
+                    <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    Це правило автоматично формує повідомлення перед відправкою для обраної групи у вказаний час.
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Включає:</span>
+                    {rule?.include_trial_bookings !== false && <span style={{ ...badgeBase, ...badgeTone.includeTrial }}>пробні</span>}
+                    {rule?.include_unpaid_students !== false && <span style={{ ...badgeBase, ...badgeTone.includePayments }}>оплати</span>}
+                    {rule?.include_attendance_reminder !== false && <span style={{ ...badgeBase, ...badgeTone.includeAttendance }}>відвідування</span>}
+                    {!includeItems.length && <span style={{ ...badgeBase, ...badgeTone.days }}>нічого не включено</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
+                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? "#6E5337" : "#2C6A47", color: "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid #425A80`, borderRadius: 10, background: "#2B3E5B", color: "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {!visibleScheduleRules.length && !scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Для вибраного тренера ще немає правил.</div>}
+          {!!previewRule && (
+            <div style={{ border: `1px solid ${theme.primary}55`, borderRadius: 12, padding: 10, background: `${theme.primary}10`, display: "grid", gap: 6 }}>
+              <div style={{ fontWeight: 700, color: theme.textMain }}>Попередній перегляд: {previewRule.name || `Rule #${previewRule.id}`}</div>
+              {includeItemsFromRule(previewRule).map((item) => <div key={item} style={{ fontSize: 12, color: theme.textMain }}>• {item}</div>)}
+              {!includeItemsFromRule(previewRule).length && <div style={{ fontSize: 12, color: theme.textMuted }}>Немає активних прапорців для перевірки.</div>}
+              <button type="button" onClick={() => setPreviewRuleId(null)} style={{ width: "fit-content", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.card, color: theme.textMain, padding: "4px 8px", cursor: "pointer" }}>Закрити</button>
+            </div>
+          )}
+        </div>
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "grid", gap: 8 }}>
+          <button type="button" onClick={() => setLegacyManualExpanded((v) => !v)} style={{ border: "none", background: "transparent", color: theme.textMain, fontWeight: 800, textAlign: "left", cursor: "pointer", padding: 0 }}>
+            {legacyManualExpanded ? "▾" : "▸"} Стара ручна система. Не оновлює дані автоматично.
+          </button>
+        </div>
+        {legacyManualExpanded && (
+          <>
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: theme.textMain }}>Крок 1: Обери групу</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
@@ -940,6 +1246,8 @@ export default function TrainersNotificationsTab({
             })}
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
