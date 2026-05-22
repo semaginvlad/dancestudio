@@ -253,12 +253,20 @@ const handleScheduleRules = async (req, res) => {
       groupsById = Object.fromEntries((groupsRows || []).map((g) => [String(g.id), g]));
     }
     if (trainerIds.length) {
-      const { data: trainerRows } = await supabase.from("trainers").select("id,firstName,lastName,name,email,telegram,login").in("id", trainerIds);
-      trainersById = Object.fromEntries((trainerRows || []).map((t) => [String(t.id), t]));
+      const { data: trainerRows } = await supabase.from("trainers").select("id,auth_user_id,firstName,lastName,name,email,telegram,login");
+      const rowsSafe = trainerRows || [];
+      const byId = Object.fromEntries(rowsSafe.map((t) => [String(t.id), t]));
+      const byAuthUserId = Object.fromEntries(
+        rowsSafe
+          .filter((t) => t?.auth_user_id)
+          .map((t) => [String(t.auth_user_id), t])
+      );
+      trainersById = { byId, byAuthUserId };
     }
     const enriched = rows.map((r) => {
       const group = groupsById[String(r.group_id)] || null;
-      const trainer = trainersById[String(r.trainer_id)] || null;
+      const trainerKey = String(r.trainer_id || "");
+      const trainer = trainersById?.byAuthUserId?.[trainerKey] || trainersById?.byId?.[trainerKey] || null;
       const trainerName = trainer
         ? ([trainer.firstName || "", trainer.lastName || ""].filter(Boolean).join(" ").trim() || trainer.name || null)
         : null;

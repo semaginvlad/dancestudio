@@ -844,6 +844,21 @@ export default function TrainersNotificationsTab({
     const raw = String(groupId || "");
     return raw ? `${raw.slice(0, 8)}…` : "—";
   };
+  const selectedDialogTrainerIds = resolveDialogTrainerIds(selectedDialog);
+  const selectedDialogTrainerAuthIds = Array.from(new Set(
+    selectedDialogTrainerIds
+      .map((trainerId) => {
+        const trainer = trainers.find((t) => String(t?.id) === String(trainerId));
+        return String(trainer?.authUserId || trainer?.auth_user_id || trainer?.id || "").trim();
+      })
+      .filter(Boolean)
+  ));
+  const visibleScheduleRules = selectedDialogTrainerAuthIds.length
+    ? scheduleRules.filter((rule) => {
+      const ruleTrainerId = String(rule?.trainer_id || "").trim();
+      return selectedDialogTrainerAuthIds.includes(ruleTrainerId);
+    })
+    : scheduleRules;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
@@ -964,7 +979,7 @@ export default function TrainersNotificationsTab({
           {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
           {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
           <div style={{ display: "grid", gap: 8 }}>
-            {scheduleRules.map((rule) => {
+            {visibleScheduleRules.map((rule) => {
               const includeItems = includeItemsFromRule(rule);
               return (
                 <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
@@ -1000,6 +1015,7 @@ export default function TrainersNotificationsTab({
               );
             })}
           </div>
+          {!visibleScheduleRules.length && !scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Для вибраного тренера ще немає правил.</div>}
           {!!previewRule && (
             <div style={{ border: `1px solid ${theme.primary}55`, borderRadius: 12, padding: 10, background: `${theme.primary}10`, display: "grid", gap: 6 }}>
               <div style={{ fontWeight: 700, color: theme.textMain }}>Попередній перегляд: {previewRule.name || `Rule #${previewRule.id}`}</div>
