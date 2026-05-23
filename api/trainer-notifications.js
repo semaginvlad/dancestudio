@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_LOG_CHAT_ID } from "../server/trainer-digest-send.js";
+import { sendTrainerDigestWithAdminLog } from "../server/trainer-digest-send.js";
+import { sendPushToUser } from "../server/push-send.js";
+import { parseTrainerGroupIds, parseTrainerGroups } from "../src/shared/trainerDigest.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,6 +23,61 @@ const readinessError = (res, error) => res.status(503).json({
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
 const VALID_CHANNELS = new Set(["push", "telegram", "both"]);
 const TIME_RE = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
+const DAYS_JS_TO_RULE = { 0: 7, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6 };
+
+const readBearerToken = (req) => {
+  const auth = String(req.headers?.authorization || "").trim();
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || "";
+};
+
+const parseDryRun = (req) => (
+  String(req.query?.dryRun || "").toLowerCase() === "true"
+  || req.body?.dryRun === true
+  || req.body?.dryRun === 1
+  || req.body?.dryRun === "1"
+);
+
+const toLocalTimeParts = (date, timeZone = "Europe/Kyiv") => {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timeZone || "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    weekday: "short",
+  });
+  const parts = formatter.formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+  const minuteKey = `${parts.hour}:${parts.minute}`;
+  const dayJs = new Date(`${dateKey}T00:00:00Z`).getUTCDay();
+  const weekdayRule = DAYS_JS_TO_RULE[dayJs] || 7;
+  return { dateKey, minuteKey, weekdayRule };
+};
+
+const pickChatIdForRule = ({ telegramMetaRows = [], rule, group }) => {
+  const groupId = String(rule?.group_id || "").trim();
+  const groupNameLc = String(group?.name || "").trim().toLowerCase();
+  if (!groupId) return null;
+  for (const meta of telegramMetaRows) {
+    const note = String(meta?.internal_note || "");
+    const parsedGroupIds = parseTrainerGroupIds(note);
+    const parsedGroupNames = parseTrainerGroups(note).map((x) => String(x || "").trim().toLowerCase());
+    const idMatch = parsedGroupIds.includes(groupId);
+    const nameMatch = groupNameLc && parsedGroupNames.includes(groupNameLc);
+    if (idMatch || nameMatch) {
+      const chatId = String(meta?.chat_id || "").trim();
+      if (chatId) return chatId;
+    }
+  }
+  return null;
+};
 
 const parseDaysOfWeek = (value) => {
   if (value == null) return [];
@@ -357,6 +415,259 @@ const handleScheduleRules = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+const handleDispatchScheduleRules = async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET || "";
+  const token = readBearerToken(req);
+  if (!cronSecret || token !== cronSecret) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  const supabase = buildSupabase();
+  const dryRun = parseDryRun(req);
+  const now = new Date();
+  const toleranceMinutes = Math.max(1, Math.min(30, Number(req.query?.toleranceMinutes || req.body?.toleranceMinutes || 10)));
+
+  const { data: rules, error: rulesError } = await supabase
+    .from("notification_schedule_rules")
+    .select("*")
+    .eq("enabled", true);
+  if (rulesError) return res.status(500).json({ ok: false, error: "Failed to load schedule rules", details: String(rulesError?.message || rulesError) });
+
+  const groupIds = Array.from(new Set((rules || []).map((r) => String(r?.group_id || "")).filter(Boolean)));
+  const trainerIds = Array.from(new Set((rules || []).map((r) => String(r?.trainer_id || "")).filter(Boolean)));
+  const [groupsRaw, trainersRaw, trialRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, telegramMetaRaw] = await Promise.all([
+    groupIds.length ? supabase.from("groups").select("id,name").in("id", groupIds) : Promise.resolve({ data: [] }),
+    trainerIds.length ? supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,telegram,instagram_handle").or(`auth_user_id.in.(${trainerIds.join(",")}),id.in.(${trainerIds.join(",")})`) : Promise.resolve({ data: [] }),
+    groupIds.length ? supabase.from("trial_bookings").select("id,name,notes,trial_date,trial_time,status,group_id").in("group_id", groupIds).eq("status", "confirmed") : Promise.resolve({ data: [] }),
+    groupIds.length ? supabase.from("student_groups").select("student_id,group_id").in("group_id", groupIds) : Promise.resolve({ data: [] }),
+    supabase.from("students").select("id,name,first_name,last_name"),
+    groupIds.length ? supabase.from("subscriptions").select("student_id,group_id,end_date,plan_type,start_date,total_trainings,used_trainings").in("group_id", groupIds) : Promise.resolve({ data: [] }),
+    groupIds.length ? supabase.from("attendance").select("id,group_id,date").in("group_id", groupIds) : Promise.resolve({ data: [] }),
+    supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
+  ]);
+
+  const possibleErrors = [groupsRaw, trainersRaw, trialRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, telegramMetaRaw].find((x) => x?.error);
+  if (possibleErrors?.error) return res.status(500).json({ ok: false, error: "Failed to load dispatcher datasets", details: String(possibleErrors.error?.message || possibleErrors.error) });
+
+  const groupsById = Object.fromEntries((groupsRaw.data || []).map((g) => [String(g.id), g]));
+  const telegramMetaRows = telegramMetaRaw.data || [];
+  const trainersByAuth = Object.fromEntries((trainersRaw.data || []).filter((t) => t?.auth_user_id).map((t) => [String(t.auth_user_id), t]));
+  const trainersById = Object.fromEntries((trainersRaw.data || []).map((t) => [String(t.id), t]));
+  const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
+  const trialByGroup = (trialRaw.data || []).reduce((acc, row) => {
+    const key = String(row.group_id || "");
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+  const membershipsByGroup = (studentGroupsRaw.data || []).reduce((acc, row) => {
+    const key = String(row.group_id || "");
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(String(row.student_id || ""));
+    return acc;
+  }, {});
+  const subsByGroup = (subsRaw.data || []).reduce((acc, row) => {
+    const key = String(row.group_id || "");
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+  const attendanceByGroupDate = new Set((attendanceRaw.data || []).map((a) => `${String(a.group_id || "")}:${String(a.date || "")}`));
+
+  const results = [];
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const rule of rules || []) {
+    const timezone = String(rule.timezone || "Europe/Kyiv") || "Europe/Kyiv";
+    const { dateKey, minuteKey, weekdayRule } = toLocalTimeParts(now, timezone);
+    const allowedDays = Array.isArray(rule.days_of_week) ? rule.days_of_week.map(Number) : [];
+    const sendTime = String(rule.send_time_local || "");
+    const [ruleHour, ruleMinute] = sendTime.split(":").map((n) => Number(n));
+    const [nowHour, nowMinute] = minuteKey.split(":").map((n) => Number(n));
+    const delta = Math.abs(((nowHour * 60) + nowMinute) - ((ruleHour * 60) + ruleMinute));
+
+    if (!allowedDays.includes(weekdayRule) || delta > toleranceMinutes) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "not_due", localDate: dateKey, localTime: minuteKey, sendTimeLocal: sendTime, weekdayRule });
+      continue;
+    }
+
+    const runKey = `schedule_rule:${rule.id}:${dateKey}:${sendTime}:${rule.channel}`;
+    const { data: existingRun } = await supabase.from("notification_rule_runs").select("id,status").eq("run_key", runKey).maybeSingle();
+    if (existingRun?.id) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "duplicate", runKey });
+      continue;
+    }
+
+    if (!dryRun) {
+      const { error: runInsertError } = await supabase.from("notification_rule_runs").insert({
+        rule_id: rule.id,
+        run_key: runKey,
+        scheduled_for: now.toISOString(),
+        status: "pending",
+        reason: null,
+        payload_snapshot: {},
+      });
+      if (runInsertError) {
+        skipped += 1;
+        results.push({ ruleId: rule.id, status: "skipped", reason: "run_insert_conflict_or_error", details: String(runInsertError?.message || runInsertError), runKey });
+        continue;
+      }
+    }
+
+    const group = groupsById[String(rule.group_id)] || null;
+    const groupName = String(group?.name || rule.group_id || "—");
+    const trainer = trainersByAuth[String(rule.trainer_id || "")] || trainersById[String(rule.trainer_id || "")] || null;
+    const trainerDisplay = ([trainer?.first_name, trainer?.last_name].filter(Boolean).join(" ").trim() || trainer?.name || null);
+
+    const lines = [`Група ${groupName}`];
+    const ruleTrials = (trialByGroup[String(rule.group_id)] || []).filter((t) => String(t.trial_date || "") === dateKey);
+    if (rule.include_trial_bookings) {
+      if (ruleTrials.length) {
+        lines.push("Пробні:");
+        for (const t of ruleTrials) {
+          const detail = [t.name || "Без імені", t.trial_time || t.trial_date || "", t.notes || ""].filter(Boolean).join(" — ");
+          lines.push(`- ${detail}`);
+        }
+      } else if (dryRun) {
+        lines.push("Пробних немає");
+      }
+    }
+
+    if (rule.include_unpaid_students) {
+      const memberIds = membershipsByGroup[String(rule.group_id)] || [];
+      const subs = subsByGroup[String(rule.group_id)] || [];
+      const noPay = [];
+      for (const studentId of memberIds) {
+        const studentSubs = subs.filter((s) => String(s.student_id || "") === studentId);
+        const hasActivePaidSub = studentSubs.some((s) => {
+          const endDate = String(s.end_date || "");
+          const totalTrainings = Number(s.total_trainings);
+          const usedTrainings = Number(s.used_trainings);
+          const hasRemainingTrainings = Number.isFinite(totalTrainings) && Number.isFinite(usedTrainings)
+            ? usedTrainings < totalTrainings
+            : true;
+          const planType = String(s.plan_type || "").toLowerCase();
+          const isNonSubscriptionPlan = planType === "trial" || planType === "single";
+          return endDate >= dateKey && hasRemainingTrainings && !isNonSubscriptionPlan;
+        });
+        if (!hasActivePaidSub) {
+          const student = studentsById[studentId];
+          const studentName = student?.name || [student?.first_name, student?.last_name].filter(Boolean).join(" ").trim() || studentId;
+          noPay.push(studentName);
+        }
+      }
+      if (noPay.length) {
+        lines.push("Немає оплат у:");
+        noPay.forEach((n) => lines.push(`- ${n}`));
+      }
+    }
+
+    if (rule.include_attendance_reminder) {
+      const attendanceKey = `${String(rule.group_id)}:${dateKey}`;
+      if (!attendanceByGroupDate.has(attendanceKey)) {
+        lines.push(`Нагадування: відміть відвідування по групі ${groupName}`);
+      }
+    }
+
+    const messageTemplate = String(rule.message_template || "").trim();
+    if (messageTemplate) lines.push("", messageTemplate);
+    const messageText = lines.join("\n").trim();
+
+    if (dryRun) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "dry-run", runKey, groupName, trainerDisplay, channel: rule.channel, messageText });
+      continue;
+    }
+
+    let pushResult = null;
+    let tgResult = null;
+    let runStatus = "sent";
+    let runReason = null;
+
+    try {
+      if (rule.channel === "push" || rule.channel === "both") {
+        pushResult = await sendPushToUser({
+          supabase,
+          targetUserId: rule.trainer_id,
+          payload: {
+            title: `Нагадування • ${groupName}`,
+            body: messageText.slice(0, 400),
+            url: "/",
+          },
+        });
+        if (!pushResult?.sent) {
+          runStatus = "skipped";
+          runReason = "push_not_delivered";
+        }
+      }
+
+      if (rule.channel === "telegram" || rule.channel === "both") {
+        const chatId = pickChatIdForRule({ telegramMetaRows, rule, group });
+        if (!chatId) {
+          if (runStatus !== "failed") runStatus = "skipped";
+          runReason = runReason || "telegram_chat_not_found";
+        } else {
+          tgResult = await sendTrainerDigestWithAdminLog({
+            peer: chatId,
+            message: messageText,
+            chatTitle: trainerDisplay || chatId,
+            groupNames: [groupName],
+            studentsCount: 0,
+            triggerType: "schedule_rule",
+          });
+          if (!tgResult?.deliveredToTarget) {
+            runStatus = "failed";
+            runReason = "telegram_send_not_confirmed";
+          }
+        }
+      }
+    } catch (error) {
+      runStatus = "failed";
+      runReason = String(error?.message || error);
+    }
+
+    await supabase
+      .from("notification_rule_runs")
+      .update({
+        status: runStatus,
+        reason: runReason,
+        payload_snapshot: { messageText, pushResult, tgResult, channel: rule.channel, groupName },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("run_key", runKey);
+
+    if (runStatus === "sent") sent += 1;
+    else if (runStatus === "failed") failed += 1;
+    else skipped += 1;
+
+    results.push({
+      ruleId: rule.id,
+      runKey,
+      status: runStatus,
+      reason: runReason,
+      channel: rule.channel,
+      groupName,
+      trainer: trainerDisplay || rule.trainer_id,
+      push: pushResult,
+      telegram: tgResult ? { deliveredToTarget: !!tgResult.deliveredToTarget, adminLogStatus: tgResult.adminLogStatus } : null,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    dryRun,
+    checked: (rules || []).length,
+    sent,
+    skipped,
+    failed,
+    results,
+  });
+};
+
 export default async function handler(req, res) {
   const op = getOp(req);
   try {
@@ -364,7 +675,8 @@ export default async function handler(req, res) {
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
     if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules"] });
+    if (req.method === "POST" && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
