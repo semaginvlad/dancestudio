@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_LOG_CHAT_ID } from "../server/trainer-digest-send.js";
+import { withTelegramClient, resolveTelegramPeer } from "../server/telegram-user-client.js";
+import { sendPushToUser } from "../server/push-send.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -233,6 +235,270 @@ const handleHistory = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+
+
+const isDryRunFlag = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const parseToleranceMinutes = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 10;
+  return Math.min(180, Math.max(0, Math.floor(num)));
+};
+
+const getLocalDateParts = (timezone = "Europe/Kyiv", now = new Date()) => {
+  const dayParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone || "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const y = dayParts.find((x) => x.type === "year")?.value || "1970";
+  const m = dayParts.find((x) => x.type === "month")?.value || "01";
+  const d = dayParts.find((x) => x.type === "day")?.value || "01";
+  return `${y}-${m}-${d}`;
+};
+
+const getLocalWeekdayAndTime = (timezone = "Europe/Kyiv", now = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone || "Europe/Kyiv",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const weekdayMap = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  const weekday = weekdayMap[parts.find((x) => x.type === "weekday")?.value] || null;
+  const hour = parts.find((x) => x.type === "hour")?.value || "00";
+  const minute = parts.find((x) => x.type === "minute")?.value || "00";
+  return { weekday, hhmm: `${hour}:${minute}` };
+};
+
+const toMinutes = (hhmm) => {
+  const [h, m] = String(hhmm || "").split(":").map((n) => Number(n));
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return null;
+  return h * 60 + m;
+};
+
+const isDueByTolerance = (currentHhmm, scheduledHhmm, toleranceMinutes) => {
+  const current = toMinutes(currentHhmm);
+  const scheduled = toMinutes(scheduledHhmm);
+  if (current == null || scheduled == null) return false;
+  return current >= scheduled && current <= (scheduled + toleranceMinutes);
+};
+
+const hasActiveSubscription = (sub, localDate) => {
+  const planType = String(sub?.plan_type || "").trim().toLowerCase();
+  if (!planType || planType === "trial" || planType === "single") return false;
+  if (!sub?.end_date || String(sub.end_date) < localDate) return false;
+  const total = sub?.total_trainings == null ? null : Number(sub.total_trainings);
+  const used = sub?.used_trainings == null ? null : Number(sub.used_trainings);
+  if (Number.isFinite(total) && Number.isFinite(used)) return used < total;
+  return true;
+};
+
+const buildRuleMessage = ({ rule, groupName, trialRows, unpaidStudents, hasAttendance, dryRun }) => {
+  const lines = [];
+  if (rule.include_trial_bookings && (trialRows || []).length) {
+    lines.push("Пробні підтверджені:");
+    for (const t of trialRows) {
+      const trialNote = t.note || "";
+      lines.push(`- ${t.name || "Без імені"} (${t.trial_date || ""})${trialNote ? ` — ${trialNote}` : ""}`.trim());
+    }
+  }
+
+  if (rule.include_unpaid_students) {
+    if ((unpaidStudents || []).length) {
+      lines.push(`Група ${groupName}:`);
+      lines.push("Немає оплат у:");
+      for (const name of unpaidStudents) lines.push(`- ${name}`);
+    } else if (dryRun) {
+      lines.push("Немає проблем з оплатами");
+    }
+  }
+
+  if (rule.include_attendance_reminder && !hasAttendance) {
+    lines.push(`Нагадування: відміть відвідування по групі ${groupName}`);
+  }
+
+  const extra = String(rule.message_template || "").trim();
+  if (extra) lines.push(extra);
+  return lines.join("\n").trim();
+};
+
+const resolveTrainerTelegramChatId = (rule, trainerRows, telegramMetaRows) => {
+  const trainerKey = String(rule.trainer_id || "").trim();
+  if (!trainerKey) return null;
+  const trainer = (trainerRows || []).find((t) => String(t.auth_user_id || t.id || "") === trainerKey || String(t.id || "") === trainerKey);
+  if (!trainer) return null;
+  const patterns = [String(trainer.id || ""), String(trainer.auth_user_id || "")].filter(Boolean);
+  const match = (telegramMetaRows || []).find((m) => {
+    const note = String(m.internal_note || "");
+    return patterns.some((k) => note.includes(k));
+  });
+  return match?.chat_id ? String(match.chat_id) : null;
+};
+
+const handleDispatchScheduleRules = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const secret = process.env.CRON_SECRET || "";
+  const auth = String(req.headers?.authorization || "");
+  if (!secret || auth !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+
+  const dryRun = isDryRunFlag(req.query?.dryRun ?? req.body?.dryRun);
+  const toleranceMinutes = parseToleranceMinutes(req.query?.toleranceMinutes ?? req.body?.toleranceMinutes);
+  const now = new Date();
+  const supabase = buildSupabase();
+
+  const [rulesRaw, groupsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, runsRaw, trainersRaw, tgMetaRaw] = await Promise.all([
+    supabase.from("notification_schedule_rules").select("*").eq("enabled", true),
+    supabase.from("groups").select("id,name"),
+    supabase.from("trial_bookings").select("id,group_id,name,note,trial_date,status"),
+    supabase.from("student_groups").select("student_id,group_id"),
+    supabase.from("students").select("id,name,first_name,last_name"),
+    supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
+    supabase.from("attendance").select("id,group_id,date"),
+    supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
+    supabase.from("trainers").select("id,auth_user_id"),
+    supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
+  ]);
+
+  const firstErr = [rulesRaw, groupsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, runsRaw, trainersRaw, tgMetaRaw].find((r) => r.error);
+  if (firstErr?.error) return res.status(500).json({ error: "Failed to load dispatch data", details: String(firstErr.error.message || firstErr.error) });
+
+  const groupsById = Object.fromEntries((groupsRaw.data || []).map((g) => [String(g.id), g]));
+  const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
+  const existingRunKeys = new Set((runsRaw.data || []).map((r) => String(r.run_key || "")).filter(Boolean));
+
+  const results = [];
+  let checked = 0;
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const rule of (rulesRaw.data || [])) {
+    checked += 1;
+    const timezone = String(rule.timezone || "Europe/Kyiv").trim() || "Europe/Kyiv";
+    const { weekday, hhmm } = getLocalWeekdayAndTime(timezone, now);
+    const localDate = getLocalDateParts(timezone, now);
+
+    if (!Array.isArray(rule.days_of_week) || !rule.days_of_week.includes(weekday)) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "weekday_mismatch", timezone, weekday, localDate });
+      continue;
+    }
+
+    if (!isDueByTolerance(hhmm, rule.send_time_local, toleranceMinutes)) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "time_window_mismatch", timezone, hhmm, send_time_local: rule.send_time_local, toleranceMinutes });
+      continue;
+    }
+
+    const channel = String(rule.channel || "push");
+    const runKey = `schedule_rule:${rule.id}:${localDate}:${rule.send_time_local}:${channel}`;
+    if (existingRunKeys.has(runKey)) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "dedup", runKey });
+      continue;
+    }
+
+    const groupId = String(rule.group_id || "");
+    const groupName = groupsById[groupId]?.name || groupId;
+    const trials = (trialsRaw.data || []).filter((t) => String(t.group_id || "") === groupId && String(t.status || "") === "confirmed" && String(t.trial_date || "") === localDate);
+    const groupStudents = (studentGroupsRaw.data || []).filter((row) => String(row.group_id || "") === groupId);
+    const studentIds = groupStudents.map((r) => String(r.student_id || "")).filter(Boolean);
+    const groupSubs = (subsRaw.data || []).filter((s) => String(s.group_id || "") === groupId);
+    const unpaidStudents = studentIds.filter((studentId) => !groupSubs.some((sub) => String(sub.student_id || "") === studentId && hasActiveSubscription(sub, localDate))).map((studentId) => {
+      const st = studentsById[studentId] || {};
+      return String(st.name || [st.first_name, st.last_name].filter(Boolean).join(" ") || studentId);
+    });
+    const attendanceRows = (attendanceRaw.data || []).filter((a) => String(a.group_id || "") === groupId && String(a.date || "") === localDate);
+    const messageText = buildRuleMessage({ rule, groupName, trialRows: trials, unpaidStudents, hasAttendance: attendanceRows.length > 0, dryRun });
+
+    if (!messageText) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "empty_message", runKey });
+      continue;
+    }
+
+    if (dryRun) {
+      results.push({ ruleId: rule.id, status: "dry-run", runKey, messageText });
+      continue;
+    }
+
+    const scheduledFor = `${localDate} ${rule.send_time_local}`;
+    const { data: runInserted, error: insertErr } = await supabase
+      .from("notification_rule_runs")
+      .insert({ rule_id: rule.id, run_key: runKey, scheduled_for: scheduledFor, status: "pending", reason: null, payload_snapshot: { messageText, channel, groupName }, updated_at: new Date().toISOString() })
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      failed += 1;
+      results.push({ ruleId: rule.id, status: "failed", reason: "run_insert_failed", details: String(insertErr.message || insertErr) });
+      continue;
+    }
+
+    let pushResult = null;
+    let telegramResult = null;
+    let finalStatus = "sent";
+    let reason = null;
+
+    try {
+      if (channel === "push" || channel === "both") {
+        if (!rule.trainer_id) {
+          pushResult = { sent: 0, failed: 0, reason: "missing_trainer_id" };
+          finalStatus = "skipped";
+          reason = "missing_trainer_id";
+        } else {
+          pushResult = await sendPushToUser({ supabase, targetUserId: String(rule.trainer_id), payload: { title: "Нагадування тренеру", body: messageText, data: { ruleId: String(rule.id) } } });
+          if (Number(pushResult?.sent || 0) <= 0) {
+            finalStatus = "failed";
+            reason = "push_not_sent";
+          }
+        }
+      }
+
+      if ((channel === "telegram" || channel === "both") && finalStatus !== "failed") {
+        const chatId = resolveTrainerTelegramChatId(rule, trainersRaw.data || [], tgMetaRaw.data || []);
+        if (!chatId) {
+          telegramResult = { sent: 0, reason: "missing_chat_id" };
+          if (channel === "telegram") {
+            finalStatus = "skipped";
+            reason = "missing_chat_id";
+          }
+        } else {
+          await withTelegramClient(async (client) => {
+            const entity = await resolveTelegramPeer(client, { chatId, context: "dispatch-schedule-rules" });
+            await client.sendMessage(entity, { message: messageText });
+          });
+          telegramResult = { sent: 1, chatId };
+        }
+      }
+    } catch (dispatchErr) {
+      finalStatus = "failed";
+      reason = String(dispatchErr?.message || dispatchErr);
+    }
+
+    const snapshot = { messageText, channel, groupName, pushResult, telegramResult };
+    await supabase.from("notification_rule_runs").update({ status: finalStatus, reason, payload_snapshot: snapshot, updated_at: new Date().toISOString() }).eq("id", runInserted.id);
+
+    if (finalStatus === "sent") sent += 1;
+    else if (finalStatus === "failed") failed += 1;
+    else skipped += 1;
+
+    existingRunKeys.add(runKey);
+    results.push({ ruleId: rule.id, status: finalStatus, runKey, reason, pushResult, telegramResult });
+  }
+
+  return res.status(200).json({ ok: true, dryRun, checked, sent, skipped, failed, results });
+};
+
+
 const handleScheduleRules = async (req, res) => {
   const supabase = buildSupabase();
 
@@ -364,7 +630,8 @@ export default async function handler(req, res) {
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
     if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules"] });
+    if (req.method === "POST" && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
