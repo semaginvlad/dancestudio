@@ -444,7 +444,20 @@ const handleDispatchScheduleRules = async (req, res) => {
     }
 
     if (dryRun) {
-      results.push({ ruleId: rule.id, status: "dry-run", runKey, messageText });
+      const telegramTarget = (channel === "telegram" || channel === "both")
+        ? resolveTrainerTelegramTarget(rule, trainersRaw.data || [], tgMetaRaw.data || [])
+        : null;
+      results.push({
+        ruleId: rule.id,
+        status: "dry-run",
+        runKey,
+        messageText,
+        telegramTargetSource: telegramTarget?.telegramTargetSource || null,
+        telegramTarget: telegramTarget?.chatId || null,
+        telegramReason: telegramTarget?.telegramReason || null,
+        trainerFound: telegramTarget?.trainerFound ?? null,
+        trainerTelegram: telegramTarget?.trainerTelegram ?? null,
+      });
       continue;
     }
 
