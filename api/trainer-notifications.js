@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_LOG_CHAT_ID } from "../server/trainer-digest-send.js";
+import { withTelegramClient, resolveTelegramPeer } from "../server/telegram-user-client.js";
+import { sendPushToUser } from "../server/push-send.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -233,6 +235,151 @@ const handleHistory = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+const isDryRunFlag = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const getLocalDateParts = (timezone = "Europe/Kyiv", now = new Date()) => {
+  const dayParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone || "Europe/Kyiv",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const y = dayParts.find((x) => x.type === "year")?.value || "1970";
+  const m = dayParts.find((x) => x.type === "month")?.value || "01";
+  const d = dayParts.find((x) => x.type === "day")?.value || "01";
+  return `${y}-${m}-${d}`;
+};
+
+const resolveTelegramTarget = (rule, trainerRows, telegramMetaRows) => {
+  const trainerKey = String(rule.trainer_id || "").trim();
+  if (!trainerKey) return { target: null, source: "missing", reason: "missing_trainer_id" };
+  const trainer = (trainerRows || []).find((t) => String(t.auth_user_id || t.id || "") === trainerKey || String(t.id || "") === trainerKey);
+  if (!trainer) return { target: null, source: "missing", reason: "trainer_not_found" };
+
+  const patterns = [String(trainer.id || ""), String(trainer.auth_user_id || "")].filter(Boolean);
+  const metaMatch = (telegramMetaRows || []).find((m) => {
+    const note = String(m.internal_note || "");
+    return patterns.some((k) => note.includes(k));
+  });
+  if (metaMatch?.chat_id) return { target: String(metaMatch.chat_id), source: "telegram_chat_meta", reason: null };
+
+  const fallbackRaw = String(trainer.telegram || "").trim();
+  if (!fallbackRaw) return { target: null, source: "missing", reason: "telegram_chat_id_not_resolved" };
+  return { target: fallbackRaw, source: "trainers.telegram", reason: null };
+};
+
+const handleDispatchScheduleRules = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const secret = process.env.CRON_SECRET || "";
+  const auth = String(req.headers?.authorization || "");
+  if (!secret || auth !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+
+  const dryRun = isDryRunFlag(req.query?.dryRun ?? req.body?.dryRun);
+  const now = new Date();
+  const supabase = buildSupabase();
+  const [rulesRaw, trainersRaw, tgMetaRaw] = await Promise.all([
+    supabase.from("notification_schedule_rules").select("*").eq("enabled", true),
+    supabase.from("trainers").select("id,auth_user_id,telegram"),
+    supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
+  ]);
+  const firstErr = [rulesRaw, trainersRaw, tgMetaRaw].find((r) => r.error);
+  if (firstErr?.error) return res.status(500).json({ error: "Failed to load dispatch data", details: String(firstErr.error.message || firstErr.error) });
+
+  const results = [];
+  for (const rule of (rulesRaw.data || [])) {
+    const channel = String(rule.channel || "push").toLowerCase();
+    const localDate = getLocalDateParts(String(rule.timezone || "Europe/Kyiv"), now);
+    const runKey = `schedule_rule:${rule.id}:${localDate}:${rule.send_time_local}:${channel}`;
+
+    const tg = resolveTelegramTarget(rule, trainersRaw.data || [], tgMetaRaw.data || []);
+
+    if (dryRun) {
+      results.push({
+        ruleId: rule.id,
+        status: "dry-run",
+        channel,
+        runKey,
+        telegramTargetSource: tg.source,
+        telegramTarget: tg.target,
+        telegramReason: tg.reason || null,
+      });
+      continue;
+    }
+
+    let pushResult = null;
+    let telegramResult = null;
+    let status = "sent";
+    let reason = null;
+
+    if (channel === "push" || channel === "both") {
+      if (!rule.trainer_id) {
+        pushResult = { sent: 0, reason: "missing_trainer_id" };
+      } else {
+        pushResult = await sendPushToUser({
+          supabase,
+          targetUserId: String(rule.trainer_id),
+          payload: { title: "Нагадування тренеру", body: String(rule.message_template || "Нагадування"), data: { ruleId: String(rule.id) } },
+        });
+      }
+    }
+
+    if (channel === "telegram" || channel === "both") {
+      if (!tg.target) {
+        telegramResult = { status: "skipped", reason: tg.reason || "missing_telegram_target" };
+        if (channel === "telegram") {
+          status = "skipped";
+          reason = "missing_telegram_target";
+        }
+      } else {
+        const isNumeric = /^-?\d+$/.test(String(tg.target));
+        if (tg.source === "trainers.telegram" && !isNumeric && !String(tg.target).startsWith("@")) {
+          telegramResult = { status: "skipped", reason: "telegram_username_not_resolved", target: tg.target };
+          if (channel === "telegram") {
+            status = "skipped";
+            reason = "missing_telegram_target";
+          }
+        } else {
+          try {
+            await withTelegramClient(async (client) => {
+              const entity = await resolveTelegramPeer(client, { chatId: tg.target, context: "dispatch-schedule-rules" });
+              await client.sendMessage(entity, { message: String(rule.message_template || "Нагадування") });
+            });
+            telegramResult = { status: "sent", target: tg.target };
+          } catch (e) {
+            telegramResult = { status: "failed", reason: String(e?.message || e), target: tg.target };
+            if (channel === "telegram") {
+              status = "failed";
+              reason = "telegram_send_failed";
+            } else {
+              status = Number(pushResult?.sent || 0) > 0 ? "sent" : "failed";
+              reason = Number(pushResult?.sent || 0) > 0 ? "telegram_failed_push_sent" : "telegram_and_push_failed";
+            }
+          }
+        }
+      }
+    }
+
+    results.push({
+      ruleId: rule.id,
+      status,
+      reason,
+      channel,
+      runKey,
+      pushResult,
+      telegramResult,
+      telegramTargetSource: tg.source,
+      telegramTarget: tg.target,
+    });
+  }
+
+  return res.status(200).json({ ok: true, dryRun, checked: results.length, results });
+};
+
 const handleScheduleRules = async (req, res) => {
   const supabase = buildSupabase();
 
@@ -364,7 +511,8 @@ export default async function handler(req, res) {
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
     if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules"] });
+    if (req.method === "POST" && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"] });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
