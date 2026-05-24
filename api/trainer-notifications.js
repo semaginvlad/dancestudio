@@ -330,25 +330,35 @@ const buildRuleMessage = ({ rule, groupName, trialRows, unpaidStudents, hasAtten
   return lines.join("\n").trim();
 };
 
-const resolveTrainerTelegramChatId = (rule, trainerRows, telegramMetaRows) => {
+const resolveTrainerTelegramTarget = (rule, trainerRows, telegramMetaRows) => {
   const trainerKey = String(rule.trainer_id || "").trim();
-  if (!trainerKey) return null;
+  if (!trainerKey) return { chatId: null, telegramTargetSource: "missing_trainer_id", telegramReason: "missing_trainer_id", trainerFound: false, trainerTelegram: null };
+
   const trainer = (trainerRows || []).find((t) => String(t.auth_user_id || t.id || "") === trainerKey || String(t.id || "") === trainerKey);
-  if (!trainer) return null;
+  if (!trainer) return { chatId: null, telegramTargetSource: "not_found", telegramReason: "trainer_not_found", trainerFound: false, trainerTelegram: null };
+
+  const trainerTelegram = trainer.telegram ?? null;
   const patterns = [String(trainer.id || ""), String(trainer.auth_user_id || "")].filter(Boolean);
   const match = (telegramMetaRows || []).find((m) => {
     const note = String(m.internal_note || "");
     return patterns.some((k) => note.includes(k));
   });
-  if (match?.chat_id) return String(match.chat_id);
+  if (match?.chat_id) {
+    return { chatId: String(match.chat_id), telegramTargetSource: "telegram_chat_meta", telegramReason: null, trainerFound: true, trainerTelegram };
+  }
 
-  const trainerTelegram = trainer.telegram;
-  if (typeof trainerTelegram === "string" && trainerTelegram.trim()) return trainerTelegram.trim();
+  if (typeof trainerTelegram === "string" && trainerTelegram.trim()) {
+    return { chatId: trainerTelegram.trim(), telegramTargetSource: "trainers.telegram", telegramReason: "fallback_trainers_telegram", trainerFound: true, trainerTelegram };
+  }
+
   if (trainerTelegram && typeof trainerTelegram === "object") {
     const chatId = trainerTelegram.chat_id ?? trainerTelegram.chatId ?? trainerTelegram.id;
-    if (chatId != null && String(chatId).trim()) return String(chatId).trim();
+    if (chatId != null && String(chatId).trim()) {
+      return { chatId: String(chatId).trim(), telegramTargetSource: "trainers.telegram", telegramReason: "fallback_trainers_telegram", trainerFound: true, trainerTelegram };
+    }
   }
-  return null;
+
+  return { chatId: null, telegramTargetSource: "none", telegramReason: "missing_chat_id", trainerFound: true, trainerTelegram };
 };
 
 const handleDispatchScheduleRules = async (req, res) => {
@@ -472,19 +482,19 @@ const handleDispatchScheduleRules = async (req, res) => {
       }
 
       if ((channel === "telegram" || channel === "both") && finalStatus !== "failed") {
-        const chatId = resolveTrainerTelegramChatId(rule, trainersRaw.data || [], tgMetaRaw.data || []);
-        if (!chatId) {
-          telegramResult = { sent: 0, reason: "missing_chat_id" };
+        const telegramTarget = resolveTrainerTelegramTarget(rule, trainersRaw.data || [], tgMetaRaw.data || []);
+        if (!telegramTarget.chatId) {
+          telegramResult = { sent: 0, reason: "missing_chat_id", telegramTargetSource: telegramTarget.telegramTargetSource, telegramTarget: null, telegramReason: telegramTarget.telegramReason, trainerFound: telegramTarget.trainerFound, trainerTelegram: telegramTarget.trainerTelegram };
           if (channel === "telegram") {
             finalStatus = "skipped";
             reason = "missing_chat_id";
           }
         } else {
           await withTelegramClient(async (client) => {
-            const entity = await resolveTelegramPeer(client, { chatId, context: "dispatch-schedule-rules" });
+            const entity = await resolveTelegramPeer(client, { chatId: telegramTarget.chatId, context: "dispatch-schedule-rules" });
             await client.sendMessage(entity, { message: messageText });
           });
-          telegramResult = { sent: 1, chatId };
+          telegramResult = { sent: 1, chatId: telegramTarget.chatId, telegramTargetSource: telegramTarget.telegramTargetSource, telegramTarget: telegramTarget.chatId, telegramReason: telegramTarget.telegramReason, trainerFound: telegramTarget.trainerFound, trainerTelegram: telegramTarget.trainerTelegram };
         }
       }
     } catch (dispatchErr) {
