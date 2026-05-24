@@ -340,7 +340,15 @@ const resolveTrainerTelegramChatId = (rule, trainerRows, telegramMetaRows) => {
     const note = String(m.internal_note || "");
     return patterns.some((k) => note.includes(k));
   });
-  return match?.chat_id ? String(match.chat_id) : null;
+  if (match?.chat_id) return String(match.chat_id);
+
+  const trainerTelegram = trainer.telegram;
+  if (typeof trainerTelegram === "string" && trainerTelegram.trim()) return trainerTelegram.trim();
+  if (trainerTelegram && typeof trainerTelegram === "object") {
+    const chatId = trainerTelegram.chat_id ?? trainerTelegram.chatId ?? trainerTelegram.id;
+    if (chatId != null && String(chatId).trim()) return String(chatId).trim();
+  }
+  return null;
 };
 
 const handleDispatchScheduleRules = async (req, res) => {
@@ -363,7 +371,7 @@ const handleDispatchScheduleRules = async (req, res) => {
     supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
     supabase.from("attendance").select("id,group_id,date"),
     supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
-    supabase.from("trainers").select("id,auth_user_id"),
+    supabase.from("trainers").select("id,auth_user_id,telegram"),
     supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
   ]);
 
