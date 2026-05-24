@@ -1390,7 +1390,7 @@ export default function App() {
               <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, minWidth: "max-content" }}>
               <button type="button" onClick={() => setTrainersSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "trainers" ? theme.primary : "transparent", color: trainersSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Тренери</button>
               <button type="button" onClick={() => setTrainersSubtab("groups")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "groups" ? theme.primary : "transparent", color: trainersSubtab === "groups" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Групи</button>
-              <button type="button" onClick={() => setTrainersSubtab("notifications")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "notifications" ? theme.primary : "transparent", color: trainersSubtab === "notifications" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сповіщення</button>
+              <button type="button" onClick={() => setTrainersSubtab("notifications")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "notifications" ? theme.primary : "transparent", color: trainersSubtab === "notifications" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Автоматизація</button>
               </div>
             </div>
             )}
