@@ -798,6 +798,7 @@ export default function TrainersNotificationsTab({
     rule?.include_unpaid_students !== false ? "будуть перевірені оплати" : null,
     rule?.include_attendance_reminder !== false ? "буде перевірено відвідування" : null,
   ].filter(Boolean));
+  const isLightTheme = String(theme.background || "").toLowerCase() === "#ffffff" || String(theme.background || "").toLowerCase() === "#fff";
   const badgeBase = {
     fontSize: 12,
     borderRadius: 999,
@@ -806,19 +807,20 @@ export default function TrainersNotificationsTab({
     fontWeight: 700,
     lineHeight: 1.25,
   };
+  const tone = (light, dark) => (isLightTheme ? light : dark);
   const badgeTone = {
-    statusEnabled: { color: "#9FF5C6", background: "#1F5D3A", border: "#2D7B4E" },
-    statusDisabled: { color: "#FFD9A8", background: "#5A4632", border: "#7A6244" },
-    group: { color: "#C9DBFF", background: "#263A63", border: "#355289" },
-    recipient: { color: "#E0D2FF", background: "#3C315E", border: "#55457F" },
-    channelPush: { color: "#CDE3FF", background: "#28466E", border: "#396194" },
-    channelTelegram: { color: "#CDEFFF", background: "#24505E", border: "#337182" },
-    channelBoth: { color: "#E2D3FF", background: "#4A376E", border: "#684C98" },
-    time: { color: "#E5E7EB", background: "#2F3541", border: "#495063" },
-    days: { color: "#D5DBE6", background: "#343B47", border: "#495163" },
-    includeTrial: { color: "#BDF6E8", background: "#1E5B53", border: "#2C7F74" },
-    includePayments: { color: "#FFE0B3", background: "#5E4830", border: "#836444" },
-    includeAttendance: { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" },
+    statusEnabled: tone({ color: "#14532D", background: "#DCFCE7", border: "#4ADE80" }, { color: "#9FF5C6", background: "#1F5D3A", border: "#2D7B4E" }),
+    statusDisabled: tone({ color: "#7C2D12", background: "#FFEDD5", border: "#FB923C" }, { color: "#FFD9A8", background: "#5A4632", border: "#7A6244" }),
+    group: tone({ color: "#1E3A8A", background: "#DBEAFE", border: "#60A5FA" }, { color: "#C9DBFF", background: "#263A63", border: "#355289" }),
+    recipient: tone({ color: "#581C87", background: "#F3E8FF", border: "#C084FC" }, { color: "#E0D2FF", background: "#3C315E", border: "#55457F" }),
+    channelPush: tone({ color: "#1E3A8A", background: "#E0ECFF", border: "#7AA2FF" }, { color: "#CDE3FF", background: "#28466E", border: "#396194" }),
+    channelTelegram: tone({ color: "#155E75", background: "#CFFAFE", border: "#22D3EE" }, { color: "#CDEFFF", background: "#24505E", border: "#337182" }),
+    channelBoth: tone({ color: "#6B21A8", background: "#F3E8FF", border: "#C084FC" }, { color: "#E2D3FF", background: "#4A376E", border: "#684C98" }),
+    time: tone({ color: "#1F2937", background: "#E5E7EB", border: "#9CA3AF" }, { color: "#E5E7EB", background: "#2F3541", border: "#495063" }),
+    days: tone({ color: "#374151", background: "#F3F4F6", border: "#9CA3AF" }, { color: "#D5DBE6", background: "#343B47", border: "#495163" }),
+    includeTrial: tone({ color: "#0F766E", background: "#CCFBF1", border: "#2DD4BF" }, { color: "#BDF6E8", background: "#1E5B53", border: "#2C7F74" }),
+    includePayments: tone({ color: "#92400E", background: "#FEF3C7", border: "#F59E0B" }, { color: "#FFE0B3", background: "#5E4830", border: "#836444" }),
+    includeAttendance: tone({ color: "#1D4ED8", background: "#DBEAFE", border: "#60A5FA" }, { color: "#CFE0FF", background: "#2B466F", border: "#3E6399" }),
   };
   const previewRule = scheduleRules.find((r) => String(r.id) === String(previewRuleId)) || null;
   const fieldStyle = {
@@ -926,7 +928,7 @@ export default function TrainersNotificationsTab({
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
               const active = scheduleRuleDraft.daysOfWeek.includes(d.value);
-              return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#BBD7FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{d.label}</button>;
+              return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? (isLightTheme ? "#1D4ED8" : "#BBD7FF") : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{d.label}</button>;
             })}</div>
             <div style={{ display: "grid", gap: 8 }}>
               <input type="time" value={scheduleRuleDraft.sendTime} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, sendTime: e.target.value }))} style={{ ...fieldStyle, width: "fit-content" }} />
@@ -938,7 +940,7 @@ export default function TrainersNotificationsTab({
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[["enabled", "увімкнено"], ["includeTrial", "пробні"], ["includePaymentIssues", "оплати"], ["includeAttendanceReminder", "нагадати відмітити"]].map(([k, label]) => {
                   const active = !!scheduleRuleDraft[k];
-                  return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? "#D7E6FF" : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{label}</button>;
+                  return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 999, background: active ? `${theme.primary}22` : theme.input, color: active ? (isLightTheme ? "#1D4ED8" : "#D7E6FF") : theme.textMuted, padding: "7px 11px", fontWeight: 700, cursor: "pointer" }}>{label}</button>;
                 })}
               </div>
             </div>
@@ -997,8 +999,8 @@ export default function TrainersNotificationsTab({
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
-                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: "none", borderRadius: 10, background: rule.enabled !== false ? "#6E5337" : "#2C6A47", color: "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
-                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid #425A80`, borderRadius: 10, background: "#2B3E5B", color: "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: `1px solid ${rule.enabled !== false ? (isLightTheme ? "#F59E0B" : "transparent") : (isLightTheme ? "#22C55E" : "transparent")}`, borderRadius: 10, background: rule.enabled !== false ? (isLightTheme ? "#FDE68A" : "#6E5337") : (isLightTheme ? "#BBF7D0" : "#2C6A47"), color: isLightTheme ? "#111827" : "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${isLightTheme ? "#60A5FA" : "#425A80"}`, borderRadius: 10, background: isLightTheme ? "#DBEAFE" : "#2B3E5B", color: isLightTheme ? "#1E3A8A" : "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
                                       <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await fetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
                   </div>
                 </div>
