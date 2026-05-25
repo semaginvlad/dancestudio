@@ -11,5 +11,11 @@
       "sizes": "180x180",
       "type": "image/png"
     }
+  ],
+  "id": "/",
+  "scope": "/",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
   ]
 }

@@ -2,7 +2,7 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -15,72 +15,51 @@
     
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      
-      html, body { 
-        background: #F8F9FD; 
-        color: #1F1F1F; 
+
+      :root {
+        --safe-area-top: env(safe-area-inset-top, 0px);
+        --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-area-left: env(safe-area-inset-left, 0px);
+        --safe-area-right: env(safe-area-inset-right, 0px);
+      }
+
+      html, body, #root {
         width: 100%;
-        overflow-x: hidden !important; 
+        min-width: 0;
+        min-height: 100%;
+      }
+
+      html, body {
+        background: #F8F9FD;
+        color: #1F1F1F;
+        overflow-x: hidden;
         position: relative;
       }
-      
-      #root {
-        width: 100%;
-        overflow-x: hidden !important;
+
+      body {
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0.08);
       }
 
-      /* МОБІЛЬНА АДАПТАЦІЯ */
+      #root {
+        overflow-x: hidden;
+      }
+
+      button,
+      [role="button"],
+      input,
+      select,
+      textarea,
+      summary,
+      a {
+        touch-action: manipulation;
+      }
+
       @media (max-width: 768px) {
-        
-        html, body {
-          zoom: 0.75; 
-          width: 133.33% !important; 
-        }
-
-        header {
-          padding-top: max(40px, env(safe-area-inset-top)) !important;
-          flex-direction: column !important;
-          align-items: flex-start !important;
-          gap: 12px !important;
-        }
-        
-        input, select, textarea {
-          min-width: 0 !important;
-          max-width: 100% !important;
-          width: 100% !important;
-          font-size: 16px !important; 
-        }
-
-        /* Згортаємо горизонтальні блоки в колонки */
-        main > div > div[style*="display: flex"] {
-          flex-direction: column !important;
-          align-items: stretch !important;
-        }
-
-        /* 🟢 ФІКС ОБРІЗАНОГО СПИСКУ АБОНЕМЕНТІВ: 
-           Скидаємо жорстку висоту, яку браузер брав із flex-basis, 
-           щоб список міг тягнутися вниз на всі 100% свого вмісту */
-        main > div > div[style*="display: flex"] > div {
-          flex-basis: auto !important;
-          max-width: 100% !important;
-        }
-
-        /* Фікс колонки з іменами в таблиці */
-        th:first-child, td:first-child {
-          min-width: 160px !important; 
-          padding: 10px 12px !important;
-          font-size: 13px !important;
-          white-space: nowrap !important; 
-        }
-
-        td:first-child > div {
-          white-space: nowrap !important;
-          flex-wrap: nowrap !important;
-        }
-
-        nav button {
-          padding: 10px 16px !important;
-          font-size: 13px !important;
+        input,
+        select,
+        textarea {
+          font-size: 16px;
         }
       }
     </style>
