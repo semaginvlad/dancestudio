@@ -71,7 +71,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
   const [startDate, setStartDate] = useState(initial?.startDate || today());
   const [amount, setAmount] = useState(initial?.amount || 1500);
-  const [paid, setPaid] = useState(initial?.paid ?? false);
+  const [paid] = useState(initial?.paid ?? true);
   const [payMethod, setPayMethod] = useState(initial?.payMethod || "card");
   const [discountPct, setDiscountPct] = useState(Number(initial?.discountPct || 0));
   const [discountSource, setDiscountSource] = useState(initial?.discountSource || "studio");
@@ -237,10 +237,6 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
               </Field>
             </div>
             {discountSource && Number(discountPct) === 0 && <div style={{ fontSize: 12, color: theme.warning, marginTop: 8 }}>⚠ Обрано сторону знижки, але знижка % = 0. Перевірте, чи потрібно вказати знижку.</div>}
-            <label style={{ display: "flex", alignItems: "center", gap: 12, color: theme.textMain, cursor: "pointer", fontSize: 16, fontWeight: 600, margin: "12px 0", background: theme.input, padding: "16px 20px", borderRadius: 16 }}>
-              <input type="checkbox" checked={paid} onChange={e => setPaid(e.target.checked)} style={{ width: 22, height: 22 }} />
-              Оплачено
-            </label>
             <Field label="Нотатки"><textarea style={{ ...inputSt, height: "auto", padding: "16px 20px", minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} /></Field>
           </div>
         )}
@@ -285,7 +281,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
             activationDate: selectedActivationDate,
             totalTrainings: selectedTotalTrainings,
             usedTrainings: selectedUsedTrainings,
-            amount, paid, payMethod, discountPct, discountSource,
+            amount, paid: initial?.id ? paid : true, payMethod, discountPct, discountSource,
             basePrice, notes,
             notificationSent: initial?.notificationSent || false
           });
