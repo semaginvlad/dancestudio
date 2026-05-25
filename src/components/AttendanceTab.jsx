@@ -2313,8 +2313,12 @@ export default function AttendanceTab({
           .attendance-root {
             gap: 10px !important;
           }
-          .attendance-root .attendance-table-wrap {
-            margin: 0 7px !important;
+          .attendance-root .attendance-table-wrap,
+          .attendance-root .attendance-add-panel {
+            width: calc(100vw - 8px) !important;
+            margin-left: calc(50% - 50vw + 4px) !important;
+            margin-right: calc(50% - 50vw + 4px) !important;
+            box-sizing: border-box !important;
           }
 
           .attendance-toolbar {
@@ -2503,6 +2507,7 @@ export default function AttendanceTab({
             background: ${theme.bg === "#0F131A" ? "rgba(30,41,59,0.5)" : "rgba(255,255,255,0.82)"} !important;
             backdrop-filter: blur(6px) !important;
             padding: 8px !important;
+            overflow: hidden !important;
           }
           .attendance-root .attendance-add-mode-row {
             display: grid !important;
@@ -2514,6 +2519,13 @@ export default function AttendanceTab({
             height: 34px !important;
             min-height: 34px !important;
             border-radius: 999px !important;
+          }
+          .attendance-root .attendance-add-controls {
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls > div,
+          .attendance-root .attendance-add-controls > form {
+            width: 100% !important;
           }
 
           .attendance-root .attendance-student-name {
@@ -3150,91 +3162,88 @@ export default function AttendanceTab({
               ))}
             </tr>
 
-            <tr>
-              <td colSpan={visibleDays.length + 1} style={{ padding: 8, background: "transparent" }}>
-                <div className="attendance-add-panel">
-                <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
-                <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
-                  {addMode === "student" ? (
-                    <div style={{ display: "grid", gap: 5, width: "100%" }}>
-                      <div style={{ display: "flex", gap: 6, width: "100%" }}>
-                        <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
-                      </div>
-                      {normalizeName(newStudentName).length >= 2 && (
-                        <div style={{ display: "grid", gap: 5, padding: 7, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
-                          {existingStudentMatches.length ? existingStudentMatches.map((match) => {
-                            const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
-                            return (
-                              <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
-                                <div style={{ minWidth: 140 }}>
-                                  <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{match.displayName}</div>
-                                  {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
-                                </div>
-                                {match.isLinkedToCurrentGroup ? (
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Вже є в цій групі</span>
-                                ) : match.canRestoreToCurrentGroup ? (
-                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleRestoreStudentToGroup(match.student.id)} disabled={restoringStudent}>Відновити</button>
-                                ) : (
-                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleAddExistingStudentToGroup(match.student)} disabled={addingExistingStudentId === String(match.student.id)}>Додати в цю групу</button>
-                                )}
-                              </div>
-                            );
-                          }) : (
-                            <div style={{ fontSize: 11, color: theme.textMuted }}>Схожих учениць не знайдено — можна створити нову.</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ) : addMode === "restore" ? (
-                    restoreCandidates.length ? (
-                      <>
-                        <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
-                          <option value="">Вибери ученицю</option>
-                          {restoreCandidates.map(({ student, hasHistory }) => (
-                            <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
-                          ))}
-                        </select>
-                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
-                      </>
-                    ) : (
-                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
-                    )
-                  ) : (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleCreateGuestAttendance();
-                      }}
-                      style={{ display: "flex", gap: 6, width: "100%" }}
-                    >
-                      <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                      <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
-                        <option value="trial">Пробне</option>
-                        <option value="single">Разове</option>
-                      </select>
-                      <button
-                        type="submit"
-                        className="attendance-add-action"
-                        style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                        disabled={creatingGuest || !gid}
-                      >
-                        Додати
-                      </button>
-                    </form>
-                  )}
-                </div>
-                </div>
-              </td>
-            </tr>
           </tbody>
         </table>
+      </div>
+
+      <div className="attendance-add-panel">
+        <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
+        <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
+          {addMode === "student" ? (
+            <div style={{ display: "grid", gap: 5, width: "100%" }}>
+              <div style={{ display: "flex", gap: 6, width: "100%" }}>
+                <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+                <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
+              </div>
+              {normalizeName(newStudentName).length >= 2 && (
+                <div style={{ display: "grid", gap: 5, padding: 7, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
+                  {existingStudentMatches.length ? existingStudentMatches.map((match) => {
+                    const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
+                    return (
+                      <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
+                        <div style={{ minWidth: 140 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{match.displayName}</div>
+                          {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
+                        </div>
+                        {match.isLinkedToCurrentGroup ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Вже є в цій групі</span>
+                        ) : match.canRestoreToCurrentGroup ? (
+                          <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleRestoreStudentToGroup(match.student.id)} disabled={restoringStudent}>Відновити</button>
+                        ) : (
+                          <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleAddExistingStudentToGroup(match.student)} disabled={addingExistingStudentId === String(match.student.id)}>Додати в цю групу</button>
+                        )}
+                      </div>
+                    );
+                  }) : (
+                    <div style={{ fontSize: 11, color: theme.textMuted }}>Схожих учениць не знайдено — можна створити нову.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : addMode === "restore" ? (
+            restoreCandidates.length ? (
+              <>
+                <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
+                  <option value="">Вибери ученицю</option>
+                  {restoreCandidates.map(({ student, hasHistory }) => (
+                    <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
+                  ))}
+                </select>
+                <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
+              </>
+            ) : (
+              <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
+            )
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleCreateGuestAttendance();
+              }}
+              style={{ display: "flex", gap: 6, width: "100%" }}
+            >
+              <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+              <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
+                <option value="trial">Пробне</option>
+                <option value="single">Разове</option>
+              </select>
+              <button
+                type="submit"
+                className="attendance-add-action"
+                style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                disabled={creatingGuest || !gid}
+              >
+                Додати
+              </button>
+            </form>
+          )}
+        </div>
       </div>
 
       {trialPopoverState && createPortal(
