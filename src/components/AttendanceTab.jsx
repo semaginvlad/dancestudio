@@ -491,6 +491,12 @@ const makeStyles = () => {
     background: isDark ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.09)",
     boxShadow: `inset 0 1px 0 ${theme.border}`,
   },
+  totalsSubRow: {
+    background: isDark ? "rgba(148,163,184,0.04)" : "rgba(148,163,184,0.05)",
+    boxShadow: `inset 0 1px 0 ${isDark ? "rgba(148,163,184,0.16)" : "rgba(148,163,184,0.14)"}`,
+    fontSize: 11,
+    color: theme.textMuted,
+  },
   emptyState: {
     padding: 18,
     border: `1px dashed ${theme.border}`,
@@ -2244,7 +2250,7 @@ export default function AttendanceTab({
 
   const totalsByDate = visibleDays.reduce((acc, dateStr) => {
     if (isCancelledDate(dateStr)) {
-      acc[dateStr] = { total: 0, removed: 0 };
+      acc[dateStr] = { total: 0, outsideRoster: 0 };
       return acc;
     }
 
@@ -2253,14 +2259,14 @@ export default function AttendanceTab({
     );
 
     const total = records.reduce((sum, a) => sum + (a.quantity || 1), 0);
-    const removed = records.reduce((sum, a) => {
+    const outsideRoster = records.reduce((sum, a) => {
       const resolvedStudentId = a.studentId || subsById[a.subId]?.studentId || null;
       if (!resolvedStudentId) return sum;
       if (groupStudentIdSet.has(String(resolvedStudentId))) return sum;
       return sum + (a.quantity || 1);
     }, 0);
 
-    acc[dateStr] = { total, removed };
+    acc[dateStr] = { total, outsideRoster };
     return acc;
   }, {});
 
@@ -3141,14 +3147,27 @@ export default function AttendanceTab({
                     color: theme.textMain,
                   }}
                 >
-                  <div style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
-                    <span>{totalsByDate[dateStr]?.total || 0}</span>
-                    {!!totalsByDate[dateStr]?.removed && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted }}>
-                        (+{totalsByDate[dateStr].removed} видал.)
-                      </span>
-                    )}
-                  </div>
+                  <span>{totalsByDate[dateStr]?.total || 0}</span>
+                </td>
+              ))}
+            </tr>
+
+            <tr style={styles.totalsSubRow}>
+              <td className="attendance-row-head" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsSubRow }}>Поза списком:</td>
+              {visibleDays.map((dateStr) => (
+                <td
+                  key={`outside_${dateStr}`}
+                  className="attendance-day-cell"
+                  style={{
+                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                    ...styles.totalsSubRow,
+                  }}
+                >
+                  {!!totalsByDate[dateStr]?.outsideRoster && (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted }}>
+                      +{totalsByDate[dateStr].outsideRoster}
+                    </span>
+                  )}
                 </td>
               ))}
             </tr>
