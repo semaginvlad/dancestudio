@@ -2313,6 +2313,9 @@ export default function AttendanceTab({
           .attendance-root {
             gap: 10px !important;
           }
+          .attendance-root .attendance-table-wrap {
+            margin: 0 7px !important;
+          }
 
           .attendance-toolbar {
             align-items: stretch !important;
@@ -2342,9 +2345,9 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 152px !important;
-            min-width: 152px !important;
-            max-width: 152px !important;
+            width: 142px !important;
+            min-width: 142px !important;
+            max-width: 142px !important;
             padding: 2px 5px !important;
             font-size: 12px !important;
             vertical-align: middle !important;
@@ -2429,9 +2432,9 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-day-head,
           .attendance-root .attendance-day-cell {
-            width: 42px !important;
-            min-width: 42px !important;
-            max-width: 42px !important;
+            width: 39px !important;
+            min-width: 39px !important;
+            max-width: 39px !important;
           }
 
           .attendance-root .attendance-day-head {
@@ -2442,17 +2445,17 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-day-cell {
-            height: 54px !important;
-            min-height: 54px !important;
-            max-height: 54px !important;
+            height: 49px !important;
+            min-height: 49px !important;
+            max-height: 49px !important;
             padding: 0 !important;
             text-align: center !important;
             vertical-align: middle !important;
           }
 
           .attendance-root .attendance-cell-shell {
-            width: 36px !important;
-            height: 36px !important;
+            width: 33px !important;
+            height: 33px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -2463,11 +2466,11 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-cell-button {
-            min-width: 34px !important;
-            min-height: 34px !important;
-            font-size: 15px !important;
-            width: 34px !important;
-            height: 34px !important;
+            min-width: 31px !important;
+            min-height: 31px !important;
+            font-size: 14px !important;
+            width: 31px !important;
+            height: 31px !important;
             border-radius: 999px !important;
             display: flex !important;
             align-items: center !important;
@@ -2484,6 +2487,33 @@ export default function AttendanceTab({
             background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
             backdrop-filter: blur(6px) saturate(125%) !important;
             border-radius: 14px !important;
+          }
+          .attendance-root .attendance-totals-label,
+          .attendance-root .attendance-totals-cell {
+            height: 40px !important;
+            min-height: 40px !important;
+            max-height: 40px !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+          }
+          .attendance-root .attendance-add-panel {
+            margin-top: 8px !important;
+            border-radius: 12px !important;
+            border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.26)" : "rgba(148,163,184,0.3)"} !important;
+            background: ${theme.bg === "#0F131A" ? "rgba(30,41,59,0.5)" : "rgba(255,255,255,0.82)"} !important;
+            backdrop-filter: blur(6px) !important;
+            padding: 8px !important;
+          }
+          .attendance-root .attendance-add-mode-row {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 6px !important;
+          }
+          .attendance-root .attendance-add-mode-btn {
+            height: 34px !important;
+            min-height: 34px !important;
+            border-radius: 999px !important;
           }
 
           .attendance-root .attendance-student-name {
@@ -3084,9 +3114,46 @@ export default function AttendanceTab({
               </tr>
             )}
 
+            <tr style={styles.totalsRow}>
+              <td className="attendance-row-head attendance-totals-label" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
+              {visibleDays.map((dateStr) => (
+                <td
+                  key={`total_${dateStr}`}
+                  className="attendance-day-cell attendance-totals-cell"
+                  style={{
+                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                    ...styles.totalsRow,
+                    fontWeight: 700,
+                    color: theme.textMain,
+                  }}
+                >
+                  <span>{totalsByDate[dateStr]?.total || 0}</span>
+                </td>
+              ))}
+            </tr>
+            <tr style={styles.totalsRow}>
+              <td className="attendance-row-head attendance-totals-label" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Поза списком:</td>
+              {visibleDays.map((dateStr) => (
+                <td
+                  key={`off_roster_${dateStr}`}
+                  className="attendance-day-cell attendance-totals-cell"
+                  style={{
+                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
+                    ...styles.totalsRow,
+                    fontWeight: 600,
+                    color: theme.textMuted,
+                    fontSize: 12,
+                  }}
+                >
+                  {!!totalsByDate[dateStr]?.offRoster && <span>+{totalsByDate[dateStr].offRoster}</span>}
+                </td>
+              ))}
+            </tr>
+
             <tr>
-              <td className="attendance-row-head" style={styles.rowHead}>
-                <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+              <td colSpan={visibleDays.length + 1} style={{ padding: 8, background: "transparent" }}>
+                <div className="attendance-add-panel">
+                <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
                   <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
                   <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
                   <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
@@ -3163,44 +3230,8 @@ export default function AttendanceTab({
                     </form>
                   )}
                 </div>
+                </div>
               </td>
-              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: theme.input }} />
-            </tr>
-
-            <tr style={styles.totalsRow}>
-              <td className="attendance-row-head" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
-              {visibleDays.map((dateStr) => (
-                <td
-                  key={`total_${dateStr}`}
-                  className="attendance-day-cell"
-                  style={{
-                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
-                    ...styles.totalsRow,
-                    fontWeight: 700,
-                    color: theme.textMain,
-                  }}
-                >
-                  <span>{totalsByDate[dateStr]?.total || 0}</span>
-                </td>
-              ))}
-            </tr>
-            <tr style={styles.totalsRow}>
-              <td className="attendance-row-head" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Поза списком:</td>
-              {visibleDays.map((dateStr) => (
-                <td
-                  key={`off_roster_${dateStr}`}
-                  className="attendance-day-cell"
-                  style={{
-                    ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
-                    ...styles.totalsRow,
-                    fontWeight: 600,
-                    color: theme.textMuted,
-                    fontSize: 12,
-                  }}
-                >
-                  {!!totalsByDate[dateStr]?.offRoster && <span>+{totalsByDate[dateStr].offRoster}</span>}
-                </td>
-              ))}
             </tr>
           </tbody>
         </table>
