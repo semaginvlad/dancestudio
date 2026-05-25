@@ -1317,11 +1317,11 @@ export default function App() {
           <div className="mobile-more-wrap" style={{display:"none", position:"relative"}}>
             <button type="button" style={{...btnS, padding:"8px 10px", fontSize:12}} onClick={(e) => { e.stopPropagation(); setMoreMenuOpen((v) => !v); }}>Ще ▾</button>
             {moreMenuOpen && (
-              <div onClick={(e) => e.stopPropagation()} style={{position:"absolute", right:0, top:"calc(100% + 8px)", zIndex:30, minWidth:190, background: theme.card, border:`1px solid ${theme.border}`, borderRadius:12, boxShadow:"0 10px 24px rgba(0,0,0,0.18)", padding:8, display:"flex", flexDirection:"column", gap:6}}>
-                <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
-                <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
-                <button type="button" style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
-                <button type="button" style={{...btnS, padding:"10px 12px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід</button>
+              <div onClick={(e) => e.stopPropagation()} style={{position:"absolute", right:0, top:"calc(100% + 8px)", zIndex:30, minWidth:176, background: theme.card, border:`1px solid ${theme.border}`, borderRadius:12, boxShadow:"0 10px 24px rgba(0,0,0,0.18)", padding:7, display:"flex", flexDirection:"column", gap:5}}>
+                <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
+                <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
+                <button type="button" style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
+                <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід</button>
               </div>
             )}
           </div>

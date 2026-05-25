@@ -2346,10 +2346,10 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 160px !important;
-            min-width: 160px !important;
-            max-width: 160px !important;
-            padding: 4px 10px !important;
+            width: 158px !important;
+            min-width: 158px !important;
+            max-width: 158px !important;
+            padding: 3px 6px !important;
             font-size: 13px !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
@@ -2359,7 +2359,7 @@ export default function AttendanceTab({
             width: 100% !important;
             max-width: 100% !important;
             min-width: 0 !important;
-            min-height: 52px !important;
+            min-height: 50px !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: center !important;
@@ -2374,16 +2374,21 @@ export default function AttendanceTab({
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            gap: 8px !important;
+            gap: 4px !important;
             box-sizing: border-box !important;
           }
 
           .attendance-root .attendance-student-name {
             min-width: 0 !important;
             flex: 1 1 auto !important;
+            line-height: 1.15 !important;
+            max-height: 2.3em !important;
             overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            white-space: normal !important;
+            text-wrap: balance !important;
           }
 
           .attendance-root .attendance-student-meta {
@@ -2392,7 +2397,7 @@ export default function AttendanceTab({
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             white-space: nowrap !important;
-            margin-top: 4px !important;
+            margin-top: 2px !important;
           }
 
           .attendance-root .attendance-student-menu-wrap {
@@ -2431,13 +2436,13 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-student-name {
-            font-size: 14px !important;
-            line-height: 1.2 !important;
+            font-size: 13px !important;
+            line-height: 1.15 !important;
           }
 
           .attendance-root .attendance-student-meta {
             font-size: 11px !important;
-            line-height: 1.25 !important;
+            line-height: 1.15 !important;
           }
 
           .attendance-mobile-hint {
@@ -2463,10 +2468,11 @@ export default function AttendanceTab({
           }
 
           .attendance-menu-btn {
-            width: 26px !important;
-            height: 26px !important;
-            line-height: 24px !important;
-            font-size: 14px !important;
+            width: 22px !important;
+            height: 22px !important;
+            line-height: 20px !important;
+            font-size: 12px !important;
+            border-radius: 7px !important;
           }
 
           .attendance-add-mode-btn,
