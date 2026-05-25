@@ -1070,7 +1070,9 @@ export default function App() {
     }
     for (const groupId of desiredIds) {
       if (!currentIds.has(String(groupId))) {
-        const link = await db.restoreStudentToGroup(groupId, studentId);
+        const link = db.addStudentGroup
+          ? await db.addStudentGroup(studentId, groupId)
+          : await db.restoreStudentToGroup(groupId, studentId);
         addedLinks.push(link || { id: uid(), studentId, groupId });
       }
     }

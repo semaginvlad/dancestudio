@@ -95,6 +95,12 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
+  const isEditingExisting = Boolean(initial?.id);
+  const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
+  const selectablePlanTypes = PLAN_TYPES.filter((p) => ["4pack", "8pack", "12pack"].includes(p.id));
+  const visiblePlanTypes = isEditingExisting && isLegacyPlanType
+    ? [PLAN_TYPES.find((p) => p.id === planType), ...selectablePlanTypes].filter(Boolean)
+    : selectablePlanTypes;
   const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? (plan?.price || 0)));
 
   // 🆕 Обчислюємо дату закінчення залежно від активації
@@ -135,10 +141,33 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
       <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
       <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
       <Field label="Тип Абонемента">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}` }}>
-          {PLAN_TYPES.map(p => (
-            <Pill key={p.id} active={planType === p.id} onClick={() => setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+          {visiblePlanTypes.map((p) => {
+            const isActive = planType === p.id;
+            const isLegacyOption = !["4pack", "8pack", "12pack"].includes(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPlanType(p.id)}
+                style={{
+                  border: `1px solid ${isActive ? theme.primary : theme.border}`,
+                  background: isActive ? `${theme.primary}15` : theme.card,
+                  borderRadius: 16,
+                  padding: "12px 10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  minHeight: 88,
+                }}
+              >
+                <div style={{ fontSize: 28, lineHeight: 1, fontWeight: 800, color: isActive ? theme.primary : theme.textMain }}>
+                  {String(p.trainings || "").replace(/[^\d]/g, "") || "•"}
+                </div>
+                <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{isLegacyOption ? p.name : "заняття"}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: theme.textMain }}>{p.price}₴</div>
+              </button>
+            );
+          })}
         </div>
       </Field>
 
