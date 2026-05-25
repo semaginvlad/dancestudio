@@ -2350,9 +2350,9 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 142px !important;
-            min-width: 142px !important;
-            max-width: 142px !important;
+            width: 182px !important;
+            min-width: 182px !important;
+            max-width: 182px !important;
             padding: 2px 5px !important;
             font-size: 12px !important;
             vertical-align: middle !important;
