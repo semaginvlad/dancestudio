@@ -1,4 +1,3 @@
-// test preview deploy
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
@@ -2347,11 +2346,11 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 320px !important;
-            min-width: 320px !important;
-            max-width: 320px !important;
+            width: 160px !important;
+            min-width: 160px !important;
+            max-width: 160px !important;
             padding: 4px 10px !important;
-            font-size: 14px !important;
+            font-size: 13px !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
           }
@@ -2409,35 +2408,35 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-day-head,
           .attendance-root .attendance-day-cell {
-            width: 60px !important;
-            min-width: 60px !important;
-            max-width: 60px !important;
+            width: 44px !important;
+            min-width: 44px !important;
+            max-width: 44px !important;
           }
 
           .attendance-root .attendance-day-cell {
-            height: 60px !important;
-            min-height: 60px !important;
-            max-height: 60px !important;
+            height: 58px !important;
+            min-height: 58px !important;
+            max-height: 58px !important;
           }
 
           .attendance-root .attendance-cell-shell {
-            width: 52px !important;
-            height: 52px !important;
+            width: 40px !important;
+            height: 40px !important;
           }
 
           .attendance-root .attendance-cell-button {
-            min-width: 48px !important;
-            min-height: 48px !important;
-            font-size: 20px !important;
+            min-width: 38px !important;
+            min-height: 38px !important;
+            font-size: 16px !important;
           }
 
           .attendance-root .attendance-student-name {
-            font-size: 18px !important;
+            font-size: 14px !important;
             line-height: 1.2 !important;
           }
 
           .attendance-root .attendance-student-meta {
-            font-size: 13px !important;
+            font-size: 11px !important;
             line-height: 1.25 !important;
           }
 
@@ -2457,17 +2456,17 @@ export default function AttendanceTab({
           }
 
           .attendance-day-cancel {
-            width: 44px !important;
-            height: 44px !important;
-            line-height: 42px !important;
-            font-size: 18px !important;
+            width: 28px !important;
+            height: 28px !important;
+            line-height: 26px !important;
+            font-size: 14px !important;
           }
 
           .attendance-menu-btn {
-            width: 48px !important;
-            height: 48px !important;
-            line-height: 46px !important;
-            font-size: 20px !important;
+            width: 26px !important;
+            height: 26px !important;
+            line-height: 24px !important;
+            font-size: 14px !important;
           }
 
           .attendance-add-mode-btn,

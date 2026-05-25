@@ -29,58 +29,9 @@
         overflow-x: hidden !important;
       }
 
-      /* МОБІЛЬНА АДАПТАЦІЯ */
       @media (max-width: 768px) {
-        
-        html, body {
-          zoom: 0.75; 
-          width: 133.33% !important; 
-        }
-
-        header {
-          padding-top: max(40px, env(safe-area-inset-top)) !important;
-          flex-direction: column !important;
-          align-items: flex-start !important;
-          gap: 12px !important;
-        }
-        
         input, select, textarea {
-          min-width: 0 !important;
-          max-width: 100% !important;
-          width: 100% !important;
-          font-size: 16px !important; 
-        }
-
-        /* Згортаємо горизонтальні блоки в колонки */
-        main > div > div[style*="display: flex"] {
-          flex-direction: column !important;
-          align-items: stretch !important;
-        }
-
-        /* 🟢 ФІКС ОБРІЗАНОГО СПИСКУ АБОНЕМЕНТІВ: 
-           Скидаємо жорстку висоту, яку браузер брав із flex-basis, 
-           щоб список міг тягнутися вниз на всі 100% свого вмісту */
-        main > div > div[style*="display: flex"] > div {
-          flex-basis: auto !important;
-          max-width: 100% !important;
-        }
-
-        /* Фікс колонки з іменами в таблиці */
-        th:first-child, td:first-child {
-          min-width: 160px !important; 
-          padding: 10px 12px !important;
-          font-size: 13px !important;
-          white-space: nowrap !important; 
-        }
-
-        td:first-child > div {
-          white-space: nowrap !important;
-          flex-wrap: nowrap !important;
-        }
-
-        nav button {
-          padding: 10px 16px !important;
-          font-size: 13px !important;
+          font-size: 16px !important;
         }
       }
     </style>

@@ -72,6 +72,7 @@ export default function App() {
   const [pushInfo, setPushInfo] = useState("");
   const [testPushBusy, setTestPushBusy] = useState(false);
   const [testPushInfo, setTestPushInfo] = useState("");
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   const [students, setStudents] = useState([]);
   const [subs, setSubs] = useState([]);
@@ -172,6 +173,12 @@ export default function App() {
       mounted = false;
     };
   }, [user]);
+
+  useEffect(() => {
+    const onDocClick = () => setMoreMenuOpen(false);
+    if (moreMenuOpen) document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [moreMenuOpen]);
 
 
 
@@ -1266,7 +1273,10 @@ export default function App() {
             font-size: 11px !important; 
           }
           th, td { padding: 4px !important; }
-          header { padding: 16px !important; flex-direction: column; gap: 12px; align-items: flex-start !important; }
+          header { padding: 14px 14px 10px !important; flex-direction: row; gap: 8px; align-items: center !important; }
+          .app-brand h1 { font-size: 21px !important; }
+          .mobile-hide { display: none !important; }
+          .mobile-more-wrap { display: block !important; }
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
           .bottom-form input { width: 100% !important; }
           .split-container { flex-direction: column !important; }
@@ -1277,17 +1287,17 @@ export default function App() {
           }
         }
       `}</style>
-      <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
-        <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
+      <header style={{padding:"20px 16px 12px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
+        <div className="app-brand"><h1 style={{margin:0, fontSize:26, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
-          <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
+          <button className="mobile-hide" type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
             {safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
           </button>
           {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
           {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
           {isAdmin && <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
-          <div style={{display:"flex", flexDirection:"column", gap:4, alignItems:"flex-start"}}>
+          <div className="mobile-hide" style={{display:"flex", flexDirection:"column", gap:4, alignItems:"flex-start"}}>
             <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>
               {pushBusy ? "Увімкнення..." : "Увімкнути push"}
             </button>
@@ -1303,7 +1313,18 @@ export default function App() {
             {!!pushInfo && <div style={{fontSize:11, color: pushStatus === PUSH_STATUS.error ? theme.danger : theme.success, maxWidth:260}}>{pushInfo}</div>}
             {!!testPushInfo && <div style={{fontSize:11, color: testPushInfo.startsWith("помилка") ? theme.danger : theme.success, maxWidth:260}}>{testPushInfo}</div>}
           </div>
-          <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
+          <button className="mobile-hide" style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
+          <div className="mobile-more-wrap" style={{display:"none", position:"relative"}}>
+            <button type="button" style={{...btnS, padding:"8px 10px", fontSize:12}} onClick={(e) => { e.stopPropagation(); setMoreMenuOpen((v) => !v); }}>Ще ▾</button>
+            {moreMenuOpen && (
+              <div onClick={(e) => e.stopPropagation()} style={{position:"absolute", right:0, top:"calc(100% + 8px)", zIndex:30, minWidth:190, background: theme.card, border:`1px solid ${theme.border}`, borderRadius:12, boxShadow:"0 10px 24px rgba(0,0,0,0.18)", padding:8, display:"flex", flexDirection:"column", gap:6}}>
+                <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
+                <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
+                <button type="button" style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
+                <button type="button" style={{...btnS, padding:"10px 12px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
