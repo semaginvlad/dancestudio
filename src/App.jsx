@@ -1263,7 +1263,7 @@ export default function App() {
   };
 
   return (
-    <div data-theme-version={themeRenderTick} style={{minHeight:"100vh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: 100}}>
+    <div data-theme-version={themeRenderTick} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
@@ -1273,8 +1273,10 @@ export default function App() {
             font-size: 11px !important; 
           }
           th, td { padding: 4px !important; }
-          header { padding: 14px 14px 10px !important; flex-direction: row; gap: 8px; align-items: center !important; }
-          .app-brand h1 { font-size: 21px !important; }
+          header { padding: calc(14px + env(safe-area-inset-top)) 14px 10px !important; flex-direction: row; gap: 8px; align-items: center !important; }
+          .app-brand h1 { font-size: 18px !important; letter-spacing: -0.3px !important; }
+          .brand-desktop { display: none !important; }
+          .brand-mobile { display: inline !important; }
           .mobile-hide { display: none !important; }
           .mobile-more-wrap { display: block !important; }
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
@@ -1288,7 +1290,7 @@ export default function App() {
         }
       `}</style>
       <header style={{padding:"20px 16px 12px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
-        <div className="app-brand"><h1 style={{margin:0, fontSize:26, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
+        <div className="app-brand"><h1 style={{margin:0, fontSize:26, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}><span className="brand-desktop">Dance Studio.</span><span className="brand-mobile" style={{display:"none"}}>Soroka Dance Studio</span></h1></div>
         <div style={{display:"flex", gap:12, alignItems: 'center'}}>
           <button className="mobile-hide" type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
             {safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}

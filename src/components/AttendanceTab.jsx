@@ -2309,10 +2309,6 @@ export default function AttendanceTab({
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
-        .attendance-mobile-hint {
-          display: none;
-        }
-
         @media (max-width: 768px) {
           .attendance-root {
             gap: 12px !important;
@@ -2454,12 +2450,24 @@ export default function AttendanceTab({
           .attendance-root .attendance-cell-shell {
             width: 40px !important;
             height: 40px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 999px !important;
           }
 
           .attendance-root .attendance-cell-button {
             min-width: 38px !important;
             min-height: 38px !important;
             font-size: 16px !important;
+            width: 38px !important;
+            height: 38px !important;
+            border-radius: 999px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            padding: 0 !important;
           }
 
           .attendance-root .attendance-table-wrap {
@@ -2477,21 +2485,6 @@ export default function AttendanceTab({
           .attendance-root .attendance-student-meta {
             font-size: 11px !important;
             line-height: 1.15 !important;
-          }
-
-          .attendance-mobile-hint {
-            display: inline-flex;
-            align-items: center;
-            align-self: flex-start;
-            gap: 6px;
-            padding: 7px 10px;
-            border: 1px solid rgba(148, 163, 184, 0.28);
-            border-radius: 999px;
-            background: rgba(148, 163, 184, 0.1);
-            color: ${theme.textMuted};
-            font-size: 12px;
-            font-weight: 700;
-            line-height: 1;
           }
 
           .attendance-day-cancel {
@@ -2768,8 +2761,6 @@ export default function AttendanceTab({
         </div>,
         document.body
       )}
-
-      <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>
 
       <div className="attendance-table-wrap" style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
