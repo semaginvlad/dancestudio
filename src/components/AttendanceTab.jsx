@@ -32,6 +32,7 @@ const isVisibleAttendanceStudent = (student) => {
 const makeStyles = () => {
   const isDark = theme.bg === "#0F131A";
   const CELL_SIZE = 47;
+  const STUDENT_COLUMN_WIDTH = 278;
   const matrixBase = isDark ? "#131b26" : theme.card;
   const matrixMuted = isDark ? "#101722" : theme.input;
   const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
@@ -171,9 +172,9 @@ const makeStyles = () => {
     left: 0,
     zIndex: 4,
     background: theme.card,
-    minWidth: 278,
-    maxWidth: 278,
-    width: 278,
+    minWidth: STUDENT_COLUMN_WIDTH,
+    maxWidth: STUDENT_COLUMN_WIDTH,
+    width: STUDENT_COLUMN_WIDTH,
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
     boxShadow: `1px 0 0 ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
   },
@@ -196,7 +197,7 @@ const makeStyles = () => {
     letterSpacing: 0.2,
   }),
   studentHead: {
-    padding: "12px 14px",
+    padding: "13px 16px",
     textAlign: "left",
     fontWeight: 700,
     fontSize: 15,
@@ -253,14 +254,14 @@ const makeStyles = () => {
     background: matrixBase,
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.22)"}`,
     borderBottom: "none",
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
-    padding: "6px 10px",
+    borderTopLeftRadius: 18,
+    borderBottomLeftRadius: 18,
+    padding: "7px 12px",
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.95)",
   },
   profileCard: {
-    borderRadius: 15,
-    padding: "6px 10px",
+    borderRadius: 16,
+    padding: "7px 12px",
     background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.14), rgba(148,163,184,0.06))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.95))",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.25)"}`,
     boxShadow: isDark ? "0 6px 14px rgba(0,0,0,0.24)" : "0 4px 10px rgba(15,23,42,0.08)",
@@ -3200,7 +3201,7 @@ export default function AttendanceTab({
         </table>
       </div>
 
-      <div className="attendance-add-panel" style={{ width: "min(278px, 100%)", alignSelf: "flex-start" }}>
+      <div className="attendance-add-panel" style={{ width: `min(${STUDENT_COLUMN_WIDTH}px, 100%)`, maxWidth: "100%", alignSelf: "flex-start" }}>
         <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
