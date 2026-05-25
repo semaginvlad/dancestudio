@@ -1004,6 +1004,17 @@ export default function AttendanceTab({
   const [subscriptionHistoryLoading, setSubscriptionHistoryLoading] = useState(false);
   const [subscriptionHistoryError, setSubscriptionHistoryError] = useState("");
   const [historyTab, setHistoryTab] = useState("attendance");
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 768 : false));
+  const [mobileViewMode, setMobileViewMode] = useState("day");
+  const [mobileDay, setMobileDay] = useState(today());
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
 
@@ -1107,6 +1118,19 @@ export default function AttendanceTab({
     if (!scheduleDays.length) return all;
     return all.filter((d) => scheduleDays.includes(getDayOfWeek(d)));
   }, [months, scheduleDays]);
+
+  useEffect(() => {
+    if (!visibleDays.length) return;
+    if (!visibleDays.includes(mobileDay)) {
+      const todayKey = today();
+      setMobileDay(visibleDays.includes(todayKey) ? todayKey : visibleDays[0]);
+    }
+  }, [visibleDays, mobileDay]);
+
+  useEffect(() => {
+    if (!isMobile) setMobileViewMode("table");
+    else setMobileViewMode("day");
+  }, [isMobile, gid]);
 
   const confirmedTrialBookingsByDate = useMemo(() => {
     const filtered = (trialBookings || []).filter((booking) =>
@@ -2730,9 +2754,45 @@ export default function AttendanceTab({
         document.body
       )}
 
-      <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>
+      {isMobile && (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, background: theme.input, borderRadius: 999, padding: 4, width: "fit-content" }}>
+            <button type="button" onClick={() => setMobileViewMode("day")} style={{ ...styles.control, height: 36, background: mobileViewMode === "day" ? theme.primary : "transparent", color: mobileViewMode === "day" ? "#fff" : theme.textMain, border: "none" }}>День</button>
+            <button type="button" onClick={() => setMobileViewMode("table")} style={{ ...styles.control, height: 36, background: mobileViewMode === "table" ? theme.primary : "transparent", color: mobileViewMode === "table" ? "#fff" : theme.textMain, border: "none" }}>Таблиця</button>
+          </div>
 
-      <div style={styles.tableWrap}>
+          {mobileViewMode === "day" && (
+            <>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button type="button" style={{ ...styles.control, height: 40 }} onClick={() => { const i = visibleDays.indexOf(mobileDay); if (i > 0) setMobileDay(visibleDays[i-1]); }}>←</button>
+                <input type="date" value={mobileDay} onChange={(e) => setMobileDay(e.target.value)} style={{ ...styles.control, height: 40, flex: 1 }} />
+                <button type="button" style={{ ...styles.control, height: 40 }} onClick={() => setMobileDay(today())}>Сьогодні</button>
+                <button type="button" style={{ ...styles.control, height: 40 }} onClick={() => { const i = visibleDays.indexOf(mobileDay); if (i >= 0 && i < visibleDays.length - 1) setMobileDay(visibleDays[i+1]); }}>→</button>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {orderedStudents.map((student, idx) => {
+                  const view = getCellView(student, mobileDay);
+                  const statusInfo = getStudentStatusText(subs, student.id, gid);
+                  const saving = busyCell === `${student.id}_${mobileDay}`;
+                  return (
+                    <div key={student.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, padding: 10, background: theme.card }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{idx + 1}. {getDisplayName(student)}</div>
+                      <div style={{ fontSize: 12, color: theme.textMuted, margin: "4px 0 8px" }}>{statusInfo.text}</div>
+                      <button type="button" disabled={isCancelledDate(mobileDay) || saving} onClick={() => handleToggleCell(student, mobileDay)} style={{ width: "100%", minHeight: 44, border: "none", borderRadius: 12, background: view.bg, color: "#fff", fontSize: 16, fontWeight: 700 }}>
+                        {view.mark ? `Відмічено: ${view.mark}` : "Поставити відмітку"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {(!isMobile || mobileViewMode === "table") && <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>}
+
+      {(!isMobile || mobileViewMode === "table") && <div style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
@@ -3165,7 +3225,7 @@ export default function AttendanceTab({
             </tr>
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {trialPopoverState && createPortal(
         <>

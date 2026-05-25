@@ -1266,7 +1266,12 @@ export default function App() {
             font-size: 11px !important; 
           }
           th, td { padding: 4px !important; }
-          header { padding: 16px !important; flex-direction: column; gap: 12px; align-items: flex-start !important; }
+          header { padding: 12px 14px !important; flex-direction: row !important; gap: 8px !important; align-items: center !important; }
+          .app-title { font-size: 20px !important; }
+          .desktop-actions { display: none !important; }
+          .mobile-utility { display: inline-flex !important; }
+          .top-nav-shell { padding: 0 12px 14px !important; }
+          main { padding: 0 12px !important; }
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
           .bottom-form input { width: 100% !important; }
           .split-container { flex-direction: column !important; }
@@ -1278,8 +1283,8 @@ export default function App() {
         }
       `}</style>
       <header style={{padding:"30px 24px 20px", maxWidth:1200, margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:16}}>
-        <div><h1 style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
-        <div style={{display:"flex", gap:12, alignItems: 'center'}}>
+        <div><h1 className="app-title" style={{margin:0, fontSize:28, fontWeight:800, letterSpacing: "-1px", color: theme.secondary}}>Dance Studio.</h1></div>
+        <div className="desktop-actions" style={{display:"flex", gap:12, alignItems: 'center'}}>
           <button type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
             {safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
           </button>
@@ -1305,9 +1310,18 @@ export default function App() {
           </div>
           <button style={{...btnS, padding:"10px 16px", fontSize: 13}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід ({user.email.split('@')[0]})</button>
         </div>
+        <details className="mobile-utility" style={{display:"none", position:"relative"}}>
+          <summary style={{listStyle:"none", cursor:"pointer", ...btnS, padding:"8px 12px", fontSize:12}}>Ще ▾</summary>
+          <div style={{position:"absolute", right:0, top:"calc(100% + 6px)", zIndex:50, background:theme.card, border:`1px solid ${theme.border}`, borderRadius:12, padding:8, minWidth:220, display:"grid", gap:6, boxShadow:"0 8px 20px rgba(0,0,0,0.12)"}}>
+            <button type="button" style={{...btnS, width:"100%"}} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
+            <button type="button" style={{...btnS, width:"100%", opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
+            <button type="button" style={{...btnS, width:"100%", opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
+            <button style={{...btnS, width:"100%"}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід</button>
+          </div>
+        </details>
       </header>
 
-      <nav style={{maxWidth:1200, margin:"0 auto", padding:"0 24px 30px", overflowX:"auto"}}>
+      <nav className="top-nav-shell" style={{maxWidth:1200, margin:"0 auto", padding:"0 24px 30px", overflowX:"auto"}}>
         <div style={{display:"inline-flex", background: theme.card, borderRadius: 100, padding: 6, boxShadow: "0 4px 20px rgba(168, 177, 206, 0.15)"}}>
           {isAdmin ? (
             [
