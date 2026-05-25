@@ -6,12 +6,14 @@ export function Modal({open, onClose, title, children, wide}){
   if(!open) return null;
   return(
     <div style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, padding:"32px", width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"auto", boxShadow: "0 24px 48px rgba(0,0,0,0.1)"}}>
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"hidden", boxShadow: "0 24px 48px rgba(0,0,0,0.1)", display:"flex", flexDirection:"column"}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"24px 32px 16px", borderBottom:`1px solid ${theme.border}`}}>
           <h3 style={{margin:0, fontSize:22, color:theme.textMain, fontWeight:700}}>{title}</h3>
           <button type="button" onClick={onClose} style={{background:theme.input, borderRadius:"50%", width:40, height:40, border:"none", color:theme.textMuted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize: 18}}>✕</button>
         </div>
-        {children}
+        <div style={{overflowY:"auto", padding:"16px 32px calc(24px + env(safe-area-inset-bottom))"}}>
+          {children}
+        </div>
       </div>
     </div>
   );

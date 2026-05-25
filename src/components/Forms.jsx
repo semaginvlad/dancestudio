@@ -47,7 +47,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
       <Field label="Нотатки">
         <textarea style={{ ...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} />
       </Field>
-      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
         <button type="button" style={{ ...btnP, opacity: (firstName.trim() || lastName.trim()) ? 1 : .4 }} onClick={() => {
           if (!firstName.trim() && !lastName.trim()) return;
@@ -71,12 +71,13 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
   const [startDate, setStartDate] = useState(initial?.startDate || today());
   const [amount, setAmount] = useState(initial?.amount || 1500);
-  const [paid, setPaid] = useState(initial?.paid ?? false);
+  const [paid] = useState(initial?.paid ?? true);
   const [payMethod, setPayMethod] = useState(initial?.payMethod || "card");
   const [discountPct, setDiscountPct] = useState(Number(initial?.discountPct || 0));
   const [discountSource, setDiscountSource] = useState(initial?.discountSource || "studio");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [retrospectiveMode, setRetrospectiveMode] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   // 🆕 Перемикач активації
   // За замовч. true = активувати одразу (стандартний випадок: оплата + відвідування в один день)
@@ -94,6 +95,12 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
+  const isEditingExisting = Boolean(initial?.id);
+  const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
+  const selectablePlanTypes = PLAN_TYPES.filter((p) => ["4pack", "8pack", "12pack"].includes(p.id));
+  const visiblePlanTypes = isEditingExisting && isLegacyPlanType
+    ? [PLAN_TYPES.find((p) => p.id === planType), ...selectablePlanTypes].filter(Boolean)
+    : selectablePlanTypes;
   const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? (plan?.price || 0)));
 
   // 🆕 Обчислюємо дату закінчення залежно від активації
@@ -133,17 +140,34 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
     <div>
       <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
       <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
-      <Field label="">
-        <label style={{ display: "flex", alignItems: "center", gap: 12, color: theme.textMain, cursor: "pointer", fontSize: 14, fontWeight: 600, background: theme.input, padding: "14px 18px", borderRadius: 14 }}>
-          <input type="checkbox" checked={retrospectiveMode} onChange={e => setRetrospectiveMode(e.target.checked)} style={{ width: 18, height: 18 }} />
-          Ретроспективне внесення
-        </label>
-      </Field>
       <Field label="Тип Абонемента">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: theme.card, padding: 16, borderRadius: 20, border: `1px solid ${theme.border}` }}>
-          {PLAN_TYPES.map(p => (
-            <Pill key={p.id} active={planType === p.id} onClick={() => setPlanType(p.id)}>{p.name} — {p.price}₴</Pill>
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+          {visiblePlanTypes.map((p) => {
+            const isActive = planType === p.id;
+            const isLegacyOption = !["4pack", "8pack", "12pack"].includes(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPlanType(p.id)}
+                style={{
+                  border: `1px solid ${isActive ? theme.primary : theme.border}`,
+                  background: isActive ? `${theme.primary}15` : theme.card,
+                  borderRadius: 16,
+                  padding: "12px 10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  minHeight: 88,
+                }}
+              >
+                <div style={{ fontSize: 28, lineHeight: 1, fontWeight: 800, color: isActive ? theme.primary : theme.textMain }}>
+                  {String(p.trainings || "").replace(/[^\d]/g, "") || "•"}
+                </div>
+                <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{isLegacyOption ? p.name : "заняття"}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: theme.textMain }}>{p.price}₴</div>
+              </button>
+            );
+          })}
         </div>
       </Field>
 
@@ -166,44 +190,6 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
         </Field>
       </div>
 
-      {/* 🆕 Перемикач "Активувати одразу" */}
-      {!retrospectiveMode && <Field label="">
-        <div style={{
-          background: activateNow ? theme.card : "#FFF9F0",
-          border: `1px solid ${activateNow ? theme.border : theme.warning + "40"}`,
-          borderRadius: 20,
-          padding: "16px 20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10
-        }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", fontSize: 14, fontWeight: 600, color: theme.textMain }}>
-            <input type="checkbox" checked={activateNow} onChange={e => setActivateNow(e.target.checked)} style={{ width: 20, height: 20 }} />
-            Активувати одразу (від дати покупки)
-          </label>
-          <div style={{ fontSize: 12, color: theme.textMuted, lineHeight: 1.5, paddingLeft: 32 }}>
-            {activateNow
-              ? "Абонемент починає діяти з дати покупки. Кінець: 1 місяць від неї. Це стандартний випадок, коли учениця платить і відвідує тренування в той же день."
-              : "⚠ Передоплата: абонемент почне діяти від першого відвідування (галочки в журналі). Використовуй, коли учениця купила завчасно, а ходити буде пізніше."
-            }
-          </div>
-        </div>
-      </Field>}
-
-      {retrospectiveMode && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-          <Field label="Activation Date (вручну)">
-            <input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={manualActivationDate} onChange={e => setManualActivationDate(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} />
-          </Field>
-          <Field label="К-сть тренувань">
-            <input style={inputSt} type="number" min={1} value={manualTotalTrainings} onChange={e => setManualTotalTrainings(Math.max(1, +e.target.value || 1))} />
-          </Field>
-          <Field label="Використано тренувань">
-            <input style={inputSt} type="number" min={0} value={manualUsedTrainings} onChange={e => setManualUsedTrainings(Math.max(0, +e.target.value || 0))} />
-          </Field>
-        </div>
-      )}
-
       {!!overlaps.length && (
         <div style={{ marginBottom: 12, fontSize: 13, color: theme.warning, background: "#fff7ed", border: `1px solid ${theme.warning}55`, borderRadius: 12, padding: "10px 12px" }}>
           ⚠ Є перетин з {overlaps.length} абонемент(ами) цієї учениці у цій групі.
@@ -211,27 +197,47 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
         </div>
       )}
 
-      <div style={{ background: theme.card, borderRadius: 24, padding: "24px", marginBottom: 16, border: `1px solid ${theme.border}` }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <Field label="Знижка (%)">
-            <input style={inputSt} type="number" min={0} max={100} value={discountPct} onChange={e => setDiscountPct(Math.min(100, Math.max(0, +e.target.value)))} />
-          </Field>
-          <Field label="Знижка за рахунок">
-            <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
-              <Pill active={discountSource === "studio"} onClick={() => setDiscountSource("studio")}>Студії</Pill>
-              <Pill active={discountSource === "trainer"} onClick={() => setDiscountSource("trainer")}>Тренера</Pill>
-              <Pill active={discountSource === "split"} onClick={() => setDiscountSource("split")}>50/50</Pill>
+      <div style={{ marginBottom: 16, border: `1px solid ${theme.border}`, borderRadius: 18, background: theme.card }}>
+        <button type="button" onClick={() => setShowAdvancedSettings(prev => !prev)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", border: "none", background: "transparent", color: theme.textMain, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+          <span>Додаткові налаштування</span>
+          <span style={{ color: theme.textMuted, fontSize: 14 }}>{showAdvancedSettings ? "▲" : "▼"}</span>
+        </button>
+
+        {showAdvancedSettings && (
+          <div style={{ padding: "0 16px 16px" }}>
+            <Field label="">
+              <label style={{ display: "flex", alignItems: "center", gap: 12, color: theme.textMain, cursor: "pointer", fontSize: 14, fontWeight: 600, background: theme.input, padding: "14px 18px", borderRadius: 14 }}>
+                <input type="checkbox" checked={retrospectiveMode} onChange={e => setRetrospectiveMode(e.target.checked)} style={{ width: 18, height: 18 }} />
+                Ретроспективне внесення
+              </label>
+            </Field>
+            {!retrospectiveMode && <Field label="">
+              <div style={{ background: activateNow ? theme.card : "#FFF9F0", border: `1px solid ${activateNow ? theme.border : theme.warning + "40"}`, borderRadius: 20, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", fontSize: 14, fontWeight: 600, color: theme.textMain }}>
+                  <input type="checkbox" checked={activateNow} onChange={e => setActivateNow(e.target.checked)} style={{ width: 20, height: 20 }} />
+                  Активувати одразу (від дати покупки)
+                </label>
+              </div>
+            </Field>}
+            {retrospectiveMode && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                <Field label="Activation Date (вручну)"><input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={manualActivationDate} onChange={e => setManualActivationDate(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} /></Field>
+                <Field label="К-сть тренувань"><input style={inputSt} type="number" min={1} value={manualTotalTrainings} onChange={e => setManualTotalTrainings(Math.max(1, +e.target.value || 1))} /></Field>
+                <Field label="Використано тренувань"><input style={inputSt} type="number" min={0} value={manualUsedTrainings} onChange={e => setManualUsedTrainings(Math.max(0, +e.target.value || 0))} /></Field>
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <Field label="Знижка (%)"><input style={inputSt} type="number" min={0} max={100} value={discountPct} onChange={e => setDiscountPct(Math.min(100, Math.max(0, +e.target.value)))} /></Field>
+              <Field label="Знижка за рахунок">
+                <div style={{ display: "flex", gap: 6, background: theme.input, padding: 6, borderRadius: 100 }}>
+                  <Pill active={discountSource === "studio"} onClick={() => setDiscountSource("studio")}>Студії</Pill>
+                  <Pill active={discountSource === "trainer"} onClick={() => setDiscountSource("trainer")}>Тренера</Pill>
+                  <Pill active={discountSource === "split"} onClick={() => setDiscountSource("split")}>50/50</Pill>
+                </div>
+              </Field>
             </div>
-          </Field>
-        </div>
-        {discountSource && Number(discountPct) === 0 && (
-          <div style={{ fontSize: 12, color: theme.warning, marginTop: 8 }}>
-            ⚠ Обрано сторону знижки, але знижка % = 0. Перевірте, чи потрібно вказати знижку.
-          </div>
-        )}
-        {discountPct > 0 && (
-          <div style={{ fontSize: 14, color: theme.warning, marginTop: 12, fontWeight: 500 }}>
-            Початкова ціна: {basePrice}₴ → Знижка -{Math.round(basePrice * discountPct / 100)}₴ → <strong style={{ color: theme.success, fontSize: 18 }}>До сплати: {basePrice - Math.round(basePrice * discountPct / 100)}₴</strong>
+            {discountSource && Number(discountPct) === 0 && <div style={{ fontSize: 12, color: theme.warning, marginTop: 8 }}>⚠ Обрано сторону знижки, але знижка % = 0. Перевірте, чи потрібно вказати знижку.</div>}
+            <Field label="Нотатки"><textarea style={{ ...inputSt, height: "auto", padding: "16px 20px", minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} /></Field>
           </div>
         )}
       </div>
@@ -251,14 +257,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
           </div>
         </Field>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 12, color: theme.textMain, cursor: "pointer", fontSize: 16, fontWeight: 600, marginBottom: 24, background: theme.input, padding: "20px 24px", borderRadius: 20 }}>
-        <input type="checkbox" checked={paid} onChange={e => setPaid(e.target.checked)} style={{ width: 22, height: 22 }} />
-        Оплачено
-      </label>
-      <Field label="Нотатки">
-        <textarea style={{ ...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} />
-      </Field>
-      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
         <button type="button" style={{ ...btnP, opacity: studentId && groupId ? 1 : .4 }} onClick={() => {
           if (!studentId || !groupId) return;
@@ -282,7 +281,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
             activationDate: selectedActivationDate,
             totalTrainings: selectedTotalTrainings,
             usedTrainings: selectedUsedTrainings,
-            amount, paid, payMethod, discountPct, discountSource,
+            amount, paid: initial?.id ? paid : true, payMethod, discountPct, discountSource,
             basePrice, notes,
             notificationSent: initial?.notificationSent || false
           });
