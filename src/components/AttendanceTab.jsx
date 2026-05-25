@@ -1,4 +1,3 @@
-// test preview deploy
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
@@ -32,7 +31,7 @@ const isVisibleAttendanceStudent = (student) => {
 
 const makeStyles = () => {
   const isDark = theme.bg === "#0F131A";
-  const CELL_SIZE = 40;
+  const CELL_SIZE = 47;
   const matrixBase = isDark ? "#131b26" : theme.card;
   const matrixMuted = isDark ? "#101722" : theme.input;
   const matrixCancelled = isDark ? "#2a1b23" : "#ffe9e9";
@@ -172,9 +171,9 @@ const makeStyles = () => {
     left: 0,
     zIndex: 4,
     background: theme.card,
-    minWidth: 240,
-    maxWidth: 240,
-    width: 240,
+    minWidth: 278,
+    maxWidth: 278,
+    width: 278,
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
     boxShadow: `1px 0 0 ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.24)"}`,
   },
@@ -197,10 +196,10 @@ const makeStyles = () => {
     letterSpacing: 0.2,
   }),
   studentHead: {
-    padding: "11px 12px",
+    padding: "12px 14px",
     textAlign: "left",
     fontWeight: 700,
-    fontSize: 14,
+    fontSize: 15,
     color: theme.textMain,
     borderBottom: `1px solid ${theme.border}`,
     background: matrixMuted,
@@ -254,14 +253,14 @@ const makeStyles = () => {
     background: matrixBase,
     borderRight: `1px solid ${isDark ? "rgba(148,163,184,0.18)" : "rgba(148,163,184,0.22)"}`,
     borderBottom: "none",
-    borderTopLeftRadius: 15,
-    borderBottomLeftRadius: 15,
-    padding: "4px 8px",
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    padding: "6px 10px",
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.95)",
   },
   profileCard: {
-    borderRadius: 14,
-    padding: "4px 8px",
+    borderRadius: 15,
+    padding: "6px 10px",
     background: isDark ? "linear-gradient(180deg, rgba(148,163,184,0.14), rgba(148,163,184,0.06))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.95))",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.25)"}`,
     boxShadow: isDark ? "0 6px 14px rgba(0,0,0,0.24)" : "0 4px 10px rgba(15,23,42,0.08)",
@@ -295,7 +294,7 @@ const makeStyles = () => {
     opacity: 0.96,
   },
   studentName: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 700,
     letterSpacing: 0.1,
     color: theme.textMain,
@@ -410,10 +409,10 @@ const makeStyles = () => {
     accentColor: theme.primary,
   },
   studentMeta: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 500,
     color: theme.textMuted,
-    marginTop: 2,
+    marginTop: 3,
     lineHeight: 1.15,
   },
   menuDanger: {
@@ -465,7 +464,7 @@ const makeStyles = () => {
     background: bg === theme.card ? (isDark ? "rgba(51,65,85,0.78)" : "rgba(248,250,252,0.98)") : bg,
     cursor: disabled || saving ? "not-allowed" : "pointer",
     opacity: disabled || saving ? 0.55 : 1,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 700,
     color: bg === theme.card ? theme.textLight : "#fff",
     boxShadow: bg === theme.card
@@ -2310,13 +2309,17 @@ export default function AttendanceTab({
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
-        .attendance-mobile-hint {
-          display: none;
-        }
-
         @media (max-width: 768px) {
           .attendance-root {
-            gap: 12px !important;
+            gap: 10px !important;
+          }
+          .attendance-root .attendance-table-wrap,
+          .attendance-root .attendance-filter-card,
+          .attendance-root .attendance-add-panel {
+            width: calc(100vw - 8px) !important;
+            margin-left: calc(50% - 50vw + 4px) !important;
+            margin-right: calc(50% - 50vw + 4px) !important;
+            box-sizing: border-box !important;
           }
 
           .attendance-toolbar {
@@ -2347,20 +2350,40 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 320px !important;
-            min-width: 320px !important;
-            max-width: 320px !important;
-            padding: 4px 10px !important;
-            font-size: 14px !important;
+            width: 182px !important;
+            min-width: 182px !important;
+            max-width: 182px !important;
+            padding: 2px 5px !important;
+            font-size: 12px !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 26 !important;
+            background: ${theme.bg === "#0F131A" ? "rgba(19,27,38,0.94)" : "rgba(255,255,255,0.93)"} !important;
+            backdrop-filter: blur(10px) saturate(145%) !important;
+            -webkit-backdrop-filter: blur(10px) saturate(145%) !important;
+            box-shadow: 10px 0 18px ${theme.bg === "#0F131A" ? "rgba(3,7,18,0.42)" : "rgba(15,23,42,0.12)"} !important;
+            border-right: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.28)" : "rgba(148,163,184,0.3)"} !important;
+          }
+
+          .attendance-root .attendance-row-head::after,
+          .attendance-root th:first-child::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: -1px;
+            width: 9px;
+            height: 100%;
+            pointer-events: none;
+            background: linear-gradient(to right, ${theme.bg === "#0F131A" ? "rgba(15,23,42,0.24)" : "rgba(255,255,255,0.18)"} 0%, rgba(0,0,0,0) 100%);
           }
 
           .attendance-root .attendance-profile-card {
             width: 100% !important;
             max-width: 100% !important;
             min-width: 0 !important;
-            min-height: 52px !important;
+            min-height: 50px !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: center !important;
@@ -2375,16 +2398,22 @@ export default function AttendanceTab({
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            gap: 8px !important;
+            gap: 4px !important;
             box-sizing: border-box !important;
           }
 
           .attendance-root .attendance-student-name {
             min-width: 0 !important;
             flex: 1 1 auto !important;
+            line-height: 1.15 !important;
+            max-height: 2.3em !important;
             overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow-wrap: anywhere !important;
           }
 
           .attendance-root .attendance-student-meta {
@@ -2393,7 +2422,7 @@ export default function AttendanceTab({
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             white-space: nowrap !important;
-            margin-top: 4px !important;
+            margin-top: 1px !important;
           }
 
           .attendance-root .attendance-student-menu-wrap {
@@ -2409,65 +2438,155 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-day-head,
           .attendance-root .attendance-day-cell {
-            width: 60px !important;
-            min-width: 60px !important;
-            max-width: 60px !important;
+            width: 39px !important;
+            min-width: 39px !important;
+            max-width: 39px !important;
+          }
+
+          .attendance-root .attendance-day-head {
+            background: ${theme.bg === "#0F131A" ? "rgba(17,24,39,0.78)" : "rgba(255,255,255,0.76)"} !important;
+            backdrop-filter: blur(7px) saturate(135%) !important;
+            -webkit-backdrop-filter: blur(7px) saturate(135%) !important;
+            border-bottom: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.22)"} !important;
           }
 
           .attendance-root .attendance-day-cell {
-            height: 60px !important;
-            min-height: 60px !important;
-            max-height: 60px !important;
+            height: 49px !important;
+            min-height: 49px !important;
+            max-height: 49px !important;
+            padding: 0 !important;
+            text-align: center !important;
+            vertical-align: middle !important;
           }
 
           .attendance-root .attendance-cell-shell {
-            width: 52px !important;
-            height: 52px !important;
+            width: 33px !important;
+            height: 33px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 999px !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
           }
 
           .attendance-root .attendance-cell-button {
-            min-width: 48px !important;
-            min-height: 48px !important;
-            font-size: 20px !important;
+            min-width: 31px !important;
+            min-height: 31px !important;
+            font-size: 14px !important;
+            width: 31px !important;
+            height: 31px !important;
+            border-radius: 999px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            transform: none !important;
+          }
+
+          .attendance-root .attendance-table-wrap {
+            border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
+            box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 10px 22px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.36)" : "rgba(15,23,42,0.1)"} !important;
+            background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
+            backdrop-filter: blur(6px) saturate(125%) !important;
+            border-radius: 14px !important;
+          }
+          .attendance-root .attendance-totals-label,
+          .attendance-root .attendance-totals-cell {
+            height: 40px !important;
+            min-height: 40px !important;
+            max-height: 40px !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+          }
+          .attendance-root .attendance-add-panel {
+            margin-top: 8px !important;
+            border-radius: 12px !important;
+            border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.26)" : "rgba(148,163,184,0.3)"} !important;
+            background: ${theme.bg === "#0F131A" ? "rgba(30,41,59,0.5)" : "rgba(255,255,255,0.82)"} !important;
+            backdrop-filter: blur(6px) !important;
+            padding: 8px !important;
+            overflow: hidden !important;
+          }
+          .attendance-root .attendance-add-mode-row {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 6px !important;
+          }
+          .attendance-root .attendance-add-mode-btn {
+            height: 34px !important;
+            min-height: 34px !important;
+            border-radius: 999px !important;
+          }
+          .attendance-root .attendance-add-controls {
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls > div,
+          .attendance-root .attendance-add-controls > form {
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls input,
+          .attendance-root .attendance-add-controls select,
+          .attendance-root .attendance-add-controls button {
+            min-height: 41px !important;
+            height: 41px !important;
+            border-radius: 10px !important;
+            box-sizing: border-box !important;
+            min-width: 0 !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-student-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 92px !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-restore-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 108px !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-guest-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-guest-row-bottom {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 108px !important;
+            gap: 6px !important;
+            width: 100% !important;
           }
 
           .attendance-root .attendance-student-name {
-            font-size: 18px !important;
-            line-height: 1.2 !important;
+            font-size: 13px !important;
+            line-height: 1.15 !important;
           }
 
           .attendance-root .attendance-student-meta {
-            font-size: 13px !important;
-            line-height: 1.25 !important;
-          }
-
-          .attendance-mobile-hint {
-            display: inline-flex;
-            align-items: center;
-            align-self: flex-start;
-            gap: 6px;
-            padding: 7px 10px;
-            border: 1px solid rgba(148, 163, 184, 0.28);
-            border-radius: 999px;
-            background: rgba(148, 163, 184, 0.1);
-            color: ${theme.textMuted};
-            font-size: 12px;
-            font-weight: 700;
-            line-height: 1;
+            font-size: 9.5px !important;
+            line-height: 1.05 !important;
+            opacity: 0.82 !important;
           }
 
           .attendance-day-cancel {
-            width: 44px !important;
-            height: 44px !important;
-            line-height: 42px !important;
-            font-size: 18px !important;
+            width: 28px !important;
+            height: 28px !important;
+            line-height: 26px !important;
+            font-size: 14px !important;
           }
 
           .attendance-menu-btn {
-            width: 48px !important;
-            height: 48px !important;
-            line-height: 46px !important;
-            font-size: 20px !important;
+            width: 22px !important;
+            height: 22px !important;
+            line-height: 20px !important;
+            font-size: 12px !important;
+            border-radius: 7px !important;
           }
 
           .attendance-add-mode-btn,
@@ -2493,7 +2612,7 @@ export default function AttendanceTab({
           }
         }
       `}</style>
-      <div className="attendance-toolbar" style={styles.toolbar}>
+      <div className="attendance-toolbar attendance-filter-card" style={styles.toolbar}>
         <div className="attendance-toolbar-left" style={styles.toolbarLeft}>
           <div className="attendance-group-picker" style={styles.groupPickerWrap} ref={groupPickerRef}>
             <button type="button" style={styles.groupPickerBtn(groupPickerOpen)} onClick={() => setGroupPickerOpen((v) => !v)}>
@@ -2730,9 +2849,7 @@ export default function AttendanceTab({
         document.body
       )}
 
-      <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>
-
-      <div style={styles.tableWrap}>
+      <div className="attendance-table-wrap" style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
@@ -2874,7 +2991,9 @@ export default function AttendanceTab({
                     <td className="attendance-row-head" style={{ ...styles.rowHead, ...(student.isGuestChild ? styles.guestChildRowHead : {}) }}>
                       <div className="attendance-profile-card" style={{ ...styles.profileCard, ...(student.isGuestChild ? styles.guestChildCard : {}) }}>
                         <div className="attendance-student-name-row" style={styles.studentNameRow}>
-                          <div className="attendance-student-name" style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
+                          <div className="attendance-student-name" style={styles.studentName}>
+                            {`${rowIndex + 1}.\u00A0${student.anonymous ? "Гість" : student.guestName}`}
+                          </div>
                           <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
                             <button type="button" className="attendance-menu-btn" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
                           </div>
@@ -2951,7 +3070,9 @@ export default function AttendanceTab({
                 <td className="attendance-row-head" style={{ ...styles.rowHead, ...rowHighlightStyle }}>
                   <div className="attendance-profile-card" style={styles.profileCard}>
                     <div className="attendance-student-name-row" style={styles.studentNameRow}>
-                      <div className="attendance-student-name" style={styles.studentName}>{`${rowIndex + 1}. ${getDisplayName(student)}`}</div>
+                      <div className="attendance-student-name" style={styles.studentName}>
+                        {`${rowIndex + 1}.\u00A0${getDisplayName(student)}`}
+                      </div>
                       <div style={styles.orderBtns}>
                         <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
                         <button
@@ -3045,95 +3166,12 @@ export default function AttendanceTab({
               </tr>
             )}
 
-            <tr>
-              <td className="attendance-row-head" style={styles.rowHead}>
-                <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
-                  <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
-                <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
-                  {addMode === "student" ? (
-                    <div style={{ display: "grid", gap: 5, width: "100%" }}>
-                      <div style={{ display: "flex", gap: 6, width: "100%" }}>
-                        <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
-                      </div>
-                      {normalizeName(newStudentName).length >= 2 && (
-                        <div style={{ display: "grid", gap: 5, padding: 7, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
-                          {existingStudentMatches.length ? existingStudentMatches.map((match) => {
-                            const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
-                            return (
-                              <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
-                                <div style={{ minWidth: 140 }}>
-                                  <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{match.displayName}</div>
-                                  {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
-                                </div>
-                                {match.isLinkedToCurrentGroup ? (
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Вже є в цій групі</span>
-                                ) : match.canRestoreToCurrentGroup ? (
-                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleRestoreStudentToGroup(match.student.id)} disabled={restoringStudent}>Відновити</button>
-                                ) : (
-                                  <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleAddExistingStudentToGroup(match.student)} disabled={addingExistingStudentId === String(match.student.id)}>Додати в цю групу</button>
-                                )}
-                              </div>
-                            );
-                          }) : (
-                            <div style={{ fontSize: 11, color: theme.textMuted }}>Схожих учениць не знайдено — можна створити нову.</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ) : addMode === "restore" ? (
-                    restoreCandidates.length ? (
-                      <>
-                        <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
-                          <option value="">Вибери ученицю</option>
-                          {restoreCandidates.map(({ student, hasHistory }) => (
-                            <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
-                          ))}
-                        </select>
-                        <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
-                      </>
-                    ) : (
-                      <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
-                    )
-                  ) : (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleCreateGuestAttendance();
-                      }}
-                      style={{ display: "flex", gap: 6, width: "100%" }}
-                    >
-                      <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-                      <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
-                        <option value="trial">Пробне</option>
-                        <option value="single">Разове</option>
-                      </select>
-                      <button
-                        type="submit"
-                        className="attendance-add-action"
-                        style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                        disabled={creatingGuest || !gid}
-                      >
-                        Додати
-                      </button>
-                    </form>
-                  )}
-                </div>
-              </td>
-              <td colSpan={visibleDays.length} style={{ ...styles.cell(false), background: theme.input }} />
-            </tr>
-
             <tr style={styles.totalsRow}>
-              <td className="attendance-row-head" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
+              <td className="attendance-row-head attendance-totals-label" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Всього присутніх:</td>
               {visibleDays.map((dateStr) => (
                 <td
                   key={`total_${dateStr}`}
-                  className="attendance-day-cell"
+                  className="attendance-day-cell attendance-totals-cell"
                   style={{
                     ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
                     ...styles.totalsRow,
@@ -3146,11 +3184,11 @@ export default function AttendanceTab({
               ))}
             </tr>
             <tr style={styles.totalsRow}>
-              <td className="attendance-row-head" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Поза списком:</td>
+              <td className="attendance-row-head attendance-totals-label" style={{ ...styles.rowHead, ...styles.totalsHead, ...styles.totalsRow }}>Поза списком:</td>
               {visibleDays.map((dateStr) => (
                 <td
                   key={`off_roster_${dateStr}`}
-                  className="attendance-day-cell"
+                  className="attendance-day-cell attendance-totals-cell"
                   style={{
                     ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth),
                     ...styles.totalsRow,
@@ -3163,8 +3201,92 @@ export default function AttendanceTab({
                 </td>
               ))}
             </tr>
+
           </tbody>
         </table>
+      </div>
+
+      <div className="attendance-add-panel" style={{ width: "min(278px, 100%)", alignSelf: "flex-start" }}>
+        <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
+        <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
+          {addMode === "student" ? (
+            <div style={{ display: "grid", gap: 5, width: "100%" }}>
+              <div className="attendance-student-row" style={{ display: "flex", gap: 6, width: "100%" }}>
+                <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+                <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
+              </div>
+              {normalizeName(newStudentName).length >= 2 && (
+                <div style={{ display: "grid", gap: 5, padding: 7, borderRadius: 10, border: `1px solid ${theme.border}`, background: theme.input }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Схожі учениці в базі:</div>
+                  {existingStudentMatches.length ? existingStudentMatches.map((match) => {
+                    const contact = [match.student.phone, match.student.telegram].filter(Boolean).join(" · ");
+                    return (
+                      <div key={match.student.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 8px", borderRadius: 9, background: theme.card }}>
+                        <div style={{ minWidth: 140 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{match.displayName}</div>
+                          {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
+                        </div>
+                        {match.isLinkedToCurrentGroup ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>Вже є в цій групі</span>
+                        ) : match.canRestoreToCurrentGroup ? (
+                          <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleRestoreStudentToGroup(match.student.id)} disabled={restoringStudent}>Відновити</button>
+                        ) : (
+                          <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 28, fontSize: 11, padding: "0 8px" }} onClick={() => handleAddExistingStudentToGroup(match.student)} disabled={addingExistingStudentId === String(match.student.id)}>Додати в цю групу</button>
+                        )}
+                      </div>
+                    );
+                  }) : (
+                    <div style={{ fontSize: 11, color: theme.textMuted }}>Схожих учениць не знайдено — можна створити нову.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : addMode === "restore" ? (
+            restoreCandidates.length ? (
+              <div className="attendance-restore-row">
+                <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
+                  <option value="">Вибери ученицю</option>
+                  {restoreCandidates.map(({ student, hasHistory }) => (
+                    <option key={student.id} value={student.id}>{`${getDisplayName(student)}${hasHistory ? " • була в цій групі" : ""}`}</option>
+                  ))}
+                </select>
+                <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
+              </div>
+            ) : (
+              <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
+            )
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleCreateGuestAttendance();
+              }}
+              className="attendance-guest-row"
+              style={{ display: "flex", gap: 6, width: "100%" }}
+            >
+              <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
+              <div className="attendance-guest-row-bottom">
+                <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
+                  <option value="trial">Пробне</option>
+                  <option value="single">Разове</option>
+                </select>
+                <button
+                  type="submit"
+                  className="attendance-add-action"
+                  style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                  disabled={creatingGuest || !gid}
+                >
+                  Додати
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
 
       {trialPopoverState && createPortal(
