@@ -1293,10 +1293,10 @@ export default function App() {
           <button className="mobile-hide" type="button" style={btnS} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>
             {safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}
           </button>
-          {isAdmin && <button style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
-          {isAdmin && <button style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
-          {isAdmin && <button style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
-          {isAdmin && <button style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
+          {isAdmin && <button className="mobile-hide" style={btnS} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+          {isAdmin && <button className="mobile-hide" style={btnS} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
+          {isAdmin && <button className="mobile-hide" style={btnS} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
+          {isAdmin && <button className="mobile-hide" style={btnP} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
           <div className="mobile-hide" style={{display:"flex", flexDirection:"column", gap:4, alignItems:"flex-start"}}>
             <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1}} onClick={handleEnablePush} disabled={pushBusy || !user}>
               {pushBusy ? "Увімкнення..." : "Увімкнути push"}
@@ -1321,6 +1321,10 @@ export default function App() {
                 <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
                 <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
                 <button type="button" style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
+                {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
+                {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
+                {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
+                {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addSub")}>+ Абонемент</button>}
                 <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={() => supabase.auth.signOut().then(()=>window.location.reload())}>Вихід</button>
               </div>
             )}

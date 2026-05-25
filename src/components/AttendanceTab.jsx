@@ -2353,6 +2353,26 @@ export default function AttendanceTab({
             font-size: 13px !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 26 !important;
+            background: ${theme.bg === "#0F131A" ? "rgba(19,27,38,0.94)" : "rgba(255,255,255,0.93)"} !important;
+            backdrop-filter: blur(10px) saturate(145%) !important;
+            -webkit-backdrop-filter: blur(10px) saturate(145%) !important;
+            box-shadow: 10px 0 18px ${theme.bg === "#0F131A" ? "rgba(3,7,18,0.42)" : "rgba(15,23,42,0.12)"} !important;
+            border-right: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.28)" : "rgba(148,163,184,0.3)"} !important;
+          }
+
+          .attendance-root .attendance-row-head::after,
+          .attendance-root th:first-child::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: -1px;
+            width: 9px;
+            height: 100%;
+            pointer-events: none;
+            background: linear-gradient(to right, ${theme.bg === "#0F131A" ? "rgba(15,23,42,0.24)" : "rgba(255,255,255,0.18)"} 0%, rgba(0,0,0,0) 100%);
           }
 
           .attendance-root .attendance-profile-card {
@@ -2418,6 +2438,13 @@ export default function AttendanceTab({
             max-width: 44px !important;
           }
 
+          .attendance-root .attendance-day-head {
+            background: ${theme.bg === "#0F131A" ? "rgba(17,24,39,0.78)" : "rgba(255,255,255,0.76)"} !important;
+            backdrop-filter: blur(7px) saturate(135%) !important;
+            -webkit-backdrop-filter: blur(7px) saturate(135%) !important;
+            border-bottom: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.22)"} !important;
+          }
+
           .attendance-root .attendance-day-cell {
             height: 58px !important;
             min-height: 58px !important;
@@ -2433,6 +2460,13 @@ export default function AttendanceTab({
             min-width: 38px !important;
             min-height: 38px !important;
             font-size: 16px !important;
+          }
+
+          .attendance-root .attendance-table-wrap {
+            border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
+            box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 14px 30px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.42)" : "rgba(15,23,42,0.12)"} !important;
+            background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
+            backdrop-filter: blur(6px) saturate(125%) !important;
           }
 
           .attendance-root .attendance-student-name {
@@ -2737,7 +2771,7 @@ export default function AttendanceTab({
 
       <div className="attendance-mobile-hint" aria-hidden="true">Гортай вправо →</div>
 
-      <div style={styles.tableWrap}>
+      <div className="attendance-table-wrap" style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
