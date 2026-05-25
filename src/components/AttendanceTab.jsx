@@ -2311,7 +2311,7 @@ export default function AttendanceTab({
       <style>{`
         @media (max-width: 768px) {
           .attendance-root {
-            gap: 12px !important;
+            gap: 10px !important;
           }
 
           .attendance-toolbar {
@@ -2342,11 +2342,11 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 158px !important;
-            min-width: 158px !important;
-            max-width: 158px !important;
-            padding: 3px 6px !important;
-            font-size: 13px !important;
+            width: 152px !important;
+            min-width: 152px !important;
+            max-width: 152px !important;
+            padding: 2px 5px !important;
+            font-size: 12px !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
             position: sticky !important;
@@ -2429,9 +2429,9 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-day-head,
           .attendance-root .attendance-day-cell {
-            width: 44px !important;
-            min-width: 44px !important;
-            max-width: 44px !important;
+            width: 42px !important;
+            min-width: 42px !important;
+            max-width: 42px !important;
           }
 
           .attendance-root .attendance-day-head {
@@ -2442,39 +2442,48 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-day-cell {
-            height: 58px !important;
-            min-height: 58px !important;
-            max-height: 58px !important;
+            height: 54px !important;
+            min-height: 54px !important;
+            max-height: 54px !important;
+            padding: 0 !important;
+            text-align: center !important;
+            vertical-align: middle !important;
           }
 
           .attendance-root .attendance-cell-shell {
-            width: 40px !important;
-            height: 40px !important;
+            width: 36px !important;
+            height: 36px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             border-radius: 999px !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
           }
 
           .attendance-root .attendance-cell-button {
-            min-width: 38px !important;
-            min-height: 38px !important;
-            font-size: 16px !important;
-            width: 38px !important;
-            height: 38px !important;
+            min-width: 34px !important;
+            min-height: 34px !important;
+            font-size: 15px !important;
+            width: 34px !important;
+            height: 34px !important;
             border-radius: 999px !important;
-            display: inline-flex !important;
+            display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             line-height: 1 !important;
             padding: 0 !important;
+            margin: 0 !important;
+            transform: none !important;
           }
 
           .attendance-root .attendance-table-wrap {
             border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
-            box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 14px 30px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.42)" : "rgba(15,23,42,0.12)"} !important;
+            box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 10px 22px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.36)" : "rgba(15,23,42,0.1)"} !important;
             background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
             backdrop-filter: blur(6px) saturate(125%) !important;
+            border-radius: 14px !important;
           }
 
           .attendance-root .attendance-student-name {
