@@ -2314,6 +2314,7 @@ export default function AttendanceTab({
             gap: 10px !important;
           }
           .attendance-root .attendance-table-wrap,
+          .attendance-root .attendance-filter-card,
           .attendance-root .attendance-add-panel {
             width: calc(100vw - 8px) !important;
             margin-left: calc(50% - 50vw + 4px) !important;
@@ -2527,6 +2528,39 @@ export default function AttendanceTab({
           .attendance-root .attendance-add-controls > form {
             width: 100% !important;
           }
+          .attendance-root .attendance-add-controls input,
+          .attendance-root .attendance-add-controls select,
+          .attendance-root .attendance-add-controls button {
+            min-height: 41px !important;
+            height: 41px !important;
+            border-radius: 10px !important;
+            box-sizing: border-box !important;
+            min-width: 0 !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-student-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 92px !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-restore-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 108px !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-guest-row {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
+          .attendance-root .attendance-add-controls .attendance-guest-row-bottom {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 108px !important;
+            gap: 6px !important;
+            width: 100% !important;
+          }
 
           .attendance-root .attendance-student-name {
             font-size: 13px !important;
@@ -2576,7 +2610,7 @@ export default function AttendanceTab({
           }
         }
       `}</style>
-      <div className="attendance-toolbar" style={styles.toolbar}>
+      <div className="attendance-toolbar attendance-filter-card" style={styles.toolbar}>
         <div className="attendance-toolbar-left" style={styles.toolbarLeft}>
           <div className="attendance-group-picker" style={styles.groupPickerWrap} ref={groupPickerRef}>
             <button type="button" style={styles.groupPickerBtn(groupPickerOpen)} onClick={() => setGroupPickerOpen((v) => !v)}>
@@ -3176,7 +3210,7 @@ export default function AttendanceTab({
         <div className="attendance-add-controls" style={{ display: "flex", gap: 6, position: "relative", zIndex: 2 }}>
           {addMode === "student" ? (
             <div style={{ display: "grid", gap: 5, width: "100%" }}>
-              <div style={{ display: "flex", gap: 6, width: "100%" }}>
+              <div className="attendance-student-row" style={{ display: "flex", gap: 6, width: "100%" }}>
                 <input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Ім'я учениці" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
                 <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleCreateStudentInGroup} disabled={creatingStudent}>Додати</button>
               </div>
@@ -3208,7 +3242,7 @@ export default function AttendanceTab({
             </div>
           ) : addMode === "restore" ? (
             restoreCandidates.length ? (
-              <>
+              <div className="attendance-restore-row">
                 <select value={restoreStudentId} onChange={(e) => setRestoreStudentId(e.target.value)} style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }}>
                   <option value="">Вибери ученицю</option>
                   {restoreCandidates.map(({ student, hasHistory }) => (
@@ -3216,7 +3250,7 @@ export default function AttendanceTab({
                   ))}
                 </select>
                 <button type="button" className="attendance-add-action" style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }} onClick={handleRestoreStudentToGroup} disabled={restoringStudent || !restoreStudentId}>Відновити</button>
-              </>
+              </div>
             ) : (
               <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
             )
@@ -3226,21 +3260,24 @@ export default function AttendanceTab({
                 e.preventDefault();
                 handleCreateGuestAttendance();
               }}
+              className="attendance-guest-row"
               style={{ display: "flex", gap: 6, width: "100%" }}
             >
               <input value={guestNameInput} onChange={(e) => setGuestNameInput(e.target.value)} placeholder="Ім'я гостя (необов'язково)" style={{ ...styles.control, height: 30, flex: 1, minWidth: 0, fontSize: 12 }} />
-              <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
-                <option value="trial">Пробне</option>
-                <option value="single">Разове</option>
-              </select>
-              <button
-                type="submit"
-                className="attendance-add-action"
-                style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
-                disabled={creatingGuest || !gid}
-              >
-                Додати
-              </button>
+              <div className="attendance-guest-row-bottom">
+                <select value={guestEntryType} onChange={(e) => setGuestEntryType(e.target.value)} style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 8px" }}>
+                  <option value="trial">Пробне</option>
+                  <option value="single">Разове</option>
+                </select>
+                <button
+                  type="submit"
+                  className="attendance-add-action"
+                  style={{ ...styles.control, height: 30, fontSize: 12, padding: "0 10px" }}
+                  disabled={creatingGuest || !gid}
+                >
+                  Додати
+                </button>
+              </div>
             </form>
           )}
         </div>

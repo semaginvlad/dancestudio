@@ -23,7 +23,6 @@
         min-height: 100dvh;
         overflow-x: hidden !important; 
         position: relative;
-        overscroll-behavior-y: none;
       }
       
       #root {
@@ -34,6 +33,9 @@
       }
 
       @media (max-width: 768px) {
+        html, body {
+          overscroll-behavior-y: none;
+        }
         input, select, textarea {
           font-size: 16px !important;
         }
