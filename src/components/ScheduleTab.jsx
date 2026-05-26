@@ -128,6 +128,15 @@ const getEventTypeLabel = (value = "") => {
 };
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
+const getRoomLabel = (event) =>
+  event?.roomName ||
+  event?.room_name ||
+  event?.room ||
+  event?.location ||
+  event?.hall ||
+  "";
+const normalizeRoomName = (value = "") =>
+  String(value || "").replace(/\s+/g, " ").trim();
 const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
@@ -213,6 +222,8 @@ export default function ScheduleTab({
   onUpdateGroupSchedule,
   currentUser = null,
 }) {
+  const DEFAULT_ROOM = "Основна зала";
+  const NO_ROOM = "Без залу";
   const safeGroups = Array.isArray(groups) ? groups : [];
   const safeDirections = Array.isArray(directionsList) ? directionsList : [];
   const safeTrainers = Array.isArray(trainers) ? trainers : [];
@@ -241,6 +252,12 @@ export default function ScheduleTab({
     [bookingTypes],
   );
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [viewMode, setViewMode] = useState("week"); // month | week | day
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));
+  const [selectedRoom, setSelectedRoom] = useState("all");
+  const [showRoomsManager, setShowRoomsManager] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [customRooms, setCustomRooms] = useStickyState([], "ds_schedule_rooms_v1");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -293,8 +310,9 @@ export default function ScheduleTab({
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
   );
-  const eventsByDay = useMemo(() => {
-    const map = new Map(weekDays.map((d) => [toLocalDateKey(d), []]));
+  const buildEventsByDayForDates = useMemo(() => (dates = []) => {
+    const normalizedDates = dates.map((d) => (d instanceof Date ? d : new Date(`${toLocalDateKey(d)}T12:00:00`)));
+    const map = new Map(normalizedDates.map((d) => [toLocalDateKey(d), []]));
     const slots = [];
     safeGroups.forEach((g) =>
       (Array.isArray(g.schedule) ? g.schedule : []).forEach((row, idx) => {
@@ -317,16 +335,16 @@ export default function ScheduleTab({
         });
       }),
     );
-    weekDays.forEach((d) => {
+    normalizedDates.forEach((d) => {
       const date = toLocalDateKey(d);
       slots
         .filter((s) => s.weekday === d.getDay())
         .forEach((s) => {
           const st = toMin(s.startTime);
           const en = toMin(s.endTime) ?? st + 60;
-          map
-            .get(date)
-            .push({
+              map
+                .get(date)
+                .push({
               ...s,
               kind: "group",
               eventType: "group_lesson",
@@ -335,8 +353,9 @@ export default function ScheduleTab({
               slotIndex: s.slotIndex,
               startMin: st,
               endMin: en,
-              cancelled: cancelledSet.has(`${s.groupId}:${date}`),
-            });
+                  cancelled: cancelledSet.has(`${s.groupId}:${date}`),
+                  roomName: getRoomLabel(s) || DEFAULT_ROOM,
+                });
         });
     });
     safeBookings.forEach((b) => {
@@ -369,6 +388,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
+          roomName: getRoomLabel(b) || DEFAULT_ROOM,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainer:
@@ -387,7 +407,7 @@ export default function ScheduleTab({
         });
         return;
       }
-      weekDays.forEach((day) => {
+      normalizedDates.forEach((day) => {
         const dateKey = toLocalDateKey(day);
         if (!map.has(dateKey)) return;
         if (until && day > until) return;
@@ -405,6 +425,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
+          roomName: getRoomLabel(b) || DEFAULT_ROOM,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainer:
@@ -436,7 +457,6 @@ export default function ScheduleTab({
     });
     return map;
   }, [
-    weekDays,
     safeGroups,
     safeBookings,
     dirMap,
@@ -444,9 +464,28 @@ export default function ScheduleTab({
     cancelledSet,
     bookingTypes,
   ]);
+  const eventsByDay = useMemo(() => buildEventsByDayForDates(weekDays), [buildEventsByDayForDates, weekDays]);
 
   const getTariffPrice = (bookingType) =>
     tariffTypes.find((type) => type.id === bookingType)?.price || 0;
+  const allKnownRooms = useMemo(() => {
+    const set = new Set([DEFAULT_ROOM, ...customRooms.map(normalizeRoomName).filter(Boolean)]);
+    eventsByDay.forEach((arr) => {
+      (arr || []).forEach((e) => {
+        const room = normalizeRoomName(e.roomName || "");
+        if (room) set.add(room);
+      });
+    });
+    return Array.from(set);
+  }, [customRooms, eventsByDay]);
+  const roomFilteredEventsByDay = useMemo(() => {
+    if (selectedRoom === "all") return eventsByDay;
+    const map = new Map();
+    eventsByDay.forEach((arr, key) => {
+      map.set(key, (arr || []).filter((e) => (e.roomName || DEFAULT_ROOM) === selectedRoom));
+    });
+    return map;
+  }, [eventsByDay, selectedRoom]);
   const canMutateEvent = (event) =>
     isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
   const normalizeBookingPayload = (source) => {
@@ -724,6 +763,60 @@ export default function ScheduleTab({
     };
   }, [quickCreate]);
 
+  const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
+  const monthStart = useMemo(() => new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), 1), [selectedDateObj]);
+  const monthCells = useMemo(() => {
+    const firstWeekday = (monthStart.getDay() + 6) % 7;
+    const start = addDays(monthStart, -firstWeekday);
+    return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  }, [monthStart]);
+  const monthEventsByDay = useMemo(() => buildEventsByDayForDates(monthCells), [buildEventsByDayForDates, monthCells]);
+  const dayEventsByDay = useMemo(() => buildEventsByDayForDates([selectedDateObj]), [buildEventsByDayForDates, selectedDateObj]);
+  const selectedDateEvents = useMemo(() => {
+    const arr = dayEventsByDay.get(selectedDate) || [];
+    if (selectedRoom === "all") return arr;
+    return arr.filter((e) => (e.roomName || DEFAULT_ROOM) === selectedRoom);
+  }, [dayEventsByDay, selectedDate, selectedRoom]);
+  const selectedDateByRoom = useMemo(() => {
+    const map = new Map();
+    selectedDateEvents.forEach((e) => {
+      const room = (e.roomName || "").trim() || DEFAULT_ROOM || NO_ROOM;
+      if (!map.has(room)) map.set(room, []);
+      map.get(room).push(e);
+    });
+    return map;
+  }, [selectedDateEvents]);
+  const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
+  const addCustomRoom = () => {
+    const next = normalizeRoomName(newRoomName);
+    if (!next) return;
+    setCustomRooms((prev) => {
+      const list = Array.isArray(prev) ? prev.map(normalizeRoomName).filter(Boolean) : [];
+      if (list.some((x) => x.toLowerCase() === next.toLowerCase())) return list;
+      return [...list, next];
+    });
+    setNewRoomName("");
+  };
+  const removeCustomRoom = (roomName) => {
+    const target = normalizeRoomName(roomName).toLowerCase();
+    setCustomRooms((prev) => (Array.isArray(prev) ? prev.filter((x) => normalizeRoomName(x).toLowerCase() !== target) : []));
+    if (String(selectedRoom || "").toLowerCase() === target) setSelectedRoom("all");
+  };
+  const isTodaySelected = selectedDate === toLocalDateKey(new Date());
+  const nowMinute = (() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  })();
+  const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
+  const monthHasEvents = useMemo(
+    () => monthCells.some((d) => ((selectedRoom === "all" ? monthEventsByDay.get(toLocalDateKey(d)) : (monthEventsByDay.get(toLocalDateKey(d)) || []).filter((e) => (e.roomName || DEFAULT_ROOM) === selectedRoom)) || []).length > 0),
+    [monthCells, monthEventsByDay, selectedRoom],
+  );
+  const weekHasEvents = useMemo(
+    () => weekDays.some((d) => (roomFilteredEventsByDay.get(toLocalDateKey(d)) || []).length > 0),
+    [weekDays, roomFilteredEventsByDay],
+  );
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div
@@ -751,6 +844,30 @@ export default function ScheduleTab({
         <button style={btnS} onClick={() => setWeekStart((d) => addDays(d, 7))}>
           Наступний тиждень →
         </button>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            { id: "month", label: "Місяць" },
+            { id: "week", label: "Тиждень" },
+            { id: "day", label: "День" },
+          ].map((m) => (
+            <button
+              key={m.id}
+              style={viewMode === m.id ? btnP : btnS}
+              onClick={() => setViewMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <select
+          style={{ ...inputSt, minHeight: 44, maxWidth: 210 }}
+          value={selectedRoom}
+          onChange={(e) => setSelectedRoom(e.target.value)}
+        >
+          <option value="all">Усі зали</option>
+          {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+        </select>
+        <button style={btnS} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button>
         <div
           style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}
         >
@@ -1009,6 +1126,131 @@ export default function ScheduleTab({
         </div>
       )}
 
+      {showRoomsManager ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <b>Налаштування залів (тимчасово: localStorage)</b>
+          <form
+            style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              addCustomRoom();
+            }}
+          >
+            <input style={{ ...inputSt, minHeight: 44 }} placeholder="Нова назва залу" value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} />
+            <button type="submit" style={btnP}>Додати залу</button>
+          </form>
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {allKnownRooms.map((room) => (
+              <span key={room} style={{ padding: "6px 10px", border: `1px solid ${theme.border}`, borderRadius: 999, display: "inline-flex", gap: 8, alignItems: "center" }}>
+                {room}
+                {customRooms.map((x) => normalizeRoomName(x)).includes(room) ? (
+                  <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {viewMode === "month" ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, background: "linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))", boxShadow: "0 12px 32px rgba(0,0,0,.2)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <b style={{ fontSize: 20, letterSpacing: "-0.01em" }}>
+              {selectedDateObj.toLocaleDateString("uk-UA", { month: "long", year: "numeric" })}
+            </b>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(addDays(monthStart, -1)))}>←</button>
+              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(new Date()))}>Сьогодні</button>
+              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(addDays(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1), 0)))}>→</button>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
+            {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"].map((d) => (
+              <div key={d} style={{ fontSize: 12, color: theme.textLight, textAlign: "center", fontWeight: 700 }}>{d}</div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gap: 6 }}>
+            {monthCells.map((d) => {
+              const key = toLocalDateKey(d);
+              const monthDayEvents = monthEventsByDay.get(key) || [];
+              const items = selectedRoom === "all"
+                ? monthDayEvents
+                : monthDayEvents.filter((e) => (e.roomName || DEFAULT_ROOM) === selectedRoom);
+              const inMonth = d.getMonth() === monthStart.getMonth();
+              const previewItems = items.slice().sort((a, b) => a.startMin - b.startMin).slice(0, 3);
+              const remaining = Math.max(0, items.length - previewItems.length);
+              return (
+                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", minHeight: 116, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: 12, background: inMonth ? "rgba(255,255,255,.02)" : "rgba(255,255,255,.01)", color: theme.text, padding: 8, display: "grid", alignContent: "start", gap: 5 }}>
+                  <div style={{ fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</div>
+                  {previewItems.map((e) => {
+                    const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
+                    return (
+                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "3px 6px", fontSize: 11.5, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
+                        {e.startTime} {e.title}
+                      </div>
+                    );
+                  })}
+                  {remaining > 0 ? <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 700 }}>+{remaining} ще</div> : null}
+                </button>
+              );
+            })}
+          </div>
+          {!monthHasEvents ? (
+            <div style={{ marginTop: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
+              У цій залі подій немає.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {viewMode === "day" ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, background: "linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))", boxShadow: "0 12px 32px rgba(0,0,0,.2)" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center", paddingBottom: 8, borderBottom: `1px solid ${theme.border}` }}>
+            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(-1)}>←</button>
+            <input style={{ ...inputSt, minHeight: 44, borderRadius: 999, padding: "0 14px" }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(1)}>→</button>
+            <div style={{ fontSize: 12, color: theme.textLight }}>
+              {selectedDateObj.toLocaleDateString("uk-UA", { weekday: "long", day: "numeric", month: "long" })}
+            </div>
+          </div>
+          <div style={{ overflowX: selectedRoom === "all" ? "auto" : "visible" }}>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: selectedRoom === "all" ? (isNarrowScreen ? "1fr" : `repeat(${Math.max(1, selectedDateByRoom.size)}, minmax(240px, 1fr))`) : "minmax(260px,1fr)" }}>
+              {Array.from(selectedDateByRoom.entries()).map(([room, items]) => (
+                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: 240, backdropFilter: "blur(4px)" }}>
+                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
+                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
+                    {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => (
+                      <div key={i} style={{ position: "absolute", top: i * 42, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
+                    ))}
+                    {isTodaySelected ? (
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * 42, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
+                    ) : null}
+                    {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
+                      const dur = Math.max(0, e.endMin - e.startMin);
+                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
+                      const height = Math.max(24, (dur / 60) * 42);
+                      const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
+                      return (
+                        <div key={e.id} style={{ position: "absolute", left: 8, right: 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: 10, padding: 6, overflow: "hidden" }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, lineHeight: "1.2em", whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime} · {e.title}</div>
+                          {height > 38 ? <div style={{ fontSize: 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer} · {getEventTypeLabel(e.eventType)}</div> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {!selectedDateByRoom.size ? (
+                <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 12, padding: 12, color: theme.textLight }}>
+                  У цій залі подій немає.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {viewMode === "week" ? (
       <div
         style={{
           ...cardSt,
@@ -1072,7 +1314,7 @@ export default function ScheduleTab({
             </div>
             {weekDays.map((d) => {
               const date = toLocalDateKey(d);
-              const dayEvents = eventsByDay.get(date) || [];
+              const dayEvents = roomFilteredEventsByDay.get(date) || [];
               return (
                 <div
                   key={date}
@@ -1331,7 +1573,13 @@ export default function ScheduleTab({
             })}
           </div>
         </div>
+        {!weekHasEvents ? (
+          <div style={{ margin: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
+            У цій залі подій немає.
+          </div>
+        ) : null}
       </div>
+      ) : null}
 
       {canManageBookings && quickCreate && createPortal(
         <div
