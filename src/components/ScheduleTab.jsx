@@ -128,6 +128,13 @@ const getEventTypeLabel = (value = "") => {
 };
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
+const getRoomLabel = (event) =>
+  event?.roomName ||
+  event?.room_name ||
+  event?.room ||
+  event?.location ||
+  event?.hall ||
+  "";
 const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
@@ -213,6 +220,8 @@ export default function ScheduleTab({
   onUpdateGroupSchedule,
   currentUser = null,
 }) {
+  const DEFAULT_ROOM = "Основна зала";
+  const NO_ROOM = "Без залу";
   const safeGroups = Array.isArray(groups) ? groups : [];
   const safeDirections = Array.isArray(directionsList) ? directionsList : [];
   const safeTrainers = Array.isArray(trainers) ? trainers : [];
@@ -241,6 +250,12 @@ export default function ScheduleTab({
     [bookingTypes],
   );
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [viewMode, setViewMode] = useState("week"); // month | week | day
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));
+  const [selectedRoom, setSelectedRoom] = useState("all");
+  const [showRoomsManager, setShowRoomsManager] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [customRooms, setCustomRooms] = useStickyState([], "ds_schedule_rooms_v1");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -324,9 +339,9 @@ export default function ScheduleTab({
         .forEach((s) => {
           const st = toMin(s.startTime);
           const en = toMin(s.endTime) ?? st + 60;
-          map
-            .get(date)
-            .push({
+              map
+                .get(date)
+                .push({
               ...s,
               kind: "group",
               eventType: "group_lesson",
@@ -335,8 +350,9 @@ export default function ScheduleTab({
               slotIndex: s.slotIndex,
               startMin: st,
               endMin: en,
-              cancelled: cancelledSet.has(`${s.groupId}:${date}`),
-            });
+                  cancelled: cancelledSet.has(`${s.groupId}:${date}`),
+                  roomName: getRoomLabel(s) || DEFAULT_ROOM,
+                });
         });
     });
     safeBookings.forEach((b) => {
@@ -369,6 +385,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
+          roomName: getRoomLabel(b) || DEFAULT_ROOM,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainer:
@@ -405,6 +422,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
+          roomName: getRoomLabel(b) || DEFAULT_ROOM,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainer:
@@ -447,6 +465,34 @@ export default function ScheduleTab({
 
   const getTariffPrice = (bookingType) =>
     tariffTypes.find((type) => type.id === bookingType)?.price || 0;
+  const allKnownRooms = useMemo(() => {
+    const set = new Set([DEFAULT_ROOM, ...customRooms.filter(Boolean)]);
+    eventsByDay.forEach((arr) => {
+      (arr || []).forEach((e) => {
+        const room = (e.roomName || "").trim();
+        if (room) set.add(room);
+      });
+    });
+    return Array.from(set);
+  }, [customRooms, eventsByDay]);
+  const roomFilteredEventsByDay = useMemo(() => {
+    if (selectedRoom === "all") return eventsByDay;
+    const map = new Map();
+    eventsByDay.forEach((arr, key) => {
+      map.set(key, (arr || []).filter((e) => (e.roomName || DEFAULT_ROOM) === selectedRoom));
+    });
+    return map;
+  }, [eventsByDay, selectedRoom]);
+  const selectedDateEvents = roomFilteredEventsByDay.get(selectedDate) || [];
+  const selectedDateByRoom = useMemo(() => {
+    const map = new Map();
+    (eventsByDay.get(selectedDate) || []).forEach((e) => {
+      const room = (e.roomName || "").trim() || DEFAULT_ROOM || NO_ROOM;
+      if (!map.has(room)) map.set(room, []);
+      map.get(room).push(e);
+    });
+    return map;
+  }, [eventsByDay, selectedDate]);
   const canMutateEvent = (event) =>
     isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
   const normalizeBookingPayload = (source) => {
@@ -724,6 +770,15 @@ export default function ScheduleTab({
     };
   }, [quickCreate]);
 
+  const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
+  const monthStart = useMemo(() => new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), 1), [selectedDateObj]);
+  const monthCells = useMemo(() => {
+    const firstWeekday = (monthStart.getDay() + 6) % 7;
+    const start = addDays(monthStart, -firstWeekday);
+    return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  }, [monthStart]);
+  const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div
@@ -751,6 +806,32 @@ export default function ScheduleTab({
         <button style={btnS} onClick={() => setWeekStart((d) => addDays(d, 7))}>
           Наступний тиждень →
         </button>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            { id: "month", label: "Місяць" },
+            { id: "week", label: "Тиждень" },
+            { id: "day", label: "День" },
+          ].map((m) => (
+            <button
+              key={m.id}
+              style={viewMode === m.id ? btnP : btnS}
+              onClick={() => setViewMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {viewMode !== "day" ? (
+          <select
+            style={{ ...inputSt, minHeight: 44, maxWidth: 210 }}
+            value={selectedRoom}
+            onChange={(e) => setSelectedRoom(e.target.value)}
+          >
+            <option value="all">Усі зали</option>
+            {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+          </select>
+        ) : null}
+        <button style={btnS} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button>
         <div
           style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}
         >
@@ -1009,6 +1090,66 @@ export default function ScheduleTab({
         </div>
       )}
 
+      {showRoomsManager ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <b>Налаштування залів (тимчасово: localStorage)</b>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <input style={{ ...inputSt, minHeight: 44 }} placeholder="Нова назва залу" value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} />
+            <button style={btnP} onClick={() => { const n = newRoomName.trim(); if (!n) return; setCustomRooms((p) => Array.from(new Set([...p, n]))); setNewRoomName(""); }}>Додати залу</button>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {allKnownRooms.map((room) => <span key={room} style={{ padding: "6px 10px", border: `1px solid ${theme.border}`, borderRadius: 999 }}>{room}</span>)}
+          </div>
+        </div>
+      ) : null}
+
+      {viewMode === "month" ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
+            {monthCells.map((d) => {
+              const key = toLocalDateKey(d);
+              const items = roomFilteredEventsByDay.get(key) || [];
+              const inMonth = d.getMonth() === monthStart.getMonth();
+              return (
+                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", minHeight: 90, border: `1px solid ${theme.border}`, borderRadius: 10, background: inMonth ? theme.card : theme.input, color: theme.text, padding: 8 }}>
+                  <div style={{ fontWeight: 700 }}>{d.getDate()}</div>
+                  <div style={{ fontSize: 12, color: theme.textLight }}>{items.length} подій</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {viewMode === "day" ? (
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(-1)}>←</button>
+            <input style={{ ...inputSt, minHeight: 44 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(1)}>→</button>
+          </div>
+          {Array.from(selectedDateByRoom.entries()).map(([room, items]) => (
+            <div key={room} style={{ marginBottom: 10 }}>
+              <b>{room || NO_ROOM}</b>
+              <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                {items.sort((a,b)=>a.startMin-b.startMin).map((e) => (
+                  <div key={e.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontWeight: 700 }}>{e.startTime}–{e.endTime} · {e.title}</div>
+                    <div style={{ fontSize: 12, color: theme.textLight }}>{e.trainer} · {getEventTypeLabel(e.eventType)}</div>
+                    {e.kind === "booking" && canMutateEvent(e) ? <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      <button style={btnS} onClick={() => startEdit(e)}>Редагувати</button>
+                      <button style={btnS} onClick={() => duplicateBookingLikeEvent(e)}>Дублювати</button>
+                      <button style={btnS} onClick={() => onDeleteBooking(e.parentId || e.id)}>Видалити</button>
+                    </div> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {viewMode === "week" ? (
       <div
         style={{
           ...cardSt,
@@ -1072,7 +1213,7 @@ export default function ScheduleTab({
             </div>
             {weekDays.map((d) => {
               const date = toLocalDateKey(d);
-              const dayEvents = eventsByDay.get(date) || [];
+              const dayEvents = roomFilteredEventsByDay.get(date) || [];
               return (
                 <div
                   key={date}
@@ -1332,6 +1473,7 @@ export default function ScheduleTab({
           </div>
         </div>
       </div>
+      ) : null}
 
       {canManageBookings && quickCreate && createPortal(
         <div
