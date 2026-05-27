@@ -924,7 +924,16 @@ const mapRoomBooking = (b) => ({
   recurrenceUntil: b.recurrence_until || null,
   description: b.description || "",
   status: b.status || "active",
+  roomName: b.room_name || b.room || b.location || b.hall || null,
   createdAt: b.created_at || null,
+});
+
+const mapStudioRoom = (row) => ({
+  id: row.id,
+  name: row.name,
+  isActive: row.is_active !== false,
+  sortOrder: Number(row.sort_order || 0),
+  createdAt: row.created_at || null,
 });
 
 export async function fetchRoomBookings() {
@@ -965,6 +974,7 @@ export async function insertRoomBooking(payload) {
     recurrence_until: payload.recurrenceUntil || null,
     description: payload.description || null,
     status: payload.status || "active",
+    room_name: payload.roomName || 'Основна зала',
   }).select('*').single();
   if (error) throw error;
   return mapRoomBooking(data);
@@ -990,6 +1000,7 @@ export async function updateRoomBooking(id, payload) {
   if (payload.recurrenceUntil !== undefined) next.recurrence_until = payload.recurrenceUntil || null;
   if (payload.description !== undefined) next.description = payload.description || null;
   if (payload.status !== undefined) next.status = payload.status || "active";
+  if (payload.roomName !== undefined) next.room_name = payload.roomName || 'Основна зала';
   const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
   if (error) throw error;
   return mapRoomBooking(data);
@@ -998,6 +1009,66 @@ export async function updateRoomBooking(id, payload) {
 export async function deleteRoomBooking(id) {
   const { error } = await supabase.from('room_bookings').delete().eq('id', id);
   if (error) throw error;
+}
+
+export async function fetchStudioRooms() {
+  const { data, error } = await supabase
+    .from('studio_rooms')
+    .select('*')
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) {
+    console.warn('studio_rooms:', error.message);
+    return [];
+  }
+  return (data || []).map(mapStudioRoom);
+}
+
+export async function createStudioRoom(name) {
+  const roomName = String(name || '').trim();
+  if (!roomName) throw new Error('name is required');
+  const { data: existing, error: existingError } = await supabase
+    .from('studio_rooms')
+    .select('*')
+    .ilike('name', roomName)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  if (existing && existing.id) {
+    const { data, error } = await supabase
+      .from('studio_rooms')
+      .update({ is_active: true, name: roomName })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return mapStudioRoom(data);
+  }
+
+  const { data, error } = await supabase
+    .from('studio_rooms')
+    .insert({ name: roomName, is_active: true })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapStudioRoom(data);
+}
+
+export async function updateStudioRoom(id, patch = {}) {
+  const next = {};
+  if (patch.name !== undefined) next.name = String(patch.name || '').trim();
+  if (patch.isActive !== undefined) next.is_active = !!patch.isActive;
+  if (patch.sortOrder !== undefined) next.sort_order = Number(patch.sortOrder || 0);
+  const { data, error } = await supabase
+    .from('studio_rooms')
+    .update(next)
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapStudioRoom(data);
 }
 
 // ─── CUSTOM ORDERS ───
