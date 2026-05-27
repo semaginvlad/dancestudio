@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
-import { useStickyState } from "../shared/utils";
+import { fetchStudioRooms, createStudioRoom, updateStudioRoom } from "../db";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -257,7 +257,7 @@ export default function ScheduleTab({
   const [selectedRoom, setSelectedRoom] = useState("all");
   const [showRoomsManager, setShowRoomsManager] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
-  const [customRooms, setCustomRooms] = useStickyState([], "ds_schedule_rooms_v1");
+  const [studioRooms, setStudioRooms] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -284,6 +284,7 @@ export default function ScheduleTab({
     description: "",
     status: "active",
     price: 0,
+    roomName: DEFAULT_ROOM,
   });
   const dirMap = useMemo(
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
@@ -469,7 +470,7 @@ export default function ScheduleTab({
   const getTariffPrice = (bookingType) =>
     tariffTypes.find((type) => type.id === bookingType)?.price || 0;
   const allKnownRooms = useMemo(() => {
-    const set = new Set([DEFAULT_ROOM, ...customRooms.map(normalizeRoomName).filter(Boolean)]);
+    const set = new Set([DEFAULT_ROOM, ...studioRooms.map((x) => normalizeRoomName(x.name)).filter(Boolean)]);
     eventsByDay.forEach((arr) => {
       (arr || []).forEach((e) => {
         const room = normalizeRoomName(e.roomName || "");
@@ -477,7 +478,7 @@ export default function ScheduleTab({
       });
     });
     return Array.from(set);
-  }, [customRooms, eventsByDay]);
+  }, [studioRooms, eventsByDay]);
   const roomFilteredEventsByDay = useMemo(() => {
     if (selectedRoom === "all") return eventsByDay;
     const map = new Map();
@@ -504,6 +505,7 @@ export default function ScheduleTab({
       color: source.color || null,
       description: source.description || null,
       status: source.status || "active",
+      roomName: normalizeRoomName(source.roomName || DEFAULT_ROOM) || DEFAULT_ROOM,
     };
     if (eventType === "individual_training") {
       const bookingType = tariffTypes.some((type) => type.id === source.bookingType)
@@ -581,6 +583,7 @@ export default function ScheduleTab({
       trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
       trainerName: e.trainer || "",
       title: e.title || "",
+      roomName: e.roomName || DEFAULT_ROOM,
       note: e.note || "",
       recurrence: e.recurrence || "none",
       recurrenceUntil: e.recurrenceUntil || "",
@@ -606,6 +609,7 @@ export default function ScheduleTab({
       trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
       trainerName: e.trainer || "",
       title: e.title || "",
+      roomName: e.roomName || DEFAULT_ROOM,
       note: e.note || "",
       recurrence: e.recurrence || "none",
       recurrenceUntil: e.recurrenceUntil || "",
@@ -630,6 +634,7 @@ export default function ScheduleTab({
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
+      roomName: DEFAULT_ROOM,
     };
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -787,21 +792,20 @@ export default function ScheduleTab({
     return map;
   }, [selectedDateEvents]);
   const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
-  const addCustomRoom = () => {
+  const loadStudioRooms = async () => setStudioRooms(await fetchStudioRooms());
+  const addCustomRoom = async () => {
     const next = normalizeRoomName(newRoomName);
     if (!next) return;
-    setCustomRooms((prev) => {
-      const list = Array.isArray(prev) ? prev.map(normalizeRoomName).filter(Boolean) : [];
-      if (list.some((x) => x.toLowerCase() === next.toLowerCase())) return list;
-      return [...list, next];
-    });
+    await createStudioRoom(next);
     setNewRoomName("");
+    await loadStudioRooms();
   };
-  const removeCustomRoom = (roomName) => {
-    const target = normalizeRoomName(roomName).toLowerCase();
-    setCustomRooms((prev) => (Array.isArray(prev) ? prev.filter((x) => normalizeRoomName(x).toLowerCase() !== target) : []));
-    if (String(selectedRoom || "").toLowerCase() === target) setSelectedRoom("all");
+  const removeCustomRoom = async (room) => {
+    await updateStudioRoom(room.id, { isActive: false });
+    if (String(selectedRoom || "").toLowerCase() === normalizeRoomName(room.name).toLowerCase()) setSelectedRoom("all");
+    await loadStudioRooms();
   };
+  useEffect(() => { loadStudioRooms(); }, []);
   const isTodaySelected = selectedDate === toLocalDateKey(new Date());
   const nowMinute = (() => {
     const now = new Date();
@@ -1037,6 +1041,9 @@ export default function ScheduleTab({
                 setDraft((p) => ({ ...p, title: e.target.value }))
               }
             />
+            <select style={inputSt} value={draft.roomName || DEFAULT_ROOM} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
+              {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+            </select>
             <input
               style={inputSt}
               placeholder="Нотатка"
@@ -1128,7 +1135,7 @@ export default function ScheduleTab({
 
       {showRoomsManager ? (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
-          <b>Налаштування залів (тимчасово: localStorage)</b>
+          <b>Налаштування залів</b>
           <form
             style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}
             onSubmit={(e) => {
@@ -1140,12 +1147,10 @@ export default function ScheduleTab({
             <button type="submit" style={btnP}>Додати залу</button>
           </form>
           <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {allKnownRooms.map((room) => (
-              <span key={room} style={{ padding: "6px 10px", border: `1px solid ${theme.border}`, borderRadius: 999, display: "inline-flex", gap: 8, alignItems: "center" }}>
-                {room}
-                {customRooms.map((x) => normalizeRoomName(x)).includes(room) ? (
-                  <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button>
-                ) : null}
+            {studioRooms.map((room) => (
+              <span key={room.id} style={{ padding: "6px 10px", border: `1px solid ${theme.border}`, borderRadius: 999, display: "inline-flex", gap: 8, alignItems: "center" }}>
+                {room.name}
+                <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button>
               </span>
             ))}
           </div>
@@ -1614,6 +1619,9 @@ export default function ScheduleTab({
           <b>Швидке створення</b>
           <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
           <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
+          <select style={inputSt} value={quickCreate.roomName || DEFAULT_ROOM} onChange={(e)=>setQuickCreate((p)=>({ ...p, roomName: e.target.value }))}>
+            {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+          </select>
           <select
             style={inputSt}
             value={isAdmin ? quickCreate.trainerId || "" : currentTrainerId}
