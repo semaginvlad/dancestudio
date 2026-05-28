@@ -271,7 +271,8 @@ export default function ScheduleTab({
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
-  const [quickCreate, setQuickCreate] = useState(null);
+  const [formMode, setFormMode] = useState("compact");
+  const [formErrors, setFormErrors] = useState({});
   const [selection, setSelection] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
@@ -590,22 +591,25 @@ export default function ScheduleTab({
   };
 
 
+  const validateDraft = (source) => {
+    const st = toMin(source.startTime);
+    const en = toMin(source.endTime);
+    const normalizedTitle = getDraftTitle(source);
+    const errors = {
+      title: !normalizedTitle ? "Вкажіть назву події" : "",
+      date: !source.date ? "Оберіть дату" : "",
+      startTime: st == null ? "Оберіть час початку" : "",
+      endTime: en == null || (st != null && en <= st) ? "Час завершення має бути пізніше" : "",
+    };
+    return { errors, hasErrors: Object.values(errors).some(Boolean), normalizedTitle };
+  };
+
   const saveBooking = async () => {
     if (!canManageBookings) return;
-    const st = toMin(draft.startTime);
-    const en = toMin(draft.endTime);
-    const normalizedTitle = getDraftTitle(draft);
+    const { errors, hasErrors, normalizedTitle } = validateDraft(draft);
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
-    const missing = {
-      date: !draft.date,
-      title: !normalizedTitle,
-      start: st == null,
-      end: en == null || en <= st,
-    };
-    if (missing.date || missing.title || missing.start || missing.end) {
-      console.warn("[ScheduleTab] booking validation failed", { missing, draft, normalizedTitle });
-      return alert("Перевірте дату/час/назву");
-    }
+    setFormErrors(errors);
+    if (hasErrors) return;
     const payload = normalizeBookingPayload({
       ...draft,
       title: normalizedTitle,
@@ -615,9 +619,11 @@ export default function ScheduleTab({
     else await onAddBooking(payload);
     setShowForm(false);
     setEditingId(null);
+    setFormErrors({});
   };
   const startEdit = (e) => {
     setEditingId(e.parentId || e.id);
+    setFormMode("full");
     setShowForm(true);
     setDraft((p) => ({
       ...p,
@@ -644,6 +650,7 @@ export default function ScheduleTab({
 
   const duplicateBookingLikeEvent = (e) => {
     setEditingId(null);
+    setFormMode("full");
     setShowForm(true);
     setDraft((p) => ({
       ...p,
@@ -667,12 +674,12 @@ export default function ScheduleTab({
       status: e.status || "active",
     }));
   };
-  const openCreateAt = (date, minute, clickEvent) => {
+  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null) => {
     const start = roundToNearest15(minute);
     const base = {
       date,
       startTime: minToHHMM(start),
-      endTime: minToHHMM(start + 60),
+      endTime: minToHHMM(endMinuteOverride || (start + 60)),
       eventType: "room_booking",
       status: "active",
       recurrence: "none",
@@ -685,44 +692,17 @@ export default function ScheduleTab({
       paymentMethod: "none",
       roomName: DEFAULT_ROOM,
     };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const left = Math.min(Math.max(8, (clickEvent?.clientX || 40) + 8), vw - 320);
-    const top = Math.min(Math.max(8, (clickEvent?.clientY || 40) + 8), vh - 320);
-    if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", { ...base, x: left, y: top });
-    setQuickCreate({ ...base, x: left, y: top });
+    if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", base);
+    setEditingId(null);
+    setFormMode("compact");
+    setDraft((p) => ({ ...p, ...base }));
+    setFormErrors({});
+    setShowForm(true);
   };
   const minuteFromY = (y) =>
     roundToNearest15(DAY_START_HOUR * 60 + (y / HOUR_PX) * 60);
-  const applyQuickToFullForm = () => {
-    if (!quickCreate) return;
-    const { x, y, ...quickPayload } = quickCreate;
-    setEditingId(null);
-    setShowForm(true);
-    setDraft((p) => ({
-      ...p,
-      ...quickPayload,
-      recurrenceUntil: "",
-      color: "",
-      description: "",
-    }));
-    setQuickCreate(null);
-  };
-  const saveQuickCreate = async () => {
-    const normalizedTitle = getDraftTitle(quickCreate || {});
-    const fallbackRoomName = normalizeRoomName(quickCreate?.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
-    if (!normalizedTitle) return alert("Вкажіть назву події");
-    const payload = normalizeBookingPayload({
-      ...quickCreate,
-      title: normalizedTitle,
-      roomName: fallbackRoomName,
-      recurrence: "none",
-      recurrenceUntil: null,
-      status: "active",
-    });
-    await onAddBooking(payload);
-    setQuickCreate(null);
-  };
+  const applyQuickToFullForm = () => setFormMode("full");
+  const applyFullToCompactForm = () => setFormMode("compact");
 
   const openGroupSlotEditor = (e) => {
     if (e.groupId == null || e.slotIndex == null) {
@@ -802,23 +782,7 @@ export default function ScheduleTab({
       document.removeEventListener("keydown", onEsc);
     };
   }, [openMenuState]);
-  useEffect(() => {
-    if (!quickCreate) return;
-    if (DEBUG_QUICK_CREATE) console.log("[quick-create] state", quickCreate);
-    const onDoc = (e) => {
-      if (e.target.closest("[data-quick-create='1']")) return;
-      if (DEBUG_QUICK_CREATE) console.log("[quick-create] outside close");
-      setQuickCreate(null);
-    };
-    const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
-    const t = setTimeout(() => document.addEventListener("pointerdown", onDoc), 0);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("pointerdown", onDoc);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [quickCreate]);
+  
 
   const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
   const monthStart = useMemo(() => new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), 1), [selectedDateObj]);
@@ -846,7 +810,9 @@ export default function ScheduleTab({
   const dayRoomsToRender = useMemo(() => {
     if (selectedRoom !== "all") return Array.from(selectedDateByRoom.entries());
     const activeRoomNames = activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean);
-    const baseRooms = activeRoomNames.length ? activeRoomNames : Array.from(selectedDateByRoom.keys());
+    const eventRoomNames = Array.from(selectedDateByRoom.keys()).map((room) => normalizeRoomName(room)).filter(Boolean);
+    const orderedRooms = Array.from(new Set([...(eventRoomNames.length ? eventRoomNames : []), ...activeRoomNames]));
+    const baseRooms = orderedRooms.length ? orderedRooms : eventRoomNames;
     const byRoom = new Map(baseRooms.map((room) => [room, []]));
     selectedDateEvents.forEach((event) => {
       const room = normalizeRoomName(event.roomName) || primaryRoomName;
@@ -858,11 +824,15 @@ export default function ScheduleTab({
   }, [selectedRoom, selectedDateByRoom, selectedDateEvents, activeStudioRooms, primaryRoomName, dayRoomColumnLimit]);
 
   const dayRoomGridTemplate = useMemo(() => {
-    if (selectedRoom !== "all") return "minmax(260px,1fr)";
+    if (selectedRoom !== "all") return isMobile ? "minmax(100%, 1fr)" : "minmax(260px,1fr)";
     const count = Math.max(1, dayRoomsToRender.length);
+    if (isMobile) {
+      if (dayRoomColumnLimit !== "all" && Math.max(1, Number(dayRoomColumnLimit || 1)) === 1) return "minmax(100%, 1fr)";
+      return `repeat(${count}, minmax(240px, 260px))`;
+    }
     if (dayRoomColumnLimit === "all") return `repeat(${count}, minmax(240px, 1fr))`;
     return `repeat(${Math.max(1, Number(dayRoomColumnLimit || 1))}, minmax(240px, 1fr))`;
-  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit]);
+  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit, isMobile]);
 
   const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
   const loadStudioRooms = async () => {
@@ -934,6 +904,64 @@ export default function ScheduleTab({
     return now.getHours() * 60 + now.getMinutes();
   })();
   const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
+  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
+  const isDarkTheme = String(theme.bg || "").toLowerCase() === "#0f131a";
+  const typeAccent = {
+    group_lesson: { bg: "rgba(99,102,241,.12)", border: "#6366f1", text: isDarkTheme ? "#c7d2fe" : "#4338ca" },
+    individual_training: { bg: "rgba(6,182,212,.14)", border: "#06b6d4", text: isDarkTheme ? "#a5f3fc" : "#0e7490" },
+    room_booking: { bg: "rgba(59,130,246,.14)", border: "#3b82f6", text: isDarkTheme ? "#bfdbfe" : "#1d4ed8" },
+    cleaning: { bg: "rgba(245,158,11,.14)", border: "#f59e0b", text: isDarkTheme ? "#fde68a" : "#b45309" },
+    custom_admin_event: { bg: "rgba(217,70,239,.14)", border: "#d946ef", text: isDarkTheme ? "#f5d0fe" : "#a21caf" },
+  };
+  const editorSurface = isDarkTheme
+    ? "linear-gradient(180deg, rgba(15,23,42,.78), rgba(2,6,23,.7))"
+    : "linear-gradient(180deg, rgba(255,255,255,.78), rgba(248,250,252,.68))";
+  const editorOverlay = isDarkTheme ? "rgba(2,6,23,.58)" : "rgba(15,23,42,.12)";
+  const editorInputSt = {
+    ...inputSt,
+    minHeight: isMobile ? 38 : 40,
+    borderRadius: 12,
+    padding: isMobile ? "0 10px" : "0 12px",
+    fontSize: isMobile ? 12.5 : 13,
+    background: isDarkTheme ? "rgba(15,23,42,.46)" : "rgba(255,255,255,.7)",
+    color: theme.text,
+    borderColor: isDarkTheme ? "rgba(148,163,184,.24)" : "rgba(148,163,184,.38)",
+    backdropFilter: "blur(14px)",
+    WebkitBackdropFilter: "blur(14px)",
+    boxShadow: isDarkTheme ? "inset 0 1px 0 rgba(255,255,255,.06)" : "inset 0 1px 0 rgba(255,255,255,.82), 0 1px 2px rgba(15,23,42,.04)",
+  };
+  const editorBtnSt = {
+    ...btnS,
+    minHeight: isMobile ? 38 : 40,
+    borderRadius: 999,
+    padding: isMobile ? "0 12px" : "0 14px",
+    fontSize: isMobile ? 12.5 : 13,
+    background: isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.66)",
+    color: theme.text,
+    borderColor: isDarkTheme ? "rgba(148,163,184,.25)" : "rgba(148,163,184,.38)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+  };
+  const editorSectionLabelSt = { fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: theme.textLight, fontWeight: 800 };
+  const eventTypeIcon = { room_booking: "◌", individual_training: "✦", group_lesson: "●", cleaning: "✧", custom_admin_event: "◆" };
+  const toolbarBtnSt = {
+    ...btnS,
+    minHeight: isMobile ? 34 : 40,
+    borderRadius: 999,
+    padding: isMobile ? "0 10px" : "0 14px",
+    fontSize: isMobile ? 12 : 13,
+    background: isDarkTheme ? "rgba(15,23,42,.38)" : "rgba(255,255,255,.62)",
+    border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.22)" : "rgba(148,163,184,.34)"}`,
+    color: theme.text,
+    boxShadow: isDarkTheme ? "inset 0 1px 0 rgba(255,255,255,.05)" : "inset 0 1px 0 rgba(255,255,255,.75)",
+  };
+  const toolbarActiveSt = {
+    ...toolbarBtnSt,
+    color: "#fff",
+    background: `linear-gradient(135deg, ${theme.primary}, #7c3aed)`,
+    borderColor: "rgba(255,255,255,.28)",
+    boxShadow: `0 8px 20px ${theme.primary}35`,
+  };
   const monthHasEvents = useMemo(
     () => monthCells.some((d) => ((selectedRoom === "all" ? monthEventsByDay.get(toLocalDateKey(d)) : (monthEventsByDay.get(toLocalDateKey(d)) || []).filter((e) => (e.roomName || primaryRoomName) === selectedRoom)) || []).length > 0),
     [monthCells, monthEventsByDay, selectedRoom, primaryRoomName],
@@ -945,32 +973,25 @@ export default function ScheduleTab({
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <div
-        style={{
-          ...cardSt,
-          border: `1px solid ${theme.border}`,
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? 8 : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
+        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
-          style={btnS}
+          style={toolbarBtnSt}
           onClick={() => setWeekStart((d) => addDays(d, -7))}
         >
-          ← Попередній тиждень
+          {isMobile ? "←" : "← Попередній тиждень"}
         </button>
         <button
-          style={btnS}
+          style={toolbarBtnSt}
           onClick={() => setWeekStart(startOfWeek(new Date()))}
         >
           Сьогодні
         </button>
-        <button style={btnS} onClick={() => setWeekStart((d) => addDays(d, 7))}>
-          Наступний тиждень →
+        <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>
+          {isMobile ? "→" : "Наступний тиждень →"}
         </button>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        </div>
+        <div style={{ display: "flex", gap: isMobile ? 5 : 6, flexWrap: "wrap" }}>
           {[
             { id: "month", label: "Місяць" },
             { id: "week", label: "Тиждень" },
@@ -978,96 +999,93 @@ export default function ScheduleTab({
           ].map((m) => (
             <button
               key={m.id}
-              style={viewMode === m.id ? btnP : btnS}
+              style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt}
               onClick={() => setViewMode(m.id)}
             >
               {m.label}
             </button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
         <select
-          style={{ ...inputSt, minHeight: 44, maxWidth: 210 }}
+          style={{ ...editorInputSt, minHeight: isMobile ? 34 : 44, maxWidth: isMobile ? 160 : 210, fontSize: isMobile ? 12 : undefined, borderRadius: 999 }}
           value={selectedRoom}
           onChange={(e) => setSelectedRoom(e.target.value)}
         >
           <option value="all">Усі зали</option>
           {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
         </select>
-        <button style={btnS} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button>
+        {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
         <div
-          style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}
+          style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 10.5 : 12, color: theme.textLight, width: isMobile ? "100%" : undefined }}
         >
           Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
         </div>
         {canManageBookings && (
           <button
-            style={btnP}
+            style={{ ...toolbarActiveSt, minHeight: isMobile ? 34 : 40, padding: isMobile ? "0 12px" : "0 16px" }}
             onClick={() => {
               setEditingId(null);
+              setFormMode("full");
               setShowForm((v) => !v);
             }}
           >
-            + Додати тренування / резерв
+            {isMobile ? "+ Додати" : "+ Додати тренування / резерв"}
           </button>
         )}
+        </div>
       </div>
 
       {canManageBookings && showForm && (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12, overflowX: "hidden" }}>
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : (formMode === "compact" ? "min(480px, 96vw)" : "min(540px, 96vw)"), maxWidth: isMobile ? "none" : undefined, maxHeight: isMobile ? "74vh" : "86vh", overflowY: "auto", overflowX: "hidden", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)", boxShadow: isDarkTheme ? "0 22px 60px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.08)" : "0 22px 60px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.85)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div>
+              <b style={{ fontSize: isMobile ? 17 : 18, color: theme.text }}>{editingId ? "Редагувати подію" : "Нова подія"}</b>
+              <div style={{ fontSize: 12, color: theme.textLight }}>{draft.date} · {draft.startTime}–{draft.endTime}</div>
+            </div>
+            <button style={{ ...editorBtnSt, minHeight: isMobile ? 32 : 34, width: isMobile ? 34 : 36, padding: 0, justifyContent: "center" }} onClick={() => { setShowForm(false); setEditingId(null); setFormErrors({}); }}>✕</button>
+          </div>
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-              gap: 8,
+              gridTemplateColumns: "1fr",
+              gap: isMobile ? 7 : 8,
             }}
           >
-            <select
-              style={inputSt}
-              value={draft.eventType}
-              onChange={(e) => {
-                const eventType = e.target.value;
-                setDraft((p) => ({
-                  ...p,
-                  eventType,
-                  bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null,
-                  peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null,
-                  price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0,
-                  paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none",
-                }));
-              }}
-            >
-              {allowedEventTypes.map((eventType) => (
-                <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
-              ))}
+            <div style={editorSectionLabelSt}>Основне</div>
+            <input style={{ ...editorInputSt, minHeight: isMobile ? 42 : 46, fontSize: isMobile ? 14 : 15, borderColor: formErrors.title ? theme.danger : editorInputSt.borderColor }} placeholder="Назва / клієнт / група" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
+            {formErrors.title ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.title}</div> : null}
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
+            <div style={editorSectionLabelSt}>Час і місце</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+            <input style={{ ...editorInputSt, borderColor: formErrors.date ? theme.danger : editorInputSt.borderColor }} type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
+              <input style={{ ...editorInputSt, borderColor: formErrors.startTime ? theme.danger : editorInputSt.borderColor }} type="time" value={draft.startTime} onChange={(e) => setDraft((p) => ({ ...p, startTime: e.target.value }))} />
+              <input style={{ ...editorInputSt, borderColor: formErrors.endTime ? theme.danger : editorInputSt.borderColor }} type="time" value={draft.endTime} onChange={(e) => setDraft((p) => ({ ...p, endTime: e.target.value }))} />
+            </div>
+            {(formErrors.date || formErrors.startTime || formErrors.endTime) ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.date || formErrors.startTime || formErrors.endTime}</div> : null}
+            <select style={editorInputSt} value={draft.roomName || primaryRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
+              {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
             </select>
-            <input
-              style={inputSt}
-              type="date"
-              value={draft.date}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, date: e.target.value }))
-              }
-            />
-            <input
-              style={inputSt}
-              type="time"
-              value={draft.startTime}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, startTime: e.target.value }))
-              }
-            />
-            <input
-              style={inputSt}
-              type="time"
-              value={draft.endTime}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, endTime: e.target.value }))
-              }
-            />
+            {draft.eventType !== "cleaning" ? (
+              <select
+                style={editorInputSt}
+                value={isAdmin ? draft.trainerId || "" : currentTrainerId}
+                disabled={!isAdmin}
+                onChange={(e) => setDraft((p) => ({ ...p, trainerId: e.target.value }))}
+              >
+                {isAdmin ? <option value="">Тренер</option> : null}
+                {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
+                {isAdmin && safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
+              </select>
+            ) : null}
+            {formMode === "compact" ? <button style={{ ...editorBtnSt, minHeight: isMobile ? 34 : 36 }} onClick={applyQuickToFullForm}>Показати всі поля</button> : null}
+            {formMode === "full" ? <>
+            <div style={editorSectionLabelSt}>Деталі</div>
             {draft.eventType === "individual_training" && (
               <>
                 <select
-                  style={inputSt}
+                  style={editorInputSt}
                   value={draft.bookingType || tariffTypes[0]?.id || ""}
                   onChange={(e) => {
                     const nextPrice = getTariffPrice(e.target.value);
@@ -1085,7 +1103,7 @@ export default function ScheduleTab({
                   ))}
                 </select>
                 <input
-                  style={inputSt}
+                  style={editorInputSt}
                   type="number"
                   placeholder="К-ть людей"
                   value={draft.peopleCount ?? ""}
@@ -1097,7 +1115,7 @@ export default function ScheduleTab({
                   }
                 />
                 <input
-                  style={inputSt}
+                  style={editorInputSt}
                   type="number"
                   placeholder="Ціна"
                   value={draft.price ?? ""}
@@ -1111,7 +1129,7 @@ export default function ScheduleTab({
                   }
                 />
                 <select
-                  style={inputSt}
+                  style={editorInputSt}
                   value={draft.paymentMethod || "none"}
                   onChange={(e) =>
                     setDraft((p) => ({ ...p, paymentMethod: e.target.value }))
@@ -1125,7 +1143,7 @@ export default function ScheduleTab({
             )}
             {draft.eventType === "room_booking" && isAdmin && (
               <input
-                style={inputSt}
+                style={editorInputSt}
                 type="number"
                 placeholder="Ціна"
                 value={draft.price ?? ""}
@@ -1137,91 +1155,73 @@ export default function ScheduleTab({
                 }
               />
             )}
-            <select
-              style={inputSt}
-              value={isAdmin ? draft.trainerId || "" : currentTrainerId}
-              disabled={!isAdmin}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, trainerId: e.target.value }))
-              }
-            >
-              {isAdmin ? <option value="">Тренер</option> : null}
-              {!isAdmin && currentTrainerId ? (
-                <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option>
-              ) : null}
-              {isAdmin && safeTrainers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {getTrainerDisplayName(t)}
-                </option>
-              ))}
-            </select>
             <input
-              style={inputSt}
-              placeholder="Назва / клієнт"
-              value={draft.title}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, title: e.target.value }))
-              }
-            />
-            <select style={inputSt} value={draft.roomName || primaryRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
-              {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-            </select>
-            <input
-              style={inputSt}
+              style={editorInputSt}
               placeholder="Нотатка"
               value={draft.note}
               onChange={(e) =>
                 setDraft((p) => ({ ...p, note: e.target.value }))
               }
             />
-            <select style={inputSt} value={draft.recurrence} onChange={(e) => setDraft((p) => ({ ...p, recurrence: e.target.value }))}>
+            <select style={editorInputSt} value={draft.recurrence} onChange={(e) => setDraft((p) => ({ ...p, recurrence: e.target.value }))}>
               <option value="none">Без повтору</option>
               <option value="daily">Щодня</option>
               <option value="weekly">Щотижня</option>
               <option value="monthly">Щомісяця</option>
             </select>
-            <input style={inputSt} type="date" value={draft.recurrenceUntil || ""} onChange={(e) => setDraft((p) => ({ ...p, recurrenceUntil: e.target.value }))} />
-            <input style={inputSt} type="color" value={draft.color || "#64748b"} onChange={(e) => setDraft((p) => ({ ...p, color: e.target.value }))} />
-            <select style={inputSt} value={draft.status || "active"} onChange={(e) => setDraft((p) => ({ ...p, status: e.target.value }))}>
+            <input style={editorInputSt} type="date" value={draft.recurrenceUntil || ""} onChange={(e) => setDraft((p) => ({ ...p, recurrenceUntil: e.target.value }))} />
+            <input style={editorInputSt} type="color" value={draft.color || "#64748b"} onChange={(e) => setDraft((p) => ({ ...p, color: e.target.value }))} />
+            <select style={editorInputSt} value={draft.status || "active"} onChange={(e) => setDraft((p) => ({ ...p, status: e.target.value }))}>
               <option value="active">Активно</option>
               <option value="tentative">Попередньо</option>
               <option value="cancelled">Скасовано</option>
             </select>
-            <input style={inputSt} placeholder="Опис" value={draft.description || ""} onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))} />
+            <input style={editorInputSt} placeholder="Опис" value={draft.description || ""} onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))} />
+            <button type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 34 : 36 }} onClick={applyFullToCompactForm}>Сховати зайві поля</button>
+            </> : null}
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <button style={btnP} onClick={saveBooking}>
-              {editingId ? "Зберегти зміни" : "Зберегти резерв"}
+          <div style={{ display: "flex", gap: 6, marginTop: 8, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))" }}>
+            <button style={{ ...btnP, minHeight: isMobile ? 42 : 40, borderRadius: 999, padding: "0 16px" }} onClick={saveBooking}>
+              Зберегти
             </button>
             <button
-              style={btnS}
+              style={{ ...editorBtnSt, minHeight: isMobile ? 42 : 40 }}
               onClick={() => {
                 setShowForm(false);
                 setEditingId(null);
+                setFormErrors({});
               }}
             >
               Скасувати
             </button>
+            {editingId ? <button style={{ ...editorBtnSt, color: theme.danger, marginLeft: "auto", minHeight: isMobile ? 42 : 40 }} onClick={async () => { await onDeleteBooking(editingId); setShowForm(false); setEditingId(null); }}>Видалити</button> : null}
           </div>
+        </div>
         </div>
       )}
 
       {selectedEventDetails && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center" }}>
-          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(560px,92vw)", maxHeight: "90vh", overflow: "auto" }}>
-            <b>Деталі заняття</b>
-            <div style={{ marginTop: 8, display: "grid", gap: 4, fontSize: 13 }}>
-              <div><b>Назва:</b> {selectedEventDetails.title}</div>
-              <div><b>Дата:</b> {selectedEventDetails.date}</div>
-              <div><b>Час:</b> {selectedEventDetails.startTime}–{selectedEventDetails.endTime}</div>
-              <div><b>Група:</b> {selectedEventDetails.groupName || selectedEventDetails.title}</div>
-              <div><b>Напрямок:</b> {selectedEventDetails.direction || "—"}</div>
-              <div><b>Тренер:</b> {selectedEventDetails.trainer || "—"}</div>
-              <div><b>Тип події:</b> {getEventTypeLabel(selectedEventDetails.eventType)}</div>
-              {selectedEventDetails.cancelled ? <div style={{ color: theme.danger }}><b>Статус:</b> cancelled</div> : null}
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: editorOverlay, display: "grid", placeItems: "center", padding: 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(480px,94vw)", maxHeight: "86vh", overflow: "auto", borderRadius: 18, background: editorSurface, color: theme.text }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
+              <div>
+                <div style={editorSectionLabelSt}>Деталі</div>
+                <b style={{ fontSize: 18 }}>{selectedEventDetails.title || selectedEventDetails.groupName || "Подія"}</b>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setSelectedEventDetails(null)}>✕</button>
             </div>
-            <div style={{ marginTop: 10 }}>
-              <button style={btnP} onClick={() => setSelectedEventDetails(null)}>Закрити</button>
+            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>🕒 {selectedEventDetails.startTime}–{selectedEventDetails.endTime}</span>
+              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>📅 {selectedEventDetails.date}</span>
+              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>⌂ {selectedEventDetails.roomName || primaryRoomName || "—"}</span>
+              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>{getEventTypeLabel(selectedEventDetails.eventType)}</span>
+              {selectedEventDetails.cancelled ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", color: theme.danger }}>Скасовано</span> : null}
+            </div>
+            <div style={{ marginTop: 12, display: "grid", gap: 8, fontSize: 13 }}>
+              <div style={{ color: theme.textLight }}>Група / клієнт</div>
+              <div>{selectedEventDetails.groupName || selectedEventDetails.title || "—"}</div>
+              <div style={{ color: theme.textLight }}>Напрямок · Тренер</div>
+              <div>{selectedEventDetails.direction || "—"} · {selectedEventDetails.trainer || "—"}</div>
             </div>
           </div>
         </div>
@@ -1241,11 +1241,11 @@ export default function ScheduleTab({
             <div style={{ marginTop: 8, color: theme.danger, fontSize: 13 }}>{groupSlotEdit.error}</div>
           ) : null}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-            <select style={inputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))}>
+            <select style={editorInputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))}>
               <option value={1}>Пн</option><option value={2}>Вт</option><option value={3}>Ср</option><option value={4}>Чт</option><option value={5}>Пт</option><option value={6}>Сб</option><option value={0}>Нд</option>
             </select>
-            <input style={inputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
-            <input style={inputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
+            <input style={editorInputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
+            <input style={editorInputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
@@ -1255,7 +1255,7 @@ export default function ScheduleTab({
         </div>
       )}
 
-      {showRoomsManager ? (
+      {isAdmin && showRoomsManager ? (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
           <b>Налаштування залів</b>
           <form
@@ -1310,7 +1310,7 @@ export default function ScheduleTab({
               <div key={d} style={{ fontSize: 12, color: theme.textLight, textAlign: "center", fontWeight: 700 }}>{d}</div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gridAutoRows: isMobile ? 58 : undefined, gap: isMobile ? 4 : 6 }}>
             {monthCells.map((d) => {
               const key = toLocalDateKey(d);
               const monthDayEvents = monthEventsByDay.get(key) || [];
@@ -1325,13 +1325,13 @@ export default function ScheduleTab({
                 ? Math.max(0, items.length - previewItems.length)
                 : Math.max(0, items.length - visibleMonthChipCount);
               return (
-                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", minHeight: 116, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: 12, background: inMonth ? "rgba(255,255,255,.02)" : "rgba(255,255,255,.01)", color: theme.text, padding: 8, display: "grid", alignContent: "start", gap: 5 }}>
+                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 58 : 116, height: isMobile ? 58 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
                   <div style={{ fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</div>
                   {items.length > 0 && selectedRoom === "all" ? (
                     <>
                       <div
                         onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }}
-                        style={{ fontSize: 11.5, color: theme.textLight, fontWeight: 700 }}
+                        style={{ fontSize: isMobile ? 10 : 11.5, color: theme.textLight, fontWeight: 700, lineHeight: 1.1 }}
                       >
                         {items.length} подій
                       </div>
@@ -1341,12 +1341,12 @@ export default function ScheduleTab({
                       >
                         {Array.from(new Set(items.map((ev) => colorKey(ev)))).slice(0, 4).map((tone) => {
                           const c = palette[tone] || palette.default;
-                          return <span key={tone} style={{ width: 12, height: 4, borderRadius: 999, background: c.border, opacity: 0.55 }} />;
+                          return <span key={tone} style={{ width: isMobile ? 6 : 12, height: isMobile ? 6 : 4, borderRadius: 999, background: c.border, opacity: 0.65 }} />;
                         })}
                       </div>
                     </>
                   ) : null}
-                  {selectedRoom !== "all" ? previewItems.slice(0, 2).map((e) => {
+                  {!isMobile && selectedRoom !== "all" ? previewItems.slice(0, 2).map((e) => {
                     const c = e.color ? { bg: `${e.color}18`, border: `${e.color}99` } : palette[colorKey(e)] || palette.default;
                     return (
                       <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92 }}>
@@ -1354,7 +1354,7 @@ export default function ScheduleTab({
                       </div>
                     );
                   }) : null}
-                  {selectedRoom !== "all" && remaining > 0 ? <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 700, opacity: 0.85 }}>+{remaining} ще</div> : null}
+                  {!isMobile && selectedRoom !== "all" && remaining > 0 ? <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 700, opacity: 0.85 }}>+{remaining} ще</div> : null}
                 </button>
               );
             })}
@@ -1368,31 +1368,62 @@ export default function ScheduleTab({
       ) : null}
 
       {viewMode === "day" ? (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, background: "linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))", boxShadow: "0 12px 32px rgba(0,0,0,.2)" }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center", paddingBottom: 8, borderBottom: `1px solid ${theme.border}` }}>
-            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(-1)}>←</button>
-            <input style={{ ...inputSt, minHeight: 44, borderRadius: 999, padding: "0 14px" }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-            <button style={{ ...btnS, minHeight: 44 }} onClick={() => shiftSelectedDate(1)}>→</button>
-            <div style={{ fontSize: 12, color: theme.textLight }}>
-              {selectedDateObj.toLocaleDateString("uk-UA", { weekday: "long", day: "numeric", month: "long" })}
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
+          <div style={{ display: "flex", gap: isMobile ? 5 : 8, marginBottom: isMobile ? 6 : 10, flexWrap: "wrap", alignItems: "center", paddingBottom: isMobile ? 6 : 8, borderBottom: `1px solid ${theme.border}` }}>
+            <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(-1)}>←</button>
+            <input style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+            <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(1)}>→</button>
+            <div style={{ fontSize: isMobile ? 10.5 : 12, color: theme.textLight, whiteSpace: "nowrap" }}>
+              {selectedDateObj.toLocaleDateString("uk-UA", { weekday: isMobile ? "short" : "long", day: "numeric", month: "short" })}
             </div>
             {selectedRoom === "all" ? (
-              <div style={{ display: "flex", gap: 6, alignItems: "center", marginLeft: "auto", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: theme.textLight }}>Залів на екрані:</span>
+              <div style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: isMobile ? 0 : "auto", flexWrap: "wrap" }}>
+                <span style={{ fontSize: isMobile ? 10.5 : 12, color: theme.textLight }}>Залів:</span>
                 {["1", "2", "3", "all"].map((v) => (
-                  <button key={v} type="button" style={dayRoomColumnLimit === v ? btnP : btnS} onClick={() => setDayRoomColumnLimit(v)}>
+                  <button key={v} type="button" style={dayRoomColumnLimit === v ? toolbarActiveSt : toolbarBtnSt} onClick={() => setDayRoomColumnLimit(v)}>
                     {v === "all" ? "Усі" : v}
                   </button>
                 ))}
               </div>
             ) : null}
           </div>
-          <div style={{ overflowX: selectedRoom === "all" ? "auto" : "visible" }}>
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: selectedRoom === "all" && isNarrowScreen ? "1fr" : dayRoomGridTemplate, minWidth: selectedRoom === "all" && !isNarrowScreen ? `max-content` : undefined }}>
+          <div style={{ overflowX: selectedRoom === "all" ? "auto" : "visible", overflowY: "visible", WebkitOverflowScrolling: "touch", touchAction: selectedRoom === "all" ? "pan-x pan-y" : "auto", overscrollBehaviorX: "contain" }}>
+            {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}</span>)}</div> : null}
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: dayRoomGridTemplate, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? `max-content` : undefined }}>
               {dayRoomsToRender.map(([room, items]) => (
-                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: 240, backdropFilter: "blur(4px)" }}>
+                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : "100%") : 240 }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
                   <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
+                    {canManageBookings && !isMobile ? (
+                      <div
+                        style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
+                        onMouseDown={(ev) => {
+                          const rect = ev.currentTarget.getBoundingClientRect();
+                          const y = ev.clientY - rect.top;
+                          const mins = minuteFromY(y);
+                          setSelection({ date: selectedDate, startMinute: mins, endMinute: mins, dragging: true, roomName: room });
+                        }}
+                        onMouseMove={(ev) => {
+                          const rect = ev.currentTarget.getBoundingClientRect();
+                          const y = ev.clientY - rect.top;
+                          const mins = minuteFromY(y);
+                          setHoverSlot({ date: selectedDate, minute: mins });
+                          setSelection((p) => (p?.dragging && p.date === selectedDate ? { ...p, endMinute: mins } : p));
+                        }}
+                        onMouseUp={(ev) => {
+                          const rect = ev.currentTarget.getBoundingClientRect();
+                          const y = ev.clientY - rect.top;
+                          const mins = minuteFromY(y);
+                          const cur = selection && selection.date === selectedDate ? selection : { startMinute: mins, endMinute: mins };
+                          const startMinute = Math.min(cur.startMinute, mins);
+                          const endRaw = Math.max(cur.startMinute, mins);
+                          const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
+                          openCreateAt(selectedDate, startMinute, ev, endMinute);
+                          setDraft((p) => ({ ...p, roomName: room || p.roomName }));
+                          setSelection(null);
+                        }}
+                      />
+                    ) : null}
                     {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => (
                       <div key={i} style={{ position: "absolute", top: i * 42, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
                     ))}
@@ -1405,9 +1436,20 @@ export default function ScheduleTab({
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       return (
-                        <div key={e.id} style={{ position: "absolute", left: 8, right: 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: 10, padding: 6, overflow: "hidden" }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, lineHeight: "1.2em", whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime} · {e.title}</div>
-                          {height > 38 ? <div style={{ fontSize: 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer} · {getEventTypeLabel(e.eventType)}</div> : null}
+                        <div
+                          key={e.id}
+                          onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); }}
+                          onClick={(ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            if (canMutateEvent(e)) startEdit(e);
+                            else setSelectedEventDetails(e);
+                          }}
+                          style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
+                        >
+                          <div style={{ fontSize: isMobile ? 10 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 34 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
+                          {height > 52 ? <div style={{ fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{isMobile ? getEventTypeLabel(e.eventType) : `${e.trainer} · ${getEventTypeLabel(e.eventType)}`}</div> : null}
                         </div>
                       );
                     })}
@@ -1430,7 +1472,8 @@ export default function ScheduleTab({
           ...cardSt,
           border: `1px solid ${theme.border}`,
           padding: 0,
-          overflow: "auto",
+          overflowX: "auto",
+          overflowY: "hidden",
         }}
       >
         <div style={{ minWidth: 980 }}>
@@ -1526,8 +1569,7 @@ export default function ScheduleTab({
                         const startMinute = Math.min(cur.startMinute, mins);
                         const endRaw = Math.max(cur.startMinute, mins);
                         const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
-                        openCreateAt(date, startMinute, ev);
-                        setQuickCreate((p) => (p ? { ...p, endTime: minToHHMM(endMinute) } : p));
+                        openCreateAt(date, startMinute, ev, endMinute);
                         setSelection(null);
                       }}
                     />
@@ -1578,6 +1620,17 @@ export default function ScheduleTab({
                       <div
                         key={e.id}
                         data-event-card="1"
+                        onMouseDown={(ev) => ev.stopPropagation()}
+                        onMouseUp={(ev) => ev.stopPropagation()}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          if (e.kind === "booking") {
+                            if (canMutateThisEvent) startEdit(e);
+                            else setSelectedEventDetails(e);
+                          } else {
+                            setSelectedEventDetails(e);
+                          }
+                        }}
                         style={{
                           position: "absolute",
                           top,
@@ -1587,9 +1640,9 @@ export default function ScheduleTab({
                           border: `1px solid ${c.border}`,
                           background: c.bg,
                           opacity: stView.opacity,
-                          borderRadius: 10,
-                          padding: 6,
-                          fontSize: 11,
+                          borderRadius: isMobile ? 8 : 10,
+                          padding: isMobile ? 4 : 6,
+                          fontSize: isMobile ? 10 : 11,
                           overflow: "hidden",
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
@@ -1602,17 +1655,17 @@ export default function ScheduleTab({
                             gap: 6,
                           }}
                         >
-                          <div style={{ fontWeight: 700, paddingRight: 26, lineHeight: "1.2em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+                          <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
                             {e.title}
                           </div>
                           {(isAdmin || e.kind === "booking") && (
-                            <div style={{ position: "absolute", top: 6, right: 6, zIndex: 2100 }}>
+                            <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
                                 style={{
                                   ...btnS,
-                                  padding: "0 6px",
-                                  fontSize: 12,
-                                  lineHeight: "16px",
+                                  padding: isMobile ? "0 4px" : "0 6px",
+                                  fontSize: isMobile ? 10 : 12,
+                                  lineHeight: isMobile ? "14px" : "16px",
                                   position: "relative",
                                   zIndex: 2200,
                                 }}
@@ -1731,13 +1784,14 @@ export default function ScheduleTab({
                             </div>
                           )}
                         </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: 10.5, color: theme.textLight, lineHeight: "1.25em", wordBreak: "break-word" }}>
-                          <div style={{ color: theme.text, fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          {height > 44 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {e.kind === "booking" && height > 56 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
-                          {e.kind === "booking" && height > 68 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {e.description && height > 82 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {e.peopleCount && height > 92 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
+                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, lineHeight: "1.2em", wordBreak: "break-word", marginTop: 2 }}>
+                          <div style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          {!isMobile && height > 48 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
+                          {isMobile && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
+                          {!isMobile && e.kind === "booking" && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
+                          {!isMobile && e.kind === "booking" && height > 70 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
+                          {!isMobile && e.description && height > 86 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
+                          {!isMobile && e.peopleCount && height > 96 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
                       </div>
                     );
@@ -1755,67 +1809,7 @@ export default function ScheduleTab({
       </div>
       ) : null}
 
-      {canManageBookings && quickCreate && createPortal(
-        <div
-          data-quick-create="1"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}
-        >
-          <b>Швидке створення</b>
-          <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
-          <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
-          <select style={inputSt} value={quickCreate.roomName || primaryRoomName} onChange={(e)=>setQuickCreate((p)=>({ ...p, roomName: e.target.value }))}>
-            {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-          </select>
-          <select
-            style={inputSt}
-            value={isAdmin ? quickCreate.trainerId || "" : currentTrainerId}
-            disabled={!isAdmin}
-            onChange={(e)=>setQuickCreate((p)=>({ ...p, trainerId: e.target.value }))}
-          >
-            {isAdmin ? <option value="">Тренер</option> : null}
-            {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
-            {isAdmin && safeTrainers.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
-          </select>
-          <select
-            style={inputSt}
-            value={quickCreate.eventType}
-            onChange={(e)=>{
-              const eventType = e.target.value;
-              setQuickCreate((p)=>({
-                ...p,
-                eventType,
-                bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null,
-                peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null,
-                price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0,
-                paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none",
-              }));
-            }}
-          >
-            {allowedEventTypes.map((eventType) => (
-              <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
-            ))}
-          </select>
-          {quickCreate.eventType === "individual_training" ? <>
-            <select style={inputSt} value={quickCreate.bookingType || tariffTypes[0]?.id || ""} onChange={(e)=>{ const nextPrice = getTariffPrice(e.target.value); setQuickCreate((p)=>({ ...p, bookingType: e.target.value, price: nextPrice })); }}>{tariffTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-              <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} />
-              <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} readOnly={!isAdmin} disabled={!isAdmin} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
-            </div>
-            <select style={inputSt} value={quickCreate.paymentMethod || "none"} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
-              <option value="card">Карта</option><option value="cash">Готівка</option><option value="none">Без оплати</option>
-            </select>
-          </> : null}
-          {quickCreate.eventType === "room_booking" && isAdmin ? (
-            <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
-          ) : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
-            <button style={{...btnP, padding:"6px 8px", fontSize:12}} onClick={saveQuickCreate}>Створити</button>
-            <button style={{...btnS, padding:"6px 8px", fontSize:12}} onClick={applyQuickToFullForm}>Більше</button>
-            <button style={{...btnS, padding:"6px 8px", fontSize:12}} onClick={()=>setQuickCreate(null)}>Скасувати</button>
-          </div>
-        </div>, document.body)}
+      
 
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
@@ -1831,7 +1825,7 @@ export default function ScheduleTab({
               }}
             >
               <input
-                style={inputSt}
+                style={editorInputSt}
                 value={t.label}
                 onChange={(e) =>
                   setBookingTypes((p) =>
@@ -1842,7 +1836,7 @@ export default function ScheduleTab({
                 }
               />
               <input
-                style={inputSt}
+                style={editorInputSt}
                 type="number"
                 value={t.price}
                 onChange={(e) =>
