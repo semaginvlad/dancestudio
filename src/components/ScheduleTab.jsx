@@ -271,7 +271,8 @@ export default function ScheduleTab({
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
-  const [quickCreate, setQuickCreate] = useState(null);
+  const [formMode, setFormMode] = useState("full");
+  const [formErrors, setFormErrors] = useState({});
   const [selection, setSelection] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
@@ -590,22 +591,25 @@ export default function ScheduleTab({
   };
 
 
+  const validateDraft = (source) => {
+    const st = toMin(source.startTime);
+    const en = toMin(source.endTime);
+    const normalizedTitle = getDraftTitle(source);
+    const errors = {
+      title: !normalizedTitle ? "Вкажіть назву події" : "",
+      date: !source.date ? "Оберіть дату" : "",
+      startTime: st == null ? "Оберіть час початку" : "",
+      endTime: en == null || (st != null && en <= st) ? "Час завершення має бути пізніше" : "",
+    };
+    return { errors, hasErrors: Object.values(errors).some(Boolean), normalizedTitle };
+  };
+
   const saveBooking = async () => {
     if (!canManageBookings) return;
-    const st = toMin(draft.startTime);
-    const en = toMin(draft.endTime);
-    const normalizedTitle = getDraftTitle(draft);
+    const { errors, hasErrors, normalizedTitle } = validateDraft(draft);
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
-    const missing = {
-      date: !draft.date,
-      title: !normalizedTitle,
-      start: st == null,
-      end: en == null || en <= st,
-    };
-    if (missing.date || missing.title || missing.start || missing.end) {
-      console.warn("[ScheduleTab] booking validation failed", { missing, draft, normalizedTitle });
-      return alert("Перевірте дату/час/назву");
-    }
+    setFormErrors(errors);
+    if (hasErrors) return;
     const payload = normalizeBookingPayload({
       ...draft,
       title: normalizedTitle,
@@ -615,9 +619,11 @@ export default function ScheduleTab({
     else await onAddBooking(payload);
     setShowForm(false);
     setEditingId(null);
+    setFormErrors({});
   };
   const startEdit = (e) => {
     setEditingId(e.parentId || e.id);
+    setFormMode("full");
     setShowForm(true);
     setDraft((p) => ({
       ...p,
@@ -644,6 +650,7 @@ export default function ScheduleTab({
 
   const duplicateBookingLikeEvent = (e) => {
     setEditingId(null);
+    setFormMode("full");
     setShowForm(true);
     setDraft((p) => ({
       ...p,
@@ -667,12 +674,12 @@ export default function ScheduleTab({
       status: e.status || "active",
     }));
   };
-  const openCreateAt = (date, minute, clickEvent) => {
+  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null) => {
     const start = roundToNearest15(minute);
     const base = {
       date,
       startTime: minToHHMM(start),
-      endTime: minToHHMM(start + 60),
+      endTime: minToHHMM(endMinuteOverride || (start + 60)),
       eventType: "room_booking",
       status: "active",
       recurrence: "none",
@@ -685,44 +692,16 @@ export default function ScheduleTab({
       paymentMethod: "none",
       roomName: DEFAULT_ROOM,
     };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const left = Math.min(Math.max(8, (clickEvent?.clientX || 40) + 8), vw - 320);
-    const top = Math.min(Math.max(8, (clickEvent?.clientY || 40) + 8), vh - 320);
-    if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", { ...base, x: left, y: top });
-    setQuickCreate({ ...base, x: left, y: top });
+    if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", base);
+    setEditingId(null);
+    setFormMode("compact");
+    setDraft((p) => ({ ...p, ...base }));
+    setFormErrors({});
+    setShowForm(true);
   };
   const minuteFromY = (y) =>
     roundToNearest15(DAY_START_HOUR * 60 + (y / HOUR_PX) * 60);
-  const applyQuickToFullForm = () => {
-    if (!quickCreate) return;
-    const { x, y, ...quickPayload } = quickCreate;
-    setEditingId(null);
-    setShowForm(true);
-    setDraft((p) => ({
-      ...p,
-      ...quickPayload,
-      recurrenceUntil: "",
-      color: "",
-      description: "",
-    }));
-    setQuickCreate(null);
-  };
-  const saveQuickCreate = async () => {
-    const normalizedTitle = getDraftTitle(quickCreate || {});
-    const fallbackRoomName = normalizeRoomName(quickCreate?.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
-    if (!normalizedTitle) return alert("Вкажіть назву події");
-    const payload = normalizeBookingPayload({
-      ...quickCreate,
-      title: normalizedTitle,
-      roomName: fallbackRoomName,
-      recurrence: "none",
-      recurrenceUntil: null,
-      status: "active",
-    });
-    await onAddBooking(payload);
-    setQuickCreate(null);
-  };
+  const applyQuickToFullForm = () => setFormMode("full");
 
   const openGroupSlotEditor = (e) => {
     if (e.groupId == null || e.slotIndex == null) {
@@ -802,23 +781,7 @@ export default function ScheduleTab({
       document.removeEventListener("keydown", onEsc);
     };
   }, [openMenuState]);
-  useEffect(() => {
-    if (!quickCreate) return;
-    if (DEBUG_QUICK_CREATE) console.log("[quick-create] state", quickCreate);
-    const onDoc = (e) => {
-      if (e.target.closest("[data-quick-create='1']")) return;
-      if (DEBUG_QUICK_CREATE) console.log("[quick-create] outside close");
-      setQuickCreate(null);
-    };
-    const onEsc = (e) => e.key === "Escape" && setQuickCreate(null);
-    const t = setTimeout(() => document.addEventListener("pointerdown", onDoc), 0);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("pointerdown", onDoc);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [quickCreate]);
+  
 
   const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
   const monthStart = useMemo(() => new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), 1), [selectedDateObj]);
@@ -1004,6 +967,7 @@ export default function ScheduleTab({
             style={btnP}
             onClick={() => {
               setEditingId(null);
+              setFormMode("full");
               setShowForm((v) => !v);
             }}
           >
@@ -1013,14 +977,24 @@ export default function ScheduleTab({
       </div>
 
       {canManageBookings && showForm && (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5100, background: "rgba(6,10,22,.62)", display: "grid", placeItems: "center", padding: 12 }}>
+        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(680px, 96vw)", maxHeight: "92vh", overflow: "auto", borderRadius: 20, background: "linear-gradient(180deg, rgba(22,30,46,.96), rgba(12,18,32,.96))" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div>
+              <b style={{ fontSize: 20 }}>{editingId ? "Редагувати подію" : "Нова подія"}</b>
+              <div style={{ fontSize: 12, color: theme.textLight }}>{draft.date} · {draft.startTime}–{draft.endTime}</div>
+            </div>
+            <button style={btnS} onClick={() => { setShowForm(false); setEditingId(null); setFormErrors({}); }}>✕</button>
+          </div>
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-              gap: 8,
+              gridTemplateColumns: "1fr",
+              gap: 10,
             }}
           >
+            <input style={{ ...inputSt, borderColor: formErrors.title ? theme.danger : inputSt.borderColor }} placeholder="Назва / клієнт / група" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
+            {formErrors.title ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.title}</div> : null}
             <select
               style={inputSt}
               value={draft.eventType}
@@ -1040,30 +1014,14 @@ export default function ScheduleTab({
                 <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
               ))}
             </select>
-            <input
-              style={inputSt}
-              type="date"
-              value={draft.date}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, date: e.target.value }))
-              }
-            />
-            <input
-              style={inputSt}
-              type="time"
-              value={draft.startTime}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, startTime: e.target.value }))
-              }
-            />
-            <input
-              style={inputSt}
-              type="time"
-              value={draft.endTime}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, endTime: e.target.value }))
-              }
-            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+              <input style={{ ...inputSt, borderColor: formErrors.date ? theme.danger : inputSt.borderColor }} type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
+              <input style={{ ...inputSt, borderColor: formErrors.startTime ? theme.danger : inputSt.borderColor }} type="time" value={draft.startTime} onChange={(e) => setDraft((p) => ({ ...p, startTime: e.target.value }))} />
+              <input style={{ ...inputSt, borderColor: formErrors.endTime ? theme.danger : inputSt.borderColor }} type="time" value={draft.endTime} onChange={(e) => setDraft((p) => ({ ...p, endTime: e.target.value }))} />
+            </div>
+            {(formErrors.date || formErrors.startTime || formErrors.endTime) ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.date || formErrors.startTime || formErrors.endTime}</div> : null}
+            {formMode === "compact" ? <button style={btnS} onClick={applyQuickToFullForm}>Показати всі поля</button> : null}
+            {formMode === "full" ? <>
             {draft.eventType === "individual_training" && (
               <>
                 <select
@@ -1155,14 +1113,6 @@ export default function ScheduleTab({
                 </option>
               ))}
             </select>
-            <input
-              style={inputSt}
-              placeholder="Назва / клієнт"
-              value={draft.title}
-              onChange={(e) =>
-                setDraft((p) => ({ ...p, title: e.target.value }))
-              }
-            />
             <select style={inputSt} value={draft.roomName || primaryRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
               {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
             </select>
@@ -1188,21 +1138,25 @@ export default function ScheduleTab({
               <option value="cancelled">Скасовано</option>
             </select>
             <input style={inputSt} placeholder="Опис" value={draft.description || ""} onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))} />
+            </> : null}
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, position: "sticky", bottom: 0, background: "rgba(12,18,32,.92)", paddingTop: 8 }}>
             <button style={btnP} onClick={saveBooking}>
-              {editingId ? "Зберегти зміни" : "Зберегти резерв"}
+              Зберегти
             </button>
             <button
               style={btnS}
               onClick={() => {
                 setShowForm(false);
                 setEditingId(null);
+                setFormErrors({});
               }}
             >
               Скасувати
             </button>
+            {editingId ? <button style={{ ...btnS, color: theme.danger, marginLeft: "auto" }} onClick={async () => { await onDeleteBooking(editingId); setShowForm(false); setEditingId(null); }}>Видалити</button> : null}
           </div>
+        </div>
         </div>
       )}
 
@@ -1526,8 +1480,7 @@ export default function ScheduleTab({
                         const startMinute = Math.min(cur.startMinute, mins);
                         const endRaw = Math.max(cur.startMinute, mins);
                         const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
-                        openCreateAt(date, startMinute, ev);
-                        setQuickCreate((p) => (p ? { ...p, endTime: minToHHMM(endMinute) } : p));
+                        openCreateAt(date, startMinute, ev, endMinute);
                         setSelection(null);
                       }}
                     />
@@ -1755,67 +1708,7 @@ export default function ScheduleTab({
       </div>
       ) : null}
 
-      {canManageBookings && quickCreate && createPortal(
-        <div
-          data-quick-create="1"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          style={{ ...cardSt, position: "fixed", left: quickCreate.x, top: quickCreate.y, zIndex: 4000, width: 252, border: `1px solid ${theme.border}`, display: "grid", gap: 4, padding: 10 }}
-        >
-          <b>Швидке створення</b>
-          <div style={{ fontSize: 12, color: theme.textLight }}>{quickCreate.date} · {quickCreate.startTime}–{quickCreate.endTime}</div>
-          <input style={inputSt} placeholder="Назва" value={quickCreate.title || ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, title: e.target.value }))} />
-          <select style={inputSt} value={quickCreate.roomName || primaryRoomName} onChange={(e)=>setQuickCreate((p)=>({ ...p, roomName: e.target.value }))}>
-            {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-          </select>
-          <select
-            style={inputSt}
-            value={isAdmin ? quickCreate.trainerId || "" : currentTrainerId}
-            disabled={!isAdmin}
-            onChange={(e)=>setQuickCreate((p)=>({ ...p, trainerId: e.target.value }))}
-          >
-            {isAdmin ? <option value="">Тренер</option> : null}
-            {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
-            {isAdmin && safeTrainers.map((t)=><option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
-          </select>
-          <select
-            style={inputSt}
-            value={quickCreate.eventType}
-            onChange={(e)=>{
-              const eventType = e.target.value;
-              setQuickCreate((p)=>({
-                ...p,
-                eventType,
-                bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null,
-                peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null,
-                price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0,
-                paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none",
-              }));
-            }}
-          >
-            {allowedEventTypes.map((eventType) => (
-              <option key={eventType} value={eventType}>{getEventTypeLabel(eventType)}</option>
-            ))}
-          </select>
-          {quickCreate.eventType === "individual_training" ? <>
-            <select style={inputSt} value={quickCreate.bookingType || tariffTypes[0]?.id || ""} onChange={(e)=>{ const nextPrice = getTariffPrice(e.target.value); setQuickCreate((p)=>({ ...p, bookingType: e.target.value, price: nextPrice })); }}>{tariffTypes.map((b)=><option key={b.id} value={b.id}>{b.label}</option>)}</select>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-              <input style={inputSt} type="number" placeholder="К-ть людей" value={quickCreate.peopleCount ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, peopleCount: Number(e.target.value || 0) }))} />
-              <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} readOnly={!isAdmin} disabled={!isAdmin} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
-            </div>
-            <select style={inputSt} value={quickCreate.paymentMethod || "none"} onChange={(e)=>setQuickCreate((p)=>({ ...p, paymentMethod: e.target.value }))}>
-              <option value="card">Карта</option><option value="cash">Готівка</option><option value="none">Без оплати</option>
-            </select>
-          </> : null}
-          {quickCreate.eventType === "room_booking" && isAdmin ? (
-            <input style={inputSt} type="number" placeholder="Ціна" value={quickCreate.price ?? ""} onChange={(e)=>setQuickCreate((p)=>({ ...p, price: Number(e.target.value || 0) }))} />
-          ) : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
-            <button style={{...btnP, padding:"6px 8px", fontSize:12}} onClick={saveQuickCreate}>Створити</button>
-            <button style={{...btnS, padding:"6px 8px", fontSize:12}} onClick={applyQuickToFullForm}>Більше</button>
-            <button style={{...btnS, padding:"6px 8px", fontSize:12}} onClick={()=>setQuickCreate(null)}>Скасувати</button>
-          </div>
-        </div>, document.body)}
+      
 
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
