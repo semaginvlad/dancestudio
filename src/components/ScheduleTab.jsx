@@ -127,6 +127,33 @@ const getEventTypeLabel = (value = "") => {
   };
   return m[value] || value || "—";
 };
+const getTrainerInitials = (name = "") => {
+  const parts = String(name || "")
+    .replace(/[()]/g, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "—");
+  if (!parts.length) return "";
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
+    .join("");
+};
+const getSpecialEventMeta = (value = "") => {
+  if (value === "room_booking") return "Резерв";
+  if (value === "individual_training") return "Інд";
+  if (value === "cleaning") return "Клін";
+  if (value === "custom_admin_event") return "Подія";
+  return "";
+};
+const getEventMetaText = (event, { includeSpecial = false, includeStatus = false, statusText = "" } = {}) => {
+  const items = [getTrainerInitials(event?.trainer)];
+  if (includeSpecial) items.push(getSpecialEventMeta(event?.eventType));
+  if (includeStatus && event?.kind === "booking" && event?.status && event.status !== "active") {
+    items.push(statusText);
+  }
+  return items.filter(Boolean).join(" · ");
+};
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
 const getRoomLabel = (event) =>
@@ -1674,6 +1701,7 @@ export default function ScheduleTab({
                       const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
+                      const metaText = height >= 58 ? getEventMetaText(e, { includeSpecial: height > 80 }) : "";
                       return (
                         <div
                           key={e.id}
@@ -1686,9 +1714,9 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          <div style={{ fontSize: isMobile ? 10 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 34 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
-                          {height > 52 ? <div style={{ fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{isMobile ? getEventTypeLabel(e.eventType) : `${e.trainer} · ${getEventTypeLabel(e.eventType)}`}</div> : null}
+                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
+                          <div style={{ marginTop: 1, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          {metaText ? <div style={{ marginTop: 1, fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{metaText}</div> : null}
                         </div>
                       );
                     })}
@@ -1855,6 +1883,14 @@ export default function ScheduleTab({
                       : palette[colorKey(e)] || palette.default;
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
+                    const hasEventMenu = isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e);
+                    const metaText = height >= 58
+                      ? getEventMetaText(e, {
+                          includeSpecial: height > 80,
+                          includeStatus: height > 80,
+                          statusText: stView.text,
+                        })
+                      : "";
                     return (
                       <div
                         key={e.id}
@@ -1886,18 +1922,13 @@ export default function ScheduleTab({
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "start",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+                        <div style={{ minWidth: 0, paddingRight: hasEventMenu ? (isMobile ? 18 : 26) : 0 }}>
+                          <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
                             {e.title}
                           </div>
-                          {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
+                          <div style={{ marginTop: 2, color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          {metaText ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{metaText}</div> : null}
+                          {hasEventMenu && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
                                 style={{
@@ -2049,15 +2080,6 @@ export default function ScheduleTab({
                                 )}
                             </div>
                           )}
-                        </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, lineHeight: "1.2em", wordBreak: "break-word", marginTop: 2 }}>
-                          <div style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          {!isMobile && height > 48 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {isMobile && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 70 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.description && height > 86 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {!isMobile && e.peopleCount && height > 96 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
                       </div>
                     );
