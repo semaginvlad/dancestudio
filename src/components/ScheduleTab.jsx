@@ -138,6 +138,16 @@ const getRoomLabel = (event) =>
   "";
 const normalizeRoomName = (value = "") =>
   String(value || "").replace(/\s+/g, " ").trim();
+const getTrainerInitials = (name = "") => {
+  const parts = String(name || "")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+};
 const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
@@ -965,6 +975,71 @@ export default function ScheduleTab({
   };
   const editorSectionLabelSt = { fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: theme.textLight, fontWeight: 800 };
   const eventTypeIcon = { room_booking: "◌", individual_training: "✦", group_lesson: "●", cleaning: "✧", custom_admin_event: "◆" };
+  const eventTypeBadgeConfig = (eventType) => {
+    const map = {
+      group_lesson: { icon: "👥", label: "Група" },
+      individual_training: { icon: "☝", label: "Інд" },
+      room_booking: { icon: "⌂", label: "Резерв" },
+      cleaning: { icon: "✧", label: "Клін" },
+      custom_admin_event: { icon: "◆", label: "Подія" },
+    };
+    return { ...(map[eventType] || { icon: "•", label: getEventTypeLabel(eventType) }), ...(typeAccent[eventType] || typeAccent.room_booking) };
+  };
+  const renderEventCardBadge = (content, options = {}) => {
+    if (!content) return null;
+    const { accent = null, title = "" } = options;
+    return (
+      <span
+        title={title || String(content)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          maxWidth: "100%",
+          minWidth: 0,
+          height: isMobile ? 15 : 16,
+          padding: isMobile ? "0 4px" : "0 5px",
+          borderRadius: 999,
+          border: `1px solid ${accent?.border || (isDarkTheme ? "rgba(148,163,184,.26)" : "rgba(100,116,139,.24)")}`,
+          background: accent?.bg || (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.56)"),
+          color: accent?.text || theme.textLight,
+          fontSize: isMobile ? 8.5 : 9.5,
+          fontWeight: 800,
+          lineHeight: "1em",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {content}
+      </span>
+    );
+  };
+  const renderEventCardContent = (e, height, { reserveMenuSpace = false, statusText = "" } = {}) => {
+    const showTrainerBadge = height > 38;
+    const showTypeBadge = height > 50;
+    const showExtraBadge = height > 76;
+    const titleClamp = height > 54 ? 2 : 1;
+    const typeBadge = eventTypeBadgeConfig(e.eventType);
+    const trainerBadge = getTrainerInitials(e.trainer);
+    return (
+      <div style={{ display: "grid", gap: height > 42 ? 2 : 1, minWidth: 0, width: "100%", flex: "1 1 auto", overflow: "hidden" }}>
+        <div style={{ color: theme.text, fontSize: isMobile ? 10.5 : 11.5, fontWeight: 800, lineHeight: "1.08em", paddingRight: reserveMenuSpace ? (isMobile ? 18 : 26) : 0, display: "-webkit-box", WebkitLineClamp: titleClamp, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+          {e.title}
+        </div>
+        <div style={{ color: theme.text, fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700, lineHeight: "1.08em", whiteSpace: "nowrap", overflow: "hidden" }}>
+          {e.startTime}–{e.endTime}
+        </div>
+        {showTrainerBadge || showTypeBadge ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", flexWrap: "nowrap" }}>
+            {showTrainerBadge ? renderEventCardBadge(trainerBadge || "—", { title: e.trainer || "Тренер" }) : null}
+            {showTypeBadge ? renderEventCardBadge(`${typeBadge.icon} ${typeBadge.label}`, { accent: typeBadge, title: getEventTypeLabel(e.eventType) }) : null}
+            {showExtraBadge && statusText ? renderEventCardBadge(statusText, { title: statusText }) : null}
+            {showExtraBadge && !statusText && e.peopleCount ? renderEventCardBadge(`${e.peopleCount} ос.`, { title: `${e.peopleCount} осіб` }) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
   const toolbarBtnSt = {
     ...btnS,
     minHeight: isMobile ? 34 : 40,
@@ -1624,9 +1699,7 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          <div style={{ fontSize: isMobile ? 10 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 34 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
-                          {height > 52 ? <div style={{ fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{isMobile ? getEventTypeLabel(e.eventType) : `${e.trainer} · ${getEventTypeLabel(e.eventType)}`}</div> : null}
+                          {renderEventCardContent(e, height)}
                         </div>
                       );
                     })}
@@ -1832,9 +1905,7 @@ export default function ScheduleTab({
                             gap: 6,
                           }}
                         >
-                          <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                            {e.title}
-                          </div>
+                          {renderEventCardContent(e, height, { reserveMenuSpace: true, statusText: e.kind === "booking" ? stView.text : "" })}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
@@ -1987,15 +2058,6 @@ export default function ScheduleTab({
                                 )}
                             </div>
                           )}
-                        </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, lineHeight: "1.2em", wordBreak: "break-word", marginTop: 2 }}>
-                          <div style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          {!isMobile && height > 48 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {isMobile && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 70 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.description && height > 86 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {!isMobile && e.peopleCount && height > 96 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
                       </div>
                     );
