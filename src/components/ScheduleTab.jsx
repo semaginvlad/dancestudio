@@ -138,6 +138,36 @@ const getRoomLabel = (event) =>
   "";
 const normalizeRoomName = (value = "") =>
   String(value || "").replace(/\s+/g, " ").trim();
+
+const getSlotTitle = (slot, group) =>
+  String(slot?.title || slot?.name || slot?.label || group?.name || group?.title || group?.id || "").trim();
+const getSlotTrainerId = (slot, group) =>
+  slot?.trainerId ?? slot?.trainer_id ?? slot?.trainer ?? group?.trainer_id ?? group?.trainerId ?? null;
+const getSlotNote = (slot) => slot?.note ?? slot?.notes ?? slot?.description ?? "";
+const getSlotEndTimeRaw = (slot) => {
+  if (slot?.endTime || slot?.end) return slot.endTime || slot.end;
+  const time = String(slot?.time || "");
+  return time.includes("-") ? time.split("-").slice(1).join("-") : "";
+};
+const setExistingOrDefault = (target, aliases, value, defaultKey = aliases[0]) => {
+  let wrote = false;
+  aliases.forEach((key) => {
+    if (key in target) {
+      target[key] = value;
+      wrote = true;
+    }
+  });
+  if (!wrote) target[defaultKey] = value;
+};
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: "Пн" },
+  { value: 2, label: "Вт" },
+  { value: 3, label: "Ср" },
+  { value: 4, label: "Чт" },
+  { value: 5, label: "Пт" },
+  { value: 6, label: "Сб" },
+  { value: 0, label: "Нд" },
+];
 const norm = (s = "") => String(s).toLowerCase().replace(/[-_]/g, " ");
 const colorKey = (e) => {
   if (e.cancelled) return "cancelled";
@@ -277,7 +307,7 @@ export default function ScheduleTab({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
-  const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
+  const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, title, weekday, startTime, endTime, roomName, trainerId, note, direction, trainer, error }
   const [groupOverrideEdit, setGroupOverrideEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
@@ -361,7 +391,9 @@ export default function ScheduleTab({
         );
         const st = toMin(row.startTime || row.start || row.time || "");
         if (wd == null || st == null) return;
-        const en = toMin(row.endTime || row.end || "") ?? st + 60;
+        const en = toMin(getSlotEndTimeRaw(row)) ?? st + 60;
+        const slotTrainerId = getSlotTrainerId(row, g);
+        const slotTitle = getSlotTitle(row, g) || g.id;
         slots.push({
           id: `${g.id}_${idx}`,
           groupId: g.id,
@@ -369,11 +401,12 @@ export default function ScheduleTab({
           weekday: wd,
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
-          title: g.name || g.id,
+          title: slotTitle,
           direction: getDirectionDisplayName(dirMap.get(String(g.directionId || "")) || "—"),
-          trainerId: g.trainer_id || null,
-          trainer: trainerMap.get(String(g.trainer_id || "")) || "—",
+          trainerId: slotTrainerId || null,
+          trainer: trainerMap.get(String(slotTrainerId || "")) || "—",
           roomName: getRoomLabel(row) || getRoomLabel(g) || primaryRoomName,
+          note: getSlotNote(row),
         });
       }),
     );
@@ -406,7 +439,7 @@ export default function ScheduleTab({
             trainerId: effectiveTrainerId || null,
             trainer: trainerMap.get(String(effectiveTrainerId || "")) || s.trainer || "—",
             title: effectiveTitle,
-            note: override?.status === "active" ? override.note || "" : "",
+            note: override?.status === "active" ? override.note || "" : s.note || "",
             cancelled: cancelledSet.has(`${s.groupId}:${date}`),
             roomName: override?.status === "active" ? (override.roomName || s.roomName || primaryRoomName) : (getRoomLabel(s) || primaryRoomName),
             isOverride: override?.status === "active",
@@ -751,16 +784,25 @@ export default function ScheduleTab({
       });
       return;
     }
+    const g = safeGroups.find((x) => String(x.id) === String(e.groupId));
+    const slot = Array.isArray(g?.schedule) ? g.schedule[e.slotIndex] : null;
+    const st = toMin(slot?.startTime || slot?.start || slot?.time || e.startTime || "");
+    const en = toMin(getSlotEndTimeRaw(slot) || e.endTime || "") ?? (st == null ? null : st + 60);
+    const trainerId = getSlotTrainerId(slot, g) || "";
     setGroupSlotEdit({
       groupId: e.groupId,
       slotIndex: e.slotIndex,
-      groupName: e.groupName || e.title,
-      weekday: e.weekday,
-      startTime: e.startTime,
-      endTime: e.endTime,
-      direction: e.direction || "—",
-      trainer: e.trainer || "—",
-      error: "",
+      groupName: g?.name || e.groupName || e.title || "—",
+      title: getSlotTitle(slot, g) || e.groupName || e.title || "",
+      weekday: parseWeekday(slot?.weekday ?? slot?.dayOfWeek ?? slot?.day ?? slot?.dow ?? slot?.weekDay) ?? e.weekday,
+      startTime: st == null ? e.startTime || "" : minToHHMM(st),
+      endTime: en == null ? e.endTime || "" : minToHHMM(en),
+      roomName: getRoomLabel(slot) || getRoomLabel(g) || e.roomName || primaryRoomName,
+      trainerId,
+      note: getSlotNote(slot),
+      direction: e.direction || getDirectionDisplayName(dirMap.get(String(g?.directionId || "")) || "—"),
+      trainer: trainerMap.get(String(trainerId || "")) || e.trainer || "—",
+      error: slot ? "" : "Не вдалося визначити запис розкладу для редагування",
     });
   };
 
@@ -860,6 +902,12 @@ export default function ScheduleTab({
       setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
       return;
     }
+    const st = toMin(groupSlotEdit.startTime);
+    const en = toMin(groupSlotEdit.endTime);
+    if (st == null || en == null || en <= st) {
+      setGroupSlotEdit((p) => ({ ...(p || {}), error: "Час завершення має бути пізніше часу початку" }));
+      return;
+    }
     const g = safeGroups.find((x) => String(x.id) === String(groupSlotEdit.groupId));
     if (!g) {
       setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
@@ -873,18 +921,18 @@ export default function ScheduleTab({
     const nextSchedule = prev.map((row, idx) => {
       if (idx !== groupSlotEdit.slotIndex) return row;
       const next = { ...row };
-      if ("weekday" in next) next.weekday = groupSlotEdit.weekday;
-      else if ("dayOfWeek" in next) next.dayOfWeek = groupSlotEdit.weekday;
-      else if ("day" in next) next.day = groupSlotEdit.weekday;
-      else if ("dow" in next) next.dow = groupSlotEdit.weekday;
-      else if ("weekDay" in next) next.weekDay = groupSlotEdit.weekday;
-      else next.weekday = groupSlotEdit.weekday;
-      if ("startTime" in next) next.startTime = groupSlotEdit.startTime;
-      else if ("start" in next) next.start = groupSlotEdit.startTime;
-      else if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime || ""}`.replace(/-$/, "");
-      else next.startTime = groupSlotEdit.startTime;
-      if ("endTime" in next) next.endTime = groupSlotEdit.endTime;
-      else if ("end" in next) next.end = groupSlotEdit.endTime;
+      setExistingOrDefault(next, ["weekday", "dayOfWeek", "day", "dow", "weekDay"], groupSlotEdit.weekday, "weekday");
+      setExistingOrDefault(next, ["startTime", "start"], groupSlotEdit.startTime, "startTime");
+      setExistingOrDefault(next, ["endTime", "end"], groupSlotEdit.endTime, "endTime");
+      if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime}`;
+      const title = String(groupSlotEdit.title || "").trim() || null;
+      setExistingOrDefault(next, ["title", "name", "label"], title, "title");
+      next.title = title;
+      setExistingOrDefault(next, ["roomName", "room_name", "room", "location", "hall"], normalizeRoomName(groupSlotEdit.roomName || primaryRoomName) || primaryRoomName, "roomName");
+      setExistingOrDefault(next, ["trainerId", "trainer_id"], groupSlotEdit.trainerId || null, "trainerId");
+      const note = String(groupSlotEdit.note || "").trim() || null;
+      setExistingOrDefault(next, ["note", "notes", "description"], note, "note");
+      next.note = note;
       return next;
     });
     try {
@@ -1405,29 +1453,43 @@ export default function ScheduleTab({
       )}
 
       {isAdmin && groupSlotEdit && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center" }}>
-          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(620px,94vw)", maxHeight: "90vh", overflow: "auto" }}>
-          <b>Редагувати заняття групи</b>
-          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 4 }}>
-            Група: {groupSlotEdit.groupName}
-          </div>
-          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 2 }}>
-            Напрямок: {groupSlotEdit.direction || "—"} · Тренер: {groupSlotEdit.trainer || "—"}
-          </div>
-          {groupSlotEdit.error ? (
-            <div style={{ marginTop: 8, color: theme.danger, fontSize: 13 }}>{groupSlotEdit.error}</div>
-          ) : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-            <select style={editorInputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))}>
-              <option value={1}>Пн</option><option value={2}>Вт</option><option value={3}>Ср</option><option value={4}>Чт</option><option value={5}>Пт</option><option value={6}>Сб</option><option value={0}>Нд</option>
-            </select>
-            <input style={editorInputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
-            <input style={editorInputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
-            <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
-          </div>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5050, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(540px,96vw)", maxHeight: isMobile ? "74vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <b style={{ fontSize: isMobile ? 17 : 18, color: theme.text }}>Змінити регулярний графік</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>{groupSlotEdit.groupName || "—"} · {groupSlotEdit.direction || "—"}</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setGroupSlotEdit(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={editorSectionLabelSt}>Назва і повторення</div>
+              <input style={editorInputSt} placeholder={groupSlotEdit.groupName || "Назва заняття"} value={groupSlotEdit.title || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, title: e.target.value, error: "" }))} />
+              <select style={editorInputSt} value={groupSlotEdit.weekday ?? 1} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0), error: "" }))}>
+                {WEEKDAY_OPTIONS.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
+              </select>
+              <div style={editorSectionLabelSt}>Час і місце</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <input style={editorInputSt} type="time" value={groupSlotEdit.startTime || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value, error: "" }))} />
+                <input style={editorInputSt} type="time" value={groupSlotEdit.endTime || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value, error: "" }))} />
+              </div>
+              <select style={editorInputSt} value={groupSlotEdit.roomName || primaryRoomName} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, roomName: e.target.value, error: "" }))}>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              <select style={editorInputSt} value={groupSlotEdit.trainerId || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, trainerId: e.target.value, error: "" }))}>
+                <option value="">Без тренера</option>
+                {safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
+              </select>
+              <input style={editorInputSt} placeholder="Нотатка" value={groupSlotEdit.note || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, note: e.target.value, error: "" }))} />
+              {groupSlotEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{groupSlotEdit.error}</div> : null}
+              <div style={{ fontSize: 12, color: theme.textLight }}>
+                Це змінить усі повторювані заняття цього слоту, не лише обрану дату.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
+              <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
+            </div>
           </div>
         </div>
       )}
