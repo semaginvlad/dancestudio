@@ -1011,6 +1011,91 @@ export async function deleteRoomBooking(id) {
   if (error) throw error;
 }
 
+
+const mapGroupLessonOverride = (row = {}) => ({
+  id: row.id,
+  groupId: row.group_id,
+  date: row.date,
+  slotIndex: row.slot_index,
+  originalStartTime: row.original_start_time || null,
+  originalEndTime: row.original_end_time || null,
+  startTime: row.start_time,
+  endTime: row.end_time,
+  roomName: row.room_name || null,
+  trainerId: row.trainer_id || null,
+  title: row.title || "",
+  note: row.note || "",
+  status: row.status || "active",
+  createdBy: row.created_by || null,
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+});
+
+const toGroupLessonOverrideRow = (payload = {}) => {
+  const row = {};
+  if (payload.groupId !== undefined) row.group_id = payload.groupId;
+  if (payload.date !== undefined) row.date = payload.date;
+  if (payload.slotIndex !== undefined) row.slot_index = payload.slotIndex;
+  if (payload.originalStartTime !== undefined) row.original_start_time = payload.originalStartTime || null;
+  if (payload.originalEndTime !== undefined) row.original_end_time = payload.originalEndTime || null;
+  if (payload.startTime !== undefined) row.start_time = payload.startTime;
+  if (payload.endTime !== undefined) row.end_time = payload.endTime;
+  if (payload.roomName !== undefined) row.room_name = payload.roomName || null;
+  if (payload.trainerId !== undefined) row.trainer_id = payload.trainerId || null;
+  if (payload.title !== undefined) row.title = payload.title || null;
+  if (payload.note !== undefined) row.note = payload.note || null;
+  if (payload.status !== undefined) row.status = payload.status || "active";
+  if (payload.createdBy !== undefined) row.created_by = payload.createdBy || null;
+  return row;
+};
+
+export async function fetchGroupLessonOverrides(startDate, endDate) {
+  try {
+    let query = supabase
+      .from('group_lesson_overrides')
+      .select('*')
+      .order('date', { ascending: true })
+      .order('start_time', { ascending: true });
+    if (startDate) query = query.gte('date', startDate);
+    if (endDate) query = query.lte('date', endDate);
+    const { data, error } = await query;
+    if (error) {
+      console.warn('group_lesson_overrides:', error.message);
+      return [];
+    }
+    return (data || []).map(mapGroupLessonOverride);
+  } catch (error) {
+    console.warn('group_lesson_overrides unavailable:', error?.message || error);
+    return [];
+  }
+}
+
+export async function insertGroupLessonOverride(payload) {
+  const { data, error } = await supabase
+    .from('group_lesson_overrides')
+    .insert(toGroupLessonOverrideRow(payload))
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapGroupLessonOverride(data);
+}
+
+export async function updateGroupLessonOverride(id, patch) {
+  const { data, error } = await supabase
+    .from('group_lesson_overrides')
+    .update(toGroupLessonOverrideRow(patch))
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapGroupLessonOverride(data);
+}
+
+export async function deleteGroupLessonOverride(id) {
+  const { error } = await supabase.from('group_lesson_overrides').delete().eq('id', id);
+  if (error) throw error;
+}
+
 export async function fetchStudioRooms() {
   const { data, error } = await supabase
     .from('studio_rooms')
