@@ -215,12 +215,16 @@ export default function ScheduleTab({
   trainers = [],
   cancelled = [],
   roomBookings = [],
+  groupLessonOverrides = [],
   isAdmin = false,
   allowBookingMutations = false,
   onAddBooking,
   onDeleteBooking,
   onUpdateBooking,
   onUpdateGroupSchedule,
+  onAddGroupLessonOverride,
+  onUpdateGroupLessonOverride,
+  onDeleteGroupLessonOverride,
   currentUser = null,
 }) {
   const DEFAULT_ROOM = "Основна зала";
@@ -230,6 +234,7 @@ export default function ScheduleTab({
   const safeTrainers = Array.isArray(trainers) ? trainers : [];
   const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
   const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
+  const safeGroupLessonOverrides = Array.isArray(groupLessonOverrides) ? groupLessonOverrides : [];
   const canManageBookings = isAdmin || allowBookingMutations;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
   const currentTrainerFromState = safeTrainers.find(
@@ -241,6 +246,10 @@ export default function ScheduleTab({
     currentUser?.user_metadata?.name ||
     currentUser?.email ||
     "";
+  const isGroupOwnedByCurrentTrainer = (groupId) =>
+    safeGroups.some((g) => String(g.id) === String(groupId) && String(g.trainer_id || "") === currentTrainerId);
+  const canEditGroupSingleLesson = (event) =>
+    isAdmin || (event?.kind === "group" && isGroupOwnedByCurrentTrainer(event.groupId));
   const allowedEventTypes = isAdmin
     ? ["room_booking", "individual_training", "cleaning", "custom_admin_event"]
     : ["room_booking", "individual_training"];
@@ -269,6 +278,7 @@ export default function ScheduleTab({
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, weekday, startTime, endTime, direction, trainer, error }
+  const [groupOverrideEdit, setGroupOverrideEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
@@ -328,6 +338,14 @@ export default function ScheduleTab({
       ),
     [safeCancelled],
   );
+  const groupLessonOverrideMap = useMemo(() => {
+    const map = new Map();
+    safeGroupLessonOverrides.forEach((override) => {
+      if (override?.groupId == null || override?.date == null || override?.slotIndex == null) return;
+      map.set(`${override.groupId}:${String(override.date).slice(0, 10)}:${override.slotIndex}`, override);
+    });
+    return map;
+  }, [safeGroupLessonOverrides]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
@@ -344,6 +362,8 @@ export default function ScheduleTab({
         const st = toMin(row.startTime || row.start || row.time || "");
         if (wd == null || st == null) return;
         const en = toMin(row.endTime || row.end || "") ?? st + 60;
+        const regularTrainerId = row.trainerId ?? row.trainer_id ?? g.trainer_id ?? null;
+        const regularTitle = String(row.title || row.name || row.label || "").trim() || g.name || g.id;
         slots.push({
           id: `${g.id}_${idx}`,
           groupId: g.id,
@@ -351,9 +371,13 @@ export default function ScheduleTab({
           weekday: wd,
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
-          title: g.name || g.id,
-          direction: getDirectionDisplayName(dirMap.get(String(g.directionId || "")) || "—"),
-          trainer: trainerMap.get(String(g.trainer_id || "")) || "—",
+          title: regularTitle,
+          groupName: g.name || g.id,
+          direction: getDirectionDisplayName(row.direction || dirMap.get(String(g.directionId || "")) || "—"),
+          trainerId: regularTrainerId,
+          trainer: trainerMap.get(String(regularTrainerId || "")) || "—",
+          roomName: getRoomLabel(row) || getRoomLabel(g) || primaryRoomName,
+          note: row.note || "",
         });
       }),
     );
@@ -362,22 +386,38 @@ export default function ScheduleTab({
       slots
         .filter((s) => s.weekday === d.getDay())
         .forEach((s) => {
-          const st = toMin(s.startTime);
-          const en = toMin(s.endTime) ?? st + 60;
-              map
-                .get(date)
-                .push({
-              ...s,
-              kind: "group",
-              eventType: "group_lesson",
-              date,
-              groupName: s.title,
-              slotIndex: s.slotIndex,
-              startMin: st,
-              endMin: en,
-                  cancelled: cancelledSet.has(`${s.groupId}:${date}`),
-                  roomName: getRoomLabel(s) || primaryRoomName,
-                });
+          const override = groupLessonOverrideMap.get(`${s.groupId}:${date}:${s.slotIndex}`);
+          if (override?.status === "cancelled") return;
+          const effectiveStartTime = override?.status === "active" ? override.startTime : s.startTime;
+          const effectiveEndTime = override?.status === "active" ? override.endTime : s.endTime;
+          const st = toMin(effectiveStartTime);
+          const en = toMin(effectiveEndTime) ?? st + 60;
+          if (st == null || en == null || en <= st) return;
+          const effectiveTrainerId = override?.status === "active" && override.trainerId !== undefined ? override.trainerId : s.trainerId;
+          const effectiveTitle = override?.status === "active" && String(override.title || "").trim() ? override.title : s.title;
+          map.get(date).push({
+            ...s,
+            id: `${s.groupId}_${s.slotIndex}:${date}`,
+            kind: "group",
+            eventType: "group_lesson",
+            date,
+            groupName: s.groupName || s.title,
+            slotIndex: s.slotIndex,
+            startTime: effectiveStartTime,
+            endTime: effectiveEndTime,
+            startMin: st,
+            endMin: en,
+            trainerId: effectiveTrainerId || null,
+            trainer: trainerMap.get(String(effectiveTrainerId || "")) || s.trainer || "—",
+            title: effectiveTitle,
+            note: override?.status === "active" ? override.note || "" : s.note || "",
+            cancelled: cancelledSet.has(`${s.groupId}:${date}`),
+            roomName: override?.status === "active" ? (override.roomName || s.roomName || primaryRoomName) : (getRoomLabel(s) || primaryRoomName),
+            isOverride: override?.status === "active",
+            overrideId: override?.status === "active" ? override.id : null,
+            originalStartTime: override?.originalStartTime || s.startTime,
+            originalEndTime: override?.originalEndTime || s.endTime,
+          });
         });
     });
     safeBookings.forEach((b) => {
@@ -486,6 +526,7 @@ export default function ScheduleTab({
     cancelledSet,
     bookingTypes,
     primaryRoomName,
+    groupLessonOverrideMap,
   ]);
   const eventsByDay = useMemo(() => buildEventsByDayForDates(weekDays), [buildEventsByDayForDates, weekDays]);
 
@@ -705,6 +746,7 @@ export default function ScheduleTab({
   const applyFullToCompactForm = () => setFormMode("compact");
 
   const openGroupSlotEditor = (e) => {
+    if (!isAdmin) return;
     if (e.groupId == null || e.slotIndex == null) {
       setGroupSlotEdit({
         error: "Не вдалося визначити запис розкладу для редагування",
@@ -714,23 +756,130 @@ export default function ScheduleTab({
       });
       return;
     }
+    const g = safeGroups.find((x) => String(x.id) === String(e.groupId));
+    const row = Array.isArray(g?.schedule) ? g.schedule[e.slotIndex] || {} : {};
+    const wd = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay) ?? e.weekday;
+    const st = toMin(row.startTime || row.start || row.time || e.startTime || "");
+    const en = toMin(row.endTime || row.end || e.endTime || "") ?? (st != null ? st + 60 : null);
+    const regularTrainerId = row.trainerId ?? row.trainer_id ?? g?.trainer_id ?? e.trainerId ?? "";
+    const regularTitle = String(row.title || row.name || row.label || "").trim();
     setGroupSlotEdit({
       groupId: e.groupId,
       slotIndex: e.slotIndex,
-      groupName: e.groupName || e.title,
-      weekday: e.weekday,
-      startTime: e.startTime,
-      endTime: e.endTime,
-      direction: e.direction || "—",
-      trainer: e.trainer || "—",
+      groupName: g?.name || e.groupName || e.title || "—",
+      weekday: wd,
+      startTime: st == null ? e.startTime : minToHHMM(st),
+      endTime: en == null ? e.endTime : minToHHMM(en),
+      roomName: getRoomLabel(row) || getRoomLabel(g) || e.roomName || primaryRoomName,
+      trainerId: regularTrainerId || "",
+      title: regularTitle,
+      note: row.note || "",
+      direction: e.direction || getDirectionDisplayName(dirMap.get(String(g?.directionId || "")) || "—"),
+      trainer: trainerMap.get(String(regularTrainerId || "")) || e.trainer || "—",
       error: "",
     });
   };
 
+  const openGroupOverrideEditor = (e) => {
+    if (!canEditGroupSingleLesson(e)) return;
+    setGroupOverrideEdit({
+      overrideId: e.overrideId || null,
+      groupId: e.groupId,
+      slotIndex: e.slotIndex,
+      groupName: e.groupName || e.title || "—",
+      date: e.date,
+      originalStartTime: e.originalStartTime || e.startTime,
+      originalEndTime: e.originalEndTime || e.endTime,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      roomName: e.roomName || primaryRoomName,
+      trainerId: e.trainerId || "",
+      title: e.isOverride ? e.title || "" : "",
+      note: e.note || "",
+      status: "active",
+      error: "",
+    });
+  };
+
+  const saveGroupOverrideEdit = async () => {
+    if (!groupOverrideEdit) return;
+    const st = toMin(groupOverrideEdit.startTime);
+    const en = toMin(groupOverrideEdit.endTime);
+    if (st == null || en == null || en <= st) {
+      setGroupOverrideEdit((p) => ({ ...(p || {}), error: "Час завершення має бути пізніше часу початку" }));
+      return;
+    }
+    const payload = {
+      groupId: groupOverrideEdit.groupId,
+      date: groupOverrideEdit.date,
+      slotIndex: groupOverrideEdit.slotIndex,
+      originalStartTime: groupOverrideEdit.originalStartTime,
+      originalEndTime: groupOverrideEdit.originalEndTime,
+      startTime: groupOverrideEdit.startTime,
+      endTime: groupOverrideEdit.endTime,
+      roomName: normalizeRoomName(groupOverrideEdit.roomName || primaryRoomName) || primaryRoomName,
+      trainerId: groupOverrideEdit.trainerId || null,
+      title: groupOverrideEdit.title || null,
+      note: groupOverrideEdit.note || null,
+      status: "active",
+    };
+    try {
+      if (groupOverrideEdit.overrideId) await onUpdateGroupLessonOverride?.(groupOverrideEdit.overrideId, payload);
+      else await onAddGroupLessonOverride?.(payload);
+      setGroupOverrideEdit(null);
+    } catch (err) {
+      console.error(err);
+      setGroupOverrideEdit((p) => ({ ...(p || {}), error: "Не вдалося зберегти зміни цього заняття" }));
+    }
+  };
+
+  const resetGroupOverrideEdit = async () => {
+    if (!groupOverrideEdit?.overrideId) return;
+    try {
+      await onDeleteGroupLessonOverride?.(groupOverrideEdit.overrideId);
+      setGroupOverrideEdit(null);
+    } catch (err) {
+      console.error(err);
+      setGroupOverrideEdit((p) => ({ ...(p || {}), error: "Не вдалося скинути зміни цього заняття" }));
+    }
+  };
+
+  const cancelSingleGroupLesson = async (e) => {
+    if (!canEditGroupSingleLesson(e)) return;
+    if (!window.confirm("Скасувати тільки це заняття?")) return;
+    const payload = {
+      groupId: e.groupId,
+      date: e.date,
+      slotIndex: e.slotIndex,
+      originalStartTime: e.originalStartTime || e.startTime,
+      originalEndTime: e.originalEndTime || e.endTime,
+      startTime: e.startTime,
+      endTime: e.endTime,
+      roomName: e.roomName || primaryRoomName,
+      trainerId: e.trainerId || null,
+      title: e.isOverride ? e.title || null : null,
+      note: e.note || null,
+      status: "cancelled",
+    };
+    try {
+      if (e.overrideId) await onUpdateGroupLessonOverride?.(e.overrideId, payload);
+      else await onAddGroupLessonOverride?.(payload);
+    } catch (err) {
+      console.error(err);
+      alert("Не вдалося скасувати це заняття");
+    }
+  };
+
   const saveGroupSlotEdit = async () => {
-    if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.error) return;
+    if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.error || !isAdmin) return;
     if (groupSlotEdit.groupId == null || groupSlotEdit.slotIndex == null) {
       setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
+      return;
+    }
+    const st = toMin(groupSlotEdit.startTime);
+    const en = toMin(groupSlotEdit.endTime);
+    if (st == null || en == null || en <= st) {
+      setGroupSlotEdit((p) => ({ ...(p || {}), error: "Час завершення має бути пізніше часу початку" }));
       return;
     }
     const g = safeGroups.find((x) => String(x.id) === String(groupSlotEdit.groupId));
@@ -754,10 +903,16 @@ export default function ScheduleTab({
       else next.weekday = groupSlotEdit.weekday;
       if ("startTime" in next) next.startTime = groupSlotEdit.startTime;
       else if ("start" in next) next.start = groupSlotEdit.startTime;
-      else if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime || ""}`.replace(/-$/, "");
       else next.startTime = groupSlotEdit.startTime;
+      if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime || ""}`.replace(/-$/, "");
       if ("endTime" in next) next.endTime = groupSlotEdit.endTime;
       else if ("end" in next) next.end = groupSlotEdit.endTime;
+      else next.endTime = groupSlotEdit.endTime;
+      next.roomName = normalizeRoomName(groupSlotEdit.roomName || primaryRoomName) || primaryRoomName;
+      next.trainerId = groupSlotEdit.trainerId || null;
+      if ("trainer_id" in next) next.trainer_id = groupSlotEdit.trainerId || null;
+      next.title = String(groupSlotEdit.title || "").trim() || null;
+      next.note = String(groupSlotEdit.note || "").trim() || null;
       return next;
     });
     try {
@@ -1232,30 +1387,89 @@ export default function ScheduleTab({
         </div>
       )}
 
+
+      {groupOverrideEdit && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5050, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(540px,96vw)", maxHeight: isMobile ? "74vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <b style={{ fontSize: isMobile ? 17 : 18, color: theme.text }}>Змінити тільки це заняття</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>{groupOverrideEdit.groupName} · {groupOverrideEdit.date}</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setGroupOverrideEdit(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={editorSectionLabelSt}>Назва і дата</div>
+              <input style={editorInputSt} placeholder={groupOverrideEdit.groupName || "Назва заняття"} value={groupOverrideEdit.title || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, title: e.target.value }))} />
+              <input style={{ ...editorInputSt, opacity: 0.75 }} type="date" value={groupOverrideEdit.date || ""} readOnly />
+              <div style={editorSectionLabelSt}>Час і місце</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <input style={editorInputSt} type="time" value={groupOverrideEdit.startTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, startTime: e.target.value }))} />
+                <input style={editorInputSt} type="time" value={groupOverrideEdit.endTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, endTime: e.target.value }))} />
+              </div>
+              <select style={editorInputSt} value={groupOverrideEdit.roomName || primaryRoomName} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, roomName: e.target.value }))}>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              <select style={editorInputSt} value={groupOverrideEdit.trainerId || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">Без тренера</option>
+                {safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
+              </select>
+              <input style={editorInputSt} placeholder="Нотатка" value={groupOverrideEdit.note || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, note: e.target.value }))} />
+              <select style={editorInputSt} value="active" disabled>
+                <option value="active">Активно</option>
+              </select>
+              {groupOverrideEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{groupOverrideEdit.error}</div> : null}
+              <div style={{ fontSize: 12, color: theme.textLight }}>
+                Регулярний графік групи не зміниться; буде збережено override тільки для цієї дати й слоту.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              <button style={btnP} onClick={saveGroupOverrideEdit}>Зберегти</button>
+              <button style={btnS} onClick={() => setGroupOverrideEdit(null)}>Скасувати</button>
+              {groupOverrideEdit.overrideId ? <button style={{ ...btnS, color: theme.danger, marginLeft: "auto" }} onClick={resetGroupOverrideEdit}>Скинути зміни для цього заняття</button> : null}
+            </div>
+          </div>
+        </div>
+      )}
+
       {isAdmin && groupSlotEdit && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center" }}>
-          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: "min(620px,94vw)", maxHeight: "90vh", overflow: "auto" }}>
-          <b>Редагувати заняття групи</b>
-          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 4 }}>
-            Група: {groupSlotEdit.groupName}
-          </div>
-          <div style={{ fontSize: 12, color: theme.textLight, marginTop: 2 }}>
-            Напрямок: {groupSlotEdit.direction || "—"} · Тренер: {groupSlotEdit.trainer || "—"}
-          </div>
-          {groupSlotEdit.error ? (
-            <div style={{ marginTop: 8, color: theme.danger, fontSize: 13 }}>{groupSlotEdit.error}</div>
-          ) : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-            <select style={editorInputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0) }))}>
-              <option value={1}>Пн</option><option value={2}>Вт</option><option value={3}>Ср</option><option value={4}>Чт</option><option value={5}>Пт</option><option value={6}>Сб</option><option value={0}>Нд</option>
-            </select>
-            <input style={editorInputSt} type="time" value={groupSlotEdit.startTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value }))} />
-            <input style={editorInputSt} type="time" value={groupSlotEdit.endTime} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value }))} />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
-            <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
-          </div>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5050, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(540px,96vw)", maxHeight: isMobile ? "74vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <b style={{ fontSize: isMobile ? 17 : 18, color: theme.text }}>Змінити регулярний графік</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>{groupSlotEdit.groupName} · {groupSlotEdit.direction || "—"}</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setGroupSlotEdit(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={editorSectionLabelSt}>Назва і повтор</div>
+              <input style={editorInputSt} placeholder={groupSlotEdit.groupName || "Назва заняття"} value={groupSlotEdit.title || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, title: e.target.value }))} />
+              <select style={editorInputSt} value={groupSlotEdit.weekday} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, weekday: Number(e.target.value || 0), error: "" }))}>
+                <option value={1}>Пн</option><option value={2}>Вт</option><option value={3}>Ср</option><option value={4}>Чт</option><option value={5}>Пт</option><option value={6}>Сб</option><option value={0}>Нд</option>
+              </select>
+              <div style={editorSectionLabelSt}>Час і місце</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <input style={editorInputSt} type="time" value={groupSlotEdit.startTime || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, startTime: e.target.value, error: "" }))} />
+                <input style={editorInputSt} type="time" value={groupSlotEdit.endTime || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, endTime: e.target.value, error: "" }))} />
+              </div>
+              <select style={editorInputSt} value={groupSlotEdit.roomName || primaryRoomName} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, roomName: e.target.value }))}>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              <select style={editorInputSt} value={groupSlotEdit.trainerId || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, trainerId: e.target.value }))}>
+                <option value="">Без тренера</option>
+                {safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
+              </select>
+              <input style={editorInputSt} placeholder="Нотатка" value={groupSlotEdit.note || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, note: e.target.value }))} />
+              {groupSlotEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{groupSlotEdit.error}</div> : null}
+              <div style={{ fontSize: 12, color: theme.textLight }}>
+                Це змінить усі повторювані заняття цього слоту, не лише обрану дату. Single-date overrides не видаляються і лишаються пріоритетними для своїх дат.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
+              <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
+            </div>
           </div>
         </div>
       )}
@@ -1663,7 +1877,7 @@ export default function ScheduleTab({
                           <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
                             {e.title}
                           </div>
-                          {(isAdmin || e.kind === "booking") && (
+                          {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
                                 style={{
@@ -1770,16 +1984,43 @@ export default function ScheduleTab({
                                       >
                                         Деталі заняття
                                       </button>
-                                      {isAdmin && (
+                                      {canEditGroupSingleLesson(e) ? (
                                         <button
                                           style={btnS}
                                           onClick={() => {
                                             setOpenMenuState(null);
-                                            openGroupSlotEditor(e);
+                                            openGroupOverrideEditor(e);
                                           }}
                                         >
-                                          Редагувати заняття
+                                          Змінити тільки це заняття
                                         </button>
+                                      ) : null}
+                                      {canEditGroupSingleLesson(e) ? (
+                                        <button
+                                          style={btnS}
+                                          onClick={() => {
+                                            setOpenMenuState(null);
+                                            cancelSingleGroupLesson(e);
+                                          }}
+                                        >
+                                          Скасувати заняття
+                                        </button>
+                                      ) : null}
+                                      {isAdmin && (
+                                        <>
+                                          <button
+                                            style={btnS}
+                                            onClick={() => {
+                                              setOpenMenuState(null);
+                                              openGroupSlotEditor(e);
+                                            }}
+                                          >
+                                            Змінити регулярний графік
+                                          </button>
+                                          <div style={{ fontSize: 10, color: theme.textLight, padding: "0 4px" }}>
+                                            Це змінить усі повторювані заняття цього слоту, не лише обрану дату.
+                                          </div>
+                                        </>
                                       )}
                                     </>
                                   )}
