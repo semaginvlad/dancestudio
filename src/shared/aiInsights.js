@@ -1,4 +1,5 @@
-const asArray = (value) => (Array.isArray(value) ? value : []);
+import { buildCRMContext } from "./ai/contextBuilder.js";
+import { asArray, getGroupId } from "./ai/privacy.js";
 
 const displayStudent = (student = {}) => (
   student.name
@@ -96,9 +97,9 @@ export function buildAIInsights({
     }));
   }
 
-  const waitingRows = asArray(waitlist).filter((row) => ["waiting", "contacted", ""].includes(String(row.status || "")) && row.groupId);
+  const waitingRows = asArray(waitlist).filter((row) => ["waiting", "contacted", ""].includes(String(row.status || "")) && getGroupId(row));
   const waitingByGroup = waitingRows.reduce((acc, row) => {
-    const key = String(row.groupId);
+    const key = String(getGroupId(row));
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
@@ -136,11 +137,25 @@ export function buildAIInsights({
 }
 
 export function createAIInsightsPayload({
-  proAnalytics = {},
-  dashboard = {},
-  paymentAnomalies = [],
-  waitlist = [],
+  contextType,
+  students = [],
   groups = [],
+  studentGrps = [],
+  subs = [],
+  attn = [],
+  waitlist = [],
+  trialBookings = [],
+  trainers = [],
+  trainerGroups = [],
+  directionsList = [],
+  cancelled = [],
+  roomBookings = [],
+  groupLessonOverrides = [],
+  analytics = {},
+  proAnalytics = {},
+  paymentAnomalies = [],
+  dashboard = {},
+  options = {},
 } = {}) {
   const groupById = Object.fromEntries(asArray(groups).map((g) => [String(g.id), g]));
   const lowAttendanceGroupRows = asArray(dashboard.lowAttendanceGroupRows).map((row) => ({
@@ -154,8 +169,9 @@ export function createAIInsightsPayload({
     return acc;
   }, {});
   const waitlistDemand = Object.entries(asArray(waitlist).reduce((acc, row) => {
-    if (!["waiting", "contacted", ""].includes(String(row.status || "")) || !row.groupId) return acc;
-    const key = String(row.groupId);
+    const groupId = getGroupId(row);
+    if (!["waiting", "contacted", ""].includes(String(row.status || "")) || !groupId) return acc;
+    const key = String(groupId);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {})).map(([groupId, count]) => ({
@@ -163,11 +179,33 @@ export function createAIInsightsPayload({
     count,
   })).sort((a, b) => b.count - a.count).slice(0, 10);
 
+  const crmContext = buildCRMContext({
+    contextType,
+    students,
+    groups,
+    studentGrps,
+    subs,
+    attn,
+    waitlist,
+    trialBookings,
+    trainers,
+    trainerGroups,
+    directionsList,
+    cancelled,
+    roomBookings,
+    groupLessonOverrides,
+    analytics,
+    proAnalytics,
+    paymentAnomalies,
+    dashboard,
+    options,
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     dataPolicy: {
       pii: "minimized",
-      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_payment_rows"],
+      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_chats", "private_notes", "raw_payment_rows"],
     },
     dashboard: {
       period: dashboard.period || null,
@@ -191,5 +229,6 @@ export function createAIInsightsPayload({
       byType: paymentAnomalySummary,
     },
     waitlistDemand,
+    crmContext,
   };
 }
