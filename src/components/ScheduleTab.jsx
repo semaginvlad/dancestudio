@@ -140,7 +140,7 @@ const getTrainerInitials = (name = "") => {
     .join("");
 };
 const getEventTrainerInitials = (event) =>
-  getTrainerInitials(event?.trainerName || event?.trainer_name || event?.trainer || "");
+  getTrainerInitials(event?.trainerName || event?.trainer_name || event?.trainerDisplayName || event?.trainer_display_name || event?.trainer || "");
 const getEventTypeMark = (event) => {
   const marks = {
     group_lesson: "Г",
@@ -1699,9 +1699,9 @@ export default function ScheduleTab({
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
-                      const trainerInitials = height >= 58 ? getEventTrainerInitials(e) : "";
+                      const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
                       const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
-                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 16 : 18, height: isMobile ? 16 : 18, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.78)" : "rgba(30,41,59,.88)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.28)" : "1px solid rgba(15,23,42,.12)", fontSize: isMobile ? 8 : 9, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
+                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.78)" : "rgba(30,41,59,.88)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.28)" : "1px solid rgba(15,23,42,.12)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                       return (
                         <div
                           key={e.id}
@@ -1890,12 +1890,12 @@ export default function ScheduleTab({
                     const canMutateThisEvent = canMutateEvent(e);
                     const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
                     const typeMark = getEventTypeMark(e);
-                    const trainerInitials = height >= 58 ? getEventTrainerInitials(e) : "";
+                    const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
                     const extraLine = height >= 96 && e.kind === "booking"
                       ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
                       : "";
                     const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
-                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 16 : 18, height: isMobile ? 16 : 18, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.78)" : "rgba(30,41,59,.88)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.28)" : "1px solid rgba(15,23,42,.12)", fontSize: isMobile ? 8 : 9, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
+                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.78)" : "rgba(30,41,59,.88)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.28)" : "1px solid rgba(15,23,42,.12)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                     return (
                       <div
                         key={e.id}
