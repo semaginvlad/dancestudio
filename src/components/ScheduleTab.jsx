@@ -162,6 +162,14 @@ const getRoomLabel = (event) =>
   "";
 const normalizeRoomName = (value = "") =>
   String(value || "").replace(/\s+/g, " ").trim();
+const getScheduleEventKind = (event) => {
+  const kind = String(event?.kind || "").toLowerCase();
+  if (kind === "booking" || kind === "group") return kind;
+  const eventType = String(event?.eventType || event?.event_type || event?.type || "").toLowerCase();
+  if (eventType === "group_lesson" || event?.groupId != null || event?.group_id != null) return "group";
+  if (event?.parentId != null || event?.parent_id != null || eventType) return "booking";
+  return kind;
+};
 
 const getSlotTitle = (slot, group) =>
   String(slot?.title || slot?.name || slot?.label || group?.name || group?.title || group?.id || "").trim();
@@ -303,7 +311,7 @@ export default function ScheduleTab({
   const isGroupOwnedByCurrentTrainer = (groupId) =>
     safeGroups.some((g) => String(g.id) === String(groupId) && String(g.trainer_id || "") === currentTrainerId);
   const canEditGroupSingleLesson = (event) =>
-    isAdmin || (event?.kind === "group" && isGroupOwnedByCurrentTrainer(event.groupId));
+    isAdmin || (getScheduleEventKind(event) === "group" && isGroupOwnedByCurrentTrainer(event.groupId ?? event.group_id));
   const allowedEventTypes = isAdmin
     ? ["room_booking", "individual_training", "cleaning", "custom_admin_event"]
     : ["room_booking", "individual_training"];
@@ -609,7 +617,7 @@ export default function ScheduleTab({
     return map;
   }, [eventsByDay, selectedRoom, primaryRoomName]);
   const canMutateEvent = (event) =>
-    isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
+    isAdmin || (getScheduleEventKind(event) === "booking" && String(event.trainerId || event.trainer_id || "") === currentTrainerId);
   const normalizeBookingPayload = (source) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
@@ -805,18 +813,33 @@ export default function ScheduleTab({
     !!target?.closest?.('button, input, select, textarea, a, [role="button"], [data-event-menu-button="1"]');
   const canDragEvent = (event) => {
     if (!event || !["day", "week"].includes(viewMode)) return false;
-    if (event.kind === "booking") {
-      return !!onUpdateBooking && canMutateEvent(event) && String(event.recurrence || "none") === "none";
+    const kind = getScheduleEventKind(event);
+    if (kind === "booking") {
+      const recurrence = String(event.recurrence || "none").trim().toLowerCase() || "none";
+      return !!onUpdateBooking && canMutateEvent(event) && recurrence === "none";
     }
-    if (event.kind === "group") {
-      return !!(onAddGroupLessonOverride || event.overrideId) && !!onUpdateGroupLessonOverride && canEditGroupSingleLesson(event);
+    if (kind === "group") {
+      return !!onAddGroupLessonOverride && !!onUpdateGroupLessonOverride && canEditGroupSingleLesson(event);
     }
     return false;
   };
+  const getDropZoneFromPoint = (clientX, clientY, view) => {
+    const selector = `[data-schedule-drop-zone="1"][data-drop-view="${view}"]`;
+    const pointedElements = typeof document.elementsFromPoint === "function"
+      ? document.elementsFromPoint(clientX, clientY)
+      : [document.elementFromPoint(clientX, clientY)].filter(Boolean);
+    const pointedZone = pointedElements
+      .map((element) => element?.closest?.(selector))
+      .find(Boolean);
+    if (pointedZone) return pointedZone;
+    return Array.from(document.querySelectorAll(selector)).find((zone) => {
+      const rect = zone.getBoundingClientRect();
+      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    }) || null;
+  };
   const getDropFromPoint = (clientX, clientY, session) => {
-    const element = document.elementFromPoint(clientX, clientY);
-    const zone = element?.closest?.('[data-schedule-drop-zone="1"]');
-    if (!zone || zone.dataset.dropView !== session.view) return null;
+    const zone = getDropZoneFromPoint(clientX, clientY, session.view);
+    if (!zone) return null;
     const rect = zone.getBoundingClientRect();
     const hourPx = Number(zone.dataset.hourPx || HOUR_PX) || HOUR_PX;
     const y = clientY - rect.top;
@@ -826,7 +849,7 @@ export default function ScheduleTab({
     if (startMin < DAY_START_HOUR * 60 || endMin > DAY_END_HOUR * 60) return null;
     const date = zone.dataset.dropDate;
     if (!date) return null;
-    if (session.event.kind === "group" && date !== session.event.date) return null;
+    if (getScheduleEventKind(session.event) === "group" && date !== session.event.date) return null;
     const roomName = session.view === "day"
       ? normalizeRoomName(zone.dataset.dropRoom || session.event.roomName || primaryRoomName) || primaryRoomName
       : normalizeRoomName(selectedRoom !== "all" ? selectedRoom : session.event.roomName || primaryRoomName) || primaryRoomName;
@@ -840,6 +863,7 @@ export default function ScheduleTab({
     };
   };
   const isSameEventDrop = (event, drop) =>
+    !!drop &&
     event.date === drop.date &&
     minToHHMM(toMin(event.startTime) ?? event.startMin) === drop.startTime &&
     minToHHMM(toMin(event.endTime) ?? event.endMin) === drop.endTime &&
@@ -867,15 +891,15 @@ export default function ScheduleTab({
   const clearEventDragSession = () => {
     window.clearTimeout(eventDragTimerRef.current);
     eventDragTimerRef.current = null;
-    window.removeEventListener("pointermove", handleEventDragPointerMove);
-    window.removeEventListener("pointerup", handleEventDragPointerUp);
-    window.removeEventListener("pointercancel", handleEventDragPointerCancel);
+    document.removeEventListener("pointermove", handleEventDragPointerMove, true);
+    document.removeEventListener("pointerup", handleEventDragPointerUp, true);
+    document.removeEventListener("pointercancel", handleEventDragPointerCancel, true);
     eventDragRef.current = null;
     setEventDrag(null);
   };
   const commitEventDrop = async (event, drop) => {
     if (!drop || isSameEventDrop(event, drop)) return;
-    if (event.kind === "booking") {
+    if (getScheduleEventKind(event) === "booking") {
       await onUpdateBooking?.(event.parentId || event.id, {
         date: drop.date,
         startTime: drop.startTime,
@@ -884,11 +908,11 @@ export default function ScheduleTab({
       });
       return;
     }
-    if (event.kind === "group") {
+    if (getScheduleEventKind(event) === "group") {
       const payload = {
-        groupId: event.groupId,
+        groupId: event.groupId ?? event.group_id,
         date: event.date,
-        slotIndex: event.slotIndex,
+        slotIndex: event.slotIndex ?? event.slot_index,
         originalStartTime: event.originalStartTime || event.startTime,
         originalEndTime: event.originalEndTime || event.endTime,
         startTime: drop.startTime,
@@ -964,10 +988,9 @@ export default function ScheduleTab({
       preview: null,
     };
     eventDragRef.current = session;
-    try { ev.currentTarget.setPointerCapture?.(ev.pointerId); } catch (_) {}
-    window.addEventListener("pointermove", handleEventDragPointerMove, { passive: false });
-    window.addEventListener("pointerup", handleEventDragPointerUp, { passive: false });
-    window.addEventListener("pointercancel", handleEventDragPointerCancel, { passive: false });
+    document.addEventListener("pointermove", handleEventDragPointerMove, { capture: true, passive: false });
+    document.addEventListener("pointerup", handleEventDragPointerUp, { capture: true, passive: false });
+    document.addEventListener("pointercancel", handleEventDragPointerCancel, { capture: true, passive: false });
     if (session.pointerType !== "mouse") {
       eventDragTimerRef.current = window.setTimeout(() => beginEventDrag(session), 550);
     }
