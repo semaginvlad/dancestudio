@@ -141,13 +141,13 @@ const getTrainerInitials = (name = "") => {
 };
 const getEventTrainerInitials = (event) =>
   getTrainerInitials(event?.trainerName || event?.trainer_name || event?.trainerDisplayName || event?.trainer_display_name || event?.trainer || "");
-const getEventTypeMark = (event, compact = false) => {
+const getEventTypeMark = (event) => {
   const marks = {
-    group_lesson: compact ? "Г" : "ГР",
-    individual_training: compact ? "І" : "ІНД",
-    room_booking: compact ? "Р" : "РЕЗ",
-    cleaning: compact ? "К" : "КЛН",
-    custom_admin_event: compact ? "П" : "ПОД",
+    group_lesson: "Г",
+    individual_training: "І",
+    room_booking: "Р",
+    cleaning: "К",
+    custom_admin_event: "П",
   };
   return marks[event?.eventType || event?.type] || "";
 };
@@ -1698,13 +1698,10 @@ export default function ScheduleTab({
                       const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
-                      const compactSticker = isMobile || height < 54;
-                      const typeMark = height >= 42 ? getEventTypeMark(e, compactSticker) : "";
+                      const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
-                      const stickerHeight = isMobile || height < 54 ? 14 : 16;
-                      const stickerFont = isMobile || height < 54 ? 8.5 : 9.5;
-                      const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", height: stickerHeight, minWidth: stickerHeight, padding: compactSticker ? "0 4px" : "0 5px", borderRadius: 999, background: c.border, color: "#fff", border: "1px solid rgba(255,255,255,.38)", fontSize: stickerFont, fontWeight: 900, letterSpacing: ".01em", lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 3px rgba(0,0,0,.24)" : "0 1px 3px rgba(15,23,42,.14)" };
-                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", height: stickerHeight, minWidth: stickerHeight, padding: compactSticker ? "0 4px" : "0 5px", borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: stickerFont - 1, fontWeight: 900, letterSpacing: ".01em", lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                      const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
+                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
                       return (
                         <div
                           key={e.id}
@@ -1717,13 +1714,11 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          {(typeMark || trainerInitials) ? (
-                            <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "nowrap", overflow: "hidden", marginBottom: height < 54 ? 1 : 2 }}>
-                              {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
-                              {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
-                            </div>
-                          ) : null}
-                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.12em", display: "-webkit-box", WebkitLineClamp: height > 62 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                            {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
+                            {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
+                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
+                          </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 1 }}>
                             <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
@@ -1894,16 +1889,13 @@ export default function ScheduleTab({
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
                     const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
-                    const compactSticker = isMobile || height < 54;
-                    const typeMark = height >= 42 ? getEventTypeMark(e, compactSticker) : "";
+                    const typeMark = getEventTypeMark(e);
                     const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
                     const extraLine = height >= 96 && e.kind === "booking"
                       ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
                       : "";
-                    const stickerHeight = isMobile || height < 54 ? 14 : 16;
-                    const stickerFont = isMobile || height < 54 ? 8.5 : 9.5;
-                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", height: stickerHeight, minWidth: stickerHeight, padding: compactSticker ? "0 4px" : "0 5px", borderRadius: 999, background: c.border, color: "#fff", border: "1px solid rgba(255,255,255,.38)", fontSize: stickerFont, fontWeight: 900, letterSpacing: ".01em", lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 3px rgba(0,0,0,.24)" : "0 1px 3px rgba(15,23,42,.14)" };
-                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", height: stickerHeight, minWidth: stickerHeight, padding: compactSticker ? "0 4px" : "0 5px", borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: stickerFont - 1, fontWeight: 900, letterSpacing: ".01em", lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
+                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
                     return (
                       <div
                         key={e.id}
@@ -1936,14 +1928,12 @@ export default function ScheduleTab({
                         }}
                       >
                         <div style={{ minWidth: 0, paddingRight: textRightPadding }}>
-                          {(typeMark || trainerInitials) ? (
-                            <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "nowrap", overflow: "hidden", marginBottom: height < 54 ? 1 : 2 }}>
-                              {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
-                              {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                            {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
+                            {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
+                            <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+                              {e.title}
                             </div>
-                          ) : null}
-                          <div style={{ fontWeight: 800, lineHeight: "1.12em", display: "-webkit-box", WebkitLineClamp: height > 68 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                            {e.title}
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
                             <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
