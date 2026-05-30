@@ -1422,6 +1422,12 @@ export default function App() {
             attn={attn}
             waitlist={waitlist}
             cancelled={cancelled}
+            isAdmin={!!isAdmin}
+            aiInsightsContext={{
+              proAnalytics,
+              paymentAnomalies,
+              analytics,
+            }}
           />
         )}
         {tab === "schedule" && (isAdmin || user) && (
