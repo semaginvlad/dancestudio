@@ -1,4 +1,5 @@
-const asArray = (value) => (Array.isArray(value) ? value : []);
+import { buildCRMContext } from "./ai/contextBuilder";
+import { asArray, getGroupId } from "./ai/privacy";
 
 const displayStudent = (student = {}) => (
   student.name
@@ -96,9 +97,9 @@ export function buildAIInsights({
     }));
   }
 
-  const waitingRows = asArray(waitlist).filter((row) => ["waiting", "contacted", ""].includes(String(row.status || "")) && row.groupId);
+  const waitingRows = asArray(waitlist).filter((row) => ["waiting", "contacted", ""].includes(String(row.status || "")) && getGroupId(row));
   const waitingByGroup = waitingRows.reduce((acc, row) => {
-    const key = String(row.groupId);
+    const key = String(getGroupId(row));
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
@@ -154,8 +155,9 @@ export function createAIInsightsPayload({
     return acc;
   }, {});
   const waitlistDemand = Object.entries(asArray(waitlist).reduce((acc, row) => {
-    if (!["waiting", "contacted", ""].includes(String(row.status || "")) || !row.groupId) return acc;
-    const key = String(row.groupId);
+    const groupId = getGroupId(row);
+    if (!["waiting", "contacted", ""].includes(String(row.status || "")) || !groupId) return acc;
+    const key = String(groupId);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {})).map(([groupId, count]) => ({
@@ -163,11 +165,13 @@ export function createAIInsightsPayload({
     count,
   })).sort((a, b) => b.count - a.count).slice(0, 10);
 
+  const crmContext = buildCRMContext({ proAnalytics, dashboard, paymentAnomalies, waitlist, groups });
+
   return {
     generatedAt: new Date().toISOString(),
     dataPolicy: {
       pii: "minimized",
-      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_payment_rows"],
+      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_chats", "private_notes", "raw_payment_rows"],
     },
     dashboard: {
       period: dashboard.period || null,
@@ -191,5 +195,6 @@ export function createAIInsightsPayload({
       byType: paymentAnomalySummary,
     },
     waitlistDemand,
+    crmContext,
   };
 }
