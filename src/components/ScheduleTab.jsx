@@ -127,7 +127,12 @@ const getEventTypeLabel = (value = "") => {
   };
   return m[value] || value || "—";
 };
+const isMissingTrainerName = (name) => {
+  const value = String(name ?? "").trim();
+  return !value || value === "—" || value === "-";
+};
 const getTrainerInitials = (name = "") => {
+  if (isMissingTrainerName(name)) return "";
   const parts = String(name || "")
     .replace(/[()]/g, " ")
     .split(/[\s-]+/)
@@ -372,6 +377,13 @@ export default function ScheduleTab({
       ),
     [safeTrainers],
   );
+  const getTrainerNameById = (trainerId) =>
+    trainerId ? trainerMap.get(String(trainerId)) || "" : "";
+  const getResolvedTrainerName = (trainerName, trainerId) => {
+    const currentName = String(trainerName ?? "").trim();
+    if (!isMissingTrainerName(currentName)) return currentName;
+    return getTrainerNameById(trainerId);
+  };
   const activeStudioRooms = useMemo(() => {
     const safeStudioRooms = Array.isArray(studioRooms) ? studioRooms : [];
     return safeStudioRooms
@@ -506,8 +518,9 @@ export default function ScheduleTab({
           roomName: getRoomLabel(b) || primaryRoomName,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
+          trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
-            b.trainerName || trainerMap.get(String(b.trainerId || b.trainer_id || "")) || "—",
+            getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || "—",
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
@@ -543,8 +556,9 @@ export default function ScheduleTab({
           roomName: getRoomLabel(b) || primaryRoomName,
           direction: getDirectionDisplayName(bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
+          trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
-            b.trainerName || trainerMap.get(String(b.trainerId || b.trainer_id || "")) || "—",
+            getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || "—",
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
@@ -611,7 +625,9 @@ export default function ScheduleTab({
       ? source.eventType
       : "room_booking";
     const trainerId = isAdmin ? source.trainerId || null : currentTrainerId || null;
-    const trainerName = isAdmin ? source.trainerName || null : currentTrainerName || null;
+    const trainerName = trainerId
+      ? getResolvedTrainerName(source.trainerName, trainerId) || (isAdmin ? null : currentTrainerName || null)
+      : null;
     const base = {
       ...source,
       eventType,
@@ -730,7 +746,7 @@ export default function ScheduleTab({
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
       trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
-      trainerName: e.trainer || "",
+      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : currentTrainerId),
       title: e.title || "",
       roomName: e.roomName || primaryRoomName,
       note: e.note || "",
@@ -757,7 +773,7 @@ export default function ScheduleTab({
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
       trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
-      trainerName: e.trainer || "",
+      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : currentTrainerId),
       title: e.title || "",
       roomName: e.roomName || primaryRoomName,
       note: e.note || "",
@@ -1276,7 +1292,14 @@ export default function ScheduleTab({
                 style={editorInputSt}
                 value={isAdmin ? draft.trainerId || "" : currentTrainerId}
                 disabled={!isAdmin}
-                onChange={(e) => setDraft((p) => ({ ...p, trainerId: e.target.value }))}
+                onChange={(e) => {
+                  const trainerId = e.target.value;
+                  setDraft((p) => ({
+                    ...p,
+                    trainerId,
+                    trainerName: trainerId ? getTrainerNameById(trainerId) : "",
+                  }));
+                }}
               >
                 {isAdmin ? <option value="">Тренер</option> : null}
                 {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
