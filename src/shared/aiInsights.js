@@ -134,3 +134,62 @@ export function buildAIInsights({
     return (weight[a.priority] ?? 9) - (weight[b.priority] ?? 9);
   }).slice(0, 5);
 }
+
+export function createAIInsightsPayload({
+  proAnalytics = {},
+  dashboard = {},
+  paymentAnomalies = [],
+  waitlist = [],
+  groups = [],
+} = {}) {
+  const groupById = Object.fromEntries(asArray(groups).map((g) => [String(g.id), g]));
+  const lowAttendanceGroupRows = asArray(dashboard.lowAttendanceGroupRows).map((row) => ({
+    groupName: row.name || displayGroup(row),
+    averageAttendance: row.average,
+    heldSessions: row.held,
+  })).slice(0, 10);
+  const paymentAnomalySummary = asArray(paymentAnomalies).reduce((acc, row) => {
+    const key = row.type || "unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const waitlistDemand = Object.entries(asArray(waitlist).reduce((acc, row) => {
+    if (!["waiting", "contacted", ""].includes(String(row.status || "")) || !row.groupId) return acc;
+    const key = String(row.groupId);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {})).map(([groupId, count]) => ({
+    groupName: displayGroup(groupById[groupId]),
+    count,
+  })).sort((a, b) => b.count - a.count).slice(0, 10);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    dataPolicy: {
+      pii: "minimized",
+      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_payment_rows"],
+    },
+    dashboard: {
+      period: dashboard.period || null,
+      endingSoon: dashboard.endingSoon || 0,
+      noActivePayment: dashboard.noActivePayment || 0,
+      lowAttendanceGroups: dashboard.lowAttendanceGroups || lowAttendanceGroupRows.length,
+      deadGroups: dashboard.deadGroups || 0,
+      reserveDemand: dashboard.reserveDemand || waitlistDemand.length,
+      weakSignals: asArray(dashboard.weakSignals).slice(0, 5),
+      strongSignals: asArray(dashboard.strongSignals).slice(0, 5),
+      lowAttendanceGroupRows,
+    },
+    proAnalytics: {
+      churnRiskCount: asArray(proAnalytics.churnRisk).length,
+      upsellCandidatesCount: asArray(proAnalytics.upsellCandidates).length,
+      bestAttendersCount: asArray(proAnalytics.bestAttenders).length,
+      popularDays: asArray(proAnalytics.popularDays).slice(0, 7).map((row) => ({ day: row.day, count: row.count || 0 })),
+    },
+    paymentAnomalies: {
+      total: asArray(paymentAnomalies).length,
+      byType: paymentAnomalySummary,
+    },
+    waitlistDemand,
+  };
+}
