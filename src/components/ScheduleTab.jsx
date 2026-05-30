@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
@@ -338,6 +338,10 @@ export default function ScheduleTab({
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
   const [selection, setSelection] = useState(null);
+  const [eventDrag, setEventDrag] = useState(null);
+  const eventDragRef = useRef(null);
+  const eventDragTimerRef = useRef(null);
+  const suppressEventClickRef = useRef(false);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
     startTime: "12:00",
@@ -795,6 +799,195 @@ export default function ScheduleTab({
   };
   const minuteFromY = (y) =>
     roundToNearest15(DAY_START_HOUR * 60 + (y / HOUR_PX) * 60);
+  const getDragDuration = (event) => Math.max(15, (toMin(event?.endTime) ?? event?.endMin ?? 0) - (toMin(event?.startTime) ?? event?.startMin ?? 0));
+  const getEventDragKey = (event) => `${event?.kind || "event"}:${event?.parentId || event?.id}:${event?.date || ""}`;
+  const isEventDragInteractiveTarget = (target) =>
+    !!target?.closest?.('button, input, select, textarea, a, [role="button"], [data-event-menu-button="1"]');
+  const canDragEvent = (event) => {
+    if (!event || !["day", "week"].includes(viewMode)) return false;
+    if (event.kind === "booking") {
+      return !!onUpdateBooking && canMutateEvent(event) && String(event.recurrence || "none") === "none";
+    }
+    if (event.kind === "group") {
+      return !!(onAddGroupLessonOverride || event.overrideId) && !!onUpdateGroupLessonOverride && canEditGroupSingleLesson(event);
+    }
+    return false;
+  };
+  const getDropFromPoint = (clientX, clientY, session) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const zone = element?.closest?.('[data-schedule-drop-zone="1"]');
+    if (!zone || zone.dataset.dropView !== session.view) return null;
+    const rect = zone.getBoundingClientRect();
+    const hourPx = Number(zone.dataset.hourPx || HOUR_PX) || HOUR_PX;
+    const y = clientY - rect.top;
+    if (y < 0 || y > rect.height) return null;
+    const startMin = roundToNearest15(DAY_START_HOUR * 60 + (y / hourPx) * 60);
+    const endMin = startMin + session.duration;
+    if (startMin < DAY_START_HOUR * 60 || endMin > DAY_END_HOUR * 60) return null;
+    const date = zone.dataset.dropDate;
+    if (!date) return null;
+    if (session.event.kind === "group" && date !== session.event.date) return null;
+    const roomName = session.view === "day"
+      ? normalizeRoomName(zone.dataset.dropRoom || session.event.roomName || primaryRoomName) || primaryRoomName
+      : normalizeRoomName(selectedRoom !== "all" ? selectedRoom : session.event.roomName || primaryRoomName) || primaryRoomName;
+    return {
+      date,
+      roomName,
+      startMin,
+      endMin,
+      startTime: minToHHMM(startMin),
+      endTime: minToHHMM(endMin),
+    };
+  };
+  const isSameEventDrop = (event, drop) =>
+    event.date === drop.date &&
+    minToHHMM(toMin(event.startTime) ?? event.startMin) === drop.startTime &&
+    minToHHMM(toMin(event.endTime) ?? event.endMin) === drop.endTime &&
+    normalizeRoomName(event.roomName || primaryRoomName) === normalizeRoomName(drop.roomName || primaryRoomName);
+  const updateEventDragPreview = (session, clientX, clientY) => {
+    const drop = getDropFromPoint(clientX, clientY, session);
+    session.preview = drop;
+    setEventDrag({
+      key: getEventDragKey(session.event),
+      eventId: session.event.id,
+      active: true,
+      preview: drop,
+      duration: session.duration,
+      view: session.view,
+    });
+  };
+  const beginEventDrag = (session, clientX = session.lastX, clientY = session.lastY) => {
+    if (!eventDragRef.current || eventDragRef.current !== session) return;
+    window.clearTimeout(eventDragTimerRef.current);
+    eventDragTimerRef.current = null;
+    session.started = true;
+    setOpenMenuState(null);
+    updateEventDragPreview(session, clientX, clientY);
+  };
+  const clearEventDragSession = () => {
+    window.clearTimeout(eventDragTimerRef.current);
+    eventDragTimerRef.current = null;
+    window.removeEventListener("pointermove", handleEventDragPointerMove);
+    window.removeEventListener("pointerup", handleEventDragPointerUp);
+    window.removeEventListener("pointercancel", handleEventDragPointerCancel);
+    eventDragRef.current = null;
+    setEventDrag(null);
+  };
+  const commitEventDrop = async (event, drop) => {
+    if (!drop || isSameEventDrop(event, drop)) return;
+    if (event.kind === "booking") {
+      await onUpdateBooking?.(event.parentId || event.id, {
+        date: drop.date,
+        startTime: drop.startTime,
+        endTime: drop.endTime,
+        roomName: drop.roomName,
+      });
+      return;
+    }
+    if (event.kind === "group") {
+      const payload = {
+        groupId: event.groupId,
+        date: event.date,
+        slotIndex: event.slotIndex,
+        originalStartTime: event.originalStartTime || event.startTime,
+        originalEndTime: event.originalEndTime || event.endTime,
+        startTime: drop.startTime,
+        endTime: drop.endTime,
+        roomName: drop.roomName,
+        trainerId: event.trainerId || null,
+        title: event.isOverride ? event.title || null : null,
+        note: event.note || null,
+        status: "active",
+      };
+      if (event.overrideId) await onUpdateGroupLessonOverride?.(event.overrideId, payload);
+      else await onAddGroupLessonOverride?.(payload);
+    }
+  };
+  const handleEventDragPointerMove = (ev) => {
+    const session = eventDragRef.current;
+    if (!session || ev.pointerId !== session.pointerId) return;
+    session.lastX = ev.clientX;
+    session.lastY = ev.clientY;
+    const dx = ev.clientX - session.startX;
+    const dy = ev.clientY - session.startY;
+    const distance = Math.hypot(dx, dy);
+    if (!session.started) {
+      if (session.pointerType === "mouse") {
+        if (distance < 5) return;
+        beginEventDrag(session, ev.clientX, ev.clientY);
+      } else {
+        if (Math.abs(dx) > 12 || Math.abs(dy) > 12) clearEventDragSession();
+        return;
+      }
+    }
+    ev.preventDefault();
+    updateEventDragPreview(session, ev.clientX, ev.clientY);
+  };
+  const handleEventDragPointerUp = async (ev) => {
+    const session = eventDragRef.current;
+    if (!session || ev.pointerId !== session.pointerId) return;
+    const wasDragging = session.started;
+    const drop = session.preview;
+    clearEventDragSession();
+    if (!wasDragging) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    suppressEventClickRef.current = true;
+    window.setTimeout(() => { suppressEventClickRef.current = false; }, 0);
+    try {
+      await commitEventDrop(session.event, drop);
+    } catch (err) {
+      console.error(err);
+      alert("Не вдалося перенести подію");
+    }
+  };
+  const handleEventDragPointerCancel = (ev) => {
+    const session = eventDragRef.current;
+    if (!session || ev.pointerId !== session.pointerId) return;
+    clearEventDragSession();
+  };
+  const startEventDragPointer = (event, view, ev) => {
+    if (!canDragEvent(event) || isEventDragInteractiveTarget(ev.target)) return;
+    if (ev.pointerType === "mouse" && ev.button !== 0) return;
+    ev.stopPropagation();
+    const session = {
+      event,
+      view,
+      pointerId: ev.pointerId,
+      pointerType: ev.pointerType || "mouse",
+      startX: ev.clientX,
+      startY: ev.clientY,
+      lastX: ev.clientX,
+      lastY: ev.clientY,
+      duration: getDragDuration(event),
+      started: false,
+      preview: null,
+    };
+    eventDragRef.current = session;
+    try { ev.currentTarget.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    window.addEventListener("pointermove", handleEventDragPointerMove, { passive: false });
+    window.addEventListener("pointerup", handleEventDragPointerUp, { passive: false });
+    window.addEventListener("pointercancel", handleEventDragPointerCancel, { passive: false });
+    if (session.pointerType !== "mouse") {
+      eventDragTimerRef.current = window.setTimeout(() => beginEventDrag(session), 550);
+    }
+  };
+  const getDropPreviewStyle = (preview, hourPx, roomName = null) => {
+    if (!eventDrag?.preview || eventDrag.preview.date !== preview.date) return null;
+    if (roomName != null && normalizeRoomName(eventDrag.preview.roomName) !== normalizeRoomName(roomName)) return null;
+    return {
+      position: "absolute",
+      left: preview.left ?? 0,
+      right: preview.right ?? 0,
+      top: ((eventDrag.preview.startMin - DAY_START_HOUR * 60) / 60) * hourPx,
+      height: Math.max(MIN_EVENT_HEIGHT, (eventDrag.duration / 60) * hourPx),
+      background: "rgba(99,102,241,.16)",
+      border: "1px dashed #6366f1",
+      borderRadius: isMobile ? 8 : 10,
+      pointerEvents: "none",
+      zIndex: 6,
+    };
+  };
   const applyQuickToFullForm = () => setFormMode("full");
   const applyFullToCompactForm = () => setFormMode("compact");
 
@@ -981,6 +1174,7 @@ export default function ScheduleTab({
       document.removeEventListener("keydown", onEsc);
     };
   }, [openMenuState]);
+  useEffect(() => () => clearEventDragSession(), []);
   
 
   const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
@@ -1656,7 +1850,14 @@ export default function ScheduleTab({
               {dayRoomsToRender.map(([room, items]) => (
                 <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : undefined }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
-                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
+                  <div
+                    data-schedule-drop-zone="1"
+                    data-drop-view="day"
+                    data-drop-date={selectedDate}
+                    data-drop-room={room}
+                    data-hour-px="42"
+                    style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}
+                  >
                     {canManageBookings && !isMobile ? (
                       <div
                         style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
@@ -1693,6 +1894,9 @@ export default function ScheduleTab({
                     {isTodaySelected ? (
                       <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * 42, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
+                    {eventDrag?.view === "day" && getDropPreviewStyle({ date: selectedDate }, 42, room) ? (
+                      <div style={getDropPreviewStyle({ date: selectedDate }, 42, room)} />
+                    ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
                       const dur = Math.max(0, e.endMin - e.startMin);
                       const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
@@ -1700,19 +1904,24 @@ export default function ScheduleTab({
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
+                      const canDragThisEvent = canDragEvent(e);
+                      const isDraggingThisEvent = eventDrag?.key === getEventDragKey(e);
                       const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
                       const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
                       return (
                         <div
                           key={e.id}
+                          data-event-card="1"
+                          onPointerDown={(ev) => startEventDragPointer(e, "day", ev)}
                           onMouseDown={(ev) => { ev.stopPropagation(); }}
                           onClick={(ev) => {
                             ev.preventDefault();
                             ev.stopPropagation();
+                            if (suppressEventClickRef.current) return;
                             if (canMutateEvent(e)) startEdit(e);
                             else setSelectedEventDetails(e);
                           }}
-                          style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
+                          style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: isDraggingThisEvent ? 7 : 4, cursor: canDragThisEvent ? (isDraggingThisEvent ? "grabbing" : "grab") : undefined, opacity: isDraggingThisEvent ? 0.72 : undefined, transform: isDraggingThisEvent ? "scale(.98)" : undefined, touchAction: canDragThisEvent ? "manipulation" : undefined }}
                         >
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
@@ -1807,6 +2016,11 @@ export default function ScheduleTab({
               return (
                 <div
                   key={date}
+                  data-schedule-drop-zone="1"
+                  data-drop-view="week"
+                  data-drop-date={date}
+                  data-drop-room={selectedRoom !== "all" ? selectedRoom : ""}
+                  data-hour-px={HOUR_PX}
                   style={{
                     position: "relative",
                     borderLeft: `1px solid ${theme.border}`,
@@ -1852,6 +2066,9 @@ export default function ScheduleTab({
                   {canManageBookings && selection?.date === date ? (
                     <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * HOUR_PX, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
                   ) : null}
+                  {eventDrag?.view === "week" && getDropPreviewStyle({ date, left: `${eventDrag.preview?.left ?? 3}%`, right: `${eventDrag.preview?.right ?? 3}%` }, HOUR_PX) ? (
+                    <div style={getDropPreviewStyle({ date, left: "3%", right: "3%" }, HOUR_PX)} />
+                  ) : null}
                   {Array.from(
                     { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
                     (_, i) => (
@@ -1888,6 +2105,8 @@ export default function ScheduleTab({
                       : palette[colorKey(e)] || palette.default;
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
+                    const canDragThisEvent = canDragEvent(e);
+                    const isDraggingThisEvent = eventDrag?.key === getEventDragKey(e);
                     const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
                     const typeMark = getEventTypeMark(e);
                     const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -1900,10 +2119,12 @@ export default function ScheduleTab({
                       <div
                         key={e.id}
                         data-event-card="1"
+                        onPointerDown={(ev) => startEventDragPointer(e, "week", ev)}
                         onMouseDown={(ev) => ev.stopPropagation()}
                         onMouseUp={(ev) => ev.stopPropagation()}
                         onClick={(ev) => {
                           ev.stopPropagation();
+                          if (suppressEventClickRef.current) return;
                           if (e.kind === "booking") {
                             if (canMutateThisEvent) startEdit(e);
                             else setSelectedEventDetails(e);
@@ -1919,12 +2140,15 @@ export default function ScheduleTab({
                           height,
                           border: `1px solid ${c.border}`,
                           background: c.bg,
-                          opacity: stView.opacity,
+                          opacity: isDraggingThisEvent ? 0.72 : stView.opacity,
                           borderRadius: isMobile ? 8 : 10,
                           padding: isMobile ? 4 : 6,
                           fontSize: isMobile ? 10 : 11,
                           overflow: "hidden",
-                          zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
+                          zIndex: isDraggingThisEvent ? 2100 : (openMenuState?.eventId === e.id ? 2000 : 5),
+                          cursor: canDragThisEvent ? (isDraggingThisEvent ? "grabbing" : "grab") : undefined,
+                          transform: isDraggingThisEvent ? "scale(.98)" : undefined,
+                          touchAction: canDragThisEvent ? "manipulation" : undefined,
                         }}
                       >
                         <div style={{ minWidth: 0, paddingRight: textRightPadding }}>
@@ -1942,6 +2166,7 @@ export default function ScheduleTab({
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
+                                data-event-menu-button="1"
                                 style={{
                                   ...btnS,
                                   padding: isMobile ? "0 4px" : "0 6px",
