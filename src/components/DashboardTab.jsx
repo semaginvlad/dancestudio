@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { cardSt, theme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
+import AIInsightsPanel from "./AIInsightsPanel";
 
 const dayMs = 86400000;
 const toDate = (s) => new Date(`${s}T00:00:00`);
@@ -63,7 +64,7 @@ const TrendLine = ({ rows = [], title, color, deltaLabel }) => {
 
 const RankList = ({ title, rows = [], unit = "" }) => <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>{title}</b><div style={{ display: "grid", gap: 7, marginTop: 8 }}>{rows.length ? rows.map((r, i) => <div key={`${title}_${r.id || r.name}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{i + 1}. {r.name}</span><b>{(r.value || 0).toLocaleString()}{unit}</b></div>) : <div style={{color:theme.textLight}}>Немає даних за період</div>}</div></div>;
 
-export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [] }) {
+export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
   const [mode, setMode] = useState("this_month");
   const [from, setFrom] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1)));
@@ -149,6 +150,21 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   curr.byDirRevenue.forEach((d) => { const p = prevData.byDirRevenue.find((x) => String(x.id) === String(d.id))?.value || 0; if (p > 0 && d.value > p) works.push(`Напрямок ${d.name} виріс (${pctDelta(d.value, p)}%).`); if (p === 0 && d.value > 0) works.push(`Напрямок ${d.name}: нові дані.`); });
   curr.byGroupAttendance.forEach((g) => { const prevG = prevData.byGroupAttendance.find((x) => String(x.id) === String(g.id))?.value || 0; if (g.held >= 2 && (g.value / g.held) >= 6) works.push(`Група ${g.name}: сильна відвідуваність.`); if (g.held >= 2 && prevG > 0 && g.value < prevG) weak.push(`Група ${g.name}: відвідуваність знизилась.`); if (g.held >= 2 && (g.value / g.held) < 4) weak.push(`Група ${g.name}: низька середня відвідуваність.`); });
 
+  const aiDashboardContext = useMemo(() => ({
+    period,
+    endingSoon,
+    noActivePayment,
+    lowAttendanceGroups,
+    deadGroups,
+    reserveDemand,
+    lowAttendanceGroupRows: curr.byGroupAttendance
+      .filter((g) => g.held >= 2 && (g.value / g.held) < 4)
+      .map((g) => ({ ...g, average: Number((g.value / g.held).toFixed(2)) })),
+    riskGroups: health.slice(-5),
+    weakSignals: weak.slice(0, 5),
+    strongSignals: works.slice(0, 5),
+  }), [period, endingSoon, noActivePayment, lowAttendanceGroups, deadGroups, reserveDemand, curr.byGroupAttendance, health, weak, works]);
+
   const targetCards = [
     { key: "revenue", label: "Виручка", actual: curr.revenue, target: targets.revenueTarget, unit: "₴", cmp: cmpLabel(curr.revenue, prevData.revenue) },
     { key: "attendance", label: "Відвідуваність", actual: curr.attendance, target: targets.attendanceTarget, unit: "", cmp: cmpLabel(curr.attendance, prevData.attendance) },
@@ -157,6 +173,17 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   ];
 
   return <div style={{ display: "grid", gap: 14 }}>
+    {isAdmin && (
+      <AIInsightsPanel
+        isAdmin={isAdmin}
+        context={{
+          ...aiInsightsContext,
+          dashboard: aiDashboardContext,
+          waitlist,
+          groups,
+        }}
+      />
+    )}
     <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
       <b>Фінансова картина студії</b>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginTop: 8 }}>

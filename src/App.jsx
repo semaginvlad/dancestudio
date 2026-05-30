@@ -29,6 +29,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
+import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
 import { StudentForm, SubForm, TrialBookingForm, WaitlistForm } from "./components/Forms";
 import AttendanceTab from "./components/AttendanceTab";
@@ -147,8 +148,8 @@ export default function App() {
   const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
   const [directionEdits, setDirectionEdits] = useState({});
 
-  const adminEmails = ["semagin.vlad@gmail.com"]; 
-  const isAdmin = user && adminEmails.includes(user.email);
+  const adminEmails = ADMIN_EMAILS;
+  const isAdmin = user && isAdminEmail(user.email, adminEmails);
 
   const pushStatusLabel = useMemo(() => {
     switch (pushStatus) {
@@ -327,7 +328,7 @@ export default function App() {
     setLoading(true);
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
-      const isCurrentAdmin = currentUser && adminEmails.includes(currentUser.email);
+      const isCurrentAdmin = currentUser && isAdminEmail(currentUser.email, adminEmails);
       
       const fetchCustomOrders = async () => {
         if (!isCurrentAdmin) return db.fetchMyCustomOrders();
@@ -1422,6 +1423,12 @@ export default function App() {
             attn={attn}
             waitlist={waitlist}
             cancelled={cancelled}
+            isAdmin={!!isAdmin}
+            aiInsightsContext={{
+              proAnalytics,
+              paymentAnomalies,
+              analytics,
+            }}
           />
         )}
         {tab === "schedule" && (isAdmin || user) && (
