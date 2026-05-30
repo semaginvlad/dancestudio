@@ -127,6 +127,42 @@ const getEventTypeLabel = (value = "") => {
   };
   return m[value] || value || "—";
 };
+const getTrainerInitials = (name = "") => {
+  const parts = String(name || "")
+    .replace(/[()]/g, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "—");
+  if (!parts.length) return "";
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
+    .join("");
+};
+const getEventTypeSticker = (event) => {
+  const stickers = {
+    group_lesson: "Гр",
+    individual_training: "Інд",
+    room_booking: "Рез",
+    cleaning: "Кл",
+    custom_admin_event: "Под",
+  };
+  const text = stickers[event?.eventType || event?.type] || "";
+  return text ? { text, tone: "type" } : null;
+};
+const getEventCardStickers = (event, { includeExtra = false } = {}) => {
+  const stickers = [];
+  const initials = getTrainerInitials(event?.trainer);
+  if (initials) stickers.push({ text: initials, tone: "trainer" });
+  const typeSticker = getEventTypeSticker(event);
+  if (typeSticker) stickers.push(typeSticker);
+  if (includeExtra && event?.kind === "booking") {
+    if (event.status === "cancelled") stickers.push({ text: "Скас", tone: "danger" });
+    else if (event.status === "tentative") stickers.push({ text: "Попер", tone: "warn" });
+    else if (event.peopleCount && event.eventType === "room_booking") stickers.push({ text: `${event.peopleCount}ос`, tone: "count" });
+  }
+  return stickers;
+};
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
 const getRoomLabel = (event) =>
@@ -1674,6 +1710,21 @@ export default function ScheduleTab({
                       const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
+                      const maxStickers = height >= 96 ? 3 : height >= 54 ? 2 : 0;
+                      const cardStickers = maxStickers ? getEventCardStickers(e, { includeExtra: height >= 96 }).slice(0, maxStickers) : [];
+                      const stickerSt = (sticker) => {
+                        const tone = sticker.tone || "type";
+                        const toneStyle = tone === "trainer"
+                          ? { background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(30,41,59,.9)", borderColor: isDarkTheme ? "rgba(148,163,184,.32)" : "rgba(15,23,42,.14)", color: "#fff" }
+                          : tone === "danger"
+                            ? { background: isDarkTheme ? "rgba(220,38,38,.38)" : "rgba(254,226,226,.92)", borderColor: "rgba(220,38,38,.35)", color: isDarkTheme ? "#fee2e2" : "#991b1b" }
+                            : tone === "warn"
+                              ? { background: isDarkTheme ? "rgba(202,138,4,.34)" : "rgba(254,243,199,.94)", borderColor: "rgba(202,138,4,.35)", color: isDarkTheme ? "#fef3c7" : "#854d0e" }
+                              : tone === "count"
+                                ? { background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(204,251,241,.88)", borderColor: "rgba(20,184,166,.34)", color: isDarkTheme ? "#ccfbf1" : "#115e59" }
+                                : { background: isDarkTheme ? `${c.border}44` : `${c.border}24`, borderColor: `${c.border}88`, color: theme.text };
+                        return { display: "inline-flex", alignItems: "center", justifyContent: "center", height: isMobile ? 14 : 16, padding: isMobile ? "2px 5px" : "2px 6px", borderRadius: 999, border: `1px solid ${toneStyle.borderColor}`, background: toneStyle.background, color: toneStyle.color, boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.18)" : "0 1px 2px rgba(15,23,42,.08)", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700, lineHeight: 1, whiteSpace: "nowrap", boxSizing: "border-box" };
+                      };
                       return (
                         <div
                           key={e.id}
@@ -1686,9 +1737,13 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          <div style={{ fontSize: isMobile ? 10 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 34 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
-                          {height > 52 ? <div style={{ fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{isMobile ? getEventTypeLabel(e.eventType) : `${e.trainer} · ${getEventTypeLabel(e.eventType)}`}</div> : null}
+                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
+                          <div style={{ marginTop: 1, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          {cardStickers.length ? (
+                            <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "nowrap", overflow: "hidden", marginTop: 2 }}>
+                              {cardStickers.map((sticker, index) => <span key={`${sticker.text}-${index}`} style={stickerSt(sticker)}>{sticker.text}</span>)}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -1855,6 +1910,22 @@ export default function ScheduleTab({
                       : palette[colorKey(e)] || palette.default;
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
+                    const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
+                    const maxStickers = height >= 96 ? 3 : height >= 54 ? 2 : 0;
+                    const cardStickers = maxStickers ? getEventCardStickers(e, { includeExtra: height >= 96 }).slice(0, maxStickers) : [];
+                    const stickerSt = (sticker) => {
+                      const tone = sticker.tone || "type";
+                      const toneStyle = tone === "trainer"
+                        ? { background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(30,41,59,.9)", borderColor: isDarkTheme ? "rgba(148,163,184,.32)" : "rgba(15,23,42,.14)", color: "#fff" }
+                        : tone === "danger"
+                          ? { background: isDarkTheme ? "rgba(220,38,38,.38)" : "rgba(254,226,226,.92)", borderColor: "rgba(220,38,38,.35)", color: isDarkTheme ? "#fee2e2" : "#991b1b" }
+                          : tone === "warn"
+                            ? { background: isDarkTheme ? "rgba(202,138,4,.34)" : "rgba(254,243,199,.94)", borderColor: "rgba(202,138,4,.35)", color: isDarkTheme ? "#fef3c7" : "#854d0e" }
+                            : tone === "count"
+                              ? { background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(204,251,241,.88)", borderColor: "rgba(20,184,166,.34)", color: isDarkTheme ? "#ccfbf1" : "#115e59" }
+                              : { background: isDarkTheme ? `${c.border}44` : `${c.border}24`, borderColor: `${c.border}88`, color: theme.text };
+                      return { display: "inline-flex", alignItems: "center", justifyContent: "center", height: isMobile ? 14 : 16, padding: isMobile ? "2px 5px" : "2px 6px", borderRadius: 999, border: `1px solid ${toneStyle.borderColor}`, background: toneStyle.background, color: toneStyle.color, boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.18)" : "0 1px 2px rgba(15,23,42,.08)", fontSize: isMobile ? 9.5 : 10.5, fontWeight: 700, lineHeight: 1, whiteSpace: "nowrap", boxSizing: "border-box" };
+                    };
                     return (
                       <div
                         key={e.id}
@@ -1886,17 +1957,16 @@ export default function ScheduleTab({
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "start",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+                        <div style={{ minWidth: 0, paddingRight: textRightPadding }}>
+                          <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
                             {e.title}
                           </div>
+                          <div style={{ marginTop: 2, color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
+                          {cardStickers.length ? (
+                            <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "nowrap", overflow: "hidden", marginTop: 3 }}>
+                              {cardStickers.map((sticker, index) => <span key={`${sticker.text}-${index}`} style={stickerSt(sticker)}>{sticker.text}</span>)}
+                            </div>
+                          ) : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
@@ -2049,15 +2119,6 @@ export default function ScheduleTab({
                                 )}
                             </div>
                           )}
-                        </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, lineHeight: "1.2em", wordBreak: "break-word", marginTop: 2 }}>
-                          <div style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          {!isMobile && height > 48 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {isMobile && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 70 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.description && height > 86 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {!isMobile && e.peopleCount && height > 96 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
                       </div>
                     );
