@@ -665,6 +665,32 @@ export default function App() {
     }
   };
   const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
+  const isPlaceholderTrainerName = (name = "") => {
+    const value = String(name || "").trim();
+    return !value || value === "—" || value === "-";
+  };
+  const getTrainerDisplayName = (trainer) => {
+    const fullName = [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ").trim();
+    return [trainer?.name, fullName, trainer?.email, trainer?.id]
+      .map((value) => String(value || "").trim())
+      .find((value) => !isPlaceholderTrainerName(value)) || "";
+  };
+  const resolveRoomBookingTrainerName = (trainerId, preferredName = "") => {
+    const id = String(trainerId || "").trim();
+    if (!id) return null;
+    const trainerListName = getTrainerDisplayName(trainersById[id]);
+    if (!isPlaceholderTrainerName(trainerListName)) return trainerListName;
+    const preferred = String(preferredName || "").trim();
+    return isPlaceholderTrainerName(preferred) ? null : preferred;
+  };
+  const withResolvedRoomBookingTrainerName = (payload = {}) => {
+    if (!Object.prototype.hasOwnProperty.call(payload, "trainerId")) return payload;
+    const trainerId = payload.trainerId || null;
+    return {
+      ...payload,
+      trainerName: trainerId ? resolveRoomBookingTrainerName(trainerId, payload.trainerName) : null,
+    };
+  };
   const parseGroupSchedule = (schedule) => {
     if (Array.isArray(schedule)) return schedule;
     if (typeof schedule === "string") {
@@ -1219,7 +1245,7 @@ export default function App() {
     const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
       ? payload.eventType
       : "room_booking";
-    return {
+    return withResolvedRoomBookingTrainerName({
       ...payload,
       trainerId: user?.id || null,
       eventType,
@@ -1227,11 +1253,11 @@ export default function App() {
       peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
       price: eventType === "individual_training" ? payload.price || null : null,
       paymentMethod: eventType === "individual_training" ? payload.paymentMethod || "none" : "none",
-    };
+    });
   };
 
   const addRoomBookingAction = async (payload) => {
-    const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
+    const safePayload = isAdmin ? withResolvedRoomBookingTrainerName(payload) : normalizeTrainerSchedulePayload(payload);
     const created = await db.insertRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
   };
@@ -1254,7 +1280,7 @@ export default function App() {
       return;
     }
     const safePayload = isAdmin
-      ? payload
+      ? withResolvedRoomBookingTrainerName(payload)
       : normalizeTrainerSchedulePayload({
           ...booking,
           ...payload,
