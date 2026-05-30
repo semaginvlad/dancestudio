@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
@@ -126,6 +126,30 @@ const getEventTypeLabel = (value = "") => {
     group_lesson: "Групове заняття",
   };
   return m[value] || value || "—";
+};
+const getTrainerInitials = (name = "") => {
+  const parts = String(name || "")
+    .replace(/[()]/g, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "—");
+  if (!parts.length) return "";
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
+    .join("");
+};
+const getEventTrainerInitials = (event) =>
+  getTrainerInitials(event?.trainerName || event?.trainer_name || event?.trainerDisplayName || event?.trainer_display_name || event?.trainer || "");
+const getEventTypeMark = (event) => {
+  const marks = {
+    group_lesson: "Г",
+    individual_training: "І",
+    room_booking: "Р",
+    cleaning: "К",
+    custom_admin_event: "П",
+  };
+  return marks[event?.eventType || event?.type] || "";
 };
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
@@ -314,6 +338,10 @@ export default function ScheduleTab({
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
   const [selection, setSelection] = useState(null);
+  const [eventDrag, setEventDrag] = useState(null);
+  const eventDragRef = useRef(null);
+  const eventDragLongPressTimerRef = useRef(null);
+  const suppressEventClickRef = useRef(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
     startTime: "12:00",
@@ -582,6 +610,12 @@ export default function ScheduleTab({
   }, [eventsByDay, selectedRoom, primaryRoomName]);
   const canMutateEvent = (event) =>
     isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
+  const canDragEvent = (event) => {
+    if (event?.kind === "group") return canEditGroupSingleLesson(event);
+    if (event?.kind !== "booking") return false;
+    if (!canMutateEvent(event)) return false;
+    return !event.recurrence || event.recurrence === "none";
+  };
   const normalizeBookingPayload = (source) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
@@ -895,6 +929,209 @@ export default function ScheduleTab({
       alert("Не вдалося скасувати це заняття");
     }
   };
+
+  const clearEventDragLongPressTimer = () => {
+    if (!eventDragLongPressTimerRef.current) return;
+    window.clearTimeout(eventDragLongPressTimerRef.current);
+    eventDragLongPressTimerRef.current = null;
+  };
+
+  const syncEventDrag = (next) => {
+    eventDragRef.current = next;
+    setEventDrag(next);
+  };
+
+  const isInteractiveEventDragTarget = (target) =>
+    Boolean(target?.closest?.("button,input,select,textarea,a,[role='button'],[data-event-menu-button='1']"));
+
+  const getDropTargetFromPoint = (clientX, clientY, sourceView, event) => {
+    if (typeof document === "undefined") return null;
+    const zones = Array.from(document.querySelectorAll(`[data-schedule-drop-zone='${sourceView}']`));
+    const zone = zones.find((node) => {
+      const rect = node.getBoundingClientRect();
+      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    });
+    if (!zone) return null;
+    const rect = zone.getBoundingClientRect();
+    const hourPx = Number(zone.dataset.hourPx || HOUR_PX) || HOUR_PX;
+    const duration = Math.max(15, (event.endMin ?? toMin(event.endTime) ?? 0) - (event.startMin ?? toMin(event.startTime) ?? 0));
+    const minStart = DAY_START_HOUR * 60;
+    const maxStart = DAY_END_HOUR * 60 - duration;
+    const rawMinute = roundToNearest15(DAY_START_HOUR * 60 + ((clientY - rect.top) / hourPx) * 60);
+    const startMinute = Math.max(minStart, Math.min(maxStart, rawMinute));
+    const date = zone.dataset.dropDate || event.date;
+    if (event.kind === "group" && date !== event.date) return null;
+    const roomName = sourceView === "day"
+      ? normalizeRoomName(zone.dataset.dropRoom || event.roomName || primaryRoomName) || primaryRoomName
+      : normalizeRoomName(event.roomName || (selectedRoom !== "all" ? selectedRoom : primaryRoomName)) || primaryRoomName;
+    if (!date || startMinute < minStart || startMinute + duration > DAY_END_HOUR * 60) return null;
+    return {
+      view: sourceView,
+      date,
+      roomName,
+      startMinute,
+      endMinute: startMinute + duration,
+      top: ((startMinute - minStart) / 60) * hourPx,
+      height: Math.max(MIN_EVENT_HEIGHT, (duration / 60) * hourPx),
+    };
+  };
+
+  const isSameEventDrop = (event, drop) =>
+    event.date === drop.date &&
+    normalizeRoomName(event.roomName || primaryRoomName) === normalizeRoomName(drop.roomName || primaryRoomName) &&
+    toMin(event.startTime) === drop.startMinute &&
+    toMin(event.endTime) === drop.endMinute;
+
+  const saveEventDrop = async (event, drop) => {
+    if (!canDragEvent(event) || !drop || isSameEventDrop(event, drop)) return;
+    const startTime = minToHHMM(drop.startMinute);
+    const endTime = minToHHMM(drop.endMinute);
+    if (event.kind === "booking") {
+      await onUpdateBooking?.(event.parentId || event.id, {
+        date: drop.date,
+        startTime,
+        endTime,
+        roomName: drop.roomName,
+      });
+      return;
+    }
+    if (event.kind === "group") {
+      const payload = {
+        groupId: event.groupId,
+        date: drop.date,
+        slotIndex: event.slotIndex,
+        originalStartTime: event.originalStartTime || event.startTime,
+        originalEndTime: event.originalEndTime || event.endTime,
+        startTime,
+        endTime,
+        roomName: normalizeRoomName(drop.roomName || event.roomName || primaryRoomName) || primaryRoomName,
+        trainerId: event.trainerId || null,
+        title: event.isOverride ? event.title || null : null,
+        note: event.note || null,
+        status: "active",
+      };
+      if (event.overrideId) await onUpdateGroupLessonOverride?.(event.overrideId, payload);
+      else await onAddGroupLessonOverride?.(payload);
+    }
+  };
+
+  const activateEventDrag = (drag, clientX, clientY) => {
+    const drop = getDropTargetFromPoint(clientX, clientY, drag.view, drag.event);
+    clearEventDragLongPressTimer();
+    setSelection(null);
+    setHoverSlot(null);
+    syncEventDrag({ ...drag, active: true, pending: false, x: clientX, y: clientY, drop });
+  };
+
+  const startEventDragPointer = (ev, event, view) => {
+    if (!canDragEvent(event)) return;
+    if (ev.pointerType === "mouse" && ev.button !== 0) return;
+    if (isInteractiveEventDragTarget(ev.target)) return;
+    ev.stopPropagation();
+    const drag = {
+      eventId: event.id,
+      pointerId: ev.pointerId,
+      pointerType: ev.pointerType || "mouse",
+      event,
+      view,
+      pending: true,
+      active: false,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      x: ev.clientX,
+      y: ev.clientY,
+      drop: null,
+    };
+    clearEventDragLongPressTimer();
+    syncEventDrag(drag);
+    if (ev.currentTarget?.setPointerCapture) {
+      try {
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+      } catch (_) {
+        // Ignore unsupported pointer capture cases.
+      }
+    }
+    if (drag.pointerType === "touch") {
+      eventDragLongPressTimerRef.current = window.setTimeout(() => {
+        const current = eventDragRef.current;
+        if (current?.eventId === drag.eventId && current.pending) {
+          suppressEventClickRef.current = { eventId: drag.eventId, until: Date.now() + 800 };
+          activateEventDrag(current, current.x, current.y);
+        }
+      }, 550);
+    }
+  };
+
+  const shouldSuppressEventClick = (event) => {
+    const current = suppressEventClickRef.current;
+    if (!current || current.eventId !== event.id) return false;
+    if (Date.now() > current.until) {
+      suppressEventClickRef.current = null;
+      return false;
+    }
+    return true;
+  };
+
+  const finishEventDrag = async (drag, clientX, clientY) => {
+    clearEventDragLongPressTimer();
+    const drop = drag.active ? getDropTargetFromPoint(clientX, clientY, drag.view, drag.event) || drag.drop : null;
+    syncEventDrag(null);
+    if (!drag.active || !drop || isSameEventDrop(drag.event, drop)) return;
+    suppressEventClickRef.current = { eventId: drag.eventId, until: Date.now() + 800 };
+    try {
+      await saveEventDrop(drag.event, drop);
+    } catch (err) {
+      console.error(err);
+      alert("Не вдалося перенести подію. Зміни не збережено.");
+    }
+  };
+
+  useEffect(() => {
+    if (!eventDrag) return undefined;
+    const onPointerMove = (ev) => {
+      const drag = eventDragRef.current;
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      const dx = ev.clientX - drag.startX;
+      const dy = ev.clientY - drag.startY;
+      const distance = Math.hypot(dx, dy);
+      if (drag.pending && drag.pointerType === "touch" && distance > 10) {
+        clearEventDragLongPressTimer();
+        syncEventDrag(null);
+        return;
+      }
+      if (drag.pending && drag.pointerType !== "touch" && distance > 4) {
+        suppressEventClickRef.current = { eventId: drag.eventId, until: Date.now() + 800 };
+        activateEventDrag(drag, ev.clientX, ev.clientY);
+        ev.preventDefault();
+        return;
+      }
+      if (!drag.active) {
+        syncEventDrag({ ...drag, x: ev.clientX, y: ev.clientY });
+        return;
+      }
+      ev.preventDefault();
+      const drop = getDropTargetFromPoint(ev.clientX, ev.clientY, drag.view, drag.event);
+      syncEventDrag({ ...drag, x: ev.clientX, y: ev.clientY, drop });
+    };
+    const onPointerUp = (ev) => {
+      const drag = eventDragRef.current;
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      if (drag.active) ev.preventDefault();
+      finishEventDrag(drag, ev.clientX, ev.clientY);
+    };
+    const onPointerCancel = () => {
+      clearEventDragLongPressTimer();
+      syncEventDrag(null);
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    window.addEventListener("pointercancel", onPointerCancel);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+    };
+  }, [eventDrag]);
 
   const saveGroupSlotEdit = async () => {
     if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.error) return;
@@ -1632,7 +1869,13 @@ export default function ScheduleTab({
               {dayRoomsToRender.map(([room, items]) => (
                 <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : undefined }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
-                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
+                  <div
+                    data-schedule-drop-zone="day"
+                    data-drop-date={selectedDate}
+                    data-drop-room={room || ""}
+                    data-hour-px="42"
+                    style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}
+                  >
                     {canManageBookings && !isMobile ? (
                       <div
                         style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
@@ -1669,26 +1912,46 @@ export default function ScheduleTab({
                     {isTodaySelected ? (
                       <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * 42, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
+                    {eventDrag?.active && eventDrag.drop?.view === "day" && eventDrag.drop.date === selectedDate && normalizeRoomName(eventDrag.drop.roomName) === normalizeRoomName(room || primaryRoomName) ? (
+                      <div style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top: eventDrag.drop.top, height: eventDrag.drop.height, border: `1px dashed ${theme.primary}`, background: "rgba(99,102,241,.14)", borderRadius: isMobile ? 8 : 10, pointerEvents: "none", zIndex: 3 }} />
+                    ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
                       const dur = Math.max(0, e.endMin - e.startMin);
                       const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
                       const height = Math.max(24, (dur / 60) * 42);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
+                      const typeMark = getEventTypeMark(e);
+                      const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
+                      const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
+                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                      const draggableEvent = canDragEvent(e);
+                      const draggingThisEvent = eventDrag?.active && eventDrag.eventId === e.id;
                       return (
                         <div
                           key={e.id}
+                          onPointerDown={(ev) => startEventDragPointer(ev, e, "day")}
                           onMouseDown={(ev) => { ev.stopPropagation(); }}
                           onClick={(ev) => {
+                            if (shouldSuppressEventClick(e)) {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              return;
+                            }
                             ev.preventDefault();
                             ev.stopPropagation();
                             if (canMutateEvent(e)) startEdit(e);
                             else setSelectedEventDetails(e);
                           }}
-                          style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
+                          style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: draggingThisEvent ? 6 : 4, cursor: draggableEvent ? (draggingThisEvent ? "grabbing" : "grab") : "pointer", opacity: draggingThisEvent ? 0.62 : undefined, transform: draggingThisEvent ? "scale(.985)" : undefined }}
                         >
-                          <div style={{ fontSize: isMobile ? 10 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 34 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.title}</div>
-                          {height > 52 ? <div style={{ fontSize: isMobile ? 9.5 : 10, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{isMobile ? getEventTypeLabel(e.eventType) : `${e.trainer} · ${getEventTypeLabel(e.eventType)}`}</div> : null}
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                            {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
+                            {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
+                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 1 }}>
+                            <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
+                          </div>
                         </div>
                       );
                     })}
@@ -1774,6 +2037,9 @@ export default function ScheduleTab({
               return (
                 <div
                   key={date}
+                  data-schedule-drop-zone="week"
+                  data-drop-date={date}
+                  data-hour-px={HOUR_PX}
                   style={{
                     position: "relative",
                     borderLeft: `1px solid ${theme.border}`,
@@ -1819,6 +2085,9 @@ export default function ScheduleTab({
                   {canManageBookings && selection?.date === date ? (
                     <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * HOUR_PX, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
                   ) : null}
+                  {eventDrag?.active && eventDrag.drop?.view === "week" && eventDrag.drop.date === date ? (
+                    <div style={{ position: "absolute", left: 3, right: 3, top: eventDrag.drop.top, height: eventDrag.drop.height, border: `1px dashed ${theme.primary}`, background: "rgba(99,102,241,.14)", borderRadius: isMobile ? 8 : 10, pointerEvents: "none", zIndex: 3 }} />
+                  ) : null}
                   {Array.from(
                     { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
                     (_, i) => (
@@ -1855,13 +2124,27 @@ export default function ScheduleTab({
                       : palette[colorKey(e)] || palette.default;
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
+                    const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
+                    const typeMark = getEventTypeMark(e);
+                    const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
+                    const extraLine = height >= 96 && e.kind === "booking"
+                      ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
+                      : "";
+                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
+                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
                     return (
                       <div
                         key={e.id}
                         data-event-card="1"
+                        onPointerDown={(ev) => startEventDragPointer(ev, e, "week")}
                         onMouseDown={(ev) => ev.stopPropagation()}
                         onMouseUp={(ev) => ev.stopPropagation()}
                         onClick={(ev) => {
+                          if (shouldSuppressEventClick(e)) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            return;
+                          }
                           ev.stopPropagation();
                           if (e.kind === "booking") {
                             if (canMutateThisEvent) startEdit(e);
@@ -1878,25 +2161,28 @@ export default function ScheduleTab({
                           height,
                           border: `1px solid ${c.border}`,
                           background: c.bg,
-                          opacity: stView.opacity,
+                          opacity: eventDrag?.active && eventDrag.eventId === e.id ? 0.62 : stView.opacity,
                           borderRadius: isMobile ? 8 : 10,
                           padding: isMobile ? 4 : 6,
                           fontSize: isMobile ? 10 : 11,
                           overflow: "hidden",
-                          zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
+                          zIndex: openMenuState?.eventId === e.id ? 2000 : (eventDrag?.active && eventDrag.eventId === e.id ? 6 : 5),
+                          cursor: canDragEvent(e) ? (eventDrag?.active && eventDrag.eventId === e.id ? "grabbing" : "grab") : "pointer",
+                          transform: eventDrag?.active && eventDrag.eventId === e.id ? "scale(.985)" : undefined,
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "start",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, paddingRight: isMobile ? 18 : 26, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                            {e.title}
+                        <div style={{ minWidth: 0, paddingRight: textRightPadding }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                            {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
+                            {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
+                            <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
+                              {e.title}
+                            </div>
                           </div>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
+                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
+                          </div>
+                          {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
@@ -1908,6 +2194,7 @@ export default function ScheduleTab({
                                   position: "relative",
                                   zIndex: 2200,
                                 }}
+                                data-event-menu-button="1"
                                 onClick={(ev) => {
                                   ev.stopPropagation();
                                   const rect = ev.currentTarget.getBoundingClientRect();
@@ -2049,15 +2336,6 @@ export default function ScheduleTab({
                                 )}
                             </div>
                           )}
-                        </div>
-                        <div style={{ overflow: "hidden", minWidth: 0, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, lineHeight: "1.2em", wordBreak: "break-word", marginTop: 2 }}>
-                          <div style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</div>
-                          {!isMobile && height > 48 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.trainer}</div> : null}
-                          {isMobile && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 58 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{stView.text}</div> : null}
-                          {!isMobile && e.kind === "booking" && height > 70 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{getEventTypeLabel(e.eventType)}</div> : null}
-                          {!isMobile && e.description && height > 86 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.description}</div> : null}
-                          {!isMobile && e.peopleCount && height > 96 ? <div style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.peopleCount} ос.</div> : null}
                         </div>
                       </div>
                     );
