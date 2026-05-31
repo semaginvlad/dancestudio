@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { cardSt, theme } from "../shared/constants";
 import { buildCRMContext } from "../shared/ai/contextBuilder";
 import { CRM_CONTEXT_TYPES, CRM_CONTEXT_TYPE_LIST } from "../shared/ai/contextTypes";
+import { supabase } from "../supabase";
 
 const labelByContext = {
   global: "Global",
@@ -56,6 +57,20 @@ const jsonPreviewStyle = {
   lineHeight: 1.5,
 };
 
+const priorityMeta = {
+  high: { label: "Високий", color: theme.danger },
+  medium: { label: "Середній", color: theme.warning },
+  low: { label: "Низький", color: theme.success },
+};
+
+const getAIErrorMessage = (status, error) => {
+  if (status === 401) return "AI доступ потребує активної admin-сесії";
+  if (status === 403) return "AI доступ доступний тільки admin";
+  if (status === 400 && error === "unsafe_payload") return "AI context містить небезпечні/private поля, запит заблоковано";
+  if (status === 502 && error === "invalid_ai_response") return "AI повернув невалідну відповідь";
+  return "Не вдалося отримати AI-висновки. Context preview залишається доступним.";
+};
+
 export default function GlobalAIAssistant({
   isAdmin = false,
   students = [],
@@ -78,6 +93,9 @@ export default function GlobalAIAssistant({
 }) {
   const [open, setOpen] = useState(false);
   const [contextType, setContextType] = useState(CRM_CONTEXT_TYPES.GLOBAL);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiResult, setAiResult] = useState(null);
 
   const crmContext = useMemo(() => {
     if (!isAdmin) return null;
@@ -132,6 +150,60 @@ export default function GlobalAIAssistant({
   const paymentsContext = getContextSection(crmContext, CRM_CONTEXT_TYPES.PAYMENTS);
   const selectedContext = getContextSection(crmContext, contextType);
   const selectedRows = Object.entries(selectedContext).slice(0, 8);
+  const aiInsights = Array.isArray(aiResult?.insights) ? aiResult.insights : [];
+
+  const analyzeWithAI = async () => {
+    setOpen(true);
+    setAiLoading(true);
+    setAiError("");
+    setAiResult(null);
+
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) {
+        setAiError("Немає активної auth-сесії");
+        setAiLoading(false);
+        return;
+      }
+
+      const response = await fetch("/api/claude", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          op: "crmContextAnalysis",
+          contextType,
+          context: crmContext,
+        }),
+      });
+
+      let json = null;
+      try {
+        json = await response.json();
+      } catch (_error) {
+        json = null;
+      }
+
+      if (!response.ok) {
+        setAiError(getAIErrorMessage(response.status, json?.error));
+        return;
+      }
+
+      if (json?.mode === "ai" && Array.isArray(json.insights)) {
+        setAiResult(json);
+        return;
+      }
+
+      setAiError("AI повернув неочікуваний формат відповіді");
+    } catch (_error) {
+      setAiError("Не вдалося отримати AI-висновки. Context preview залишається доступним.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: 10 }}>
@@ -143,24 +215,42 @@ export default function GlobalAIAssistant({
             <span style={{ fontSize: 11, color: theme.textMuted, background: theme.bg, borderRadius: 999, padding: "3px 8px", fontWeight: 700 }}>Context preview</span>
           </div>
           <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
-            AI API ще не підключено · No external AI calls · Read-only aggregate context
+            AI API підключено для ручного admin-запиту · No automatic actions · Read-only aggregate context
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          style={{
-            border: "none",
-            borderRadius: 999,
-            background: theme.primary,
-            color: "#fff",
-            padding: "10px 14px",
-            fontWeight: 800,
-            cursor: "pointer",
-          }}
-        >
-          {open ? "Сховати AI shell" : "Відкрити AI shell"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={analyzeWithAI}
+            disabled={aiLoading}
+            style={{
+              border: "none",
+              borderRadius: 999,
+              background: aiLoading ? theme.textMuted : theme.primary,
+              color: "#fff",
+              padding: "10px 14px",
+              fontWeight: 800,
+              cursor: aiLoading ? "wait" : "pointer",
+            }}
+          >
+            {aiLoading ? "AI аналізує…" : "Проаналізувати через AI"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            style={{
+              border: "none",
+              borderRadius: 999,
+              background: theme.primary,
+              color: "#fff",
+              padding: "10px 14px",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            {open ? "Сховати AI shell" : "Відкрити AI shell"}
+          </button>
+        </div>
       </div>
 
       {open && (
@@ -179,6 +269,54 @@ export default function GlobalAIAssistant({
             </select>
             <span style={{ color: theme.textMuted, fontSize: 12 }}>Selected: {crmContext?.contextType || contextType}</span>
           </div>
+
+          {(aiError || aiInsights.length > 0 || aiLoading) && (
+            <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 14, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div>
+                  <b>AI-висновки</b>
+                  <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 3 }}>Перевір перед дією. AI не змінює дані автоматично.</div>
+                </div>
+                {aiResult?.provider && <span style={{ color: theme.textMuted, fontSize: 12 }}>Provider: {aiResult.provider}</span>}
+              </div>
+
+              {aiLoading && <div style={{ color: theme.textMuted, fontSize: 13 }}>AI аналізує aggregate-only CRM context…</div>}
+
+              {aiError && (
+                <div style={{ padding: 12, borderRadius: 14, background: theme.input, color: theme.danger, fontSize: 13, fontWeight: 700 }}>
+                  {aiError}
+                </div>
+              )}
+
+              {aiInsights.length > 0 && (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {aiInsights.map((item, index) => {
+                    const meta = priorityMeta[item.priority] || priorityMeta.medium;
+                    return (
+                      <article key={item.id || index} style={{ border: `1px solid ${theme.border}`, borderRadius: 16, padding: 14, background: theme.bg }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontWeight: 800, color: theme.textMain }}>{item.title || "AI-висновок"}</div>
+                            {item.summary && <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>{item.summary}</div>}
+                          </div>
+                          <span style={{ border: `1px solid ${meta.color}55`, color: meta.color, borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{meta.label}</span>
+                        </div>
+
+                        {Array.isArray(item.evidence) && item.evidence.length > 0 && (
+                          <ul style={{ margin: "10px 0 0 18px", padding: 0, color: theme.textMuted, fontSize: 13 }}>
+                            {item.evidence.map((row) => <li key={row}>{row}</li>)}
+                          </ul>
+                        )}
+
+                        {item.recommendation && <div style={{ marginTop: 10, color: theme.textMain, fontSize: 13 }}><b>Рекомендація:</b> {item.recommendation}</div>}
+                        {item.source && <div style={{ marginTop: 8, color: theme.textLight, fontSize: 11 }}>Source: {item.source}</div>}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           <SummaryGrid
             title="Key counts"
