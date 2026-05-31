@@ -76,7 +76,8 @@ export default function GlobalAIAssistant({
   paymentAnomalies = [],
   dashboard = {},
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
+  const [showTechnicalJson, setShowTechnicalJson] = useState(false);
   const [contextType, setContextType] = useState(CRM_CONTEXT_TYPES.GLOBAL);
 
   const crmContext = useMemo(() => {
@@ -210,27 +211,49 @@ export default function GlobalAIAssistant({
 
           <SummaryGrid title={`${labelByContext[contextType] || contextType} context summary`} rows={selectedRows} />
 
-          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-              <b>Data policy</b>
-              <span style={{ color: theme.textMuted, fontSize: 12 }}>Privacy-safe aggregate-only preview</span>
-            </div>
-            <pre style={jsonPreviewStyle}>{JSON.stringify(crmContext?.dataPolicy || {}, null, 2)}</pre>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setShowTechnicalJson((value) => !value)}
+              style={{
+                border: `1px solid ${theme.border}`,
+                borderRadius: 999,
+                background: theme.bg,
+                color: theme.textMuted,
+                padding: "8px 12px",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              {showTechnicalJson ? "Сховати технічний JSON" : "Показати технічний JSON"}
+            </button>
           </div>
 
-          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-              <b>Structured context preview</b>
-              <span style={{ color: theme.textMuted, fontSize: 12 }}>No phones, messengers, raw chats, private notes, or raw payment rows</span>
+          {showTechnicalJson && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <b>Data policy</b>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>Privacy-safe aggregate-only preview</span>
+                </div>
+                <pre style={jsonPreviewStyle}>{JSON.stringify(crmContext?.dataPolicy || {}, null, 2)}</pre>
+              </div>
+
+              <div style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <b>Structured context preview</b>
+                  <span style={{ color: theme.textMuted, fontSize: 12 }}>No phones, messengers, raw chats, private notes, or raw payment rows</span>
+                </div>
+                <pre style={jsonPreviewStyle}>{JSON.stringify({
+                  version: crmContext?.version,
+                  contextType: crmContext?.contextType || contextType,
+                  selectedContext,
+                  messages: crmContext?.messages,
+                  instagram: crmContext?.instagram,
+                }, null, 2)}</pre>
+              </div>
             </div>
-            <pre style={jsonPreviewStyle}>{JSON.stringify({
-              version: crmContext?.version,
-              contextType: crmContext?.contextType || contextType,
-              selectedContext,
-              messages: crmContext?.messages,
-              instagram: crmContext?.instagram,
-            }, null, 2)}</pre>
-          </div>
+          )}
         </div>
       )}
     </div>
