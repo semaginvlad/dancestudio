@@ -19,12 +19,12 @@ export default function AIInsightsPanel({ isAdmin = false, context = {} }) {
   };
 
   return (
-    <section style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: 14 }}>
+    <section style={{ ...cardSt, border: `1px dashed ${theme.border}`, display: "grid", gap: 12, background: theme.input }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>AI Core v1 · Admin only</div>
-          <h3 style={{ margin: "4px 0", color: theme.textMain }}>AI Insights</h3>
-          <div style={{ color: theme.textMuted, fontSize: 13 }}>Fallback-підказки на основі CRM-агрегатів. Real AI API тимчасово не підключено, щоб не збільшувати кількість Vercel Serverless Functions.</div>
+          <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>Fallback helper · Admin only</div>
+          <h3 style={{ margin: "4px 0", color: theme.textMain }}>Швидкі fallback-підказки</h3>
+          <div style={{ color: theme.textMuted, fontSize: 13 }}>Локальні rule-based підказки на основі CRM-агрегатів. Це не real AI і не замінює Global AI Assistant вище.</div>
         </div>
         <button type="button" style={{ ...btnP, whiteSpace: "nowrap" }} onClick={generateInsights}>
           Згенерувати fallback-підказки
@@ -32,8 +32,8 @@ export default function AIInsightsPanel({ isAdmin = false, context = {} }) {
       </div>
 
       <div style={{ padding: 12, borderRadius: 14, background: theme.input, color: theme.textMuted, fontSize: 13 }}>
-        Режим: <b style={{ color: generated ? theme.warning : theme.textMain }}>{generated ? "Fallback analytics" : "AI API ще не підключено"}</b>
-        <span> · Real AI endpoint прибрано з цього PR для сумісності з Vercel Hobby limit.</span>
+        Режим: <b style={{ color: generated ? theme.warning : theme.textMain }}>{generated ? "Rule-based fallback" : "Очікує ручного запуску"}</b>
+        <span> · Локальна перевірка без AI API, fetch або зовнішніх запитів.</span>
       </div>
 
       {!generated ? (
