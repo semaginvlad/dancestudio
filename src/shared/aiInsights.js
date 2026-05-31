@@ -1,5 +1,5 @@
 import { buildCRMContext } from "./ai/contextBuilder";
-import { asArray, getGroupId } from "./ai/privacy";
+import { AI_CONTEXT_DATA_POLICY, asArray, getGroupId, getStudentId } from "./ai/privacy";
 
 const displayStudent = (student = {}) => (
   student.name
@@ -38,9 +38,9 @@ export function buildAIInsights({
   groups = [],
 } = {}) {
   const insights = [];
-  const groupById = Object.fromEntries(asArray(groups).map((g) => [String(g.id), g]));
+  const groupById = Object.fromEntries(asArray(groups).map((g) => [String(getGroupId(g) ?? g.id), g]));
 
-  const churnRows = uniq(asArray(proAnalytics.churnRisk), (row) => String(row?.student?.id || row?.studentId || displayStudent(row?.student)));
+  const churnRows = uniq(asArray(proAnalytics.churnRisk), (row) => String(getStudentId(row) || displayStudent(row?.student)));
   if (churnRows.length > 0) {
     insights.push(insight({
       id: "churn-risk",
@@ -53,7 +53,7 @@ export function buildAIInsights({
     }));
   }
 
-  const upsellRows = uniq(asArray(proAnalytics.upsellCandidates), (row) => `${row?.student?.id || displayStudent(row?.student)}:${row?.group?.id || displayGroup(row?.group)}`);
+  const upsellRows = uniq(asArray(proAnalytics.upsellCandidates), (row) => `${getStudentId(row) || displayStudent(row?.student)}:${getGroupId(row) || displayGroup(row?.group)}`);
   if (upsellRows.length > 0) {
     insights.push(insight({
       id: "upsell-candidates",
@@ -137,13 +137,27 @@ export function buildAIInsights({
 }
 
 export function createAIInsightsPayload({
-  proAnalytics = {},
-  dashboard = {},
-  paymentAnomalies = [],
-  waitlist = [],
+  contextType,
+  students = [],
   groups = [],
+  studentGrps = [],
+  subs = [],
+  attn = [],
+  waitlist = [],
+  trialBookings = [],
+  trainers = [],
+  trainerGroups = [],
+  directionsList = [],
+  cancelled = [],
+  roomBookings = [],
+  groupLessonOverrides = [],
+  analytics = {},
+  proAnalytics = {},
+  paymentAnomalies = [],
+  dashboard = {},
+  options = {},
 } = {}) {
-  const groupById = Object.fromEntries(asArray(groups).map((g) => [String(g.id), g]));
+  const groupById = Object.fromEntries(asArray(groups).map((g) => [String(getGroupId(g) ?? g.id), g]));
   const lowAttendanceGroupRows = asArray(dashboard.lowAttendanceGroupRows).map((row) => ({
     groupName: row.name || displayGroup(row),
     averageAttendance: row.average,
@@ -165,14 +179,31 @@ export function createAIInsightsPayload({
     count,
   })).sort((a, b) => b.count - a.count).slice(0, 10);
 
-  const crmContext = buildCRMContext({ proAnalytics, dashboard, paymentAnomalies, waitlist, groups });
+  const crmContext = buildCRMContext({
+    contextType,
+    students,
+    groups,
+    studentGrps,
+    subs,
+    attn,
+    waitlist,
+    trialBookings,
+    trainers,
+    trainerGroups,
+    directionsList,
+    cancelled,
+    roomBookings,
+    groupLessonOverrides,
+    analytics,
+    proAnalytics,
+    paymentAnomalies,
+    dashboard,
+    options,
+  });
 
   return {
     generatedAt: new Date().toISOString(),
-    dataPolicy: {
-      pii: "minimized",
-      excludes: ["phones", "telegram_handles", "instagram_handles", "chat_messages", "raw_chats", "private_notes", "raw_payment_rows"],
-    },
+    dataPolicy: AI_CONTEXT_DATA_POLICY,
     dashboard: {
       period: dashboard.period || null,
       endingSoon: dashboard.endingSoon || 0,
