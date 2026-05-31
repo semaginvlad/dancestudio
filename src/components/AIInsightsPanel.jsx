@@ -19,26 +19,28 @@ export default function AIInsightsPanel({ isAdmin = false, context = {} }) {
   };
 
   return (
-    <section style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: 14 }}>
+    <section style={{ ...cardSt, border: `1px dashed ${theme.border}`, background: theme.bg, display: "grid", gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 12, color: theme.textMuted, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>AI Core v1 · Admin only</div>
-          <h3 style={{ margin: "4px 0", color: theme.textMain }}>AI Insights</h3>
-          <div style={{ color: theme.textMuted, fontSize: 13 }}>Fallback-підказки на основі CRM-агрегатів. Real AI API тимчасово не підключено, щоб не збільшувати кількість Vercel Serverless Functions.</div>
+          <h3 style={{ margin: "4px 0", color: theme.textMain }}>Швидкі fallback-підказки</h3>
+          <div style={{ color: theme.textMuted, fontSize: 13, maxWidth: 680 }}>
+            Це локальні rule-based підказки з CRM-агрегатів, а не реальний AI-висновок. Real AI API тимчасово не підключено, щоб не збільшувати кількість Vercel Serverless Functions.
+          </div>
         </div>
-        <button type="button" style={{ ...btnP, whiteSpace: "nowrap" }} onClick={generateInsights}>
+        <button type="button" style={{ ...btnP, background: theme.textMuted, whiteSpace: "nowrap" }} onClick={generateInsights}>
           Згенерувати fallback-підказки
         </button>
       </div>
 
       <div style={{ padding: 12, borderRadius: 14, background: theme.input, color: theme.textMuted, fontSize: 13 }}>
         Режим: <b style={{ color: generated ? theme.warning : theme.textMain }}>{generated ? "Fallback analytics" : "AI API ще не підключено"}</b>
-        <span> · Real AI endpoint прибрано з цього PR для сумісності з Vercel Hobby limit.</span>
+        <span> · No external AI calls: підказки формуються локальними правилами і мають допоміжний статус.</span>
       </div>
 
       {!generated ? (
         <div style={{ padding: 16, borderRadius: 16, background: theme.input, color: theme.textMuted, fontSize: 13 }}>
-          Натисни кнопку, щоб вручну сформувати безпечні read-only fallback-підказки. Панель не рендериться для тренерів.
+          Натисни кнопку, щоб вручну сформувати безпечні read-only fallback-підказки. Панель не рендериться для тренерів і залишається візуально другорядною до основного dashboard.
         </div>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
