@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { cardSt, theme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 import AIInsightsPanel from "./AIInsightsPanel";
+import GlobalAIAssistant from "./GlobalAIAssistant";
 
 const dayMs = 86400000;
 const toDate = (s) => new Date(`${s}T00:00:00`);
@@ -64,7 +65,7 @@ const TrendLine = ({ rows = [], title, color, deltaLabel }) => {
 
 const RankList = ({ title, rows = [], unit = "" }) => <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>{title}</b><div style={{ display: "grid", gap: 7, marginTop: 8 }}>{rows.length ? rows.map((r, i) => <div key={`${title}_${r.id || r.name}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{i + 1}. {r.name}</span><b>{(r.value || 0).toLocaleString()}{unit}</b></div>) : <div style={{color:theme.textLight}}>Немає даних за період</div>}</div></div>;
 
-export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], isAdmin = false, aiInsightsContext = {} }) {
+export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
   const [mode, setMode] = useState("this_month");
   const [from, setFrom] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1)));
@@ -173,6 +174,28 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   ];
 
   return <div style={{ display: "grid", gap: 14 }}>
+    {isAdmin && (
+      <GlobalAIAssistant
+        isAdmin={isAdmin}
+        students={students}
+        groups={groups}
+        studentGrps={studentGrps}
+        subs={subs}
+        attn={attn}
+        waitlist={waitlist}
+        trialBookings={trialBookings}
+        trainers={trainers}
+        trainerGroups={trainerGroups}
+        directionsList={directionsList}
+        cancelled={cancelled}
+        roomBookings={roomBookings}
+        groupLessonOverrides={groupLessonOverrides}
+        analytics={aiInsightsContext.analytics}
+        proAnalytics={aiInsightsContext.proAnalytics}
+        paymentAnomalies={aiInsightsContext.paymentAnomalies}
+        dashboard={aiDashboardContext}
+      />
+    )}
     {isAdmin && (
       <AIInsightsPanel
         isAdmin={isAdmin}

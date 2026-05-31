@@ -1422,7 +1422,12 @@ export default function App() {
             directionsList={directionsList}
             attn={attn}
             waitlist={waitlist}
+            trialBookings={trialBookings}
+            trainers={trainers}
+            trainerGroups={trainerGroups}
             cancelled={cancelled}
+            roomBookings={roomBookings}
+            groupLessonOverrides={groupLessonOverrides}
             isAdmin={!!isAdmin}
             aiInsightsContext={{
               proAnalytics,
