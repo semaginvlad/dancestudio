@@ -9,6 +9,8 @@ export const CRM_CONTEXT_TYPES = Object.freeze({
   FORECAST: "forecast",
 });
 
+export const DEFAULT_CRM_CONTEXT_TYPE = CRM_CONTEXT_TYPES.GLOBAL;
+
 export const CRM_CONTEXT_TYPE_LIST = Object.freeze(Object.values(CRM_CONTEXT_TYPES));
 
 export const LATER_PHASE_CONTEXT_TYPES = Object.freeze({
