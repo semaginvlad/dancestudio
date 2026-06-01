@@ -1005,9 +1005,13 @@ export default function ScheduleTab({
       setLessonPlanEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити групу, дату або тренера для плану." }));
       return;
     }
+    if (typeof onUpsertTrainingLessonPlan !== "function") {
+      setLessonPlanEdit((p) => ({ ...(p || {}), error: "Функція збереження плану заняття недоступна. Онови сторінку або звернись до адміністратора." }));
+      return;
+    }
     setLessonPlanEdit((p) => ({ ...(p || {}), saving: true, error: "" }));
     try {
-      await onUpsertTrainingLessonPlan?.({
+      await onUpsertTrainingLessonPlan({
         groupId: lessonPlanEdit.groupId,
         trainerId: lessonPlanEdit.trainerId,
         lessonDate: lessonPlanEdit.lessonDate,

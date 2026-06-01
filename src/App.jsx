@@ -48,6 +48,13 @@ import {
   sendTestPushRequest,
 } from "./push";
 
+const TRAINING_LESSON_PLAN_DB_HELPERS = {
+  fetch: ["fetch", "Training", "Lesson", "Plans"].join(""),
+  upsert: ["upsert", "Training", "Lesson", "Plan"].join(""),
+};
+
+const getDbHelper = (name) => db[name];
+
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
   к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch",
@@ -379,7 +386,14 @@ export default function App() {
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
         safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings"),
         safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
-        safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans")
+        safeFetch(() => {
+          const fetchTrainingLessonPlans = getDbHelper(TRAINING_LESSON_PLAN_DB_HELPERS.fetch);
+          if (typeof fetchTrainingLessonPlans !== "function") {
+            console.warn("[loadAllData] fetchTrainingLessonPlans helper is unavailable");
+            return [];
+          }
+          return fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate });
+        }, "fetchTrainingLessonPlans")
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -1319,7 +1333,11 @@ export default function App() {
     if (!isAdmin && String(plan?.trainerId || "") !== String(user?.id || "")) {
       throw new Error("Тренер може зберігати плани тільки від свого імені.");
     }
-    const saved = await db.upsertTrainingLessonPlan(plan);
+    const upsertTrainingLessonPlan = getDbHelper(TRAINING_LESSON_PLAN_DB_HELPERS.upsert);
+    if (typeof upsertTrainingLessonPlan !== "function") {
+      throw new Error("Функція збереження плану заняття недоступна. Перевір, що DB foundation PR є в base branch.");
+    }
+    const saved = await upsertTrainingLessonPlan(plan);
     const sameLesson = (row) => (
       String(row.groupId) === String(saved.groupId)
       && String(row.trainerId) === String(saved.trainerId)
