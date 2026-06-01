@@ -8,6 +8,21 @@ const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
 const HOUR_PX = 54;
 const MIN_EVENT_HEIGHT = 24;
+const TRAINING_PLAN_TYPES = [
+  { id: "choreography", label: "Хореографія" },
+  { id: "technique", label: "Техніка" },
+  { id: "routine", label: "Зв'язка" },
+  { id: "practice", label: "Напрацювання" },
+  { id: "review", label: "Повторення" },
+  { id: "filming", label: "Зйомка" },
+  { id: "performance_prep", label: "Підготовка до виступу" },
+  { id: "other", label: "Інше" },
+];
+const TRAINING_PLAN_DIFFICULTIES = [
+  { id: "easy", label: "Легко" },
+  { id: "medium", label: "Середньо" },
+  { id: "hard", label: "Складно" },
+];
 const DEFAULT_TYPES = [
   {
     id: "cleaning",
@@ -275,6 +290,7 @@ export default function ScheduleTab({
   cancelled = [],
   roomBookings = [],
   groupLessonOverrides = [],
+  trainingLessonPlans = [],
   isAdmin = false,
   allowBookingMutations = false,
   onAddBooking,
@@ -284,6 +300,7 @@ export default function ScheduleTab({
   onAddGroupLessonOverride,
   onUpdateGroupLessonOverride,
   onDeleteGroupLessonOverride,
+  onUpsertTrainingLessonPlan,
   currentUser = null,
 }) {
   const DEFAULT_ROOM = "Основна зала";
@@ -294,6 +311,7 @@ export default function ScheduleTab({
   const safeCancelled = Array.isArray(cancelled) ? cancelled : [];
   const safeBookings = Array.isArray(roomBookings) ? roomBookings : [];
   const safeGroupLessonOverrides = Array.isArray(groupLessonOverrides) ? groupLessonOverrides : [];
+  const safeTrainingLessonPlans = Array.isArray(trainingLessonPlans) ? trainingLessonPlans : [];
   const canManageBookings = isAdmin || allowBookingMutations;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
   const currentTrainerFromState = safeTrainers.find(
@@ -338,6 +356,7 @@ export default function ScheduleTab({
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, title, weekday, startTime, endTime, roomName, trainerId, note, direction, trainer, error }
   const [groupOverrideEdit, setGroupOverrideEdit] = useState(null);
+  const [lessonPlanEdit, setLessonPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
@@ -413,6 +432,16 @@ export default function ScheduleTab({
     });
     return map;
   }, [safeGroupLessonOverrides]);
+  const getLessonPlanKey = (groupId, trainerId, lessonDate, scheduleSlotIndex = 0) =>
+    `${String(groupId || "")}:${String(trainerId || "")}:${String(lessonDate || "").slice(0, 10)}:${Number(scheduleSlotIndex || 0)}`;
+  const trainingLessonPlanMap = useMemo(() => {
+    const map = new Map();
+    safeTrainingLessonPlans.forEach((plan) => {
+      if (!plan?.groupId || !plan?.trainerId || !plan?.lessonDate) return;
+      map.set(getLessonPlanKey(plan.groupId, plan.trainerId, plan.lessonDate, plan.scheduleSlotIndex), plan);
+    });
+    return map;
+  }, [safeTrainingLessonPlans]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
@@ -916,6 +945,84 @@ export default function ScheduleTab({
     } catch (err) {
       console.error(err);
       setGroupOverrideEdit((p) => ({ ...(p || {}), error: "Не вдалося скинути зміни цього заняття" }));
+    }
+  };
+
+  const resolveLessonPlanTrainerId = (event) => {
+    const group = safeGroups.find((g) => String(g.id) === String(event?.groupId));
+    return event?.trainerId || group?.trainer_id || (!isAdmin ? currentTrainerId : "");
+  };
+
+  const openLessonPlanEditor = (event) => {
+    if (!canEditGroupSingleLesson(event)) return;
+    const groupId = event?.groupId || "";
+    const trainerId = resolveLessonPlanTrainerId(event);
+    const lessonDate = event?.date || "";
+    const scheduleSlotIndex = Number(event?.slotIndex || 0);
+    if (!groupId || !lessonDate || !trainerId) {
+      setLessonPlanEdit({
+        groupId,
+        trainerId,
+        lessonDate,
+        scheduleSlotIndex,
+        groupName: event?.groupName || event?.title || "—",
+        trainerName: event?.trainer || "—",
+        planType: "other",
+        goal: "",
+        plannedContent: "",
+        plannedDifficulty: "medium",
+        plannedOutcome: "",
+        notes: "",
+        saving: false,
+        error: "Не вдалося визначити групу, дату або тренера для плану.",
+      });
+      return;
+    }
+
+    const existing = trainingLessonPlanMap.get(getLessonPlanKey(groupId, trainerId, lessonDate, scheduleSlotIndex));
+    setLessonPlanEdit({
+      id: existing?.id || null,
+      groupId,
+      trainerId,
+      lessonDate,
+      scheduleSlotIndex,
+      groupName: event?.groupName || event?.title || "—",
+      trainerName: event?.trainer || trainerMap.get(String(trainerId)) || currentTrainerName || "—",
+      planType: existing?.planType || "other",
+      goal: existing?.goal || "",
+      plannedContent: existing?.plannedContent || "",
+      plannedDifficulty: existing?.plannedDifficulty || "medium",
+      plannedOutcome: existing?.plannedOutcome || "",
+      notes: existing?.notes || "",
+      saving: false,
+      error: "",
+    });
+  };
+
+  const saveLessonPlanEdit = async () => {
+    if (!lessonPlanEdit || lessonPlanEdit.saving) return;
+    if (!lessonPlanEdit.groupId || !lessonPlanEdit.trainerId || !lessonPlanEdit.lessonDate) {
+      setLessonPlanEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити групу, дату або тренера для плану." }));
+      return;
+    }
+    setLessonPlanEdit((p) => ({ ...(p || {}), saving: true, error: "" }));
+    try {
+      await onUpsertTrainingLessonPlan?.({
+        groupId: lessonPlanEdit.groupId,
+        trainerId: lessonPlanEdit.trainerId,
+        lessonDate: lessonPlanEdit.lessonDate,
+        scheduleSlotIndex: Number(lessonPlanEdit.scheduleSlotIndex || 0),
+        planType: lessonPlanEdit.planType || "other",
+        goal: lessonPlanEdit.goal || "",
+        plannedContent: lessonPlanEdit.plannedContent || "",
+        plannedDifficulty: lessonPlanEdit.plannedDifficulty || null,
+        plannedOutcome: lessonPlanEdit.plannedOutcome || "",
+        notes: lessonPlanEdit.notes || "",
+      });
+      setLessonPlanEdit(null);
+    } catch (err) {
+      console.error(err);
+      setLessonPlanEdit((p) => ({ ...(p || {}), saving: false, error: err?.message || "Не вдалося зберегти план заняття" }));
     }
   };
 
@@ -1463,6 +1570,90 @@ export default function ScheduleTab({
         </div>
       )}
 
+
+      {lessonPlanEdit && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5050, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(560px,96vw)", maxHeight: isMobile ? "74vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10 }}>
+              <div>
+                <b style={{ fontSize: isMobile ? 17 : 18, color: theme.text }}>План заняття</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>{lessonPlanEdit.groupName} · {lessonPlanEdit.lessonDate}</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setLessonPlanEdit(null)} disabled={lessonPlanEdit.saving}>✕</button>
+            </div>
+
+            <div style={{ display: "grid", gap: 9 }}>
+              <div style={editorSectionLabelSt}>Тип і складність</div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 180px", gap: 8 }}>
+                <select
+                  style={editorInputSt}
+                  value={lessonPlanEdit.planType || "other"}
+                  onChange={(e) => setLessonPlanEdit((p) => ({ ...p, planType: e.target.value, error: "" }))}
+                  disabled={lessonPlanEdit.saving}
+                >
+                  {TRAINING_PLAN_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
+                </select>
+                <select
+                  style={editorInputSt}
+                  value={lessonPlanEdit.plannedDifficulty || "medium"}
+                  onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedDifficulty: e.target.value, error: "" }))}
+                  disabled={lessonPlanEdit.saving}
+                >
+                  {TRAINING_PLAN_DIFFICULTIES.map((level) => <option key={level.id} value={level.id}>{level.label}</option>)}
+                </select>
+              </div>
+
+              <div style={editorSectionLabelSt}>Ціль</div>
+              <input
+                style={editorInputSt}
+                value={lessonPlanEdit.goal || ""}
+                onChange={(e) => setLessonPlanEdit((p) => ({ ...p, goal: e.target.value, error: "" }))}
+                placeholder="Що хочемо отримати після заняття"
+                disabled={lessonPlanEdit.saving}
+              />
+
+              <div style={editorSectionLabelSt}>Що вчимо / робимо</div>
+              <textarea
+                style={{ ...editorInputSt, minHeight: 82, paddingTop: 10, resize: "vertical" }}
+                value={lessonPlanEdit.plannedContent || ""}
+                onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedContent: e.target.value, error: "" }))}
+                placeholder="Коротко: блоки, комбінації, повторення, зйомка..."
+                disabled={lessonPlanEdit.saving}
+              />
+
+              <div style={editorSectionLabelSt}>Очікуваний результат</div>
+              <textarea
+                style={{ ...editorInputSt, minHeight: 66, paddingTop: 10, resize: "vertical" }}
+                value={lessonPlanEdit.plannedOutcome || ""}
+                onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedOutcome: e.target.value, error: "" }))}
+                placeholder="Наприклад: впевнено повторюють 1-й куплет / готові до зйомки"
+                disabled={lessonPlanEdit.saving}
+              />
+
+              <div style={editorSectionLabelSt}>Нотатки</div>
+              <textarea
+                style={{ ...editorInputSt, minHeight: 58, paddingTop: 10, resize: "vertical" }}
+                value={lessonPlanEdit.notes || ""}
+                onChange={(e) => setLessonPlanEdit((p) => ({ ...p, notes: e.target.value, error: "" }))}
+                placeholder="Опційно"
+                disabled={lessonPlanEdit.saving}
+              />
+
+              <div style={{ fontSize: 12, color: theme.textLight }}>
+                Ключ плану: група {lessonPlanEdit.groupId || "—"} · тренер {lessonPlanEdit.trainerName || lessonPlanEdit.trainerId || "—"} · слот {Number(lessonPlanEdit.scheduleSlotIndex || 0) + 1}
+              </div>
+              {lessonPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{lessonPlanEdit.error}</div> : null}
+            </div>
+
+            <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+              <button style={btnP} onClick={saveLessonPlanEdit} disabled={lessonPlanEdit.saving || !lessonPlanEdit.groupId || !lessonPlanEdit.trainerId || !lessonPlanEdit.lessonDate}>
+                {lessonPlanEdit.saving ? "Зберігаємо..." : "Зберегти план"}
+              </button>
+              <button style={btnS} onClick={() => setLessonPlanEdit(null)} disabled={lessonPlanEdit.saving}>Скасувати</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {groupOverrideEdit && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5050, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
@@ -2078,6 +2269,17 @@ export default function ScheduleTab({
                                       >
                                         Деталі заняття
                                       </button>
+                                      {canEditGroupSingleLesson(e) ? (
+                                        <button
+                                          style={btnS}
+                                          onClick={() => {
+                                            setOpenMenuState(null);
+                                            openLessonPlanEditor(e);
+                                          }}
+                                        >
+                                          План заняття
+                                        </button>
+                                      ) : null}
                                       {canEditGroupSingleLesson(e) ? (
                                         <button
                                           style={btnS}

@@ -96,6 +96,7 @@ export default function App() {
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
+  const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
   
   const [tab, setTab] = useStickyState("dashboard", "ds_danceStudioTab");
   const [modal, setModal] = useState(null);
@@ -371,13 +372,14 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo] = await Promise.all([
+      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
         safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings"),
-        safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides")
+        safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
+        safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans")
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -392,6 +394,7 @@ export default function App() {
       const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
       const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
       const scopedCancelled = isCurrentAdmin ? (ca || []) : (ca || []).filter((c) => allowedGroupIds.has(String(c.groupId)));
+      const scopedTrainingLessonPlans = isCurrentAdmin ? (tlp || []) : (tlp || []).filter((plan) => allowedGroupIds.has(String(plan.groupId)));
       const allowedStudentIds = new Set([
         ...scopedStudentGrps.map((row) => String(row.studentId)),
         ...scopedSubs.map((sub) => String(sub.studentId)),
@@ -417,6 +420,7 @@ export default function App() {
       setDirections(dirs || []);
       setRoomBookings(rb || []);
       setGroupLessonOverrides(glo || []);
+      setTrainingLessonPlans(scopedTrainingLessonPlans);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -1308,6 +1312,27 @@ export default function App() {
     setGroupLessonOverrides((prev) => prev.filter((x) => String(x.id) !== String(id)));
   };
 
+  const upsertTrainingLessonPlanAction = async (plan) => {
+    if (!canMutateGroupLessonOverride(plan?.groupId)) {
+      throw new Error("Можна редагувати плани тільки для своїх груп.");
+    }
+    if (!isAdmin && String(plan?.trainerId || "") !== String(user?.id || "")) {
+      throw new Error("Тренер може зберігати плани тільки від свого імені.");
+    }
+    const saved = await db.upsertTrainingLessonPlan(plan);
+    const sameLesson = (row) => (
+      String(row.groupId) === String(saved.groupId)
+      && String(row.trainerId) === String(saved.trainerId)
+      && String(row.lessonDate) === String(saved.lessonDate)
+      && Number(row.scheduleSlotIndex || 0) === Number(saved.scheduleSlotIndex || 0)
+    );
+    setTrainingLessonPlans((prev) => [
+      ...(prev || []).filter((row) => !sameLesson(row)),
+      saved,
+    ]);
+    return saved;
+  };
+
   const updateGroupScheduleAction = async (groupId, schedule) => {
     if (!isAdmin) {
       alert("Редагування розкладу груп доступне тільки адміністратору.");
@@ -1444,6 +1469,7 @@ export default function App() {
             cancelled={scheduleCancelled}
             roomBookings={roomBookings}
             groupLessonOverrides={groupLessonOverrides}
+            trainingLessonPlans={trainingLessonPlans}
             isAdmin={isAdmin}
             allowBookingMutations={!isAdmin}
             onAddBooking={addRoomBookingAction}
@@ -1453,6 +1479,7 @@ export default function App() {
             onAddGroupLessonOverride={addGroupLessonOverrideAction}
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}
             onDeleteGroupLessonOverride={deleteGroupLessonOverrideAction}
+            onUpsertTrainingLessonPlan={upsertTrainingLessonPlanAction}
             currentUser={user}
           />
         )}
