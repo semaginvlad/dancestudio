@@ -1175,6 +1175,20 @@ const applyTrainingLessonEvidenceFilters = (query, filters = {}) => {
   return query;
 };
 
+const TRAINING_LESSON_EVIDENCE_CONFLICT_TARGET = 'group_id,trainer_id,lesson_date,schedule_slot_index';
+
+const buildTrainingLessonEvidenceUpsertPayload = (input = {}, mapper) => {
+  const payload = { schedule_slot_index: 0, ...mapper(input) };
+  const missing = [];
+  if (!payload.group_id) missing.push('groupId');
+  if (!payload.trainer_id) missing.push('trainerId');
+  if (!payload.lesson_date) missing.push('lessonDate');
+  if (missing.length) {
+    throw new Error(`Training lesson evidence requires ${missing.join(', ')}`);
+  }
+  return payload;
+};
+
 export async function fetchTrainingLessonPlans(filters = {}) {
   let query = supabase
     .from('training_lesson_plans')
@@ -1190,10 +1204,10 @@ export async function fetchTrainingLessonPlans(filters = {}) {
 }
 
 export async function upsertTrainingLessonPlan(plan = {}) {
-  const payload = toTrainingLessonPlanRow(plan);
+  const payload = buildTrainingLessonEvidenceUpsertPayload(plan, toTrainingLessonPlanRow);
   const { data, error } = await supabase
     .from('training_lesson_plans')
-    .upsert(payload, { onConflict: 'group_id,trainer_id,lesson_date,schedule_slot_index' })
+    .upsert(payload, { onConflict: TRAINING_LESSON_EVIDENCE_CONFLICT_TARGET })
     .select('*')
     .single();
   if (error) throw error;
@@ -1215,10 +1229,10 @@ export async function fetchTrainingLessonReports(filters = {}) {
 }
 
 export async function upsertTrainingLessonReport(report = {}) {
-  const payload = toTrainingLessonReportRow(report);
+  const payload = buildTrainingLessonEvidenceUpsertPayload(report, toTrainingLessonReportRow);
   const { data, error } = await supabase
     .from('training_lesson_reports')
-    .upsert(payload, { onConflict: 'group_id,trainer_id,lesson_date,schedule_slot_index' })
+    .upsert(payload, { onConflict: TRAINING_LESSON_EVIDENCE_CONFLICT_TARGET })
     .select('*')
     .single();
   if (error) throw error;
