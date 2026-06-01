@@ -44,6 +44,9 @@ create index if not exists training_lesson_plans_group_date_idx
 create index if not exists training_lesson_plans_trainer_date_idx
   on public.training_lesson_plans (trainer_id, lesson_date);
 
+create index if not exists training_lesson_plans_lesson_date_idx
+  on public.training_lesson_plans (lesson_date);
+
 create table if not exists public.training_lesson_reports (
   id uuid primary key default gen_random_uuid(),
   group_id text not null references public.groups(id) on delete cascade,
@@ -103,6 +106,9 @@ create index if not exists training_lesson_reports_group_date_idx
 
 create index if not exists training_lesson_reports_trainer_date_idx
   on public.training_lesson_reports (trainer_id, lesson_date);
+
+create index if not exists training_lesson_reports_lesson_date_idx
+  on public.training_lesson_reports (lesson_date);
 
 create index if not exists training_lesson_reports_risk_flags_gin_idx
   on public.training_lesson_reports using gin (risk_flags);
