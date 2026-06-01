@@ -392,6 +392,25 @@ export default function ScheduleTab({
   const currentTrainerRecordId = currentTrainerFromState?.id ? String(currentTrainerFromState.id) : "";
   const currentTrainerAuthId = currentTrainerFromState?.authUserId ? String(currentTrainerFromState.authUserId) : currentTrainerId;
   const currentTrainerScopeIds = [currentTrainerRecordId, currentTrainerAuthId, currentTrainerId].filter(Boolean);
+  const getTrainerAuthIdForValue = (value) => {
+    const raw = String(value || "");
+    if (!raw) return "";
+    const trainer = safeTrainers.find((t) => String(t.authUserId || "") === raw || String(t.id || "") === raw);
+    return String(trainer?.authUserId || raw || "");
+  };
+  const getTrainerIdSource = (value) => {
+    const raw = String(value || "");
+    if (!raw) return "missing";
+    if (raw === String(currentTrainerAuthId || "") || raw === String(currentTrainerId || "")) return "current_auth_user";
+    if (raw === String(currentTrainerRecordId || "")) return "current_trainer_record";
+    const trainer = safeTrainers.find((t) => String(t.authUserId || "") === raw || String(t.id || "") === raw);
+    if (!trainer) return "unknown";
+    return String(trainer.authUserId || "") === raw ? "trainer_auth_user" : "trainer_record";
+  };
+  const getLessonPlanTrainerIdForEvent = (event = {}) => {
+    if (!isAdmin) return currentTrainerAuthId || currentTrainerId;
+    return getTrainerAuthIdForValue(event.trainerId || event.trainer_id || "");
+  };
   const isGroupOwnedByCurrentTrainer = (groupId) =>
     safeGroups.some((g) => (
       String(g.id) === String(groupId) &&
@@ -464,9 +483,9 @@ export default function ScheduleTab({
   const trainerMap = useMemo(
     () =>
       new Map(
-        safeTrainers.map((t) => [
-          String(t.id),
-          getTrainerDisplayName(t),
+        safeTrainers.flatMap((t) => [
+          [String(t.id), getTrainerDisplayName(t)],
+          ...(t.authUserId ? [[String(t.authUserId), getTrainerDisplayName(t)]] : []),
         ]),
       ),
     [safeTrainers],
@@ -930,7 +949,7 @@ export default function ScheduleTab({
 
   const openLessonPlanEditor = (e) => {
     if (!canEditGroupSingleLesson(e)) return;
-    const trainerId = e.trainerId || (!isAdmin ? (currentTrainerRecordId || currentTrainerId) : "") || "";
+    const trainerId = getLessonPlanTrainerIdForEvent(e);
     const base = {
       groupId: e.groupId,
       trainerId,
@@ -983,9 +1002,9 @@ export default function ScheduleTab({
   );
   const canOpenBulkPlanner = Boolean(onUpsertTrainingLessonPlan && bulkPlannerGroups.length);
   const getDefaultBulkTrainerId = (group) => {
-    if (!isAdmin) return currentTrainerRecordId || currentTrainerId;
+    if (!isAdmin) return currentTrainerAuthId || currentTrainerId;
     if (!group) return "";
-    return group.trainer_id || group.trainerId || "";
+    return getTrainerAuthIdForValue(group.trainer_id || group.trainerId || "");
   };
   const getDatesInRange = (dateFrom, dateTo) => {
     const start = new Date(`${dateFrom}T12:00:00`);
@@ -1212,9 +1231,11 @@ export default function ScheduleTab({
       return;
     }
     const template = createEmptyLessonPlanFields();
+    const drafts = selectedInstances.map((instance) => createBulkPlanDraft(instance, template));
     setBulkPlanEdit({
-      instances: selectedInstances.map((instance) => createBulkPlanDraft(instance, template)),
+      instances: drafts,
       applyTemplate: template,
+      track: drafts.find((draft) => String(draft.track || "").trim())?.track || "",
       saving: false,
       error: "",
     });
@@ -1263,17 +1284,18 @@ export default function ScheduleTab({
     if (Number.isNaN(parsed.getTime())) return String(date);
     return parsed.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
   };
-  const buildBulkPlanPayload = (instance) => {
+  const buildBulkPlanPayload = (instance, bulkTrack = "") => {
     const date = String(instance?.lessonDate || "").slice(0, 10);
     const slotIndex = Number(instance?.scheduleSlotIndex);
+    const trainerId = isAdmin ? getTrainerAuthIdForValue(instance?.trainerId) : (currentTrainerAuthId || currentTrainerId);
     if (!instance?.groupId) throw new Error(`Немає groupId для ${formatBulkSaveDate(date)}`);
-    if (!instance?.trainerId) throw new Error(`Немає тренера для ${formatBulkSaveDate(date)}`);
+    if (!trainerId) throw new Error(`Немає тренера для ${formatBulkSaveDate(date)}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Некоректна дата для ${formatBulkSaveDate(date)}`);
     if (!Number.isFinite(slotIndex)) throw new Error(`Немає слоту для ${formatBulkSaveDate(date)}`);
     const fields = normalizeLessonPlanFields(instance);
     return {
       groupId: instance.groupId,
-      trainerId: instance.trainerId,
+      trainerId,
       lessonDate: date,
       scheduleSlotIndex: slotIndex,
       planType: fields.planType || "other",
@@ -1281,17 +1303,22 @@ export default function ScheduleTab({
       goal: fields.goal || "",
       plannedContent: fields.plannedContent || "",
       plannedOutcome: fields.plannedOutcome || "",
-      notes: mergeTrackIntoNotes(fields.track, fields.notes),
+      notes: mergeTrackIntoNotes(bulkTrack || fields.track, fields.notes),
     };
   };
-  const getSaveErrorMessage = (error) => error?.message || error?.error_description || error?.details || "Не вдалося зберегти";
+  const getSaveErrorMessage = (error) => {
+    const message = error?.message || error?.error_description || error?.details || "Не вдалося зберегти";
+    return /row-level security|violates row-level security|rls/i.test(message)
+      ? "Немає доступу для збереження цього плану. Перевір тренера/групу."
+      : message;
+  };
   const saveBulkLessonPlans = async () => {
     if (!bulkPlanEdit || !onUpsertTrainingLessonPlan) return;
     const instances = bulkPlanEdit.instances || [];
     if (!instances.length) return;
     let payloads = [];
     try {
-      payloads = instances.map(buildBulkPlanPayload);
+      payloads = instances.map((instance) => buildBulkPlanPayload(instance, bulkPlanEdit.track || ""));
     } catch (error) {
       setBulkPlanEdit((p) => ({ ...(p || {}), saving: false, error: getSaveErrorMessage(error) }));
       return;
@@ -1311,6 +1338,9 @@ export default function ScheduleTab({
         lessonDate: currentPayload?.lessonDate || null,
         scheduleSlotIndex: currentPayload?.scheduleSlotIndex ?? null,
         groupId: currentPayload?.groupId || null,
+        trainerIdSource: getTrainerIdSource(currentPayload?.trainerId),
+        isAdmin: Boolean(isAdmin),
+        isTrainer: Boolean(!isAdmin && currentTrainerAuthId),
         hasTrainer: Boolean(currentPayload?.trainerId),
       });
       setBulkPlanEdit((p) => ({ ...(p || {}), saving: false, error: getSaveErrorMessage(error) }));
@@ -2047,7 +2077,7 @@ export default function ScheduleTab({
               <div>{selectedEventDetails.direction || "—"} · {selectedEventDetails.trainer || "—"}</div>
             </div>
             {selectedEventDetails.kind === "group" ? (() => {
-              const trainerId = selectedEventDetails.trainerId || (!isAdmin ? (currentTrainerRecordId || currentTrainerId) : "") || "";
+              const trainerId = getLessonPlanTrainerIdForEvent(selectedEventDetails);
               const planKey = getLessonPlanKey({
                 groupId: selectedEventDetails.groupId,
                 trainerId,
@@ -2151,7 +2181,7 @@ export default function ScheduleTab({
                     >
                       {isAdmin ? <option value="">Оберіть тренера</option> : null}
                       {!isAdmin && bulkPlanSetup.trainerId ? <option value={bulkPlanSetup.trainerId}>{currentTrainerName || "Поточний тренер"}</option> : null}
-                      {isAdmin && safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
+                      {isAdmin && safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.authUserId || trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
                     </select>
                     <div style={editorSectionLabelSt}>Період</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
@@ -2263,7 +2293,7 @@ export default function ScheduleTab({
 
       {bulkPlanEdit && (
         <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
-          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22 }}>
+          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22, paddingBottom: isMobile ? "calc(92px + env(safe-area-inset-bottom, 0px))" : 72 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
               <div>
                 <div style={editorSectionLabelSt}>Графік · План на період</div>
@@ -2271,6 +2301,15 @@ export default function ScheduleTab({
                 <div style={{ fontSize: 12, color: theme.textLight }}>{getBulkEditSummary(bulkPlanEdit.instances || [])}</div>
               </div>
               <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 5, marginBottom: 10 }}>
+              <div style={editorSectionLabelSt}>Трек</div>
+              <input
+                style={{ ...editorInputSt, minHeight: 36, borderRadius: 999, fontFamily: "inherit", fontWeight: 800, letterSpacing: ".01em", background: isDarkTheme ? "rgba(15,23,42,.38)" : "rgba(255,255,255,.72)" }}
+                placeholder="Назва / артист / версія"
+                value={bulkPlanEdit.track || ""}
+                onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), track: e.target.value, error: "" }))}
+              />
             </div>
             <details style={{ border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.28)" : "rgba(99,102,241,.22)"}`, borderRadius: 18, padding: 10, background: isDarkTheme ? "linear-gradient(135deg, rgba(79,70,229,.14), rgba(15,23,42,.38))" : "linear-gradient(135deg, rgba(238,242,255,.9), rgba(255,255,255,.78))", marginBottom: 10 }}>
               <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -2282,14 +2321,11 @@ export default function ScheduleTab({
                 {renderChipSection("Складність", renderValueChips(QUICK_DIFFICULTY_CHIPS, bulkPlanEdit.applyTemplate?.plannedDifficulty || "", (value) => updateBulkTemplate({ plannedDifficulty: value }), "amber"))}
                 {renderChipSection("План", renderFragmentChips(QUICK_CONTENT_CHIPS, bulkPlanEdit.applyTemplate?.plannedContent || "", (value) => updateBulkTemplate({ plannedContent: value }), "teal", 10))}
                 {renderChipSection("Ціль", renderFragmentChips(QUICK_GOAL_CHIPS, bulkPlanEdit.applyTemplate?.goal || "", (value) => updateBulkTemplate({ goal: value }), "violet"))}
-                {renderChipSection("Результат", renderFragmentChips(QUICK_OUTCOME_CHIPS, bulkPlanEdit.applyTemplate?.plannedOutcome || "", (value) => updateBulkTemplate({ plannedOutcome: value }), "amber"))}
-                {renderChipSection("Трек", <input style={{ ...editorInputSt, minHeight: 34 }} placeholder="Назва треку / артист / версія" value={bulkPlanEdit.applyTemplate?.track || ""} onChange={(e) => updateBulkTemplate({ track: e.target.value })} />)}
                 <details style={{ fontSize: 12, color: theme.textLight }}>
                   <summary style={{ cursor: "pointer", fontWeight: 800 }}>Деталі</summary>
                   <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
                     <input style={editorInputSt} placeholder="Ціль" value={bulkPlanEdit.applyTemplate?.goal || ""} onChange={(e) => updateBulkTemplate({ goal: e.target.value })} />
                     <textarea style={{ ...editorInputSt, minHeight: 52, paddingTop: 10, resize: "vertical" }} placeholder="План" value={bulkPlanEdit.applyTemplate?.plannedContent || ""} onChange={(e) => updateBulkTemplate({ plannedContent: e.target.value })} />
-                    <input style={editorInputSt} placeholder="Результат" value={bulkPlanEdit.applyTemplate?.plannedOutcome || ""} onChange={(e) => updateBulkTemplate({ plannedOutcome: e.target.value })} />
                     <textarea style={{ ...editorInputSt, minHeight: 48, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={bulkPlanEdit.applyTemplate?.notes || ""} onChange={(e) => updateBulkTemplate({ notes: e.target.value })} />
                   </div>
                 </details>
@@ -2315,14 +2351,11 @@ export default function ScheduleTab({
                   {renderChipSection("Складність", renderValueChips(QUICK_DIFFICULTY_CHIPS, instance.plannedDifficulty || "", (value) => updateBulkPlanInstance(idx, { plannedDifficulty: value }), "amber"))}
                   {renderChipSection("План", renderFragmentChips(QUICK_CONTENT_CHIPS, instance.plannedContent || "", (value) => updateBulkPlanInstance(idx, { plannedContent: value }), "teal", 10))}
                   {renderChipSection("Ціль", renderFragmentChips(QUICK_GOAL_CHIPS, instance.goal || "", (value) => updateBulkPlanInstance(idx, { goal: value }), "violet"))}
-                  {renderChipSection("Результат", renderFragmentChips(QUICK_OUTCOME_CHIPS, instance.plannedOutcome || "", (value) => updateBulkPlanInstance(idx, { plannedOutcome: value }), "amber"))}
-                  {renderChipSection("Трек", <input style={{ ...editorInputSt, minHeight: 34 }} placeholder="Назва треку / артист / версія" value={instance.track || ""} onChange={(e) => updateBulkPlanInstance(idx, { track: e.target.value })} />)}
                   <details style={{ fontSize: 12, color: theme.textLight }}>
                     <summary style={{ cursor: "pointer", fontWeight: 800 }}>Деталі</summary>
                     <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
                       <input style={editorInputSt} placeholder="Ціль" value={instance.goal || ""} onChange={(e) => updateBulkPlanInstance(idx, { goal: e.target.value })} />
                       <textarea style={{ ...editorInputSt, minHeight: 58, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={instance.plannedContent || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedContent: e.target.value })} />
-                      <input style={editorInputSt} placeholder="Очікуваний результат" value={instance.plannedOutcome || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedOutcome: e.target.value })} />
                       <textarea style={{ ...editorInputSt, minHeight: 50, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={instance.notes || ""} onChange={(e) => updateBulkPlanInstance(idx, { notes: e.target.value })} />
                     </div>
                   </details>
