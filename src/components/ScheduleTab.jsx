@@ -946,6 +946,18 @@ export default function ScheduleTab({
 
   const getLessonPlanKey = ({ groupId, trainerId, lessonDate, scheduleSlotIndex }) =>
     `${groupId}:${trainerId}:${String(lessonDate).slice(0, 10)}:${Number(scheduleSlotIndex || 0)}`;
+  const getLessonPlanForEvent = (event = {}) => {
+    if (event?.kind !== "group") return null;
+    const trainerId = getLessonPlanTrainerIdForEvent(event);
+    if (!event.groupId || !trainerId || !event.date || event.slotIndex == null) return null;
+    return trainingLessonPlanMap.get(getLessonPlanKey({
+      groupId: event.groupId,
+      trainerId,
+      lessonDate: event.date,
+      scheduleSlotIndex: event.slotIndex,
+    })) || null;
+  };
+  const hasLessonPlanForEvent = (event = {}) => Boolean(getLessonPlanForEvent(event));
 
   const openLessonPlanEditor = (e) => {
     if (!canEditGroupSingleLesson(e)) return;
@@ -2077,20 +2089,12 @@ export default function ScheduleTab({
               <div>{selectedEventDetails.direction || "—"} · {selectedEventDetails.trainer || "—"}</div>
             </div>
             {selectedEventDetails.kind === "group" ? (() => {
-              const trainerId = getLessonPlanTrainerIdForEvent(selectedEventDetails);
-              const planKey = getLessonPlanKey({
-                groupId: selectedEventDetails.groupId,
-                trainerId,
-                lessonDate: selectedEventDetails.date,
-                scheduleSlotIndex: selectedEventDetails.slotIndex,
-              });
-              const plan = trainingLessonPlanMap.get(planKey);
+              const plan = getLessonPlanForEvent(selectedEventDetails);
               const fields = normalizeLessonPlanFields(plan || {});
               const planRows = [
                 ["Трек", fields.track],
                 ["Ціль", fields.goal],
                 ["Що плануємо", fields.plannedContent],
-                ["Очікуваний результат", fields.plannedOutcome],
                 ["Нотатки", fields.notes],
               ].filter(([, value]) => String(value || "").trim());
               return (
@@ -2109,8 +2113,8 @@ export default function ScheduleTab({
                   {plan ? (
                     <>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <span style={planChipSt}>Тип · {lessonPlanTypeLabel(fields.planType)}</span>
-                        <span style={{ ...planChipSt, borderColor: isDarkTheme ? "rgba(20,184,166,.42)" : "rgba(20,184,166,.26)", background: isDarkTheme ? "rgba(20,184,166,.16)" : "rgba(240,253,250,.94)", color: isDarkTheme ? "#99f6e4" : "#0f766e" }}>Рівень · {lessonDifficultyLabel(fields.plannedDifficulty)}</span>
+                        <span style={planChipSt}>{lessonPlanTypeLabel(fields.planType)}</span>
+                        {fields.plannedDifficulty ? <span style={{ ...planChipSt, borderColor: isDarkTheme ? "rgba(20,184,166,.42)" : "rgba(20,184,166,.26)", background: isDarkTheme ? "rgba(20,184,166,.16)" : "rgba(240,253,250,.94)", color: isDarkTheme ? "#99f6e4" : "#0f766e" }}>{lessonDifficultyLabel(fields.plannedDifficulty)}</span> : null}
                       </div>
                       {planRows.length ? (
                         <div style={{ display: "grid", gap: 7 }}>
@@ -2592,9 +2596,11 @@ export default function ScheduleTab({
                   ) : null}
                   {!isMobile && selectedRoom !== "all" ? previewItems.slice(0, 2).map((e) => {
                     const c = e.color ? { bg: `${e.color}18`, border: `${e.color}99` } : palette[colorKey(e)] || palette.default;
+                    const hasPlan = hasLessonPlanForEvent(e);
                     return (
-                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92 }}>
-                        {e.startTime} {e.title}
+                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
+                        {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", width: 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto" }}>✓</span> : null}
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}</span>
                       </div>
                     );
                   }) : null}
@@ -2683,6 +2689,7 @@ export default function ScheduleTab({
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
                       const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
                       const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                      const hasPlan = hasLessonPlanForEvent(e);
                       return (
                         <div
                           key={e.id}
@@ -2695,7 +2702,8 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
+                          {hasPlan ? <span title="Є план" style={{ position: "absolute", top: isMobile ? 4 : 5, right: isMobile ? 4 : 5, zIndex: 6, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0, paddingRight: hasPlan ? 18 : 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
                             <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
@@ -2877,6 +2885,7 @@ export default function ScheduleTab({
                       : "";
                     const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
                     const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                    const hasPlan = hasLessonPlanForEvent(e);
                     return (
                       <div
                         key={e.id}
@@ -2908,7 +2917,8 @@ export default function ScheduleTab({
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
-                        <div style={{ minWidth: 0, paddingRight: textRightPadding }}>
+                        {hasPlan ? <span title="Є план" style={{ position: "absolute", top: isMobile ? 4 : 6, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 24 : 30) : (isMobile ? 4 : 6), zIndex: 20, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                        <div style={{ minWidth: 0, paddingRight: textRightPadding + (hasPlan ? 18 : 0) }}>
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
