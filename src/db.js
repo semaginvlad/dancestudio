@@ -1096,6 +1096,135 @@ export async function deleteGroupLessonOverride(id) {
   if (error) throw error;
 }
 
+// ─── TRAINING LESSON EVIDENCE ───
+export const mapTrainingLessonPlan = (row = {}) => ({
+  id: row.id,
+  groupId: row.group_id || null,
+  trainerId: row.trainer_id || null,
+  lessonDate: row.lesson_date || null,
+  scheduleSlotIndex: Number(row.schedule_slot_index || 0),
+  planType: row.plan_type || 'other',
+  goal: row.goal || '',
+  plannedContent: row.planned_content || '',
+  plannedDifficulty: row.planned_difficulty || null,
+  plannedOutcome: row.planned_outcome || '',
+  notes: row.notes || '',
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+});
+
+export const toTrainingLessonPlanRow = (input = {}) => {
+  const row = {};
+  if (input.groupId !== undefined) row.group_id = input.groupId;
+  if (input.trainerId !== undefined) row.trainer_id = input.trainerId;
+  if (input.lessonDate !== undefined) row.lesson_date = input.lessonDate;
+  if (input.scheduleSlotIndex !== undefined) row.schedule_slot_index = Number(input.scheduleSlotIndex || 0);
+  if (input.planType !== undefined) row.plan_type = input.planType || 'other';
+  if (input.goal !== undefined) row.goal = input.goal || null;
+  if (input.plannedContent !== undefined) row.planned_content = input.plannedContent || null;
+  if (input.plannedDifficulty !== undefined) row.planned_difficulty = input.plannedDifficulty || null;
+  if (input.plannedOutcome !== undefined) row.planned_outcome = input.plannedOutcome || null;
+  if (input.notes !== undefined) row.notes = input.notes || null;
+  return row;
+};
+
+export const mapTrainingLessonReport = (row = {}) => ({
+  id: row.id,
+  groupId: row.group_id || null,
+  trainerId: row.trainer_id || null,
+  lessonDate: row.lesson_date || null,
+  scheduleSlotIndex: Number(row.schedule_slot_index || 0),
+  moodScore: row.mood_score ?? null,
+  difficultyActual: row.difficulty_actual || null,
+  paceActual: row.pace_actual || null,
+  planProgress: row.plan_progress || null,
+  completedContent: row.completed_content || '',
+  missedContent: row.missed_content || '',
+  studentFeedback: row.student_feedback || '',
+  trainerNotes: row.trainer_notes || '',
+  nextAdjustment: row.next_adjustment || '',
+  riskFlags: Array.isArray(row.risk_flags) ? row.risk_flags : [],
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+});
+
+export const toTrainingLessonReportRow = (input = {}) => {
+  const row = {};
+  if (input.groupId !== undefined) row.group_id = input.groupId;
+  if (input.trainerId !== undefined) row.trainer_id = input.trainerId;
+  if (input.lessonDate !== undefined) row.lesson_date = input.lessonDate;
+  if (input.scheduleSlotIndex !== undefined) row.schedule_slot_index = Number(input.scheduleSlotIndex || 0);
+  if (input.moodScore !== undefined) row.mood_score = input.moodScore === '' || input.moodScore == null ? null : Number(input.moodScore);
+  if (input.difficultyActual !== undefined) row.difficulty_actual = input.difficultyActual || null;
+  if (input.paceActual !== undefined) row.pace_actual = input.paceActual || null;
+  if (input.planProgress !== undefined) row.plan_progress = input.planProgress || null;
+  if (input.completedContent !== undefined) row.completed_content = input.completedContent || null;
+  if (input.missedContent !== undefined) row.missed_content = input.missedContent || null;
+  if (input.studentFeedback !== undefined) row.student_feedback = input.studentFeedback || null;
+  if (input.trainerNotes !== undefined) row.trainer_notes = input.trainerNotes || null;
+  if (input.nextAdjustment !== undefined) row.next_adjustment = input.nextAdjustment || null;
+  if (input.riskFlags !== undefined) row.risk_flags = Array.isArray(input.riskFlags) ? input.riskFlags : [];
+  return row;
+};
+
+const applyTrainingLessonEvidenceFilters = (query, filters = {}) => {
+  if (filters.groupId) query = query.eq('group_id', filters.groupId);
+  if (filters.trainerId) query = query.eq('trainer_id', filters.trainerId);
+  if (filters.dateFrom) query = query.gte('lesson_date', filters.dateFrom);
+  if (filters.dateTo) query = query.lte('lesson_date', filters.dateTo);
+  return query;
+};
+
+export async function fetchTrainingLessonPlans(filters = {}) {
+  let query = supabase
+    .from('training_lesson_plans')
+    .select('*')
+    .order('lesson_date', { ascending: true })
+    .order('schedule_slot_index', { ascending: true });
+
+  query = applyTrainingLessonEvidenceFilters(query, filters);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapTrainingLessonPlan);
+}
+
+export async function upsertTrainingLessonPlan(plan = {}) {
+  const payload = toTrainingLessonPlanRow(plan);
+  const { data, error } = await supabase
+    .from('training_lesson_plans')
+    .upsert(payload, { onConflict: 'group_id,trainer_id,lesson_date,schedule_slot_index' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapTrainingLessonPlan(data);
+}
+
+export async function fetchTrainingLessonReports(filters = {}) {
+  let query = supabase
+    .from('training_lesson_reports')
+    .select('*')
+    .order('lesson_date', { ascending: true })
+    .order('schedule_slot_index', { ascending: true });
+
+  query = applyTrainingLessonEvidenceFilters(query, filters);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(mapTrainingLessonReport);
+}
+
+export async function upsertTrainingLessonReport(report = {}) {
+  const payload = toTrainingLessonReportRow(report);
+  const { data, error } = await supabase
+    .from('training_lesson_reports')
+    .upsert(payload, { onConflict: 'group_id,trainer_id,lesson_date,schedule_slot_index' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapTrainingLessonReport(data);
+}
+
 export async function fetchStudioRooms() {
   const { data, error } = await supabase
     .from('studio_rooms')
