@@ -228,6 +228,26 @@ const LESSON_DIFFICULTIES = [
   { value: "medium", label: "Середня" },
   { value: "hard", label: "Складна" },
 ];
+const lessonPlanTypeLabel = (value) =>
+  LESSON_PLAN_TYPES.find((type) => type.value === value)?.label || "Інше";
+const lessonDifficultyLabel = (value) =>
+  LESSON_DIFFICULTIES.find((difficulty) => difficulty.value === value)?.label || "Без оцінки";
+const createEmptyLessonPlanFields = () => ({
+  planType: "other",
+  plannedDifficulty: "",
+  goal: "",
+  plannedContent: "",
+  plannedOutcome: "",
+  notes: "",
+});
+const normalizeLessonPlanFields = (plan = {}) => ({
+  planType: plan.planType || plan.plan_type || "other",
+  plannedDifficulty: plan.plannedDifficulty || plan.planned_difficulty || "",
+  goal: plan.goal || "",
+  plannedContent: plan.plannedContent || plan.planned_content || "",
+  plannedOutcome: plan.plannedOutcome || plan.planned_outcome || "",
+  notes: plan.notes || "",
+});
 const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
 const palette = {
@@ -357,6 +377,8 @@ export default function ScheduleTab({
   const [groupSlotEdit, setGroupSlotEdit] = useState(null); // { groupId, slotIndex, groupName, title, weekday, startTime, endTime, roomName, trainerId, note, direction, trainer, error }
   const [groupOverrideEdit, setGroupOverrideEdit] = useState(null);
   const [lessonPlanEdit, setLessonPlanEdit] = useState(null);
+  const [bulkPlanSetup, setBulkPlanSetup] = useState(null);
+  const [bulkPlanEdit, setBulkPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
@@ -870,12 +892,7 @@ export default function ScheduleTab({
       trainerName: e.trainer || trainerMap.get(String(trainerId || "")) || "—",
       startTime: e.startTime || "",
       endTime: e.endTime || "",
-      planType: existing?.planType || "other",
-      plannedDifficulty: existing?.plannedDifficulty || "",
-      goal: existing?.goal || "",
-      plannedContent: existing?.plannedContent || "",
-      plannedOutcome: existing?.plannedOutcome || "",
-      notes: existing?.notes || "",
+      ...normalizeLessonPlanFields(existing || createEmptyLessonPlanFields()),
       error: trainerId ? "" : "Не вдалося визначити тренера для цього заняття",
     });
   };
@@ -904,6 +921,179 @@ export default function ScheduleTab({
     } catch (err) {
       console.error(err);
       setLessonPlanEdit((p) => ({ ...(p || {}), error: "Не вдалося зберегти план заняття" }));
+    }
+  };
+
+
+  const bulkPlannerGroups = useMemo(
+    () => safeGroups.filter((group) => isAdmin || isGroupOwnedByCurrentTrainer(group.id)),
+    [safeGroups, isAdmin, currentTrainerId],
+  );
+  const canOpenBulkPlanner = Boolean(onUpsertTrainingLessonPlan && bulkPlannerGroups.length);
+  const getDefaultBulkTrainerId = (group) => {
+    if (!group) return !isAdmin ? currentTrainerId : "";
+    return group.trainer_id || group.trainerId || (!isAdmin ? currentTrainerId : "");
+  };
+  const openBulkPlanSetup = () => {
+    if (!canOpenBulkPlanner) return;
+    const group = bulkPlannerGroups[0];
+    setBulkPlanSetup({
+      groupId: group?.id || "",
+      trainerId: getDefaultBulkTrainerId(group),
+      dateFrom: toLocalDateKey(weekDays[0] || selectedDateObj),
+      dateTo: toLocalDateKey(weekDays[6] || selectedDateObj),
+      weekdays: [],
+      onlyScheduled: true,
+      error: "",
+    });
+  };
+  const updateBulkSetupGroup = (groupId) => {
+    const group = bulkPlannerGroups.find((x) => String(x.id) === String(groupId));
+    setBulkPlanSetup((p) => ({
+      ...(p || {}),
+      groupId,
+      trainerId: getDefaultBulkTrainerId(group),
+      error: "",
+    }));
+  };
+  const toggleBulkSetupWeekday = (weekday) => {
+    setBulkPlanSetup((p) => {
+      const current = Array.isArray(p?.weekdays) ? p.weekdays : [];
+      const next = current.includes(weekday) ? current.filter((x) => x !== weekday) : [...current, weekday].sort((a, b) => a - b);
+      return { ...(p || {}), weekdays: next, error: "" };
+    });
+  };
+  const getDatesInRange = (dateFrom, dateTo) => {
+    const start = new Date(`${dateFrom}T12:00:00`);
+    const end = new Date(`${dateTo}T12:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+    const out = [];
+    for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
+    return out;
+  };
+  const buildRegularGroupLessonInstances = (group, dates, trainerId) => {
+    const rows = Array.isArray(group?.schedule) ? group.schedule : [];
+    const instances = [];
+    dates.forEach((dateObj) => {
+      const date = toLocalDateKey(dateObj);
+      rows.forEach((row, slotIndex) => {
+        const weekday = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
+        if (weekday !== dateObj.getDay()) return;
+        const st = toMin(row.startTime || row.start || row.time || "");
+        const en = toMin(getSlotEndTimeRaw(row)) ?? (st == null ? null : st + 60);
+        if (st == null || en == null || en <= st) return;
+        const slotTrainerId = trainerId || getSlotTrainerId(row, group) || "";
+        instances.push({
+          id: `${group.id}:${slotIndex}:${date}`,
+          groupId: group.id,
+          trainerId: slotTrainerId,
+          lessonDate: date,
+          scheduleSlotIndex: slotIndex,
+          groupName: group.name || group.title || "—",
+          trainerName: trainerMap.get(String(slotTrainerId || "")) || "—",
+          startTime: minToHHMM(st),
+          endTime: minToHHMM(en),
+          timeLabel: `${minToHHMM(st)}–${minToHHMM(en)}`,
+        });
+      });
+    });
+    return instances;
+  };
+  const createBulkPlanDraft = (instance) => {
+    const existing = trainingLessonPlanMap.get(getLessonPlanKey(instance));
+    return {
+      ...instance,
+      ...normalizeLessonPlanFields(existing || createEmptyLessonPlanFields()),
+      existed: Boolean(existing),
+    };
+  };
+  const generateBulkLessonPlans = () => {
+    if (!bulkPlanSetup) return;
+    const group = bulkPlannerGroups.find((x) => String(x.id) === String(bulkPlanSetup.groupId));
+    if (!group || !bulkPlanSetup.trainerId || !bulkPlanSetup.dateFrom || !bulkPlanSetup.dateTo) {
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "Оберіть групу, тренера та діапазон дат" }));
+      return;
+    }
+    const allDates = getDatesInRange(bulkPlanSetup.dateFrom, bulkPlanSetup.dateTo);
+    if (!allDates.length) {
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "Перевірте діапазон дат" }));
+      return;
+    }
+    const weekdayFilter = Array.isArray(bulkPlanSetup.weekdays) ? bulkPlanSetup.weekdays : [];
+    const filteredDates = weekdayFilter.length ? allDates.filter((d) => weekdayFilter.includes(d.getDay())) : allDates;
+    const instances = bulkPlanSetup.onlyScheduled
+      ? Array.from(buildEventsByDayForDates(filteredDates).values()).flat()
+          .filter((event) => event.kind === "group" && String(event.groupId) === String(group.id))
+          .map((event) => ({
+            id: `${event.groupId}:${event.slotIndex}:${event.date}`,
+            groupId: event.groupId,
+            trainerId: bulkPlanSetup.trainerId,
+            lessonDate: event.date,
+            scheduleSlotIndex: event.slotIndex,
+            groupName: event.groupName || event.title || group.name || "—",
+            trainerName: trainerMap.get(String(bulkPlanSetup.trainerId || "")) || event.trainer || "—",
+            startTime: event.startTime || "",
+            endTime: event.endTime || "",
+            timeLabel: `${event.startTime || "—"}–${event.endTime || "—"}`,
+          }))
+      : buildRegularGroupLessonInstances(group, filteredDates, bulkPlanSetup.trainerId);
+    const uniqueInstances = Array.from(new Map(instances.map((instance) => [getLessonPlanKey(instance), instance])).values())
+      .sort((a, b) => String(a.lessonDate).localeCompare(String(b.lessonDate)) || String(a.startTime).localeCompare(String(b.startTime)));
+    if (!uniqueInstances.length) {
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "У цьому діапазоні не знайдено занять для групи" }));
+      return;
+    }
+    setBulkPlanEdit({
+      instances: uniqueInstances.map(createBulkPlanDraft),
+      applyTemplate: createEmptyLessonPlanFields(),
+      saving: false,
+      error: "",
+    });
+    setBulkPlanSetup(null);
+  };
+  const updateBulkPlanInstance = (idx, patch) => {
+    setBulkPlanEdit((p) => ({
+      ...(p || {}),
+      error: "",
+      instances: (p?.instances || []).map((instance, i) => (i === idx ? { ...instance, ...patch } : instance)),
+    }));
+  };
+  const applyBulkTemplateToAll = () => {
+    setBulkPlanEdit((p) => ({
+      ...(p || {}),
+      instances: (p?.instances || []).map((instance) => ({ ...instance, ...normalizeLessonPlanFields(p?.applyTemplate) })),
+    }));
+  };
+  const copyPreviousBulkPlan = (idx) => {
+    setBulkPlanEdit((p) => {
+      const instances = p?.instances || [];
+      if (idx <= 0 || !instances[idx - 1]) return p;
+      const previousFields = normalizeLessonPlanFields(instances[idx - 1]);
+      return {
+        ...(p || {}),
+        instances: instances.map((instance, i) => (i === idx ? { ...instance, ...previousFields } : instance)),
+      };
+    });
+  };
+  const clearBulkPlan = (idx) => updateBulkPlanInstance(idx, createEmptyLessonPlanFields());
+  const saveBulkLessonPlans = async () => {
+    if (!bulkPlanEdit || !onUpsertTrainingLessonPlan) return;
+    const instances = bulkPlanEdit.instances || [];
+    if (!instances.length) return;
+    setBulkPlanEdit((p) => ({ ...(p || {}), saving: true, error: "" }));
+    try {
+      await Promise.all(instances.map((instance) => onUpsertTrainingLessonPlan({
+        groupId: instance.groupId,
+        trainerId: instance.trainerId,
+        lessonDate: instance.lessonDate,
+        scheduleSlotIndex: instance.scheduleSlotIndex,
+        ...normalizeLessonPlanFields(instance),
+        plannedDifficulty: instance.plannedDifficulty || null,
+      })));
+      setBulkPlanEdit(null);
+    } catch (error) {
+      console.error(error);
+      setBulkPlanEdit((p) => ({ ...(p || {}), saving: false, error: "Не вдалося зберегти всі плани" }));
     }
   };
 
@@ -1329,6 +1519,11 @@ export default function ScheduleTab({
           {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
         </select>
         {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
+        {canOpenBulkPlanner ? (
+          <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>
+            План на період
+          </button>
+        ) : null}
         <div
           style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 10.5 : 12, color: theme.textLight, width: isMobile ? "100%" : undefined }}
         >
@@ -1542,6 +1737,177 @@ export default function ScheduleTab({
               <div>{selectedEventDetails.groupName || selectedEventDetails.title || "—"}</div>
               <div style={{ color: theme.textLight }}>Напрямок · Тренер</div>
               <div>{selectedEventDetails.direction || "—"} · {selectedEventDetails.trainer || "—"}</div>
+            </div>
+            {selectedEventDetails.kind === "group" ? (() => {
+              const trainerId = selectedEventDetails.trainerId || (!isAdmin ? currentTrainerId : "") || "";
+              const planKey = getLessonPlanKey({
+                groupId: selectedEventDetails.groupId,
+                trainerId,
+                lessonDate: selectedEventDetails.date,
+                scheduleSlotIndex: selectedEventDetails.slotIndex,
+              });
+              const plan = trainingLessonPlanMap.get(planKey);
+              const fields = normalizeLessonPlanFields(plan || {});
+              const planRows = [
+                ["Ціль", fields.goal],
+                ["Що плануємо", fields.plannedContent],
+                ["Очікуваний результат", fields.plannedOutcome],
+                ["Нотатки", fields.notes],
+              ].filter(([, value]) => String(value || "").trim());
+              return (
+                <div style={{ marginTop: 14, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, background: isDarkTheme ? "rgba(15,23,42,.34)" : "rgba(248,250,252,.72)", display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={editorSectionLabelSt}>План заняття</div>
+                      <b style={{ fontSize: 15 }}>{plan ? "План підготовлено" : "План ще не додано"}</b>
+                    </div>
+                    {canEditGroupSingleLesson(selectedEventDetails) ? (
+                      <button style={{ ...editorBtnSt, minHeight: 32, padding: "0 12px" }} onClick={() => openLessonPlanEditor(selectedEventDetails)}>
+                        {plan ? "Редагувати план" : "Додати план"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {plan ? (
+                    <>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ ...editorBtnSt, minHeight: 26, padding: "0 9px", color: theme.primary }}>Тип: {lessonPlanTypeLabel(fields.planType)}</span>
+                        <span style={{ ...editorBtnSt, minHeight: 26, padding: "0 9px" }}>Складність: {lessonDifficultyLabel(fields.plannedDifficulty)}</span>
+                      </div>
+                      {planRows.length ? (
+                        <div style={{ display: "grid", gap: 7 }}>
+                          {planRows.map(([label, value]) => (
+                            <div key={label} style={{ border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.18)" : "rgba(148,163,184,.28)"}`, borderRadius: 12, padding: "8px 10px", background: isDarkTheme ? "rgba(2,6,23,.26)" : "rgba(255,255,255,.64)" }}>
+                              <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>{label}</div>
+                              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: theme.textLight }}>План має тільки тип або складність — додайте деталі за потреби.</div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                      Немає плану для цієї групи, тренера, дати та слоту. Додайте його, щоб тренер бачив ціль і зміст заняття.
+                    </div>
+                  )}
+                </div>
+              );
+            })() : null}
+          </div>
+        </div>
+      )}
+
+
+      {bulkPlanSetup && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5040, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(560px,96vw)", maxHeight: isMobile ? "78vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, color: theme.text }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
+              <div>
+                <div style={editorSectionLabelSt}>Графік · Bulk planner</div>
+                <b style={{ fontSize: isMobile ? 17 : 18 }}>План на період</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу, тренера та діапазон занять</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanSetup(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 9 }}>
+              <div style={editorSectionLabelSt}>Група і тренер</div>
+              <select style={editorInputSt} value={bulkPlanSetup.groupId || ""} onChange={(e) => updateBulkSetupGroup(e.target.value)}>
+                {bulkPlannerGroups.map((group) => <option key={group.id} value={group.id}>{group.name || group.title || group.id}</option>)}
+              </select>
+              <select style={editorInputSt} value={bulkPlanSetup.trainerId || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), trainerId: e.target.value, error: "" }))}>
+                <option value="">Оберіть тренера</option>
+                {safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
+              </select>
+              <div style={editorSectionLabelSt}>Період</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <input style={editorInputSt} type="date" value={bulkPlanSetup.dateFrom || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateFrom: e.target.value, error: "" }))} />
+                <input style={editorInputSt} type="date" value={bulkPlanSetup.dateTo || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateTo: e.target.value, error: "" }))} />
+              </div>
+              <div style={editorSectionLabelSt}>Фільтр днів тижня</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[{ value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" }, { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 0, label: "Нд" }].map((day) => {
+                  const active = (bulkPlanSetup.weekdays || []).includes(day.value);
+                  return <button key={day.value} type="button" style={active ? { ...toolbarActiveSt, minHeight: 32, padding: "0 10px" } : { ...editorBtnSt, minHeight: 32, padding: "0 10px" }} onClick={() => toggleBulkSetupWeekday(day.value)}>{day.label}</button>;
+                })}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textLight }}>
+                <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, error: "" }))} />
+                Тільки заплановані заняття цієї групи (враховує скасування та разові зміни)
+              </label>
+              {bulkPlanSetup.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{bulkPlanSetup.error}</div> : null}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+              <button style={btnP} onClick={generateBulkLessonPlans}>Згенерувати список</button>
+              <button style={btnS} onClick={() => setBulkPlanSetup(null)}>Скасувати</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkPlanEdit && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5045, background: editorOverlay, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
+          <div style={{ ...cardSt, border: `1px solid ${theme.border}`, width: isMobile ? "calc(100vw - 16px)" : "min(900px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: "auto", borderRadius: isMobile ? "16px 16px 0 0" : 18, background: editorSurface, color: theme.text }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
+              <div>
+                <div style={editorSectionLabelSt}>Графік · План на період</div>
+                <b style={{ fontSize: isMobile ? 17 : 18 }}>Bulk planner</b>
+                <div style={{ fontSize: 12, color: theme.textLight }}>{(bulkPlanEdit.instances || []).length} занять у списку</div>
+              </div>
+              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>✕</button>
+            </div>
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, background: isDarkTheme ? "rgba(15,23,42,.32)" : "rgba(248,250,252,.72)", marginBottom: 10 }}>
+              <div style={editorSectionLabelSt}>Застосувати до всіх</div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <select style={editorInputSt} value={bulkPlanEdit.applyTemplate?.planType || "other"} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), planType: e.target.value } }))}>
+                  {LESSON_PLAN_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                </select>
+                <select style={editorInputSt} value={bulkPlanEdit.applyTemplate?.plannedDifficulty || ""} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), plannedDifficulty: e.target.value } }))}>
+                  <option value="">Без оцінки складності</option>
+                  {LESSON_DIFFICULTIES.map((difficulty) => <option key={difficulty.value} value={difficulty.value}>{difficulty.label}</option>)}
+                </select>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                <input style={editorInputSt} placeholder="Ціль для всіх" value={bulkPlanEdit.applyTemplate?.goal || ""} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), goal: e.target.value } }))} />
+                <input style={editorInputSt} placeholder="Очікуваний результат для всіх" value={bulkPlanEdit.applyTemplate?.plannedOutcome || ""} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), plannedOutcome: e.target.value } }))} />
+              </div>
+              <textarea style={{ ...editorInputSt, minHeight: 62, paddingTop: 10, resize: "vertical" }} placeholder="Плановий зміст для всіх" value={bulkPlanEdit.applyTemplate?.plannedContent || ""} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), plannedContent: e.target.value } }))} />
+              <textarea style={{ ...editorInputSt, minHeight: 54, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки для всіх" value={bulkPlanEdit.applyTemplate?.notes || ""} onChange={(e) => setBulkPlanEdit((p) => ({ ...(p || {}), applyTemplate: { ...(p?.applyTemplate || {}), notes: e.target.value } }))} />
+              <button style={{ ...btnS, width: "fit-content" }} onClick={applyBulkTemplateToAll}>Застосувати до всіх</button>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {(bulkPlanEdit.instances || []).map((instance, idx) => (
+                <div key={getLessonPlanKey(instance)} style={{ border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, background: isDarkTheme ? "rgba(2,6,23,.22)" : "rgba(255,255,255,.64)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                    <div>
+                      <b>{new Date(`${instance.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })} · {instance.timeLabel}</b>
+                      <div style={{ fontSize: 12, color: theme.textLight }}>{instance.groupName} · {instance.trainerName}{instance.existed ? " · є збережений план" : ""}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => copyPreviousBulkPlan(idx)} disabled={idx === 0}>Скопіювати з попереднього</button>
+                      <button style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px", color: theme.danger }} onClick={() => clearBulkPlan(idx)}>Очистити</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                    <select style={editorInputSt} value={instance.planType || "other"} onChange={(e) => updateBulkPlanInstance(idx, { planType: e.target.value })}>
+                      {LESSON_PLAN_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                    </select>
+                    <select style={editorInputSt} value={instance.plannedDifficulty || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedDifficulty: e.target.value })}>
+                      <option value="">Без оцінки складності</option>
+                      {LESSON_DIFFICULTIES.map((difficulty) => <option key={difficulty.value} value={difficulty.value}>{difficulty.label}</option>)}
+                    </select>
+                  </div>
+                  <input style={editorInputSt} placeholder="Ціль заняття" value={instance.goal || ""} onChange={(e) => updateBulkPlanInstance(idx, { goal: e.target.value })} />
+                  <textarea style={{ ...editorInputSt, minHeight: 76, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={instance.plannedContent || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedContent: e.target.value })} />
+                  <input style={editorInputSt} placeholder="Очікуваний результат" value={instance.plannedOutcome || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedOutcome: e.target.value })} />
+                  <textarea style={{ ...editorInputSt, minHeight: 58, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={instance.notes || ""} onChange={(e) => updateBulkPlanInstance(idx, { notes: e.target.value })} />
+                </div>
+              ))}
+            </div>
+            {bulkPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12, marginTop: 10 }}>{bulkPlanEdit.error}</div> : null}
+            <div style={{ display: "flex", gap: 6, marginTop: 12, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap" }}>
+              <button style={btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти всі плани"}</button>
+              <button style={btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
             </div>
           </div>
         </div>
