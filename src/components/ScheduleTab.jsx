@@ -949,18 +949,58 @@ export default function ScheduleTab({
     for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
     return out;
   };
+  const getGroupScheduleWeekdays = (group) => Array.from(new Set(
+    (Array.isArray(group?.schedule) ? group.schedule : [])
+      .map((row) => parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay))
+      .filter((weekday) => weekday != null),
+  )).sort((a, b) => a - b);
+  const getWeekdayLabel = (weekday) => WEEKDAY_OPTIONS.find((day) => day.value === weekday)?.label || "—";
+  const buildScheduledGroupLessonInstances = (group, dates, trainerId) => Array.from(buildEventsByDayForDates(dates).values()).flat()
+    .filter((event) => event.kind === "group" && String(event.groupId) === String(group.id))
+    .map((event) => ({
+      id: `${event.groupId}:${event.slotIndex}:${event.date}`,
+      groupId: event.groupId,
+      trainerId,
+      lessonDate: event.date,
+      scheduleSlotIndex: event.slotIndex,
+      groupName: event.groupName || event.title || group.name || "—",
+      trainerName: trainerMap.get(String(trainerId || "")) || event.trainer || currentTrainerName || "—",
+      startTime: event.startTime || "",
+      endTime: event.endTime || "",
+      timeLabel: `${event.startTime || "—"}–${event.endTime || "—"}`,
+      lessonLabel: event.title || event.groupName || group.name || "Заняття",
+    }));
+  const getBulkLessonInstances = (setup, group) => {
+    if (!setup || !group?.id || !setup.dateFrom || !setup.dateTo) return [];
+    const allDates = getDatesInRange(setup.dateFrom, setup.dateTo);
+    if (!allDates.length) return [];
+    const groupWeekdays = getGroupScheduleWeekdays(group);
+    const selectedWeekdays = Array.isArray(setup.weekdays) && setup.weekdays.length ? setup.weekdays : groupWeekdays;
+    const allowedWeekdays = selectedWeekdays.filter((weekday) => groupWeekdays.includes(weekday));
+    const filteredDates = allowedWeekdays.length ? allDates.filter((d) => allowedWeekdays.includes(d.getDay())) : allDates;
+    const trainerId = setup.trainerId || getDefaultBulkTrainerId(group);
+    const instances = setup.onlyScheduled
+      ? buildScheduledGroupLessonInstances(group, filteredDates, trainerId)
+      : buildRegularGroupLessonInstances(group, filteredDates, trainerId);
+    return Array.from(new Map(instances.map((instance) => [getLessonPlanKey(instance), instance])).values())
+      .sort((a, b) => String(a.lessonDate).localeCompare(String(b.lessonDate)) || String(a.startTime).localeCompare(String(b.startTime)));
+  };
   const getSuggestedBulkDateRange = (group) => {
     const today = new Date(`${toLocalDateKey(new Date())}T12:00:00`);
     const horizonEnd = addDays(today, 28);
     const fallback = { dateFrom: toLocalDateKey(today), dateTo: toLocalDateKey(horizonEnd) };
     if (!group?.id) return fallback;
-    const dates = getDatesInRange(fallback.dateFrom, fallback.dateTo);
-    const upcoming = Array.from(buildEventsByDayForDates(dates).values()).flat()
-      .filter((event) => event.kind === "group" && String(event.groupId) === String(group.id))
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+    const setup = {
+      groupId: group.id,
+      trainerId: getDefaultBulkTrainerId(group),
+      ...fallback,
+      weekdays: getGroupScheduleWeekdays(group),
+      onlyScheduled: true,
+    };
+    const upcoming = getBulkLessonInstances(setup, group);
     if (!upcoming.length) return fallback;
-    const first = upcoming[0]?.date || fallback.dateFrom;
-    const last = upcoming[Math.min(upcoming.length - 1, 7)]?.date || upcoming[upcoming.length - 1]?.date || fallback.dateTo;
+    const first = upcoming[0]?.lessonDate || fallback.dateFrom;
+    const last = upcoming[Math.min(upcoming.length - 1, 7)]?.lessonDate || upcoming[upcoming.length - 1]?.lessonDate || fallback.dateTo;
     const cappedLast = String(last) > fallback.dateTo ? fallback.dateTo : last;
     return { dateFrom: first, dateTo: cappedLast || fallback.dateTo };
   };
@@ -972,7 +1012,8 @@ export default function ScheduleTab({
       groupId: group?.id || "",
       trainerId: getDefaultBulkTrainerId(group),
       ...suggestedRange,
-      weekdays: [],
+      weekdays: getGroupScheduleWeekdays(group),
+      showAdvancedFilters: false,
       onlyScheduled: true,
       error: "",
     });
@@ -985,6 +1026,8 @@ export default function ScheduleTab({
       groupId,
       trainerId: getDefaultBulkTrainerId(group),
       ...suggestedRange,
+      weekdays: getGroupScheduleWeekdays(group),
+      showAdvancedFilters: false,
       error: "",
     }));
   };
@@ -1044,32 +1087,11 @@ export default function ScheduleTab({
       setBulkPlanSetup((p) => ({ ...(p || {}), error: "Тренер може планувати тільки свої групи" }));
       return;
     }
-    const allDates = getDatesInRange(bulkPlanSetup.dateFrom, bulkPlanSetup.dateTo);
-    if (!allDates.length) {
+    if (!getDatesInRange(bulkPlanSetup.dateFrom, bulkPlanSetup.dateTo).length) {
       setBulkPlanSetup((p) => ({ ...(p || {}), error: "Перевірте діапазон дат" }));
       return;
     }
-    const weekdayFilter = Array.isArray(bulkPlanSetup.weekdays) ? bulkPlanSetup.weekdays : [];
-    const filteredDates = weekdayFilter.length ? allDates.filter((d) => weekdayFilter.includes(d.getDay())) : allDates;
-    const instances = bulkPlanSetup.onlyScheduled
-      ? Array.from(buildEventsByDayForDates(filteredDates).values()).flat()
-          .filter((event) => event.kind === "group" && String(event.groupId) === String(group.id))
-          .map((event) => ({
-            id: `${event.groupId}:${event.slotIndex}:${event.date}`,
-            groupId: event.groupId,
-            trainerId: bulkPlanSetup.trainerId,
-            lessonDate: event.date,
-            scheduleSlotIndex: event.slotIndex,
-            groupName: event.groupName || event.title || group.name || "—",
-            trainerName: trainerMap.get(String(bulkPlanSetup.trainerId || "")) || event.trainer || currentTrainerName || "—",
-            startTime: event.startTime || "",
-            endTime: event.endTime || "",
-            timeLabel: `${event.startTime || "—"}–${event.endTime || "—"}`,
-            lessonLabel: event.title || event.groupName || group.name || "Заняття",
-          }))
-      : buildRegularGroupLessonInstances(group, filteredDates, bulkPlanSetup.trainerId);
-    const uniqueInstances = Array.from(new Map(instances.map((instance) => [getLessonPlanKey(instance), instance])).values())
-      .sort((a, b) => String(a.lessonDate).localeCompare(String(b.lessonDate)) || String(a.startTime).localeCompare(String(b.startTime)));
+    const uniqueInstances = getBulkLessonInstances(bulkPlanSetup, group);
     if (!uniqueInstances.length) {
       setBulkPlanSetup((p) => ({ ...(p || {}), error: "У цьому діапазоні не знайдено занять для групи" }));
       return;
@@ -1876,52 +1898,107 @@ export default function ScheduleTab({
 
       {bulkPlanSetup && (
         <div style={{ ...modalOverlaySt, zIndex: 5040, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
-          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(580px,96vw)", maxHeight: isMobile ? "78vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
-              <div>
-                <div style={editorSectionLabelSt}>Графік · Bulk planner</div>
-                <b style={{ fontSize: isMobile ? 17 : 18 }}>План на період</b>
-                <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу, тренера та діапазон занять</div>
-              </div>
-              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanSetup(null)}>✕</button>
-            </div>
-            <div style={{ display: "grid", gap: 9 }}>
-              <div style={editorSectionLabelSt}>Група і тренер</div>
-              <select style={editorInputSt} value={bulkPlanSetup.groupId || ""} onChange={(e) => updateBulkSetupGroup(e.target.value)}>
-                {bulkPlannerGroups.map((group) => <option key={group.id} value={group.id}>{group.name || group.title || group.id}</option>)}
-              </select>
-              <select
-                style={{ ...editorInputSt, opacity: isAdmin ? 1 : 0.78 }}
-                value={bulkPlanSetup.trainerId || ""}
-                disabled={!isAdmin}
-                onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), trainerId: e.target.value, error: "" }))}
-              >
-                {isAdmin ? <option value="">Оберіть тренера</option> : null}
-                {!isAdmin && bulkPlanSetup.trainerId ? <option value={bulkPlanSetup.trainerId}>{currentTrainerName || "Поточний тренер"}</option> : null}
-                {isAdmin && safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
-              </select>
-              <div style={editorSectionLabelSt}>Період</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
-                <input style={editorInputSt} type="date" value={bulkPlanSetup.dateFrom || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateFrom: e.target.value, error: "" }))} />
-                <input style={editorInputSt} type="date" value={bulkPlanSetup.dateTo || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateTo: e.target.value, error: "" }))} />
-              </div>
-              <div style={editorSectionLabelSt}>Фільтр днів тижня</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[{ value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" }, { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 0, label: "Нд" }].map((day) => {
-                  const active = (bulkPlanSetup.weekdays || []).includes(day.value);
-                  return <button key={day.value} type="button" style={active ? { ...toolbarActiveSt, minHeight: 32, padding: "0 10px" } : { ...editorBtnSt, minHeight: 32, padding: "0 10px" }} onClick={() => toggleBulkSetupWeekday(day.value)}>{day.label}</button>;
-                })}
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textLight }}>
-                <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, error: "" }))} />
-                Тільки заплановані заняття цієї групи (враховує скасування та разові зміни)
-              </label>
-              {bulkPlanSetup.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{bulkPlanSetup.error}</div> : null}
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-              <button style={btnP} onClick={generateBulkLessonPlans}>Згенерувати список</button>
-              <button style={btnS} onClick={() => setBulkPlanSetup(null)}>Скасувати</button>
-            </div>
+          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(620px,96vw)", maxHeight: isMobile ? "78vh" : "86vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22 }}>
+            {(() => {
+              const selectedBulkGroup = bulkPlannerGroups.find((x) => String(x.id) === String(bulkPlanSetup.groupId));
+              const groupWeekdays = getGroupScheduleWeekdays(selectedBulkGroup);
+              const previewInstances = getBulkLessonInstances(bulkPlanSetup, selectedBulkGroup);
+              const previewItems = previewInstances.slice(0, 8);
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <div style={editorSectionLabelSt}>Графік · Bulk planner</div>
+                      <b style={{ fontSize: isMobile ? 17 : 18 }}>План на період</b>
+                      <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу — система підтягне найближчі реальні заняття</div>
+                    </div>
+                    <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanSetup(null)}>✕</button>
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div style={editorSectionLabelSt}>Група і тренер</div>
+                    <select style={editorInputSt} value={bulkPlanSetup.groupId || ""} onChange={(e) => updateBulkSetupGroup(e.target.value)}>
+                      {bulkPlannerGroups.map((group) => <option key={group.id} value={group.id}>{group.name || group.title || group.id}</option>)}
+                    </select>
+                    <select
+                      style={{ ...editorInputSt, opacity: isAdmin ? 1 : 0.78 }}
+                      value={bulkPlanSetup.trainerId || ""}
+                      disabled={!isAdmin}
+                      onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), trainerId: e.target.value, error: "" }))}
+                    >
+                      {isAdmin ? <option value="">Оберіть тренера</option> : null}
+                      {!isAdmin && bulkPlanSetup.trainerId ? <option value={bulkPlanSetup.trainerId}>{currentTrainerName || "Поточний тренер"}</option> : null}
+                      {isAdmin && safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
+                    </select>
+                    <div style={editorSectionLabelSt}>Період</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateFrom || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateFrom: e.target.value, error: "" }))} />
+                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateTo || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateTo: e.target.value, error: "" }))} />
+                    </div>
+                    <div style={{ display: "grid", gap: 7, border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.22)" : "rgba(99,102,241,.18)"}`, borderRadius: 16, padding: 10, background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.62)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={editorSectionLabelSt}>Дні занять цієї групи</div>
+                          <div style={{ fontSize: 12, color: theme.textLight }}>Read-only підказка з реального розкладу групи</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                          {groupWeekdays.length ? groupWeekdays.map((weekday) => <span key={weekday} style={{ ...planChipSt, minHeight: 24 }}>{getWeekdayLabel(weekday)}</span>) : <span style={{ fontSize: 12, color: theme.textLight }}>Графік не задано</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textLight }}>
+                      <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, error: "" }))} />
+                      Тільки заплановані заняття цієї групи (враховує скасування та разові зміни)
+                    </label>
+                    <div style={{ display: "grid", gap: 8, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, background: isDarkTheme ? "rgba(2,6,23,.22)" : "rgba(248,250,252,.78)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <div>
+                          <div style={editorSectionLabelSt}>Найближчі заняття</div>
+                          <b style={{ fontSize: 14 }}>Знайдено {previewInstances.length} занять</b>
+                        </div>
+                        <button
+                          type="button"
+                          style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }}
+                          onClick={() => setBulkPlanSetup((prev) => ({ ...(prev || {}), showAdvancedFilters: !prev?.showAdvancedFilters }))}
+                        >
+                          {bulkPlanSetup.showAdvancedFilters ? "Сховати фільтри" : "Додаткові фільтри"}
+                        </button>
+                      </div>
+                      {previewItems.length ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {previewItems.map((lesson) => (
+                            <span key={getLessonPlanKey(lesson)} style={{ ...planChipSt, background: isDarkTheme ? "rgba(20,184,166,.16)" : "rgba(240,253,250,.94)", borderColor: isDarkTheme ? "rgba(20,184,166,.38)" : "rgba(20,184,166,.24)", color: isDarkTheme ? "#99f6e4" : "#0f766e" }}>
+                              {new Date(`${lesson.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })} · {lesson.startTime || "—"}
+                            </span>
+                          ))}
+                          {previewInstances.length > previewItems.length ? <span style={{ ...editorBtnSt, minHeight: 26, padding: "0 9px" }}>+{previewInstances.length - previewItems.length}</span> : null}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: "9px 10px" }}>
+                          У цьому діапазоні немає занять цієї групи.
+                        </div>
+                      )}
+                    </div>
+                    {bulkPlanSetup.showAdvancedFilters ? (
+                      <div style={{ display: "grid", gap: 7, border: `1px dashed ${theme.border}`, borderRadius: 16, padding: 10 }}>
+                        <div style={editorSectionLabelSt}>Додатковий weekday filter</div>
+                        <div style={{ fontSize: 12, color: theme.textLight }}>Фільтр показує тільки дні, які є у schedule цієї групи, і не створює додаткових занять.</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {groupWeekdays.length ? groupWeekdays.map((weekday) => {
+                            const active = (bulkPlanSetup.weekdays || []).includes(weekday);
+                            return <button key={weekday} type="button" style={active ? { ...toolbarActiveSt, minHeight: 32, padding: "0 10px" } : { ...editorBtnSt, minHeight: 32, padding: "0 10px" }} onClick={() => toggleBulkSetupWeekday(weekday)}>{getWeekdayLabel(weekday)}</button>;
+                          }) : <span style={{ fontSize: 12, color: theme.textLight }}>Немає днів для фільтра</span>}
+                        </div>
+                      </div>
+                    ) : null}
+                    {bulkPlanSetup.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{bulkPlanSetup.error}</div> : null}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+                    <button style={btnP} onClick={generateBulkLessonPlans}>Генерувати список</button>
+                    <button style={btnS} onClick={() => setBulkPlanSetup(null)}>Скасувати</button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
