@@ -989,11 +989,11 @@ export default function ScheduleTab({
     });
     return validRows.length || getGroupScheduleWeekdays(group).length || 0;
   };
-  const getLessonWord = (count) => {
+  const getTrainingWord = (count) => {
     const n = Math.abs(Number(count || 0));
-    if (n % 10 === 1 && n % 100 !== 11) return "урок";
-    if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "уроки";
-    return "уроків";
+    if (n % 10 === 1 && n % 100 !== 11) return "тренування";
+    if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "тренування";
+    return "тренувань";
   };
   const getWeekWord = (count) => Number(count) === 1 ? "тиждень" : "тижні";
   const getWeekdayLabel = (weekday) => WEEKDAY_OPTIONS.find((day) => day.value === weekday)?.label || "—";
@@ -1010,7 +1010,7 @@ export default function ScheduleTab({
       startTime: event.startTime || "",
       endTime: event.endTime || "",
       timeLabel: `${event.startTime || "—"}–${event.endTime || "—"}`,
-      lessonLabel: event.title || event.groupName || group.name || "Заняття",
+      lessonLabel: event.title || event.groupName || group.name || "Тренування",
     }));
   const getBulkLessonInstances = (setup, group) => {
     if (!setup || !group?.id || !setup.dateFrom || !setup.dateTo) return [];
@@ -1137,7 +1137,7 @@ export default function ScheduleTab({
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
           timeLabel: `${minToHHMM(st)}–${minToHHMM(en)}`,
-          lessonLabel: getSlotTitle(row, group) || group.name || group.title || "Заняття",
+          lessonLabel: getSlotTitle(row, group) || group.name || group.title || "Тренування",
         });
       });
     });
@@ -1169,13 +1169,13 @@ export default function ScheduleTab({
     }
     const uniqueInstances = getBulkLessonInstances(bulkPlanSetup, group);
     if (!uniqueInstances.length) {
-      setBulkPlanSetup((p) => ({ ...(p || {}), error: "У цьому діапазоні не знайдено занять для групи" }));
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "У цьому періоді немає тренувань" }));
       return;
     }
     const selectedKeySet = new Set(getSelectedBulkLessonKeys(bulkPlanSetup, uniqueInstances));
     const selectedInstances = uniqueInstances.filter((instance) => selectedKeySet.has(getLessonPlanKey(instance)));
     if (!selectedInstances.length) {
-      setBulkPlanSetup((p) => ({ ...(p || {}), error: "Оберіть хоча б одне заняття для планування" }));
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "Оберіть хоча б одне тренування" }));
       return;
     }
     const template = createEmptyLessonPlanFields();
@@ -1672,17 +1672,27 @@ export default function ScheduleTab({
       opacity: active ? 1 : 0.72,
     };
   };
-  const renderValueChips = (options, value, onChange, accent = "violet") => (
+  const formatTrainingChipDate = (date) => {
+    const raw = new Date(`${date}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(",", "");
+    return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "—";
+  };
+  const renderChipSection = (label, children) => (
+    <div style={{ display: "grid", gap: 5 }}>
+      <div style={editorSectionLabelSt}>{label}</div>
+      {children}
+    </div>
+  );
+  const renderValueChips = (options, value, onChange, accent = "violet", limit = null) => (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {options.map((option) => {
+      {(limit ? options.slice(0, limit) : options).map((option) => {
         const active = String(value || "") === String(option.value);
         return <button key={option.value} type="button" style={getQuickChipSt(active, accent)} onClick={() => onChange(option.value)}>{option.label}</button>;
       })}
     </div>
   );
-  const renderFragmentChips = (items, value, onChange, accent = "teal") => (
+  const renderFragmentChips = (items, value, onChange, accent = "teal", limit = null) => (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {items.map((item) => {
+      {(limit ? items.slice(0, limit) : items).map((item) => {
         const active = planHasFragment(value, item);
         return <button key={item} type="button" style={getQuickChipSt(active, accent)} onClick={() => onChange(togglePlanFragment(value, item))}>{item}</button>;
       })}
@@ -1696,7 +1706,7 @@ export default function ScheduleTab({
     const weeks = Math.max(1, Math.ceil(((last - first) / 86400000 + 1) / 7));
     const label = sorted[0].lessonLabel || sorted[0].groupName || "Група";
     const time = sorted[0].startTime || "";
-    return `План для ${instances.length} ${getLessonWord(instances.length)} · ${weeks} ${getWeekWord(weeks)} · ${label}${time ? ` ${time}` : ""}`;
+    return `План: ${instances.length} ${getTrainingWord(instances.length)} · ${weeks} ${getWeekWord(weeks)} · ${label}${time ? ` ${time}` : ""}`;
   };
 
   return (
@@ -2043,9 +2053,9 @@ export default function ScheduleTab({
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
                     <div>
-                      <div style={editorSectionLabelSt}>Графік · Bulk planner</div>
+                      <div style={editorSectionLabelSt}>Графік · Планувальник</div>
                       <b style={{ fontSize: isMobile ? 17 : 18 }}>План на період</b>
-                      <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу — ми підтягнемо найближчі заняття. Натисніть на уроки, які має покривати план.</div>
+                      <div style={{ fontSize: 12, color: theme.textLight }}>Група · період · тренування</div>
                     </div>
                     <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanSetup(null)}>✕</button>
                   </div>
@@ -2072,8 +2082,8 @@ export default function ScheduleTab({
                     <div style={{ display: "grid", gap: 7, border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.22)" : "rgba(99,102,241,.18)"}`, borderRadius: 16, padding: 10, background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.62)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <div>
-                          <div style={editorSectionLabelSt}>Дні занять цієї групи</div>
-                          <div style={{ fontSize: 12, color: theme.textLight }}>Read-only підказка з реального розкладу групи</div>
+                          <div style={editorSectionLabelSt}>Дні групи</div>
+                          <div style={{ fontSize: 12, color: theme.textLight }}>Розклад групи</div>
                         </div>
                         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                           {groupWeekdays.length ? groupWeekdays.map((weekday) => <span key={weekday} style={{ ...planChipSt, minHeight: 24 }}>{getWeekdayLabel(weekday)}</span>) : <span style={{ fontSize: 12, color: theme.textLight }}>Графік не задано</span>}
@@ -2082,14 +2092,13 @@ export default function ScheduleTab({
                     </div>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textLight }}>
                       <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, selectedLessonKeys: null, error: "" }))} />
-                      Тільки заплановані заняття цієї групи (враховує скасування та разові зміни)
+                      Тільки за графіком
                     </label>
                     <div style={{ display: "grid", gap: 9, border: `1px solid ${theme.border}`, borderRadius: 18, padding: 11, background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.42), rgba(2,6,23,.24))" : "linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.76))" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <div>
-                          <div style={editorSectionLabelSt}>Найближчі заняття</div>
-                          <b style={{ fontSize: 14 }}>У план увійде {selectedLessonCount} {getLessonWord(selectedLessonCount)} із {previewInstances.length} знайдених</b>
-                          <div style={{ fontSize: 12, color: theme.textLight }}>Далі заповните загальні параметри та деталі по кожному уроку.</div>
+                          <div style={editorSectionLabelSt}>Тренування</div>
+                          <b style={{ fontSize: 14 }}>{selectedLessonCount} із {previewInstances.length} тренувань</b>
                         </div>
                         <button
                           type="button"
@@ -2102,15 +2111,15 @@ export default function ScheduleTab({
                       {previewInstances.length ? (
                         <>
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances)}>Обрати всі</button>
-                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection([])}>Зняти всі</button>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances)}>Усі</button>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection([])}>Очистити</button>
                             {quickSelectionOptions.map((option) => (
                               <button key={`${option.weeks || "near"}-${option.count}`} type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances, option.count)}>
-                                {option.weeks ? `${option.weeks} ${getWeekWord(option.weeks)} · ${option.count} ${getLessonWord(option.count)}` : `Найближчі ${option.count}`}
+                                {option.weeks ? `${option.weeks} ${getWeekWord(option.weeks)} · ${option.count} трен.` : `${option.count} трен.`}
                               </button>
                             ))}
                           </div>
-                          {selectedLessonCount > 10 ? <div style={{ fontSize: 12, color: isDarkTheme ? "#fde68a" : "#92400e" }}>Багато занять у плані, перевір список перед збереженням.</div> : null}
+                          {selectedLessonCount > 10 ? <div style={{ fontSize: 12, color: isDarkTheme ? "#fde68a" : "#92400e" }}>Багато тренувань у плані, перевір список перед збереженням.</div> : null}
                           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
                             {previewInstances.map((lesson) => {
                               const lessonKey = getLessonPlanKey(lesson);
@@ -2135,8 +2144,7 @@ export default function ScheduleTab({
                                     opacity: selected ? 1 : 0.68,
                                   }}
                                 >
-                                  <span style={{ fontWeight: 900, fontSize: 12.5 }}>{new Date(`${lesson.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(",", " ·")}</span>
-                                  {lesson.startTime ? <span style={{ fontSize: 10.5, fontWeight: 800, padding: "2px 6px", borderRadius: 999, background: selected ? "rgba(255,255,255,.26)" : "rgba(148,163,184,.12)" }}>{lesson.startTime}</span> : null}
+                                  <span style={{ fontWeight: 900, fontSize: 12.5 }}>{formatTrainingChipDate(lesson.lessonDate)}</span>
                                   <span style={{ fontSize: 10, fontWeight: 900, padding: "2px 6px", borderRadius: 999, background: trainingLessonPlanMap.has(getLessonPlanKey(lesson)) ? "rgba(99,102,241,.18)" : "rgba(20,184,166,.14)" }}>{trainingLessonPlanMap.has(getLessonPlanKey(lesson)) ? "є план" : "новий"}</span>
                                 </button>
                               );
@@ -2145,19 +2153,18 @@ export default function ScheduleTab({
                         </>
                       ) : (
                         <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: "9px 10px" }}>
-                          У цьому діапазоні немає занять цієї групи.
+                          Немає тренувань у періоді.
                         </div>
                       )}
                     </div>
                     {bulkPlanSetup.showAdvancedFilters ? (
                       <div style={{ display: "grid", gap: 7, border: `1px dashed ${theme.border}`, borderRadius: 16, padding: 10 }}>
-                        <div style={editorSectionLabelSt}>Додатковий weekday filter</div>
-                        <div style={{ fontSize: 12, color: theme.textLight }}>Фільтр показує тільки дні, які є у schedule цієї групи, і не створює додаткових занять.</div>
+                        <div style={editorSectionLabelSt}>Фільтр днів</div>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {groupWeekdays.length ? groupWeekdays.map((weekday) => {
                             const active = (bulkPlanSetup.weekdays || []).includes(weekday);
                             return <button key={weekday} type="button" style={active ? { ...toolbarActiveSt, minHeight: 32, padding: "0 10px" } : { ...editorBtnSt, minHeight: 32, padding: "0 10px" }} onClick={() => toggleBulkSetupWeekday(weekday)}>{getWeekdayLabel(weekday)}</button>;
-                          }) : <span style={{ fontSize: 12, color: theme.textLight }}>Немає днів для фільтра</span>}
+                          }) : <span style={{ fontSize: 12, color: theme.textLight }}>Немає днів</span>}
                         </div>
                       </div>
                     ) : null}
@@ -2180,23 +2187,20 @@ export default function ScheduleTab({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
               <div>
                 <div style={editorSectionLabelSt}>Графік · План на період</div>
-                <b style={{ fontSize: isMobile ? 17 : 18 }}>Bulk planner</b>
+                <b style={{ fontSize: isMobile ? 17 : 18 }}>Планувальник</b>
                 <div style={{ fontSize: 12, color: theme.textLight }}>{getBulkEditSummary(bulkPlanEdit.instances || [])}</div>
               </div>
               <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>✕</button>
             </div>
             <div style={{ border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.28)" : "rgba(99,102,241,.22)"}`, borderRadius: 18, padding: 12, display: "grid", gap: 9, background: isDarkTheme ? "linear-gradient(135deg, rgba(79,70,229,.16), rgba(15,23,42,.46))" : "linear-gradient(135deg, rgba(238,242,255,.96), rgba(255,255,255,.82))", marginBottom: 12 }}>
-              <div style={editorSectionLabelSt}>Загальні параметри</div>
-              {renderValueChips(QUICK_TYPE_CHIPS, bulkPlanEdit.applyTemplate?.planType || "other", (value) => updateBulkTemplate({ planType: value }), "violet")}
-              {renderValueChips(QUICK_DIFFICULTY_CHIPS, bulkPlanEdit.applyTemplate?.plannedDifficulty || "", (value) => updateBulkTemplate({ plannedDifficulty: value }), "amber")}
-              <div style={editorSectionLabelSt}>Швидкий зміст</div>
-              {renderFragmentChips(QUICK_CONTENT_CHIPS, bulkPlanEdit.applyTemplate?.plannedContent || "", (value) => updateBulkTemplate({ plannedContent: value }), "teal")}
-              <div style={editorSectionLabelSt}>Ціль</div>
-              {renderFragmentChips(QUICK_GOAL_CHIPS, bulkPlanEdit.applyTemplate?.goal || "", (value) => updateBulkTemplate({ goal: value }), "violet")}
-              <div style={editorSectionLabelSt}>Результат</div>
-              {renderFragmentChips(QUICK_OUTCOME_CHIPS, bulkPlanEdit.applyTemplate?.plannedOutcome || "", (value) => updateBulkTemplate({ plannedOutcome: value }), "amber")}
+              <div style={editorSectionLabelSt}>Шаблон</div>
+              {renderChipSection("Тип", renderValueChips(QUICK_TYPE_CHIPS, bulkPlanEdit.applyTemplate?.planType || "other", (value) => updateBulkTemplate({ planType: value }), "violet"))}
+              {renderChipSection("Складність", renderValueChips(QUICK_DIFFICULTY_CHIPS, bulkPlanEdit.applyTemplate?.plannedDifficulty || "", (value) => updateBulkTemplate({ plannedDifficulty: value }), "amber"))}
+              {renderChipSection("План", renderFragmentChips(QUICK_CONTENT_CHIPS, bulkPlanEdit.applyTemplate?.plannedContent || "", (value) => updateBulkTemplate({ plannedContent: value }), "teal", 10))}
+              {renderChipSection("Ціль", renderFragmentChips(QUICK_GOAL_CHIPS, bulkPlanEdit.applyTemplate?.goal || "", (value) => updateBulkTemplate({ goal: value }), "violet"))}
+              {renderChipSection("Результат", renderFragmentChips(QUICK_OUTCOME_CHIPS, bulkPlanEdit.applyTemplate?.plannedOutcome || "", (value) => updateBulkTemplate({ plannedOutcome: value }), "amber"))}
               <details style={{ fontSize: 12, color: theme.textLight }}>
-                <summary style={{ cursor: "pointer", fontWeight: 800 }}>Розширені деталі шаблону</summary>
+                <summary style={{ cursor: "pointer", fontWeight: 800 }}>Деталі шаблону</summary>
                 <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
                   <input style={editorInputSt} placeholder="Ціль для всіх" value={bulkPlanEdit.applyTemplate?.goal || ""} onChange={(e) => updateBulkTemplate({ goal: e.target.value })} />
                   <textarea style={{ ...editorInputSt, minHeight: 52, paddingTop: 10, resize: "vertical" }} placeholder="Плановий зміст для всіх" value={bulkPlanEdit.applyTemplate?.plannedContent || ""} onChange={(e) => updateBulkTemplate({ plannedContent: e.target.value })} />
@@ -2204,12 +2208,12 @@ export default function ScheduleTab({
                   <textarea style={{ ...editorInputSt, minHeight: 48, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки для всіх" value={bulkPlanEdit.applyTemplate?.notes || ""} onChange={(e) => updateBulkTemplate({ notes: e.target.value })} />
                 </div>
               </details>
-              <button style={{ ...btnS, width: "fit-content" }} onClick={applyBulkTemplateToAll}>Застосувати загальне до всіх</button>
+              <button style={{ ...btnS, width: "fit-content" }} onClick={applyBulkTemplateToAll}>Застосувати до всіх</button>
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               {(bulkPlanEdit.instances || []).map((instance, idx) => (
-                <div key={getLessonPlanKey(instance)} style={{ border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.22)" : "rgba(148,163,184,.3)"}`, borderRadius: 18, padding: 12, display: "grid", gap: 9, background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.44), rgba(2,6,23,.28))" : "linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.72))" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <div key={getLessonPlanKey(instance)} style={{ border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.22)" : "rgba(148,163,184,.3)"}`, borderRadius: 18, padding: isMobile ? 10 : 12, display: "grid", gap: isMobile ? 8 : 9, background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.44), rgba(2,6,23,.28))" : "linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.72))" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, flexWrap: "wrap" }}>
                     <div>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <b>{new Date(`${instance.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })} · {instance.timeLabel}</b>
@@ -2218,22 +2222,19 @@ export default function ScheduleTab({
                       <div style={{ fontSize: 12, color: theme.textLight }}>{instance.lessonLabel || instance.groupName} · {instance.trainerName}</div>
                     </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => copyPreviousBulkPlan(idx)} disabled={idx === 0}>Скопіювати з попереднього</button>
-                      <button style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px", color: theme.danger }} onClick={() => clearBulkPlan(idx)}>Очистити</button>
+                      <button style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }} onClick={() => copyPreviousBulkPlan(idx)} disabled={idx === 0}>Копіювати</button>
+                      <button style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", color: theme.danger }} onClick={() => clearBulkPlan(idx)}>Очистити</button>
                     </div>
                   </div>
-                  {renderValueChips(QUICK_TYPE_CHIPS, instance.planType || "other", (value) => updateBulkPlanInstance(idx, { planType: value }), "violet")}
-                  {renderValueChips(QUICK_DIFFICULTY_CHIPS, instance.plannedDifficulty || "", (value) => updateBulkPlanInstance(idx, { plannedDifficulty: value }), "amber")}
-                  <div style={editorSectionLabelSt}>План</div>
-                  {renderFragmentChips(QUICK_CONTENT_CHIPS, instance.plannedContent || "", (value) => updateBulkPlanInstance(idx, { plannedContent: value }), "teal")}
-                  <div style={editorSectionLabelSt}>Ціль</div>
-                  {renderFragmentChips(QUICK_GOAL_CHIPS, instance.goal || "", (value) => updateBulkPlanInstance(idx, { goal: value }), "violet")}
-                  <div style={editorSectionLabelSt}>Результат</div>
-                  {renderFragmentChips(QUICK_OUTCOME_CHIPS, instance.plannedOutcome || "", (value) => updateBulkPlanInstance(idx, { plannedOutcome: value }), "amber")}
+                  {renderChipSection("Тип", renderValueChips(QUICK_TYPE_CHIPS, instance.planType || "other", (value) => updateBulkPlanInstance(idx, { planType: value }), "violet"))}
+                  {renderChipSection("Складність", renderValueChips(QUICK_DIFFICULTY_CHIPS, instance.plannedDifficulty || "", (value) => updateBulkPlanInstance(idx, { plannedDifficulty: value }), "amber"))}
+                  {renderChipSection("План", renderFragmentChips(QUICK_CONTENT_CHIPS, instance.plannedContent || "", (value) => updateBulkPlanInstance(idx, { plannedContent: value }), "teal", 10))}
+                  {renderChipSection("Ціль", renderFragmentChips(QUICK_GOAL_CHIPS, instance.goal || "", (value) => updateBulkPlanInstance(idx, { goal: value }), "violet"))}
+                  {renderChipSection("Результат", renderFragmentChips(QUICK_OUTCOME_CHIPS, instance.plannedOutcome || "", (value) => updateBulkPlanInstance(idx, { plannedOutcome: value }), "amber"))}
                   <details style={{ fontSize: 12, color: theme.textLight }}>
-                    <summary style={{ cursor: "pointer", fontWeight: 800 }}>Розширені деталі / нотатка</summary>
+                    <summary style={{ cursor: "pointer", fontWeight: 800 }}>Деталі / нотатка</summary>
                     <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
-                      <input style={editorInputSt} placeholder="Ціль заняття" value={instance.goal || ""} onChange={(e) => updateBulkPlanInstance(idx, { goal: e.target.value })} />
+                      <input style={editorInputSt} placeholder="Ціль" value={instance.goal || ""} onChange={(e) => updateBulkPlanInstance(idx, { goal: e.target.value })} />
                       <textarea style={{ ...editorInputSt, minHeight: 58, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={instance.plannedContent || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedContent: e.target.value })} />
                       <input style={editorInputSt} placeholder="Очікуваний результат" value={instance.plannedOutcome || ""} onChange={(e) => updateBulkPlanInstance(idx, { plannedOutcome: e.target.value })} />
                       <textarea style={{ ...editorInputSt, minHeight: 50, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={instance.notes || ""} onChange={(e) => updateBulkPlanInstance(idx, { notes: e.target.value })} />
@@ -2274,7 +2275,7 @@ export default function ScheduleTab({
                 {LESSON_DIFFICULTIES.map((difficulty) => <option key={difficulty.value} value={difficulty.value}>{difficulty.label}</option>)}
               </select>
               <div style={editorSectionLabelSt}>Зміст плану</div>
-              <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Ціль заняття" value={lessonPlanEdit.goal || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, goal: e.target.value, error: "" }))} />
+              <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Ціль" value={lessonPlanEdit.goal || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, goal: e.target.value, error: "" }))} />
               <textarea style={{ ...editorInputSt, minHeight: 90, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={lessonPlanEdit.plannedContent || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedContent: e.target.value, error: "" }))} />
               <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Очікуваний результат" value={lessonPlanEdit.plannedOutcome || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedOutcome: e.target.value, error: "" }))} />
               <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={lessonPlanEdit.notes || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, notes: e.target.value, error: "" }))} />
