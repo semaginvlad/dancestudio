@@ -1014,6 +1014,7 @@ export default function ScheduleTab({
       ...suggestedRange,
       weekdays: getGroupScheduleWeekdays(group),
       showAdvancedFilters: false,
+      selectedLessonKeys: null,
       onlyScheduled: true,
       error: "",
     });
@@ -1028,6 +1029,7 @@ export default function ScheduleTab({
       ...suggestedRange,
       weekdays: getGroupScheduleWeekdays(group),
       showAdvancedFilters: false,
+      selectedLessonKeys: null,
       error: "",
     }));
   };
@@ -1035,7 +1037,31 @@ export default function ScheduleTab({
     setBulkPlanSetup((p) => {
       const current = Array.isArray(p?.weekdays) ? p.weekdays : [];
       const next = current.includes(weekday) ? current.filter((x) => x !== weekday) : [...current, weekday].sort((a, b) => a - b);
-      return { ...(p || {}), weekdays: next, error: "" };
+      return { ...(p || {}), weekdays: next, selectedLessonKeys: null, error: "" };
+    });
+  };
+  const getSelectedBulkLessonKeys = (setup, instances) => {
+    const allKeys = instances.map((instance) => getLessonPlanKey(instance));
+    if (!Array.isArray(setup?.selectedLessonKeys)) return allKeys;
+    const allKeySet = new Set(allKeys);
+    return setup.selectedLessonKeys.filter((key) => allKeySet.has(key));
+  };
+  const setBulkLessonSelection = (instances, count = null) => {
+    const nextInstances = count == null ? instances : instances.slice(0, count);
+    setBulkPlanSetup((p) => ({
+      ...(p || {}),
+      selectedLessonKeys: nextInstances.map((instance) => getLessonPlanKey(instance)),
+      error: "",
+    }));
+  };
+  const toggleBulkLessonSelection = (lesson, instances) => {
+    const lessonKey = getLessonPlanKey(lesson);
+    setBulkPlanSetup((p) => {
+      const currentKeys = getSelectedBulkLessonKeys(p, instances);
+      const nextKeys = currentKeys.includes(lessonKey)
+        ? currentKeys.filter((key) => key !== lessonKey)
+        : [...currentKeys, lessonKey];
+      return { ...(p || {}), selectedLessonKeys: nextKeys, error: "" };
     });
   };
   const buildRegularGroupLessonInstances = (group, dates, trainerId) => {
@@ -1096,9 +1122,15 @@ export default function ScheduleTab({
       setBulkPlanSetup((p) => ({ ...(p || {}), error: "У цьому діапазоні не знайдено занять для групи" }));
       return;
     }
+    const selectedKeySet = new Set(getSelectedBulkLessonKeys(bulkPlanSetup, uniqueInstances));
+    const selectedInstances = uniqueInstances.filter((instance) => selectedKeySet.has(getLessonPlanKey(instance)));
+    if (!selectedInstances.length) {
+      setBulkPlanSetup((p) => ({ ...(p || {}), error: "Оберіть хоча б одне заняття для планування" }));
+      return;
+    }
     const template = createEmptyLessonPlanFields();
     setBulkPlanEdit({
-      instances: uniqueInstances.map((instance) => createBulkPlanDraft(instance, template)),
+      instances: selectedInstances.map((instance) => createBulkPlanDraft(instance, template)),
       applyTemplate: template,
       saving: false,
       error: "",
@@ -1903,14 +1935,16 @@ export default function ScheduleTab({
               const selectedBulkGroup = bulkPlannerGroups.find((x) => String(x.id) === String(bulkPlanSetup.groupId));
               const groupWeekdays = getGroupScheduleWeekdays(selectedBulkGroup);
               const previewInstances = getBulkLessonInstances(bulkPlanSetup, selectedBulkGroup);
-              const previewItems = previewInstances.slice(0, 8);
+              const selectedLessonKeys = getSelectedBulkLessonKeys(bulkPlanSetup, previewInstances);
+              const selectedLessonKeySet = new Set(selectedLessonKeys);
+              const selectedLessonCount = selectedLessonKeys.length;
               return (
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
                     <div>
                       <div style={editorSectionLabelSt}>Графік · Bulk planner</div>
                       <b style={{ fontSize: isMobile ? 17 : 18 }}>План на період</b>
-                      <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу — система підтягне найближчі реальні заняття</div>
+                      <div style={{ fontSize: 12, color: theme.textLight }}>Оберіть групу — ми підтягнемо найближчі заняття. Натисніть на уроки, які має покривати план.</div>
                     </div>
                     <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setBulkPlanSetup(null)}>✕</button>
                   </div>
@@ -1931,8 +1965,8 @@ export default function ScheduleTab({
                     </select>
                     <div style={editorSectionLabelSt}>Період</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
-                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateFrom || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateFrom: e.target.value, error: "" }))} />
-                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateTo || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateTo: e.target.value, error: "" }))} />
+                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateFrom || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateFrom: e.target.value, selectedLessonKeys: null, error: "" }))} />
+                      <input style={editorInputSt} type="date" value={bulkPlanSetup.dateTo || ""} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), dateTo: e.target.value, selectedLessonKeys: null, error: "" }))} />
                     </div>
                     <div style={{ display: "grid", gap: 7, border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.22)" : "rgba(99,102,241,.18)"}`, borderRadius: 16, padding: 10, background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.62)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1946,32 +1980,63 @@ export default function ScheduleTab({
                       </div>
                     </div>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textLight }}>
-                      <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, error: "" }))} />
+                      <input type="checkbox" checked={!!bulkPlanSetup.onlyScheduled} onChange={(e) => setBulkPlanSetup((prev) => ({ ...(prev || {}), onlyScheduled: e.target.checked, selectedLessonKeys: null, error: "" }))} />
                       Тільки заплановані заняття цієї групи (враховує скасування та разові зміни)
                     </label>
-                    <div style={{ display: "grid", gap: 8, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, background: isDarkTheme ? "rgba(2,6,23,.22)" : "rgba(248,250,252,.78)" }}>
+                    <div style={{ display: "grid", gap: 9, border: `1px solid ${theme.border}`, borderRadius: 18, padding: 11, background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.42), rgba(2,6,23,.24))" : "linear-gradient(180deg, rgba(255,255,255,.86), rgba(248,250,252,.76))" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <div>
                           <div style={editorSectionLabelSt}>Найближчі заняття</div>
-                          <b style={{ fontSize: 14 }}>Знайдено {previewInstances.length} занять</b>
+                          <b style={{ fontSize: 14 }}>Обрано {selectedLessonCount} з {previewInstances.length} занять</b>
+                          <div style={{ fontSize: 12, color: theme.textLight }}>Далі заповните загальні параметри та деталі по кожному уроку.</div>
                         </div>
                         <button
                           type="button"
-                          style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }}
+                          style={{ ...planChipSt, minHeight: 30, padding: "0 11px", cursor: "pointer" }}
                           onClick={() => setBulkPlanSetup((prev) => ({ ...(prev || {}), showAdvancedFilters: !prev?.showAdvancedFilters }))}
                         >
                           {bulkPlanSetup.showAdvancedFilters ? "Сховати фільтри" : "Додаткові фільтри"}
                         </button>
                       </div>
-                      {previewItems.length ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {previewItems.map((lesson) => (
-                            <span key={getLessonPlanKey(lesson)} style={{ ...planChipSt, background: isDarkTheme ? "rgba(20,184,166,.16)" : "rgba(240,253,250,.94)", borderColor: isDarkTheme ? "rgba(20,184,166,.38)" : "rgba(20,184,166,.24)", color: isDarkTheme ? "#99f6e4" : "#0f766e" }}>
-                              {new Date(`${lesson.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })} · {lesson.startTime || "—"}
-                            </span>
-                          ))}
-                          {previewInstances.length > previewItems.length ? <span style={{ ...editorBtnSt, minHeight: 26, padding: "0 9px" }}>+{previewInstances.length - previewItems.length}</span> : null}
-                        </div>
+                      {previewInstances.length ? (
+                        <>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances)}>Обрати всі</button>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection([])}>Зняти всі</button>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances, 4)}>Найближчі 4</button>
+                            <button type="button" style={{ ...editorBtnSt, minHeight: 30, padding: "0 10px" }} onClick={() => setBulkLessonSelection(previewInstances, 8)}>Найближчі 8</button>
+                          </div>
+                          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                            {previewInstances.map((lesson) => {
+                              const lessonKey = getLessonPlanKey(lesson);
+                              const selected = selectedLessonKeySet.has(lessonKey);
+                              return (
+                                <button
+                                  key={lessonKey}
+                                  type="button"
+                                  onClick={() => toggleBulkLessonSelection(lesson, previewInstances)}
+                                  style={{
+                                    border: `1px solid ${selected ? (isDarkTheme ? "rgba(45,212,191,.58)" : "rgba(20,184,166,.42)") : (isDarkTheme ? "rgba(148,163,184,.24)" : "rgba(148,163,184,.36)")}`,
+                                    borderRadius: 999,
+                                    padding: "6px 10px",
+                                    minHeight: 36,
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 7,
+                                    cursor: "pointer",
+                                    color: selected ? (isDarkTheme ? "#ccfbf1" : "#0f766e") : theme.textLight,
+                                    background: selected ? (isDarkTheme ? "linear-gradient(135deg, rgba(20,184,166,.28), rgba(79,70,229,.18))" : "linear-gradient(135deg, rgba(204,251,241,.96), rgba(238,242,255,.92))") : (isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.54)"),
+                                    boxShadow: selected ? (isDarkTheme ? "0 0 0 1px rgba(45,212,191,.18), 0 10px 22px rgba(20,184,166,.1)" : "0 0 0 1px rgba(20,184,166,.16), 0 10px 20px rgba(15,118,110,.08)") : "none",
+                                    opacity: selected ? 1 : 0.68,
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 900, fontSize: 12.5 }}>{new Date(`${lesson.lessonDate}T12:00:00`).toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(",", " ·")}</span>
+                                  {lesson.startTime ? <span style={{ fontSize: 10.5, fontWeight: 800, padding: "2px 6px", borderRadius: 999, background: selected ? "rgba(255,255,255,.26)" : "rgba(148,163,184,.12)" }}>{lesson.startTime}</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
                       ) : (
                         <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${theme.border}`, borderRadius: 12, padding: "9px 10px" }}>
                           У цьому діапазоні немає занять цієї групи.
