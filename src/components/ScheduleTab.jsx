@@ -151,7 +151,7 @@ const getEventTypeMark = (event) => {
     group_lesson: "Г",
     individual_training: "І",
     room_booking: "Р",
-    cleaning: "🧹",
+    cleaning: "П",
     custom_admin_event: "П",
   };
   return marks[event?.eventType || event?.type] || "";
