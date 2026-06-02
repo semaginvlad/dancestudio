@@ -170,7 +170,8 @@ const makeStyles = () => {
   }),
   tableWrap: {
     overflowX: "auto",
-    overflowY: "visible",
+    overflowY: "auto",
+    maxHeight: "calc(100vh - 132px)",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : theme.border}`,
     borderRadius: 18,
     background: isDark ? "linear-gradient(180deg, rgba(21,30,43,0.98), rgba(16,23,34,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
@@ -196,9 +197,17 @@ const makeStyles = () => {
   },
   headTop: {
     position: "sticky",
+    background: theme.bg === "#0F131A" ? "rgba(16,23,34,0.96)" : "rgba(248,250,252,0.96)",
+    backdropFilter: "blur(8px)",
+  },
+  monthHeadSticky: {
     top: 0,
-    zIndex: 5,
-    background: matrixMuted,
+    zIndex: 18,
+  },
+  dateHeadSticky: {
+    top: 43,
+    zIndex: 19,
+    boxShadow: theme.bg === "#0F131A" ? "0 8px 18px rgba(0,0,0,0.28)" : "0 8px 18px rgba(15,23,42,0.08)",
   },
   monthHead: (isCurrent) => ({
     textAlign: "center",
@@ -249,8 +258,27 @@ const makeStyles = () => {
     color: isCurrentMonth ? theme.textMuted : (isMutedMonth ? theme.textLight : theme.textMuted),
     marginTop: 2,
   }),
+  cancelToggleBtn: (active) => ({
+    ...{
+      height: 36,
+      borderRadius: 999,
+      border: `1px solid ${active ? "rgba(239,68,68,0.38)" : (isDark ? "rgba(148,163,184,0.28)" : theme.border)}`,
+      padding: "0 12px",
+      background: active ? (isDark ? "rgba(239,68,68,0.16)" : "rgba(254,226,226,0.88)") : (isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.95)"),
+      color: active ? (isDark ? "#fecaca" : "#991b1b") : theme.textMuted,
+      fontSize: 13,
+      fontWeight: 800,
+      cursor: "pointer",
+      boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.05)" : "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 0 rgba(15,23,42,0.04)",
+    },
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    whiteSpace: "nowrap",
+  }),
   cancelBtn: (isCancelled) => ({
-    marginTop: 6,
+    marginTop: 4,
     width: 21,
     height: 21,
     borderRadius: 999,
@@ -1109,6 +1137,7 @@ export default function AttendanceTab({
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
+  const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
@@ -2562,7 +2591,8 @@ export default function AttendanceTab({
 
           .attendance-group-picker button,
           .attendance-toolbar-left input,
-          .attendance-toolbar-left select {
+          .attendance-toolbar-left select,
+          .attendance-cancel-toggle {
             min-height: 42px !important;
           }
 
@@ -2794,9 +2824,12 @@ export default function AttendanceTab({
             line-height: 1.15 !important;
           }
 
-          .attendance-day-cancel {
+          .attendance-day-cancel,
+          .attendance-day-head button[aria-label^="План тренування"] {
             width: 28px !important;
+            min-width: 28px !important;
             height: 28px !important;
+            min-height: 28px !important;
             line-height: 26px !important;
             font-size: 14px !important;
           }
@@ -2859,6 +2892,18 @@ export default function AttendanceTab({
             <option value="trial">Пробне</option>
             <option value="debt">Борг</option>
           </select>
+
+          <button
+            type="button"
+            className="attendance-cancel-toggle"
+            style={styles.cancelToggleBtn(showCancellationControls)}
+            onClick={() => setShowCancellationControls((value) => !value)}
+            aria-pressed={showCancellationControls}
+            title={showCancellationControls ? "Сховати кнопки скасування" : "Показати кнопки скасування"}
+          >
+            <span aria-hidden="true">{showCancellationControls ? "−" : "+"}</span>
+            <span>{showCancellationControls ? "Скасування" : "Показати скасування"}</span>
+          </button>
 
           {isAdmin && (
             <button
@@ -3073,14 +3118,14 @@ export default function AttendanceTab({
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
-              <th style={{ ...styles.thSticky, ...styles.headTop, ...styles.studentHead }}>
+              <th style={{ ...styles.thSticky, ...styles.headTop, ...styles.monthHeadSticky, ...styles.studentHead }}>
                 Учениці
               </th>
               {monthSpans.map((m) => (
                 <th
                   key={m.month}
                   colSpan={m.span}
-                  style={{ ...styles.headTop, ...styles.monthHead(m.month === centerMonth) }}
+                  style={{ ...styles.headTop, ...styles.monthHeadSticky, ...styles.monthHead(m.month === centerMonth) }}
                 >
                   {m.label}
                 </th>
@@ -3088,7 +3133,7 @@ export default function AttendanceTab({
             </tr>
 
             <tr>
-              <th style={{ ...styles.thSticky, ...styles.headTop, ...styles.studentHead }}>
+              <th style={{ ...styles.thSticky, ...styles.headTop, ...styles.dateHeadSticky, ...styles.studentHead }}>
                 {currentGroup.name}
               </th>
               {visibleDays.map((dateStr) => {
@@ -3105,6 +3150,7 @@ export default function AttendanceTab({
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
                 const headStyle = {
                   ...styles.headTop,
+                  ...styles.dateHeadSticky,
                   ...styles.dayHead(cancelledDay, isMutedMonth, isCurrentMonth),
                   ...(isMonthBoundary ? styles.monthDivider : {}),
                 };
@@ -3131,16 +3177,18 @@ export default function AttendanceTab({
                         i
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="attendance-day-cancel"
-                      disabled={isBusy}
-                      onClick={() => handleToggleCancelled(dateStr)}
-                      style={styles.cancelBtn(cancelledDay)}
-                      title={cancelledDay ? "Відновити тренування" : "Скасувати тренування"}
-                    >
-                      {cancelledDay ? "↺" : "×"}
-                    </button>
+                    {showCancellationControls ? (
+                      <button
+                        type="button"
+                        className="attendance-day-cancel"
+                        disabled={isBusy}
+                        onClick={() => handleToggleCancelled(dateStr)}
+                        style={styles.cancelBtn(cancelledDay)}
+                        title={cancelledDay ? "Відновити тренування" : "Скасувати тренування"}
+                      >
+                        {cancelledDay ? "↺" : "×"}
+                      </button>
+                    ) : null}
                     {dayBookings.length > 0 && (
                       <button
                         type="button"
