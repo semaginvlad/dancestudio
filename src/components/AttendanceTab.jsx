@@ -19,6 +19,23 @@ const MONTH_NAMES = [
 
 const WEEKDAYS_SHORT = ["Нд", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
+const LESSON_PLAN_TYPES = [
+  { value: "choreography", label: "Хореографія" },
+  { value: "technique", label: "Техніка" },
+  { value: "routine", label: "Комбінація" },
+  { value: "practice", label: "Практика" },
+  { value: "review", label: "Повторення" },
+  { value: "filming", label: "Зйомка" },
+  { value: "performance_prep", label: "Підготовка до виступу" },
+  { value: "other", label: "Інше" },
+];
+
+const LESSON_DIFFICULTIES = [
+  { value: "easy", label: "Легка" },
+  { value: "medium", label: "Середня" },
+  { value: "hard", label: "Складна" },
+];
+
 const isVisibleAttendanceStudent = (student) => {
   if (!student) return false;
   if (student.deleted_at || student.deletedAt || student.isDeleted === true) return false;
@@ -246,6 +263,64 @@ const makeStyles = () => {
     lineHeight: "20px",
     padding: 0,
   }),
+  lessonPlanBtn: {
+    marginTop: 4,
+    minWidth: 24,
+    minHeight: 24,
+    borderRadius: 999,
+    border: `1px solid ${isDark ? "rgba(129,140,248,0.48)" : "rgba(99,102,241,0.32)"}`,
+    background: isDark ? "rgba(129,140,248,0.18)" : "rgba(99,102,241,0.12)",
+    color: isDark ? "#c7d2fe" : "#4338ca",
+    cursor: "pointer",
+    fontSize: 11,
+    lineHeight: 1,
+    padding: "0 7px",
+    fontWeight: 900,
+    boxShadow: isDark ? "0 0 0 1px rgba(129,140,248,0.08) inset" : "0 0 0 1px rgba(99,102,241,0.06) inset",
+  },
+  lessonPlanSheet: (mobile) => ({
+    position: "fixed",
+    left: mobile ? 12 : "50%",
+    right: mobile ? 12 : "auto",
+    bottom: mobile ? 12 : "auto",
+    top: mobile ? "auto" : "50%",
+    transform: mobile ? "none" : "translate(-50%, -50%)",
+    width: mobile ? "auto" : "min(420px, calc(100vw - 24px))",
+    maxHeight: mobile ? "72vh" : "min(640px, calc(100vh - 48px))",
+    overflowY: "auto",
+    zIndex: 3001,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : theme.border}`,
+    borderRadius: mobile ? 18 : 20,
+    background: isDark ? "linear-gradient(180deg, rgba(17,24,39,0.98), rgba(15,23,42,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.99), rgba(248,250,252,0.99))",
+    padding: 14,
+    boxShadow: isDark ? "0 24px 54px rgba(0,0,0,0.55)" : "0 24px 54px rgba(15,23,42,0.22)",
+  }),
+  lessonPlanChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    maxWidth: "100%",
+    minHeight: 26,
+    borderRadius: 999,
+    padding: "4px 9px",
+    border: `1px solid ${isDark ? "rgba(129,140,248,0.28)" : "rgba(99,102,241,0.18)"}`,
+    background: isDark ? "rgba(129,140,248,0.14)" : "rgba(238,242,255,0.88)",
+    color: isDark ? "#e0e7ff" : "#3730a3",
+    fontSize: 12,
+    fontWeight: 800,
+    lineHeight: 1.25,
+    overflowWrap: "anywhere",
+  },
+  lessonPlanNotes: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 14,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.24)"}`,
+    background: isDark ? "rgba(15,23,42,0.64)" : "rgba(248,250,252,0.92)",
+    color: theme.textMain,
+    fontSize: 12.5,
+    lineHeight: 1.45,
+    whiteSpace: "pre-wrap",
+  },
   rowHead: {
     position: "sticky",
     left: 0,
@@ -663,6 +738,63 @@ const parseSchedule = (schedule) => {
   return [];
 };
 
+const parseScheduleWeekday = (raw) => {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n >= 0 && n <= 6) return n;
+    if (n >= 1 && n <= 7) return n % 7;
+  }
+  const map = {
+    mon: 1,
+    monday: 1,
+    пн: 1,
+    tue: 2,
+    tuesday: 2,
+    вт: 2,
+    wed: 3,
+    wednesday: 3,
+    ср: 3,
+    thu: 4,
+    thursday: 4,
+    чт: 4,
+    fri: 5,
+    friday: 5,
+    пт: 5,
+    sat: 6,
+    saturday: 6,
+    сб: 6,
+    sun: 0,
+    sunday: 0,
+    нд: 0,
+  };
+  return map[String(raw).trim().toLowerCase()] ?? null;
+};
+
+const getScheduleRowWeekday = (row = {}) =>
+  parseScheduleWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
+
+const getScheduleRowTrainerId = (row = {}, group = {}) =>
+  row?.trainerId ?? row?.trainer_id ?? row?.trainer ?? group?.trainer_id ?? group?.trainerId ?? null;
+
+const getAttendanceLessonPlanKey = ({ groupId, trainerId, lessonDate, scheduleSlotIndex }) =>
+  `${groupId}:${trainerId}:${String(lessonDate).slice(0, 10)}:${Number(scheduleSlotIndex || 0)}`;
+
+const splitPlanFragments = (value = "") => String(value || "").split(/[;\n]+/).map((x) => x.trim()).filter(Boolean);
+const extractTrackFromNotes = (notes = "") => {
+  const line = String(notes || "").split(/\r?\n/).find((item) => /^\s*Трек\s*:/i.test(item));
+  return line ? line.replace(/^\s*Трек\s*:\s*/i, "").trim() : "";
+};
+const stripTrackFromNotes = (notes = "") => String(notes || "")
+  .split(/\r?\n/)
+  .filter((line) => !/^\s*Трек\s*:/i.test(line))
+  .join("\n")
+  .trim();
+const lessonPlanTypeLabel = (value) =>
+  LESSON_PLAN_TYPES.find((type) => type.value === value)?.label || "Інше";
+const lessonDifficultyLabel = (value) =>
+  LESSON_DIFFICULTIES.find((difficulty) => difficulty.value === value)?.label || "Без оцінки";
+
 const ymd = (dateObj) => {
   const y = dateObj.getFullYear();
   const m = String(dateObj.getMonth() + 1).padStart(2, "0");
@@ -941,6 +1073,9 @@ const formatSubscriptionChangeSummary = (row) => {
 
 export default function AttendanceTab({
   groups,
+  trainers = [],
+  currentUser = null,
+  trainingLessonPlans = [],
   rawSubs = [],
   subs,
   setSubs,
@@ -992,6 +1127,7 @@ export default function AttendanceTab({
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
   const [trialPopoverState, setTrialPopoverState] = useState(null);
+  const [selectedLessonPlanView, setSelectedLessonPlanView] = useState(null);
   const [markingTrialId, setMarkingTrialId] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
@@ -1065,8 +1201,33 @@ export default function AttendanceTab({
     [groups, gid]
   );
 
+  const safeTrainingLessonPlans = useMemo(
+    () => (Array.isArray(trainingLessonPlans) ? trainingLessonPlans : []),
+    [trainingLessonPlans]
+  );
+  const safeTrainers = useMemo(
+    () => (Array.isArray(trainers) ? trainers : []),
+    [trainers]
+  );
+  const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
+  const currentTrainerFromState = useMemo(() => (
+    safeTrainers.find((t) => String(t.authUserId || "") === currentTrainerId) ||
+    safeTrainers.find((t) => String(t.id || "") === currentTrainerId) ||
+    null
+  ), [safeTrainers, currentTrainerId]);
+  const currentTrainerAuthId = currentTrainerFromState?.authUserId
+    ? String(currentTrainerFromState.authUserId)
+    : currentTrainerId;
+  const normalizeTrainerIdForPlan = (value) => {
+    const raw = String(value || "");
+    if (!raw) return "";
+    const trainer = safeTrainers.find((t) => String(t.authUserId || "") === raw || String(t.id || "") === raw);
+    return String(trainer?.authUserId || raw || "");
+  };
+
   useEffect(() => {
     setTrialPopoverState(null);
+    setSelectedLessonPlanView(null);
   }, [gid, centerMonth]);
 
 
@@ -1095,7 +1256,7 @@ export default function AttendanceTab({
   );
 
   const scheduleDays = useMemo(
-    () => schedule.map((s) => s.day).filter((d) => typeof d === "number"),
+    () => schedule.map(getScheduleRowWeekday).filter((d) => typeof d === "number"),
     [schedule]
   );
 
@@ -1106,6 +1267,45 @@ export default function AttendanceTab({
     if (!scheduleDays.length) return all;
     return all.filter((d) => scheduleDays.includes(getDayOfWeek(d)));
   }, [months, scheduleDays]);
+
+  const trainingLessonPlanMap = useMemo(() => {
+    const map = new Map();
+    safeTrainingLessonPlans.forEach((plan) => {
+      if (plan?.groupId == null || plan?.trainerId == null || plan?.lessonDate == null || plan?.scheduleSlotIndex == null) return;
+      map.set(getAttendanceLessonPlanKey({
+        groupId: plan.groupId,
+        trainerId: plan.trainerId,
+        lessonDate: plan.lessonDate,
+        scheduleSlotIndex: plan.scheduleSlotIndex,
+      }), plan);
+    });
+    return map;
+  }, [safeTrainingLessonPlans]);
+
+  const getAttendanceScheduleSlot = (dateStr) => {
+    const lessonWeekday = getDayOfWeek(dateStr);
+    const matchingSlots = schedule
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => getScheduleRowWeekday(row) === lessonWeekday);
+    return matchingSlots.length === 1 ? matchingSlots[0] : null;
+  };
+
+  const getPlanForAttendanceDate = (dateStr) => {
+    if (!currentGroup?.id) return null;
+    const slot = getAttendanceScheduleSlot(dateStr);
+    if (!slot) return null;
+    const rawTrainerId = isAdmin
+      ? getScheduleRowTrainerId(slot.row, currentGroup)
+      : (currentTrainerAuthId || currentTrainerId || getScheduleRowTrainerId(slot.row, currentGroup));
+    const trainerId = normalizeTrainerIdForPlan(rawTrainerId);
+    if (!trainerId) return null;
+    return trainingLessonPlanMap.get(getAttendanceLessonPlanKey({
+      groupId: currentGroup.id,
+      trainerId,
+      lessonDate: dateStr,
+      scheduleSlotIndex: slot.index,
+    })) || null;
+  };
 
   const confirmedTrialBookingsByDate = useMemo(() => {
     const filtered = (trialBookings || []).filter((booking) =>
@@ -2306,6 +2506,28 @@ export default function AttendanceTab({
     }
   };
 
+  const buildLessonPlanChips = (plan = {}) => {
+    const notes = plan.notes || "";
+    return [
+      lessonPlanTypeLabel(plan.planType || plan.plan_type || "other"),
+      (plan.plannedDifficulty || plan.planned_difficulty) ? lessonDifficultyLabel(plan.plannedDifficulty || plan.planned_difficulty) : "",
+      ...splitPlanFragments(plan.goal || ""),
+      ...splitPlanFragments(plan.plannedContent || plan.planned_content || ""),
+      (plan.track || extractTrackFromNotes(notes)) ? `🎵 ${plan.track || extractTrackFromNotes(notes)}` : "",
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+  };
+
+  const getLessonPlanNotes = (plan = {}) => stripTrackFromNotes(plan.notes || "");
+
+  const openLessonPlanView = (dateStr, plan) => {
+    if (!plan) return;
+    setSelectedLessonPlanView({
+      dateStr,
+      groupName: currentGroup?.name || currentGroup?.title || "Група",
+      plan,
+    });
+  };
+
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
@@ -2880,6 +3102,7 @@ export default function AttendanceTab({
                 const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                 const dayBookings = confirmedTrialBookingsByDate[dateStr] || [];
+                const lessonPlan = getPlanForAttendanceDate(dateStr);
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dayHead(cancelledDay, isMutedMonth, isCurrentMonth),
@@ -2894,6 +3117,20 @@ export default function AttendanceTab({
                   >
                     <div style={styles.dayNum(isCurrentMonth, isMutedMonth)}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
+                    {lessonPlan ? (
+                      <button
+                        type="button"
+                        title="Переглянути план тренування"
+                        aria-label={`План тренування на ${fmtUaShortDate(dateStr)}`}
+                        style={styles.lessonPlanBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLessonPlanView(dateStr, lessonPlan);
+                        }}
+                      >
+                        i
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="attendance-day-cancel"
@@ -3282,6 +3519,62 @@ export default function AttendanceTab({
           )}
         </div>
       </div>
+
+      {selectedLessonPlanView && createPortal(
+        <>
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(15,23,42,0.36)", backdropFilter: "blur(2px)" }}
+            onClick={() => setSelectedLessonPlanView(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="План тренування"
+            style={styles.lessonPlanSheet(typeof window !== "undefined" && window.innerWidth < 700)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 900, color: theme.textMain, lineHeight: 1.15 }}>План тренування</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>
+                  {fmtUaShortDate(selectedLessonPlanView.dateStr)} · {selectedLessonPlanView.groupName}
+                </div>
+              </div>
+              <button type="button" onClick={() => setSelectedLessonPlanView(null)} style={{ border: `1px solid ${theme.border}`, background: "transparent", borderRadius: 999, width: 30, height: 30, lineHeight: "28px", cursor: "pointer", fontSize: 16, fontWeight: 800, color: theme.textMuted, padding: 0 }}>✕</button>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {buildLessonPlanChips(selectedLessonPlanView.plan).map((chip, idx) => (
+                <span key={`${chip}_${idx}`} style={styles.lessonPlanChip}>{chip}</span>
+              ))}
+            </div>
+
+            {getLessonPlanNotes(selectedLessonPlanView.plan) ? (
+              <div style={styles.lessonPlanNotes}>{getLessonPlanNotes(selectedLessonPlanView.plan)}</div>
+            ) : null}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedLessonPlanView(null)}
+                style={{
+                  minHeight: 36,
+                  borderRadius: 999,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.input,
+                  color: theme.textMain,
+                  fontWeight: 800,
+                  padding: "0 14px",
+                  cursor: "pointer",
+                }}
+              >
+                Закрити
+              </button>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
 
       {trialPopoverState && createPortal(
         <>
