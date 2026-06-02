@@ -97,6 +97,7 @@ export default function App() {
   const [roomBookings, setRoomBookings] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
   const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
+  const [trainingLessonReports, setTrainingLessonReports] = useState([]);
   
   const [tab, setTab] = useStickyState("dashboard", "ds_danceStudioTab");
   const [modal, setModal] = useState(null);
@@ -372,14 +373,15 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp] = await Promise.all([
+      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
         safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings"),
         safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
-        safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans")
+        safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans"),
+        safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports")
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -420,6 +422,7 @@ export default function App() {
       setRoomBookings(rb || []);
       setGroupLessonOverrides(glo || []);
       setTrainingLessonPlans(tlp || []);
+      setTrainingLessonReports(tlr || []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -1309,6 +1312,24 @@ export default function App() {
     return saved;
   };
 
+  const upsertTrainingLessonReportAction = async (payload) => {
+    if (!canMutateGroupLessonOverride(payload?.groupId)) {
+      alert("Можна зберігати результати тільки для своїх груп.");
+      return null;
+    }
+    const saved = await db.upsertTrainingLessonReport(payload);
+    setTrainingLessonReports((prev) => [
+      ...prev.filter((x) => !(
+        String(x.groupId) === String(saved.groupId) &&
+        String(x.trainerId) === String(saved.trainerId) &&
+        String(x.lessonDate).slice(0, 10) === String(saved.lessonDate).slice(0, 10) &&
+        Number(x.scheduleSlotIndex || 0) === Number(saved.scheduleSlotIndex || 0)
+      )),
+      saved,
+    ]);
+    return saved;
+  };
+
   const updateGroupLessonOverrideAction = async (id, patch) => {
     const existing = groupLessonOverrides.find((x) => String(x.id) === String(id));
     if (!canMutateGroupLessonOverride(existing?.groupId || patch?.groupId)) {
@@ -1481,7 +1502,7 @@ export default function App() {
           />
         )}
 
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}

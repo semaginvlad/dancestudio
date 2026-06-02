@@ -36,6 +36,18 @@ const LESSON_DIFFICULTIES = [
   { value: "hard", label: "Складна" },
 ];
 
+const LESSON_RESULT_CHIPS = [
+  { id: "on_track", label: "Пройшли за планом", patch: { planProgress: "on_track" } },
+  { id: "needs_revision", label: "Треба повторити", patch: { riskFlag: "needs_revision" } },
+  { id: "slow", label: "Темп просів", patch: { paceActual: "slow" } },
+  { id: "move_next", label: "Можемо рухатись далі", patch: { nextAdjustment: "Можемо рухатись далі" } },
+  { id: "ready_for_filming", label: "Готово до зйомки", patch: { riskFlag: "ready_for_filming" } },
+  { id: "needs_cleaning", label: "Потрібна чистка", patch: { riskFlag: "needs_revision" } },
+  { id: "too_hard", label: "Складно для групи", patch: { difficultyActual: "too_hard", riskFlag: "too_hard" } },
+  { id: "good_mood", label: "Був хороший настрій", patch: { moodScore: 5 } },
+  { id: "low_attendance", label: "Багато пропусків", patch: { riskFlag: "low_attendance" } },
+];
+
 const isVisibleAttendanceStudent = (student) => {
   if (!student) return false;
   if (student.deleted_at || student.deletedAt || student.isDeleted === true) return false;
@@ -348,6 +360,40 @@ const makeStyles = () => {
     fontSize: 12.5,
     lineHeight: 1.45,
     whiteSpace: "pre-wrap",
+  },
+  lessonInfoSection: {
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.24)"}`,
+    borderRadius: 16,
+    padding: 10,
+    background: isDark ? "linear-gradient(180deg, rgba(30,41,59,0.62), rgba(15,23,42,0.52))" : "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(248,250,252,0.8))",
+    boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.9)",
+  },
+  lessonInfoSectionTitle: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: theme.textMain,
+    marginBottom: 8,
+    letterSpacing: 0.1,
+  },
+  trialInfoCard: {
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.24)" : "rgba(16,185,129,0.22)"}`,
+    borderRadius: 12,
+    background: isDark ? "rgba(6,78,59,0.22)" : "rgba(236,253,245,0.75)",
+    padding: 8,
+  },
+  resultTextarea: {
+    width: "100%",
+    minHeight: 66,
+    borderRadius: 14,
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.28)" : theme.border}`,
+    background: isDark ? "rgba(15,23,42,0.72)" : "rgba(255,255,255,0.94)",
+    color: theme.textMain,
+    fontFamily: "inherit",
+    fontSize: 13,
+    lineHeight: 1.35,
+    padding: 10,
+    resize: "vertical",
+    boxSizing: "border-box",
   },
   rowHead: {
     position: "sticky",
@@ -1104,6 +1150,8 @@ export default function AttendanceTab({
   trainers = [],
   currentUser = null,
   trainingLessonPlans = [],
+  trainingLessonReports = [],
+  onUpsertTrainingLessonReport,
   rawSubs = [],
   subs,
   setSubs,
@@ -1157,6 +1205,9 @@ export default function AttendanceTab({
   const [groupPickerPos, setGroupPickerPos] = useState({ top: 0, left: 0, width: 320 });
   const [trialPopoverState, setTrialPopoverState] = useState(null);
   const [selectedLessonPlanView, setSelectedLessonPlanView] = useState(null);
+  const [lessonReportDraft, setLessonReportDraft] = useState({ selectedChipIds: [], trainerNotes: "" });
+  const [savingLessonReport, setSavingLessonReport] = useState(false);
+  const [lessonReportSaved, setLessonReportSaved] = useState(false);
   const [markingTrialId, setMarkingTrialId] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const [openMenuState, setOpenMenuState] = useState(null);
@@ -1234,6 +1285,10 @@ export default function AttendanceTab({
     () => (Array.isArray(trainingLessonPlans) ? trainingLessonPlans : []),
     [trainingLessonPlans]
   );
+  const safeTrainingLessonReports = useMemo(
+    () => (Array.isArray(trainingLessonReports) ? trainingLessonReports : []),
+    [trainingLessonReports]
+  );
   const safeTrainers = useMemo(
     () => (Array.isArray(trainers) ? trainers : []),
     [trainers]
@@ -1257,6 +1312,7 @@ export default function AttendanceTab({
   useEffect(() => {
     setTrialPopoverState(null);
     setSelectedLessonPlanView(null);
+    setLessonReportSaved(false);
   }, [gid, centerMonth]);
 
 
@@ -1311,6 +1367,20 @@ export default function AttendanceTab({
     return map;
   }, [safeTrainingLessonPlans]);
 
+  const trainingLessonReportMap = useMemo(() => {
+    const map = new Map();
+    safeTrainingLessonReports.forEach((report) => {
+      if (report?.groupId == null || report?.trainerId == null || report?.lessonDate == null || report?.scheduleSlotIndex == null) return;
+      map.set(getAttendanceLessonPlanKey({
+        groupId: report.groupId,
+        trainerId: report.trainerId,
+        lessonDate: report.lessonDate,
+        scheduleSlotIndex: report.scheduleSlotIndex,
+      }), report);
+    });
+    return map;
+  }, [safeTrainingLessonReports]);
+
   const getAttendanceScheduleSlot = (dateStr) => {
     const lessonWeekday = getDayOfWeek(dateStr);
     const matchingSlots = schedule
@@ -1319,7 +1389,7 @@ export default function AttendanceTab({
     return matchingSlots.length === 1 ? matchingSlots[0] : null;
   };
 
-  const getPlanForAttendanceDate = (dateStr) => {
+  const getAttendanceLessonContext = (dateStr) => {
     if (!currentGroup?.id) return null;
     const slot = getAttendanceScheduleSlot(dateStr);
     if (!slot) return null;
@@ -1328,12 +1398,22 @@ export default function AttendanceTab({
       : (currentTrainerAuthId || currentTrainerId || getScheduleRowTrainerId(slot.row, currentGroup));
     const trainerId = normalizeTrainerIdForPlan(rawTrainerId);
     if (!trainerId) return null;
-    return trainingLessonPlanMap.get(getAttendanceLessonPlanKey({
+    return {
       groupId: currentGroup.id,
       trainerId,
       lessonDate: dateStr,
       scheduleSlotIndex: slot.index,
-    })) || null;
+    };
+  };
+
+  const getPlanForAttendanceDate = (dateStr) => {
+    const context = getAttendanceLessonContext(dateStr);
+    return context ? trainingLessonPlanMap.get(getAttendanceLessonPlanKey(context)) || null : null;
+  };
+
+  const getReportForAttendanceDate = (dateStr) => {
+    const context = getAttendanceLessonContext(dateStr);
+    return context ? trainingLessonReportMap.get(getAttendanceLessonPlanKey(context)) || null : null;
   };
 
   const confirmedTrialBookingsByDate = useMemo(() => {
@@ -2548,13 +2628,97 @@ export default function AttendanceTab({
 
   const getLessonPlanNotes = (plan = {}) => stripTrackFromNotes(plan.notes || "");
 
-  const openLessonPlanView = (dateStr, plan) => {
-    if (!plan) return;
+  const getReportSelectedChipIds = (report = {}) => {
+    const safeReport = report || {};
+    return LESSON_RESULT_CHIPS
+    .filter((chip) => {
+      const patch = chip.patch || {};
+      if (patch.planProgress && safeReport.planProgress !== patch.planProgress) return false;
+      if (patch.paceActual && safeReport.paceActual !== patch.paceActual) return false;
+      if (patch.difficultyActual && safeReport.difficultyActual !== patch.difficultyActual) return false;
+      if (patch.moodScore && Number(safeReport.moodScore || 0) !== Number(patch.moodScore)) return false;
+      if (patch.nextAdjustment && !String(safeReport.nextAdjustment || "").includes(patch.nextAdjustment)) return false;
+      if (patch.riskFlag && !Array.isArray(safeReport.riskFlags)) return false;
+      if (patch.riskFlag && !safeReport.riskFlags.includes(patch.riskFlag)) return false;
+      return true;
+    })
+    .map((chip) => chip.id);
+  };
+
+  const buildReportPayloadFromDraft = (context, draft = {}) => {
+    const selectedIds = Array.isArray(draft.selectedChipIds) ? draft.selectedChipIds : [];
+    const selectedChips = LESSON_RESULT_CHIPS.filter((chip) => selectedIds.includes(chip.id));
+    const riskFlags = Array.from(new Set(selectedChips.map((chip) => chip.patch?.riskFlag).filter(Boolean)));
+    const findPatchValue = (key) => selectedChips.find((chip) => chip.patch?.[key])?.patch?.[key] || null;
+    return {
+      ...context,
+      planProgress: findPatchValue("planProgress"),
+      paceActual: findPatchValue("paceActual"),
+      difficultyActual: findPatchValue("difficultyActual"),
+      moodScore: findPatchValue("moodScore"),
+      completedContent: selectedChips.map((chip) => chip.label).join("; "),
+      nextAdjustment: selectedChips.map((chip) => chip.patch?.nextAdjustment).filter(Boolean).join("; "),
+      trainerNotes: String(draft.trainerNotes || "").trim(),
+      riskFlags,
+    };
+  };
+
+  const openLessonInfoView = (dateStr, { plan = null, bookings = [], report = null, context = null } = {}) => {
     setSelectedLessonPlanView({
       dateStr,
       groupName: currentGroup?.name || currentGroup?.title || "Група",
       plan,
+      bookings,
+      report,
+      context,
     });
+    setLessonReportDraft({
+      selectedChipIds: getReportSelectedChipIds(report),
+      trainerNotes: report?.trainerNotes || "",
+    });
+    setLessonReportSaved(false);
+  };
+
+  const toggleLessonReportChip = (chipId) => {
+    setLessonReportDraft((prev) => {
+      const current = Array.isArray(prev.selectedChipIds) ? prev.selectedChipIds : [];
+      return {
+        ...prev,
+        selectedChipIds: current.includes(chipId)
+          ? current.filter((id) => id !== chipId)
+          : [...current, chipId],
+      };
+    });
+    setLessonReportSaved(false);
+  };
+
+  const saveLessonReport = async () => {
+    if (!selectedLessonPlanView?.context || !onUpsertTrainingLessonReport) return;
+    try {
+      setSavingLessonReport(true);
+      const saved = await onUpsertTrainingLessonReport(buildReportPayloadFromDraft(selectedLessonPlanView.context, lessonReportDraft));
+      if (saved) {
+        setSelectedLessonPlanView((prev) => ({ ...(prev || {}), report: saved }));
+        setLessonReportDraft({
+          selectedChipIds: getReportSelectedChipIds(saved),
+          trainerNotes: saved.trainerNotes || "",
+        });
+        setLessonReportSaved(true);
+      }
+    } catch (e) {
+      alert(`Не вдалося зберегти результат: ${e?.message || e}`);
+    } finally {
+      setSavingLessonReport(false);
+    }
+  };
+
+  const formatTrialStatus = (status = "") => {
+    const key = String(status || "").toLowerCase();
+    if (key === "confirmed") return "Підтвердила";
+    if (key === "converted") return "У групі";
+    if (key === "cancelled") return "Скасовано";
+    if (key === "new") return "Новий запис";
+    return status || "Запис";
   };
 
   return (
@@ -2825,7 +2989,7 @@ export default function AttendanceTab({
           }
 
           .attendance-day-cancel,
-          .attendance-day-head button[aria-label^="План тренування"] {
+          .attendance-day-head button[aria-label^="Інфо тренування"] {
             width: 28px !important;
             min-width: 28px !important;
             height: 28px !important;
@@ -3148,6 +3312,9 @@ export default function AttendanceTab({
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                 const dayBookings = confirmedTrialBookingsByDate[dateStr] || [];
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
+                const lessonReport = getReportForAttendanceDate(dateStr);
+                const lessonContext = getAttendanceLessonContext(dateStr);
+                const infoCount = [lessonPlan, dayBookings.length ? dayBookings : null, lessonReport].filter(Boolean).length;
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dateHeadSticky,
@@ -3163,18 +3330,18 @@ export default function AttendanceTab({
                   >
                     <div style={styles.dayNum(isCurrentMonth, isMutedMonth)}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
-                    {lessonPlan ? (
+                    {infoCount > 0 ? (
                       <button
                         type="button"
-                        title="Переглянути план тренування"
-                        aria-label={`План тренування на ${fmtUaShortDate(dateStr)}`}
+                        title="Інфо тренування"
+                        aria-label={`Інфо тренування на ${fmtUaShortDate(dateStr)}`}
                         style={styles.lessonPlanBtn}
                         onClick={(e) => {
                           e.stopPropagation();
-                          openLessonPlanView(dateStr, lessonPlan);
+                          openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
                         }}
                       >
-                        i
+                        {infoCount > 1 ? `i · ${infoCount}` : "i"}
                       </button>
                     ) : null}
                     {showCancellationControls ? (
@@ -3189,42 +3356,6 @@ export default function AttendanceTab({
                         {cancelledDay ? "↺" : "×"}
                       </button>
                     ) : null}
-                    {dayBookings.length > 0 && (
-                      <button
-                        type="button"
-                        title={`${dayBookings.length} ${dayBookings.length === 1 ? "підтверджене пробне" : (dayBookings.length < 5 ? "підтверджені пробні" : "підтверджених пробних")}`}
-                        aria-label={`${dayBookings.length} ${dayBookings.length === 1 ? "підтверджене пробне" : (dayBookings.length < 5 ? "підтверджені пробні" : "підтверджених пробних")}`}
-                        style={{
-                          marginTop: 4,
-                          cursor: "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 10,
-                          fontWeight: 800,
-                          color: "#065f46",
-                          background: "rgba(16,185,129,.16)",
-                          borderRadius: 999,
-                          minWidth: 22,
-                          minHeight: 22,
-                          padding: "0 6px",
-                          border: "1px solid rgba(16,185,129,.35)",
-                          boxShadow: "0 0 0 1px rgba(16,185,129,.08) inset",
-                          lineHeight: 1,
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const isMobile = window.innerWidth < 700;
-                          const popoverWidth = Math.min(300, Math.max(240, window.innerWidth - 24));
-                          const left = isMobile ? 12 : Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
-                          const top = isMobile ? null : Math.min(rect.bottom + 8, window.innerHeight - 20);
-                          setTrialPopoverState({ dateStr, left, top, width: popoverWidth, mobile: isMobile });
-                        }}
-                      >
-                        {dayBookings.length}
-                      </button>
-                    )}
                   </th>
                 );
               })}
@@ -3577,13 +3708,13 @@ export default function AttendanceTab({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="План тренування"
+            aria-label="Інфо тренування"
             style={styles.lessonPlanSheet(typeof window !== "undefined" && window.innerWidth < 700)}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 900, color: theme.textMain, lineHeight: 1.15 }}>План тренування</div>
+                <div style={{ fontSize: 16, fontWeight: 900, color: theme.textMain, lineHeight: 1.15 }}>Інфо тренування</div>
                 <div style={{ marginTop: 4, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>
                   {fmtUaShortDate(selectedLessonPlanView.dateStr)} · {selectedLessonPlanView.groupName}
                 </div>
@@ -3591,15 +3722,108 @@ export default function AttendanceTab({
               <button type="button" onClick={() => setSelectedLessonPlanView(null)} style={{ border: `1px solid ${theme.border}`, background: "transparent", borderRadius: 999, width: 30, height: 30, lineHeight: "28px", cursor: "pointer", fontSize: 16, fontWeight: 800, color: theme.textMuted, padding: 0 }}>✕</button>
             </div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {buildLessonPlanChips(selectedLessonPlanView.plan).map((chip, idx) => (
-                <span key={`${chip}_${idx}`} style={styles.lessonPlanChip}>{chip}</span>
-              ))}
-            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {selectedLessonPlanView.plan ? (
+                <section style={styles.lessonInfoSection}>
+                  <div style={styles.lessonInfoSectionTitle}>План</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {buildLessonPlanChips(selectedLessonPlanView.plan).map((chip, idx) => (
+                      <span key={`${chip}_${idx}`} style={styles.lessonPlanChip}>{chip}</span>
+                    ))}
+                  </div>
+                  {getLessonPlanNotes(selectedLessonPlanView.plan) ? (
+                    <div style={styles.lessonPlanNotes}>{getLessonPlanNotes(selectedLessonPlanView.plan)}</div>
+                  ) : null}
+                </section>
+              ) : null}
 
-            {getLessonPlanNotes(selectedLessonPlanView.plan) ? (
-              <div style={styles.lessonPlanNotes}>{getLessonPlanNotes(selectedLessonPlanView.plan)}</div>
-            ) : null}
+              {selectedLessonPlanView.bookings?.length ? (
+                <section style={styles.lessonInfoSection}>
+                  <div style={styles.lessonInfoSectionTitle}>Пробні</div>
+                  <div style={{ display: "grid", gap: 7 }}>
+                    {selectedLessonPlanView.bookings.map((booking) => {
+                      const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
+                      return (
+                        <div key={booking.id} style={styles.trialInfoCard}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 900, color: theme.textMain }}>{booking.name || "Без імені"}</div>
+                              {contact ? <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, overflowWrap: "anywhere" }}>{contact}</div> : null}
+                              {booking.note ? <div style={{ fontSize: 11, color: theme.textMain, marginTop: 4 }}>{booking.note}</div> : null}
+                            </div>
+                            <span style={{ ...styles.lessonPlanChip, minHeight: 22, fontSize: 10.5, padding: "3px 7px", color: "#047857", background: "rgba(16,185,129,.14)", border: "1px solid rgba(16,185,129,.28)" }}>
+                              {formatTrialStatus(booking.status)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              {selectedLessonPlanView.context && onUpsertTrainingLessonReport ? (
+                <section style={styles.lessonInfoSection}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <div style={{ ...styles.lessonInfoSectionTitle, marginBottom: 0 }}>Результат</div>
+                    {selectedLessonPlanView.report || lessonReportSaved ? (
+                      <span style={{ ...styles.lessonPlanChip, minHeight: 22, fontSize: 10.5, padding: "3px 7px" }}>збережено</span>
+                    ) : null}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                    {LESSON_RESULT_CHIPS.map((chip) => {
+                      const active = (lessonReportDraft.selectedChipIds || []).includes(chip.id);
+                      return (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          onClick={() => toggleLessonReportChip(chip.id)}
+                          style={{
+                            ...styles.lessonPlanChip,
+                            cursor: "pointer",
+                            minHeight: 30,
+                            background: active ? theme.primary : styles.lessonPlanChip.background,
+                            color: active ? "#fff" : styles.lessonPlanChip.color,
+                            borderColor: active ? theme.primary : styles.lessonPlanChip.borderColor,
+                          }}
+                        >
+                          {chip.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    style={{ ...styles.resultTextarea, marginTop: 9 }}
+                    value={lessonReportDraft.trainerNotes || ""}
+                    onChange={(e) => {
+                      setLessonReportDraft((prev) => ({ ...(prev || {}), trainerNotes: e.target.value }));
+                      setLessonReportSaved(false);
+                    }}
+                    placeholder="Що реально вийшло / що повторити"
+                  />
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 9 }}>
+                    <button
+                      type="button"
+                      onClick={saveLessonReport}
+                      disabled={savingLessonReport}
+                      style={{
+                        minHeight: 36,
+                        borderRadius: 999,
+                        border: `1px solid ${theme.primary}`,
+                        background: theme.primary,
+                        color: "#fff",
+                        fontWeight: 900,
+                        padding: "0 14px",
+                        cursor: savingLessonReport ? "default" : "pointer",
+                        opacity: savingLessonReport ? 0.72 : 1,
+                      }}
+                    >
+                      {savingLessonReport ? "Зберігаємо…" : "Зберегти результат"}
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+            </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
               <button
@@ -3618,72 +3842,6 @@ export default function AttendanceTab({
               >
                 Закрити
               </button>
-            </div>
-          </div>
-        </>,
-        document.body
-      )}
-
-      {trialPopoverState && createPortal(
-        <>
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 2998, background: "transparent" }}
-            onClick={() => setTrialPopoverState(null)}
-          />
-          <div
-            style={trialPopoverState.mobile
-              ? {
-                  position: "fixed",
-                  left: 12,
-                  right: 12,
-                  bottom: 12,
-                  maxHeight: "60vh",
-                  overflowY: "auto",
-                  zIndex: 2999,
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 12,
-                  background: theme.card,
-                  padding: 10,
-                  boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
-                }
-              : {
-                  position: "fixed",
-                  left: trialPopoverState.left,
-                  top: trialPopoverState.top,
-                  width: trialPopoverState.width,
-                  minWidth: 240,
-                  maxWidth: 300,
-                  maxHeight: "60vh",
-                  overflowY: "auto",
-                  zIndex: 2999,
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 12,
-                  background: theme.card,
-                  padding: 10,
-                  boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
-                }
-            }
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: theme.textMain }}>{`Пробні · ${fmtUaShortDate(trialPopoverState.dateStr)}`}</div>
-              <button type="button" onClick={() => setTrialPopoverState(null)} style={{ border: `1px solid ${theme.border}`, background: "transparent", borderRadius: 999, width: 22, height: 22, lineHeight: "20px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: theme.textMuted, padding: 0 }}>✕</button>
-            </div>
-            <div style={{ display: "grid", gap: 5 }}>
-              {(confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).map((booking) => {
-                const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
-                return (
-                  <div key={booking.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.bg, padding: 7 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMain }}>{booking.name || "Без імені"}</div>
-                    {contact ? <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>{contact}</div> : null}
-                    {booking.note ? <div style={{ fontSize: 10, color: theme.textMain, marginTop: 2 }}>Нотатка: {booking.note}</div> : null}
-                    <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, color: "#047857", background: "rgba(16,185,129,.14)", borderRadius: 999, padding: "2px 7px" }}>Підтвердила</span>
-                    <button type="button" title="Додати пробну в групу" aria-label="Додати пробну в групу" onClick={() => handleAddTrialBookingToGroup(booking)} disabled={markingTrialId === String(booking.id)} style={{ marginTop: 6, border: `1px solid ${theme.border}`, borderRadius: 999, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, minHeight: trialPopoverState.mobile ? 34 : undefined }}>
-                      {markingTrialId === String(booking.id) ? "Додаємо..." : "+ В групу"}
-                    </button>
-                  </div>
-                );
-              })}
             </div>
           </div>
         </>,
