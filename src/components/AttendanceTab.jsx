@@ -1359,7 +1359,7 @@ export default function AttendanceTab({
       if (plan?.groupId == null || plan?.trainerId == null || plan?.lessonDate == null || plan?.scheduleSlotIndex == null) return;
       map.set(getAttendanceLessonPlanKey({
         groupId: plan.groupId,
-        trainerId: plan.trainerId,
+        trainerId: normalizeTrainerIdForPlan(plan.trainerId),
         lessonDate: plan.lessonDate,
         scheduleSlotIndex: plan.scheduleSlotIndex,
       }), plan);
@@ -1373,7 +1373,7 @@ export default function AttendanceTab({
       if (report?.groupId == null || report?.trainerId == null || report?.lessonDate == null || report?.scheduleSlotIndex == null) return;
       map.set(getAttendanceLessonPlanKey({
         groupId: report.groupId,
-        trainerId: report.trainerId,
+        trainerId: normalizeTrainerIdForPlan(report.trainerId),
         lessonDate: report.lessonDate,
         scheduleSlotIndex: report.scheduleSlotIndex,
       }), report);
@@ -1389,30 +1389,71 @@ export default function AttendanceTab({
     return matchingSlots.length === 1 ? matchingSlots[0] : null;
   };
 
-  const getAttendanceLessonContext = (dateStr) => {
-    if (!currentGroup?.id) return null;
-    const slot = getAttendanceScheduleSlot(dateStr);
-    if (!slot) return null;
-    const rawTrainerId = isAdmin
-      ? getScheduleRowTrainerId(slot.row, currentGroup)
-      : (currentTrainerAuthId || currentTrainerId || getScheduleRowTrainerId(slot.row, currentGroup));
-    const trainerId = normalizeTrainerIdForPlan(rawTrainerId);
+  const getPlanCandidatesForAttendanceDate = (dateStr, trainerId = "") => {
+    const lessonDate = toDateKey(dateStr);
+    const normalizedTrainerId = normalizeTrainerIdForPlan(trainerId);
+    return safeTrainingLessonPlans.filter((plan) => {
+      if (String(plan?.groupId || "") !== String(currentGroup?.id || "")) return false;
+      if (toDateKey(plan?.lessonDate) !== lessonDate) return false;
+      if (normalizedTrainerId && normalizeTrainerIdForPlan(plan?.trainerId) !== normalizedTrainerId) return false;
+      return plan?.scheduleSlotIndex != null;
+    });
+  };
+
+  const getPlanContext = (plan = null) => {
+    if (!plan?.groupId || !plan?.trainerId || !plan?.lessonDate || plan?.scheduleSlotIndex == null) return null;
+    const trainerId = normalizeTrainerIdForPlan(plan.trainerId);
     if (!trainerId) return null;
     return {
-      groupId: currentGroup.id,
+      groupId: plan.groupId,
       trainerId,
-      lessonDate: dateStr,
-      scheduleSlotIndex: slot.index,
+      lessonDate: toDateKey(plan.lessonDate),
+      scheduleSlotIndex: plan.scheduleSlotIndex,
     };
+  };
+
+  const getAttendanceLessonContext = (dateStr, plan = null) => {
+    const planContext = getPlanContext(plan);
+    if (planContext) return planContext;
+    if (!currentGroup?.id) return null;
+    const slot = getAttendanceScheduleSlot(dateStr);
+    if (slot) {
+      const rawTrainerId = isAdmin
+        ? getScheduleRowTrainerId(slot.row, currentGroup)
+        : (currentTrainerAuthId || currentTrainerId || getScheduleRowTrainerId(slot.row, currentGroup));
+      const trainerId = normalizeTrainerIdForPlan(rawTrainerId);
+      if (trainerId) {
+        return {
+          groupId: currentGroup.id,
+          trainerId,
+          lessonDate: toDateKey(dateStr),
+          scheduleSlotIndex: slot.index,
+        };
+      }
+    }
+
+    const scopedTrainerId = isAdmin ? "" : (currentTrainerAuthId || currentTrainerId);
+    const candidates = getPlanCandidatesForAttendanceDate(dateStr, scopedTrainerId);
+    return candidates.length === 1 ? getPlanContext(candidates[0]) : null;
   };
 
   const getPlanForAttendanceDate = (dateStr) => {
     const context = getAttendanceLessonContext(dateStr);
-    return context ? trainingLessonPlanMap.get(getAttendanceLessonPlanKey(context)) || null : null;
+    const exactPlan = context ? trainingLessonPlanMap.get(getAttendanceLessonPlanKey(context)) || null : null;
+    if (exactPlan) return exactPlan;
+
+    const trainerCandidates = context?.trainerId
+      ? getPlanCandidatesForAttendanceDate(dateStr, context.trainerId)
+      : [];
+    if (trainerCandidates.length === 1) return trainerCandidates[0];
+
+    const scopedTrainerId = isAdmin ? "" : (currentTrainerAuthId || currentTrainerId);
+    const scopedCandidates = getPlanCandidatesForAttendanceDate(dateStr, scopedTrainerId);
+    return scopedCandidates.length === 1 ? scopedCandidates[0] : null;
   };
 
-  const getReportForAttendanceDate = (dateStr) => {
-    const context = getAttendanceLessonContext(dateStr);
+  const getReportForAttendanceDate = (dateStr, contextOverride = null) => {
+    const context = contextOverride || getAttendanceLessonContext(dateStr);
     return context ? trainingLessonReportMap.get(getAttendanceLessonPlanKey(context)) || null : null;
   };
 
@@ -3314,8 +3355,8 @@ export default function AttendanceTab({
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
                 const dayBookings = trialBookingsByDate[dateStr] || [];
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
-                const lessonReport = getReportForAttendanceDate(dateStr);
-                const lessonContext = getAttendanceLessonContext(dateStr);
+                const lessonContext = getAttendanceLessonContext(dateStr, lessonPlan);
+                const lessonReport = getReportForAttendanceDate(dateStr, lessonContext);
                 const infoCount = [lessonPlan, dayBookings.length ? dayBookings : null, lessonReport].filter(Boolean).length;
                 const headStyle = {
                   ...styles.headTop,
