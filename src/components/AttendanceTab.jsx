@@ -303,8 +303,15 @@ const makeStyles = () => {
     lineHeight: "20px",
     padding: 0,
   }),
-  lessonPlanBtn: {
+  lessonInfoIndicators: {
     marginTop: 4,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    flexWrap: "nowrap",
+  },
+  lessonPlanBtn: {
     minWidth: 24,
     minHeight: 24,
     borderRadius: 999,
@@ -317,6 +324,20 @@ const makeStyles = () => {
     padding: "0 7px",
     fontWeight: 900,
     boxShadow: isDark ? "0 0 0 1px rgba(129,140,248,0.08) inset" : "0 0 0 1px rgba(99,102,241,0.06) inset",
+  },
+  lessonTrialBtn: {
+    minWidth: 24,
+    minHeight: 24,
+    borderRadius: 999,
+    border: `1px solid ${isDark ? "rgba(45,212,191,0.46)" : "rgba(16,185,129,0.34)"}`,
+    background: isDark ? "rgba(20,184,166,0.18)" : "rgba(16,185,129,0.13)",
+    color: isDark ? "#99f6e4" : "#047857",
+    cursor: "pointer",
+    fontSize: 11,
+    lineHeight: 1,
+    padding: "0 7px",
+    fontWeight: 900,
+    boxShadow: isDark ? "0 0 0 1px rgba(45,212,191,0.08) inset" : "0 0 0 1px rgba(16,185,129,0.06) inset",
   },
   lessonPlanSheet: (mobile) => ({
     position: "fixed",
@@ -2755,13 +2776,16 @@ export default function AttendanceTab({
     }
   };
 
-  const formatTrialStatus = (status = "") => {
+  const getTrialStatusDisplay = (status = "") => {
     const key = String(status || "").toLowerCase();
-    if (key === "confirmed") return "Підтвердила";
-    if (key === "converted") return "У групі";
-    if (key === "cancelled") return "Скасовано";
-    if (key === "new") return "Новий запис";
-    return status || "Запис";
+    if (["became_student", "converted"].includes(key)) {
+      return { label: "✓", title: "Стала ученицею", tone: "success" };
+    }
+    if (key === "confirmed") return { label: "Підтвердила", title: "Підтвердила", tone: "success" };
+    if (key === "pending") return { label: "Очікує", title: "Очікує", tone: "neutral" };
+    if (["cancelled", "canceled"].includes(key)) return { label: "Скасовано", title: "Скасовано", tone: "muted" };
+    if (key === "new") return { label: "Новий", title: "Новий запис", tone: "neutral" };
+    return { label: "Статус", title: "Статус запису", tone: "neutral" };
   };
 
   return (
@@ -3032,7 +3056,8 @@ export default function AttendanceTab({
           }
 
           .attendance-day-cancel,
-          .attendance-day-head button[aria-label^="Інфо тренування"] {
+          .attendance-day-head button[aria-label^="Інфо тренування"],
+          .attendance-day-head button[aria-label^="Пробні"] {
             width: 28px !important;
             min-width: 28px !important;
             height: 28px !important;
@@ -3357,7 +3382,8 @@ export default function AttendanceTab({
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
                 const lessonContext = getAttendanceLessonContext(dateStr, lessonPlan);
                 const lessonReport = getReportForAttendanceDate(dateStr, lessonContext);
-                const infoCount = [lessonPlan, dayBookings.length ? dayBookings : null, lessonReport].filter(Boolean).length;
+                const hasLessonInfo = Boolean(lessonPlan || lessonReport);
+                const hasTrialInfo = dayBookings.length > 0;
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dateHeadSticky,
@@ -3373,19 +3399,37 @@ export default function AttendanceTab({
                   >
                     <div style={styles.dayNum(isCurrentMonth, isMutedMonth)}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
-                    {infoCount > 0 ? (
-                      <button
-                        type="button"
-                        title="Інфо тренування"
-                        aria-label={`Інфо тренування на ${fmtUaShortDate(dateStr)}`}
-                        style={styles.lessonPlanBtn}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
-                        }}
-                      >
-                        {infoCount > 1 ? `i · ${infoCount}` : "i"}
-                      </button>
+                    {hasLessonInfo || hasTrialInfo ? (
+                      <div style={styles.lessonInfoIndicators}>
+                        {hasLessonInfo ? (
+                          <button
+                            type="button"
+                            title="Інфо тренування"
+                            aria-label={`Інфо тренування на ${fmtUaShortDate(dateStr)}`}
+                            style={styles.lessonPlanBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
+                            }}
+                          >
+                            i
+                          </button>
+                        ) : null}
+                        {hasTrialInfo ? (
+                          <button
+                            type="button"
+                            title="Пробні"
+                            aria-label={`Пробні на ${fmtUaShortDate(dateStr)}`}
+                            style={styles.lessonTrialBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
+                            }}
+                          >
+                            П
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                     {showCancellationControls ? (
                       <button
@@ -3786,6 +3830,12 @@ export default function AttendanceTab({
                   <div style={{ display: "grid", gap: 7 }}>
                     {selectedLessonPlanView.bookings.map((booking) => {
                       const contact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ");
+                      const statusDisplay = getTrialStatusDisplay(booking.status);
+                      const statusTone = statusDisplay.tone === "success"
+                        ? { color: "#047857", background: "rgba(16,185,129,.14)", border: "1px solid rgba(16,185,129,.28)" }
+                        : statusDisplay.tone === "muted"
+                          ? { color: theme.textMuted, background: "rgba(148,163,184,.12)", border: "1px solid rgba(148,163,184,.24)" }
+                          : { color: theme.textMain, background: "rgba(148,163,184,.12)", border: "1px solid rgba(148,163,184,.22)" };
                       return (
                         <div key={booking.id} style={styles.trialInfoCard}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
@@ -3794,8 +3844,8 @@ export default function AttendanceTab({
                               {contact ? <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, overflowWrap: "anywhere" }}>{contact}</div> : null}
                               {booking.note ? <div style={{ fontSize: 11, color: theme.textMain, marginTop: 4 }}>{booking.note}</div> : null}
                             </div>
-                            <span style={{ ...styles.lessonPlanChip, minHeight: 22, fontSize: 10.5, padding: "3px 7px", color: "#047857", background: "rgba(16,185,129,.14)", border: "1px solid rgba(16,185,129,.28)" }}>
-                              {formatTrialStatus(booking.status)}
+                            <span title={statusDisplay.title} aria-label={statusDisplay.title} style={{ ...styles.lessonPlanChip, ...statusTone, minHeight: 22, fontSize: 10.5, padding: "3px 7px", whiteSpace: "nowrap" }}>
+                              {statusDisplay.label}
                             </span>
                           </div>
                         </div>
