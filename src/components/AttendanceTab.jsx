@@ -1416,16 +1416,18 @@ export default function AttendanceTab({
     return context ? trainingLessonReportMap.get(getAttendanceLessonPlanKey(context)) || null : null;
   };
 
-  const confirmedTrialBookingsByDate = useMemo(() => {
-    const filtered = (trialBookings || []).filter((booking) =>
-      String(booking?.groupId || "") === String(gid || "")
-      && visibleDays.includes(String(booking?.trialDate || ""))
-      && String(booking?.status || "").toLowerCase() === "confirmed"
-    );
+  const trialBookingsByDate = useMemo(() => {
+    const visibleDaySet = new Set(visibleDays.map((day) => toDateKey(day)));
+    const shouldShowTrialBooking = (booking = {}) => {
+      const status = String(booking?.status || "").toLowerCase();
+      return !["cancelled", "canceled", "converted"].includes(status);
+    };
 
-    return filtered.reduce((acc, booking) => {
-      const dateKey = String(booking?.trialDate || "");
-      if (!dateKey) return acc;
+    return (trialBookings || []).reduce((acc, booking) => {
+      const dateKey = toDateKey(booking?.trialDate);
+      if (String(booking?.groupId || "") !== String(gid || "")) return acc;
+      if (!dateKey || !visibleDaySet.has(dateKey)) return acc;
+      if (!shouldShowTrialBooking(booking)) return acc;
       if (!acc[dateKey]) acc[dateKey] = [];
       acc[dateKey].push(booking);
       return acc;
@@ -2605,7 +2607,7 @@ export default function AttendanceTab({
       }
 
       if (trialPopoverState?.dateStr && String(trialPopoverState.dateStr) === String(booking.trialDate)) {
-        const remaining = (confirmedTrialBookingsByDate[trialPopoverState.dateStr] || []).filter((row) => String(row.id) !== String(booking.id));
+        const remaining = (trialBookingsByDate[trialPopoverState.dateStr] || []).filter((row) => String(row.id) !== String(booking.id));
         if (!remaining.length) setTrialPopoverState(null);
       }
     } catch (e) {
@@ -3310,7 +3312,7 @@ export default function AttendanceTab({
                 const dayIdx = visibleDayIndex[dateStr];
                 const nextDay = dayIdx < visibleDays.length - 1 ? visibleDays[dayIdx + 1] : null;
                 const isMonthBoundary = !!nextDay && nextDay.slice(0, 7) !== dateStr.slice(0, 7);
-                const dayBookings = confirmedTrialBookingsByDate[dateStr] || [];
+                const dayBookings = trialBookingsByDate[dateStr] || [];
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
                 const lessonReport = getReportForAttendanceDate(dateStr);
                 const lessonContext = getAttendanceLessonContext(dateStr);
