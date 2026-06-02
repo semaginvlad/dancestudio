@@ -2091,12 +2091,14 @@ export default function ScheduleTab({
             {selectedEventDetails.kind === "group" ? (() => {
               const plan = getLessonPlanForEvent(selectedEventDetails);
               const fields = normalizeLessonPlanFields(plan || {});
-              const planRows = [
-                ["Трек", fields.track],
-                ["Ціль", fields.goal],
-                ["Що плануємо", fields.plannedContent],
-                ["Нотатки", fields.notes],
-              ].filter(([, value]) => String(value || "").trim());
+              const detailChips = [
+                lessonPlanTypeLabel(fields.planType),
+                fields.plannedDifficulty ? lessonDifficultyLabel(fields.plannedDifficulty) : "",
+                ...splitPlanFragments(fields.goal),
+                ...splitPlanFragments(fields.plannedContent),
+                fields.track ? `🎵 ${fields.track}` : "",
+              ].map((value) => String(value || "").trim()).filter(Boolean);
+              const notesValue = String(fields.notes || "").trim();
               return (
                 <div style={{ marginTop: 14, border: `1px solid ${isDarkTheme ? "rgba(129,140,248,.28)" : "rgba(99,102,241,.2)"}`, borderRadius: 18, padding: 12, background: isDarkTheme ? "linear-gradient(135deg, rgba(79,70,229,.16), rgba(15,23,42,.48))" : "linear-gradient(135deg, rgba(238,242,255,.95), rgba(255,255,255,.78))", display: "grid", gap: 10, boxShadow: isDarkTheme ? "inset 0 1px 0 rgba(255,255,255,.05)" : "inset 0 1px 0 rgba(255,255,255,.9)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
@@ -2112,22 +2114,18 @@ export default function ScheduleTab({
                   </div>
                   {plan ? (
                     <>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <span style={planChipSt}>{lessonPlanTypeLabel(fields.planType)}</span>
-                        {fields.plannedDifficulty ? <span style={{ ...planChipSt, borderColor: isDarkTheme ? "rgba(20,184,166,.42)" : "rgba(20,184,166,.26)", background: isDarkTheme ? "rgba(20,184,166,.16)" : "rgba(240,253,250,.94)", color: isDarkTheme ? "#99f6e4" : "#0f766e" }}>{lessonDifficultyLabel(fields.plannedDifficulty)}</span> : null}
-                      </div>
-                      {planRows.length ? (
-                        <div style={{ display: "grid", gap: 7 }}>
-                          {planRows.map(([label, value]) => (
-                            <div key={label} style={planCardSt}>
-                              <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>{label}</div>
-                              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{value}</div>
-                            </div>
-                          ))}
+                      {detailChips.length ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: 8, border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.16)" : "rgba(148,163,184,.24)"}`, borderRadius: 16, background: isDarkTheme ? "rgba(15,23,42,.24)" : "rgba(255,255,255,.52)" }}>
+                          {detailChips.map((value, idx) => <span key={`${value}-${idx}`} style={{ ...planChipSt, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</span>)}
                         </div>
                       ) : (
-                        <div style={{ fontSize: 12, color: theme.textLight }}>План має тільки тип або складність — додайте деталі за потреби.</div>
+                        <div style={{ fontSize: 12, color: theme.textLight }}>План має тільки базові параметри — додайте деталі за потреби.</div>
                       )}
+                      {notesValue ? (
+                        <div style={{ ...planCardSt, padding: "8px 10px" }}>
+                          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{notesValue}</div>
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${isDarkTheme ? "rgba(129,140,248,.38)" : "rgba(99,102,241,.32)"}`, borderRadius: 14, padding: "10px 12px", background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.58)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -2389,24 +2387,20 @@ export default function ScheduleTab({
               <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setLessonPlanEdit(null)}>✕</button>
             </div>
             <div style={{ display: "grid", gap: 9 }}>
-              <div style={editorSectionLabelSt}>Тип і складність</div>
-              <select style={editorInputSt} value={lessonPlanEdit.planType || "other"} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, planType: e.target.value, error: "" }))}>
-                {LESSON_PLAN_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-              </select>
-              <select style={editorInputSt} value={lessonPlanEdit.plannedDifficulty || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedDifficulty: e.target.value, error: "" }))}>
-                <option value="">Без оцінки складності</option>
-                {LESSON_DIFFICULTIES.map((difficulty) => <option key={difficulty.value} value={difficulty.value}>{difficulty.label}</option>)}
-              </select>
-              <div style={editorSectionLabelSt}>Зміст плану</div>
-              <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Ціль" value={lessonPlanEdit.goal || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, goal: e.target.value, error: "" }))} />
-              <textarea style={{ ...editorInputSt, minHeight: 90, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={lessonPlanEdit.plannedContent || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedContent: e.target.value, error: "" }))} />
-              <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Очікуваний результат" value={lessonPlanEdit.plannedOutcome || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedOutcome: e.target.value, error: "" }))} />
-              <input style={editorInputSt} placeholder="Трек · назва / артист / версія" value={lessonPlanEdit.track || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, track: e.target.value, error: "" }))} />
-              <textarea style={{ ...editorInputSt, minHeight: 70, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={lessonPlanEdit.notes || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, notes: e.target.value, error: "" }))} />
+              {renderChipSection("Тип", renderValueChips(QUICK_TYPE_CHIPS, lessonPlanEdit.planType || "other", (value) => setLessonPlanEdit((p) => ({ ...p, planType: value, error: "" })), "violet"))}
+              {renderChipSection("Складність", renderValueChips(QUICK_DIFFICULTY_CHIPS, lessonPlanEdit.plannedDifficulty || "", (value) => setLessonPlanEdit((p) => ({ ...p, plannedDifficulty: value, error: "" })), "amber"))}
+              {renderChipSection("План", renderFragmentChips(QUICK_CONTENT_CHIPS, lessonPlanEdit.plannedContent || "", (value) => setLessonPlanEdit((p) => ({ ...p, plannedContent: value, error: "" })), "teal", 10))}
+              {renderChipSection("Ціль", renderFragmentChips(QUICK_GOAL_CHIPS, lessonPlanEdit.goal || "", (value) => setLessonPlanEdit((p) => ({ ...p, goal: value, error: "" })), "violet"))}
+              {renderChipSection("Трек", <input style={{ ...editorInputSt, minHeight: 36, borderRadius: 999, fontFamily: "inherit", fontWeight: 800, letterSpacing: ".01em" }} placeholder="Назва / артист / версія" value={lessonPlanEdit.track || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, track: e.target.value, error: "" }))} />)}
+              <details style={{ fontSize: 12, color: theme.textLight }}>
+                <summary style={{ cursor: "pointer", fontWeight: 800 }}>Деталі</summary>
+                <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
+                  <input style={editorInputSt} placeholder="Ціль" value={lessonPlanEdit.goal || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, goal: e.target.value, error: "" }))} />
+                  <textarea style={{ ...editorInputSt, minHeight: 58, paddingTop: 10, resize: "vertical" }} placeholder="Що плануємо пройти" value={lessonPlanEdit.plannedContent || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, plannedContent: e.target.value, error: "" }))} />
+                  <textarea style={{ ...editorInputSt, minHeight: 50, paddingTop: 10, resize: "vertical" }} placeholder="Нотатки" value={lessonPlanEdit.notes || ""} onChange={(e) => setLessonPlanEdit((p) => ({ ...p, notes: e.target.value, error: "" }))} />
+                </div>
+              </details>
               {lessonPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{lessonPlanEdit.error}</div> : null}
-              <div style={{ fontSize: 12, color: theme.textLight }}>
-                План зберігається для цієї групи, тренера, дати та індексу слоту розкладу.
-              </div>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
               <button style={btnP} onClick={saveLessonPlanEdit} disabled={!!lessonPlanEdit.error}>Зберегти план</button>
