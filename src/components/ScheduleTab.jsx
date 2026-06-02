@@ -156,6 +156,8 @@ const getEventTypeMark = (event) => {
   };
   return marks[event?.eventType || event?.type] || "";
 };
+const GROUP_TYPE_BADGE_BG = "#2563eb";
+const INDIVIDUAL_TYPE_BADGE_BG = "#f97316";
 const getTrainerDisplayName = (trainer) =>
   trainer?.name || [trainer?.firstName, trainer?.lastName].filter(Boolean).join(" ") || "";
 const getRoomLabel = (event) =>
@@ -2682,8 +2684,7 @@ export default function ScheduleTab({
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
                       const markSize = isMobile ? 14 : 16;
-                      const isIndividualMark = (e.eventType || e.type) === "individual_training";
-                      const typeMarkBg = isIndividualMark ? (isDarkTheme ? "#f97316" : "#ea580c") : c.border;
+                      const typeMarkBg = typeMark === "Г" ? GROUP_TYPE_BADGE_BG : typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : c.border;
                       const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                       const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                       const hasPlan = hasLessonPlanForEvent(e);
@@ -2881,8 +2882,7 @@ export default function ScheduleTab({
                       ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
                       : "";
                     const markSize = isMobile ? 14 : 16;
-                    const isIndividualMark = (e.eventType || e.type) === "individual_training";
-                    const typeMarkBg = isIndividualMark ? (isDarkTheme ? "#f97316" : "#ea580c") : c.border;
+                    const typeMarkBg = typeMark === "Г" ? GROUP_TYPE_BADGE_BG : typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : c.border;
                     const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                     const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                     const hasPlan = hasLessonPlanForEvent(e);
