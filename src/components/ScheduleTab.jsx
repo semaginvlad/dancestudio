@@ -2681,8 +2681,11 @@ export default function ScheduleTab({
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
-                      const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
-                      const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                      const markSize = isMobile ? 14 : 16;
+                      const isIndividualMark = (e.eventType || e.type) === "individual_training";
+                      const typeMarkBg = isIndividualMark ? (isDarkTheme ? "#f97316" : "#ea580c") : c.border;
+                      const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
+                      const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                       const hasPlan = hasLessonPlanForEvent(e);
                       return (
                         <div
@@ -2877,8 +2880,11 @@ export default function ScheduleTab({
                     const extraLine = height >= 96 && e.kind === "booking"
                       ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
                       : "";
-                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: c.border, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.22)" : "0 1px 2px rgba(15,23,42,.12)" };
-                    const trainerMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, borderRadius: 999, background: isDarkTheme ? "rgba(15,23,42,.84)" : "rgba(30,41,59,.9)", color: "#fff", border: isDarkTheme ? "1px solid rgba(148,163,184,.3)" : "1px solid rgba(15,23,42,.14)", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900, lineHeight: 1, flex: "0 0 auto", boxShadow: isDarkTheme ? "0 1px 2px rgba(0,0,0,.2)" : "0 1px 2px rgba(15,23,42,.1)" };
+                    const markSize = isMobile ? 14 : 16;
+                    const isIndividualMark = (e.eventType || e.type) === "individual_training";
+                    const typeMarkBg = isIndividualMark ? (isDarkTheme ? "#f97316" : "#ea580c") : c.border;
+                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
+                    const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                     const hasPlan = hasLessonPlanForEvent(e);
                     return (
                       <div
