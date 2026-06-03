@@ -3435,6 +3435,7 @@ export default function AttendanceTab({
                   hasResultInfo ? { key: "result", label: "є результат" } : null,
                 ].filter(Boolean);
                 const orbGradientId = `lessonOrbGradient_${dateStr.replace(/-/g, "_")}`;
+                const lessonOrbIsDark = theme.bg === "#0F131A";
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dateHeadSticky,
@@ -3466,15 +3467,15 @@ export default function AttendanceTab({
                           <svg aria-hidden="true" viewBox="0 0 100 100" style={styles.lessonSmartOrbSvg}>
                             <defs>
                               <linearGradient id={orbGradientId} x1="16" y1="10" x2="86" y2="92" gradientUnits="userSpaceOnUse">
-                                <stop offset="0%" stopColor={isDark ? "#ff2438" : "#ff3b4f"} />
-                                <stop offset="54%" stopColor={isDark ? "#ff3347" : "#ff4d5f"} />
+                                <stop offset="0%" stopColor={lessonOrbIsDark ? "#ff2438" : "#ff3b4f"} />
+                                <stop offset="54%" stopColor={lessonOrbIsDark ? "#ff3347" : "#ff4d5f"} />
                                 <stop offset="100%" stopColor="#ff6a3d" />
                               </linearGradient>
                             </defs>
                             <path
                               d="M50 7 C61 7 65 19 71 25 C77 31 93 30 93 50 C93 61 81 65 75 71 C69 77 70 93 50 93 C39 93 35 81 29 75 C23 69 7 70 7 50 C7 39 19 35 25 29 C31 23 30 7 50 7 Z"
                               fill={`url(#${orbGradientId})`}
-                              stroke={isDark ? "rgba(255,241,214,0.22)" : "rgba(255,245,223,0.26)"}
+                              stroke={lessonOrbIsDark ? "rgba(255,241,214,0.22)" : "rgba(255,245,223,0.26)"}
                               strokeWidth="2"
                             />
                             <path
@@ -3483,7 +3484,7 @@ export default function AttendanceTab({
                                  M50 79 C36 79 27 66 37 56 C44 49 56 49 63 56 C73 66 64 79 50 79 Z
                                  M21 50 C21 36 34 27 44 37 C51 44 51 56 44 63 C34 73 21 64 21 50 Z"
                               fill="none"
-                              stroke={isDark ? "#fff1d6" : "#fff5df"}
+                              stroke={lessonOrbIsDark ? "#fff1d6" : "#fff5df"}
                               strokeWidth="7.5"
                               strokeLinecap="round"
                               strokeLinejoin="round"
@@ -3492,7 +3493,7 @@ export default function AttendanceTab({
                             <path
                               d="M50 40 L60 50 L50 60 L40 50 Z"
                               fill="none"
-                              stroke={isDark ? "#fff1d6" : "#fff5df"}
+                              stroke={lessonOrbIsDark ? "#fff1d6" : "#fff5df"}
                               strokeWidth="6.5"
                               strokeLinecap="round"
                               strokeLinejoin="round"
