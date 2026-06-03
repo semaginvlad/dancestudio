@@ -1361,6 +1361,55 @@ export default function App() {
     setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
   };
 
+  const clearSubscriptionWarningForStudent = async (groupId, studentId) => {
+    if (!groupId || !studentId) return;
+    const key = `${groupId}:${studentId}`;
+    setWarnedStudents((prev) => ({ ...(prev || {}), [key]: false }));
+    try {
+      await db.upsertWarnedStudent(groupId, studentId, false);
+    } catch (err) {
+      console.warn("Failed to clear subscription warning flag:", err);
+    }
+  };
+
+  const applyConvertedDebtAttendance = (convertedRows = []) => {
+    if (!Array.isArray(convertedRows) || convertedRows.length === 0) return;
+    const byId = new Map(convertedRows.map((row) => [String(row.id), row]));
+    setAttn((prev) => (prev || []).map((row) => byId.get(String(row.id)) || row));
+  };
+
+  const createSubscriptionAction = async (payload) => {
+    try {
+      let createdSub = await db.insertSub(payload);
+      const savedSub = createdSub || { id: uid(), ...payload, notificationSent: false };
+
+      try {
+        const conversion = await db.convertDebtAttendanceToSubscription({
+          studentId: savedSub.studentId || payload.studentId,
+          groupId: savedSub.groupId || payload.groupId,
+          subId: savedSub.id,
+          startDate: savedSub.startDate || payload.startDate,
+          endDate: savedSub.endDate || payload.endDate,
+        });
+        applyConvertedDebtAttendance(conversion?.attendance || []);
+        if (conversion?.subscription) createdSub = conversion.subscription;
+      } catch (conversionErr) {
+        console.warn("Failed to convert debt attendance after subscription creation:", conversionErr);
+      }
+
+      const finalSub = createdSub || savedSub;
+      setSubs((prev) => [finalSub, ...(prev || [])]);
+      await clearSubscriptionWarningForStudent(finalSub.groupId || payload.groupId, finalSub.studentId || payload.studentId);
+      setModal(null);
+      setPrefillSub(null);
+    } catch (e) {
+      console.warn(e);
+      setSubs((prev) => [{ id: uid(), ...payload, notificationSent: false }, ...(prev || [])]);
+      setModal(null);
+      setPrefillSub(null);
+    }
+  };
+
   return (
     <div data-theme-version={themeRenderTick} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -2040,7 +2089,7 @@ export default function App() {
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={async(d)=>{try{const s=await db.insertSub(d);setSubs(p=>[s||{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}catch(e){console.warn(e);setSubs(p=>[{id:uid(),...d},...p]);setModal(null); setPrefillSub(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
