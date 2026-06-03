@@ -1392,13 +1392,25 @@ export default function App() {
           endDate: savedSub.endDate || payload.endDate,
         });
         applyConvertedDebtAttendance(conversion?.attendance || []);
-        if (conversion?.subscription) createdSub = conversion.subscription;
+        if (conversion?.subscription) {
+          createdSub = {
+            ...savedSub,
+            ...conversion.subscription,
+            paid: conversion.subscription.paid ?? savedSub.paid,
+          };
+        }
       } catch (conversionErr) {
         console.warn("Failed to convert debt attendance after subscription creation:", conversionErr);
       }
 
       const finalSub = createdSub || savedSub;
-      setSubs((prev) => [finalSub, ...(prev || [])]);
+      try {
+        const freshSubs = await db.fetchSubs({ includeFinancial: true });
+        setSubs(freshSubs);
+      } catch (refreshErr) {
+        console.warn("Failed to refresh subscriptions after subscription creation:", refreshErr);
+        setSubs((prev) => [finalSub, ...(prev || []).filter((sub) => String(sub.id) !== String(finalSub.id))]);
+      }
       await clearSubscriptionWarningForStudent(finalSub.groupId || payload.groupId, finalSub.studentId || payload.studentId);
       setModal(null);
       setPrefillSub(null);
