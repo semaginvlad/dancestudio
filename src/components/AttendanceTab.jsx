@@ -312,72 +312,81 @@ const makeStyles = () => {
   },
   lessonSmartOrbBtn: {
     position: "relative",
-    width: 26,
-    height: 26,
-    minWidth: 26,
-    minHeight: 26,
+    width: 25,
+    height: 25,
+    minWidth: 25,
+    minHeight: 25,
     borderRadius: 999,
-    border: `1px solid ${isDark ? "rgba(196,181,253,0.58)" : "rgba(99,102,241,0.34)"}`,
+    border: "1px solid transparent",
     background: isDark
-      ? "conic-gradient(from 215deg, #22d3ee, #818cf8, #e879f9, #facc15, #34d399, #22d3ee)"
-      : "conic-gradient(from 215deg, #06b6d4, #6366f1, #d946ef, #f59e0b, #10b981, #06b6d4)",
+      ? "linear-gradient(145deg, rgba(15,23,42,0.96), rgba(17,24,39,0.9)) padding-box, conic-gradient(from 150deg, rgba(45,212,191,0.88), rgba(129,140,248,0.82), rgba(217,70,239,0.66), rgba(56,189,248,0.78), rgba(45,212,191,0.88)) border-box"
+      : "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.92)) padding-box, conic-gradient(from 150deg, rgba(20,184,166,0.82), rgba(99,102,241,0.76), rgba(217,70,239,0.58), rgba(14,165,233,0.72), rgba(20,184,166,0.82)) border-box",
     color: "transparent",
     cursor: "pointer",
     padding: 0,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
+    isolation: "isolate",
     overflow: "visible",
+    outline: "none",
+    transition: "transform 160ms ease, box-shadow 160ms ease, filter 160ms ease",
     boxShadow: isDark
-      ? "0 0 0 1px rgba(255,255,255,0.08) inset, 0 0 16px rgba(129,140,248,0.42), 0 4px 12px rgba(0,0,0,0.35)"
-      : "0 0 0 1px rgba(255,255,255,0.78) inset, 0 0 14px rgba(99,102,241,0.28), 0 4px 12px rgba(15,23,42,0.12)",
+      ? "0 0 0 1px rgba(255,255,255,0.04) inset, 0 5px 14px rgba(0,0,0,0.34), 0 0 13px rgba(56,189,248,0.18)"
+      : "0 0 0 1px rgba(255,255,255,0.72) inset, 0 5px 13px rgba(15,23,42,0.1), 0 0 12px rgba(99,102,241,0.18)",
   },
   lessonSmartOrbCore: {
     position: "relative",
-    width: 18,
-    height: 18,
+    width: 17,
+    height: 17,
     borderRadius: 999,
+    overflow: "hidden",
     background: isDark
-      ? "radial-gradient(circle at 32% 24%, rgba(255,255,255,0.95), rgba(125,211,252,0.78) 18%, rgba(88,28,135,0.72) 54%, rgba(15,23,42,0.82) 100%)"
-      : "radial-gradient(circle at 32% 24%, rgba(255,255,255,0.96), rgba(186,230,253,0.86) 20%, rgba(129,140,248,0.72) 55%, rgba(79,70,229,0.78) 100%)",
-    boxShadow: "inset 0 1px 2px rgba(255,255,255,0.72), inset 0 -3px 6px rgba(15,23,42,0.22)",
+      ? "radial-gradient(circle at 35% 28%, rgba(226,232,240,0.86) 0 8%, rgba(125,211,252,0.46) 18%, rgba(49,46,129,0.62) 48%, rgba(15,23,42,0.92) 100%)"
+      : "radial-gradient(circle at 35% 28%, rgba(255,255,255,0.92) 0 10%, rgba(186,230,253,0.6) 22%, rgba(129,140,248,0.5) 55%, rgba(67,56,202,0.58) 100%)",
+    border: `1px solid ${isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.62)"}`,
+    boxShadow: isDark
+      ? "inset 0 1px 1px rgba(255,255,255,0.16), inset 0 -4px 8px rgba(2,6,23,0.42)"
+      : "inset 0 1px 1px rgba(255,255,255,0.68), inset 0 -4px 8px rgba(79,70,229,0.18)",
   },
   lessonSmartOrbGlyph: {
     position: "absolute",
     left: "50%",
     top: "50%",
-    width: 9,
-    height: 9,
-    transform: "translate(-50%, -50%) rotate(45deg)",
-    borderRadius: 3,
-    border: "1px solid rgba(255,255,255,0.86)",
-    borderLeftColor: "rgba(255,255,255,0.28)",
-    borderBottomColor: "rgba(255,255,255,0.28)",
-    filter: "drop-shadow(0 0 4px rgba(255,255,255,0.72))",
+    width: 11,
+    height: 6,
+    transform: "translate(-50%, -50%) rotate(-28deg)",
+    borderRadius: 999,
+    borderTop: "1.4px solid rgba(255,255,255,0.84)",
+    borderRight: "1.4px solid rgba(255,255,255,0.7)",
+    borderLeft: "1px solid rgba(125,211,252,0.22)",
+    borderBottom: "1px solid rgba(125,211,252,0.16)",
+    filter: "drop-shadow(0 0 3px rgba(125,211,252,0.64))",
   },
   lessonSmartOrbMarkers: {
     position: "absolute",
-    right: -3,
-    bottom: -3,
+    right: -2,
+    bottom: -2,
     display: "inline-flex",
     alignItems: "center",
-    gap: 1.5,
-    padding: "1px 2px",
+    gap: 1.2,
+    padding: "1.5px 2.5px",
     borderRadius: 999,
-    background: isDark ? "rgba(15,23,42,0.78)" : "rgba(255,255,255,0.86)",
-    border: `1px solid ${isDark ? "rgba(255,255,255,0.16)" : "rgba(148,163,184,0.24)"}`,
-    boxShadow: isDark ? "0 2px 7px rgba(0,0,0,0.42)" : "0 2px 7px rgba(15,23,42,0.12)",
+    background: isDark ? "rgba(2,6,23,0.74)" : "rgba(255,255,255,0.84)",
+    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.28)"}`,
+    backdropFilter: "blur(6px)",
+    boxShadow: isDark ? "0 2px 6px rgba(0,0,0,0.32)" : "0 2px 6px rgba(15,23,42,0.1)",
   },
   lessonSmartOrbMarker: (tone) => ({
-    width: 4.5,
-    height: 4.5,
+    width: 4,
+    height: 4,
     borderRadius: 999,
-    background: tone === "plan" ? "#818cf8" : tone === "trial" ? "#2dd4bf" : "#f59e0b",
+    background: tone === "plan" ? "#a5b4fc" : tone === "trial" ? "#5eead4" : "#fbbf24",
     boxShadow: tone === "plan"
-      ? "0 0 6px rgba(129,140,248,0.9)"
+      ? "0 0 5px rgba(165,180,252,0.78)"
       : tone === "trial"
-        ? "0 0 6px rgba(45,212,191,0.9)"
-        : "0 0 6px rgba(245,158,11,0.9)",
+        ? "0 0 5px rgba(94,234,212,0.78)"
+        : "0 0 5px rgba(251,191,36,0.74)",
   }),
   lessonPlanSheet: (mobile) => ({
     position: "fixed",
@@ -2831,6 +2840,18 @@ export default function AttendanceTab({
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
+        .attendance-lesson-orb:hover {
+          transform: translateY(-1px) scale(1.045);
+          filter: saturate(1.08) brightness(1.06);
+        }
+        .attendance-lesson-orb:active {
+          transform: translateY(0) scale(0.97);
+          filter: saturate(1.02) brightness(0.98);
+        }
+        .attendance-lesson-orb:focus-visible {
+          box-shadow: 0 0 0 2px rgba(15,23,42,0.9), 0 0 0 4px rgba(125,211,252,0.62), 0 0 18px rgba(99,102,241,0.34) !important;
+        }
+
         @media (max-width: 768px) {
           .attendance-root {
             gap: 10px !important;
@@ -3095,14 +3116,20 @@ export default function AttendanceTab({
             line-height: 1.15 !important;
           }
 
-          .attendance-day-cancel,
-          .attendance-lesson-orb {
+          .attendance-day-cancel {
             width: 28px !important;
             min-width: 28px !important;
             height: 28px !important;
             min-height: 28px !important;
             line-height: 26px !important;
             font-size: 14px !important;
+          }
+
+          .attendance-lesson-orb {
+            width: 26px !important;
+            min-width: 26px !important;
+            height: 26px !important;
+            min-height: 26px !important;
           }
 
           .attendance-menu-btn {
