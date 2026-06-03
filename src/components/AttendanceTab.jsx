@@ -308,37 +308,63 @@ const makeStyles = () => {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 3,
     flexWrap: "nowrap",
   },
-  lessonPlanBtn: {
-    minWidth: 24,
-    minHeight: 24,
-    borderRadius: 999,
-    border: `1px solid ${isDark ? "rgba(129,140,248,0.48)" : "rgba(99,102,241,0.32)"}`,
-    background: isDark ? "rgba(129,140,248,0.18)" : "rgba(99,102,241,0.12)",
-    color: isDark ? "#c7d2fe" : "#4338ca",
+  lessonSmartOrbBtn: {
+    position: "relative",
+    width: 30,
+    height: 30,
+    minWidth: 30,
+    minHeight: 30,
+    border: 0,
+    borderRadius: 12,
+    background: "transparent",
+    color: "transparent",
     cursor: "pointer",
-    fontSize: 11,
-    lineHeight: 1,
-    padding: "0 7px",
-    fontWeight: 900,
-    boxShadow: isDark ? "0 0 0 1px rgba(129,140,248,0.08) inset" : "0 0 0 1px rgba(99,102,241,0.06) inset",
+    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    isolation: "isolate",
+    overflow: "visible",
+    outline: "none",
+    transition: "transform 150ms ease, filter 150ms ease, box-shadow 150ms ease",
+    filter: isDark
+      ? "drop-shadow(0 4px 10px rgba(0,0,0,0.34)) drop-shadow(0 0 10px rgba(255,47,61,0.24))"
+      : "drop-shadow(0 4px 9px rgba(15,23,42,0.1)) drop-shadow(0 0 9px rgba(255,59,79,0.18))",
   },
-  lessonTrialBtn: {
-    minWidth: 24,
-    minHeight: 24,
+  lessonSmartOrbSvg: {
+    position: "relative",
+    zIndex: 1,
+    width: "100%",
+    height: "100%",
+    display: "block",
+    overflow: "visible",
+  },
+  lessonSmartOrbMarkers: {
+    position: "absolute",
+    right: 2,
+    bottom: 2,
+    zIndex: 2,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 1.5,
+    padding: "1px 1.5px",
     borderRadius: 999,
-    border: `1px solid ${isDark ? "rgba(45,212,191,0.46)" : "rgba(16,185,129,0.34)"}`,
-    background: isDark ? "rgba(20,184,166,0.18)" : "rgba(16,185,129,0.13)",
-    color: isDark ? "#99f6e4" : "#047857",
-    cursor: "pointer",
-    fontSize: 11,
-    lineHeight: 1,
-    padding: "0 7px",
-    fontWeight: 900,
-    boxShadow: isDark ? "0 0 0 1px rgba(45,212,191,0.08) inset" : "0 0 0 1px rgba(16,185,129,0.06) inset",
+    background: isDark ? "rgba(15,23,42,0.18)" : "rgba(255,255,255,0.16)",
+    boxShadow: isDark ? "0 1px 4px rgba(15,23,42,0.3)" : "0 1px 4px rgba(15,23,42,0.08)",
   },
+  lessonSmartOrbMarker: (tone) => ({
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 999,
+    background: tone === "plan" ? "#a78bfa" : tone === "trial" ? "#2dd4bf" : "#f59e0b",
+    boxShadow: tone === "plan"
+      ? "0 0 4px rgba(167,139,250,0.75)"
+      : tone === "trial"
+        ? "0 0 4px rgba(45,212,191,0.75)"
+        : "0 0 4px rgba(245,158,11,0.72)",
+  }),
   lessonPlanSheet: (mobile) => ({
     position: "fixed",
     left: mobile ? 12 : "50%",
@@ -2791,6 +2817,18 @@ export default function AttendanceTab({
   return (
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
+        .attendance-lesson-orb:hover {
+          transform: translateY(-1px) scale(1.03);
+          filter: saturate(1.04) brightness(1.04) drop-shadow(0 0 12px rgba(255,47,61,0.3)) !important;
+        }
+        .attendance-lesson-orb:active {
+          transform: translateY(0) scale(0.98);
+          filter: saturate(1.02) brightness(0.98) drop-shadow(0 0 8px rgba(255,47,61,0.2)) !important;
+        }
+        .attendance-lesson-orb:focus-visible {
+          box-shadow: 0 0 0 2px rgba(15,23,42,0.9), 0 0 0 4px rgba(167,139,250,0.7) !important;
+        }
+
         @media (max-width: 768px) {
           .attendance-root {
             gap: 10px !important;
@@ -3055,15 +3093,20 @@ export default function AttendanceTab({
             line-height: 1.15 !important;
           }
 
-          .attendance-day-cancel,
-          .attendance-day-head button[aria-label^="Інфо тренування"],
-          .attendance-day-head button[aria-label^="Пробні"] {
+          .attendance-day-cancel {
             width: 28px !important;
             min-width: 28px !important;
             height: 28px !important;
             min-height: 28px !important;
             line-height: 26px !important;
             font-size: 14px !important;
+          }
+
+          .attendance-lesson-orb {
+            width: 30px !important;
+            min-width: 30px !important;
+            height: 30px !important;
+            min-height: 30px !important;
           }
 
           .attendance-menu-btn {
@@ -3382,8 +3425,17 @@ export default function AttendanceTab({
                 const lessonPlan = getPlanForAttendanceDate(dateStr);
                 const lessonContext = getAttendanceLessonContext(dateStr, lessonPlan);
                 const lessonReport = getReportForAttendanceDate(dateStr, lessonContext);
-                const hasLessonInfo = Boolean(lessonPlan || lessonReport);
+                const hasPlanInfo = Boolean(lessonPlan);
                 const hasTrialInfo = dayBookings.length > 0;
+                const hasResultInfo = Boolean(lessonReport);
+                const hasLessonInfo = hasPlanInfo || hasTrialInfo || hasResultInfo;
+                const lessonInfoMarkers = [
+                  hasPlanInfo ? { key: "plan", label: "є план" } : null,
+                  hasTrialInfo ? { key: "trial", label: "є пробні" } : null,
+                  hasResultInfo ? { key: "result", label: "є результат" } : null,
+                ].filter(Boolean);
+                const orbGradientId = `lessonOrbGradient_${dateStr.replace(/-/g, "_")}`;
+                const lessonOrbIsDark = theme.bg === "#0F131A";
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dateHeadSticky,
@@ -3399,36 +3451,60 @@ export default function AttendanceTab({
                   >
                     <div style={styles.dayNum(isCurrentMonth, isMutedMonth)}>{dateStr.slice(8, 10)}</div>
                     <div style={styles.dayName(isCurrentMonth, isMutedMonth)}>{WEEKDAYS_SHORT[dow]}</div>
-                    {hasLessonInfo || hasTrialInfo ? (
+                    {hasLessonInfo ? (
                       <div style={styles.lessonInfoIndicators}>
-                        {hasLessonInfo ? (
-                          <button
-                            type="button"
-                            title="Інфо тренування"
-                            aria-label={`Інфо тренування на ${fmtUaShortDate(dateStr)}`}
-                            style={styles.lessonPlanBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
-                            }}
-                          >
-                            i
-                          </button>
-                        ) : null}
-                        {hasTrialInfo ? (
-                          <button
-                            type="button"
-                            title="Пробні"
-                            aria-label={`Пробні на ${fmtUaShortDate(dateStr)}`}
-                            style={styles.lessonTrialBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
-                            }}
-                          >
-                            П
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          className="attendance-lesson-orb"
+                          title={`Інфо тренування: ${lessonInfoMarkers.map((marker) => marker.label).join(", ")}`}
+                          aria-label={`Інфо тренування на ${fmtUaShortDate(dateStr)}: ${lessonInfoMarkers.map((marker) => marker.label).join(", ")}`}
+                          style={styles.lessonSmartOrbBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
+                          }}
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 100 100" style={styles.lessonSmartOrbSvg}>
+                            <defs>
+                              <linearGradient id={orbGradientId} x1="16" y1="10" x2="86" y2="92" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stopColor={lessonOrbIsDark ? "#ff2438" : "#ff3b4f"} />
+                                <stop offset="54%" stopColor={lessonOrbIsDark ? "#ff3347" : "#ff4d5f"} />
+                                <stop offset="100%" stopColor="#ff6a3d" />
+                              </linearGradient>
+                            </defs>
+                            <path
+                              d="M50 7 C61 7 65 19 71 25 C77 31 93 30 93 50 C93 61 81 65 75 71 C69 77 70 93 50 93 C39 93 35 81 29 75 C23 69 7 70 7 50 C7 39 19 35 25 29 C31 23 30 7 50 7 Z"
+                              fill={`url(#${orbGradientId})`}
+                              stroke={lessonOrbIsDark ? "rgba(255,241,214,0.22)" : "rgba(255,245,223,0.26)"}
+                              strokeWidth="2"
+                            />
+                            <path
+                              d="M50 21 C64 21 73 34 63 44 C56 51 44 51 37 44 C27 34 36 21 50 21 Z
+                                 M79 50 C79 64 66 73 56 63 C49 56 49 44 56 37 C66 27 79 36 79 50 Z
+                                 M50 79 C36 79 27 66 37 56 C44 49 56 49 63 56 C73 66 64 79 50 79 Z
+                                 M21 50 C21 36 34 27 44 37 C51 44 51 56 44 63 C34 73 21 64 21 50 Z"
+                              fill="none"
+                              stroke={lessonOrbIsDark ? "#fff1d6" : "#fff5df"}
+                              strokeWidth="7.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              opacity="0.96"
+                            />
+                            <path
+                              d="M50 40 L60 50 L50 60 L40 50 Z"
+                              fill="none"
+                              stroke={lessonOrbIsDark ? "#fff1d6" : "#fff5df"}
+                              strokeWidth="6.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                          <span aria-hidden="true" style={styles.lessonSmartOrbMarkers}>
+                            {lessonInfoMarkers.map((marker) => (
+                              <span key={marker.key} style={styles.lessonSmartOrbMarker(marker.key)} />
+                            ))}
+                          </span>
+                        </button>
                       </div>
                     ) : null}
                     {showCancellationControls ? (
