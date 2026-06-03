@@ -312,15 +312,13 @@ const makeStyles = () => {
   },
   lessonSmartOrbBtn: {
     position: "relative",
-    width: 25,
-    height: 25,
-    minWidth: 25,
-    minHeight: 25,
-    borderRadius: 999,
-    border: "1px solid transparent",
-    background: isDark
-      ? "linear-gradient(145deg, rgba(15,23,42,0.96), rgba(17,24,39,0.9)) padding-box, conic-gradient(from 150deg, rgba(45,212,191,0.88), rgba(129,140,248,0.82), rgba(217,70,239,0.66), rgba(56,189,248,0.78), rgba(45,212,191,0.88)) border-box"
-      : "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.92)) padding-box, conic-gradient(from 150deg, rgba(20,184,166,0.82), rgba(99,102,241,0.76), rgba(217,70,239,0.58), rgba(14,165,233,0.72), rgba(20,184,166,0.82)) border-box",
+    width: 30,
+    height: 30,
+    minWidth: 30,
+    minHeight: 30,
+    border: 0,
+    borderRadius: 12,
+    background: "transparent",
     color: "transparent",
     cursor: "pointer",
     padding: 0,
@@ -330,63 +328,42 @@ const makeStyles = () => {
     isolation: "isolate",
     overflow: "visible",
     outline: "none",
-    transition: "transform 160ms ease, box-shadow 160ms ease, filter 160ms ease",
-    boxShadow: isDark
-      ? "0 0 0 1px rgba(255,255,255,0.04) inset, 0 5px 14px rgba(0,0,0,0.34), 0 0 13px rgba(56,189,248,0.18)"
-      : "0 0 0 1px rgba(255,255,255,0.72) inset, 0 5px 13px rgba(15,23,42,0.1), 0 0 12px rgba(99,102,241,0.18)",
+    transition: "transform 150ms ease, filter 150ms ease, box-shadow 150ms ease",
+    filter: isDark
+      ? "drop-shadow(0 4px 10px rgba(0,0,0,0.34)) drop-shadow(0 0 10px rgba(255,47,61,0.24))"
+      : "drop-shadow(0 4px 9px rgba(15,23,42,0.1)) drop-shadow(0 0 9px rgba(255,59,79,0.18))",
   },
-  lessonSmartOrbCore: {
+  lessonSmartOrbSvg: {
     position: "relative",
-    width: 17,
-    height: 17,
-    borderRadius: 999,
-    overflow: "hidden",
-    background: isDark
-      ? "radial-gradient(circle at 35% 28%, rgba(226,232,240,0.86) 0 8%, rgba(125,211,252,0.46) 18%, rgba(49,46,129,0.62) 48%, rgba(15,23,42,0.92) 100%)"
-      : "radial-gradient(circle at 35% 28%, rgba(255,255,255,0.92) 0 10%, rgba(186,230,253,0.6) 22%, rgba(129,140,248,0.5) 55%, rgba(67,56,202,0.58) 100%)",
-    border: `1px solid ${isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.62)"}`,
-    boxShadow: isDark
-      ? "inset 0 1px 1px rgba(255,255,255,0.16), inset 0 -4px 8px rgba(2,6,23,0.42)"
-      : "inset 0 1px 1px rgba(255,255,255,0.68), inset 0 -4px 8px rgba(79,70,229,0.18)",
-  },
-  lessonSmartOrbGlyph: {
-    position: "absolute",
-    left: "50%",
-    top: "50%",
-    width: 11,
-    height: 6,
-    transform: "translate(-50%, -50%) rotate(-28deg)",
-    borderRadius: 999,
-    borderTop: "1.4px solid rgba(255,255,255,0.84)",
-    borderRight: "1.4px solid rgba(255,255,255,0.7)",
-    borderLeft: "1px solid rgba(125,211,252,0.22)",
-    borderBottom: "1px solid rgba(125,211,252,0.16)",
-    filter: "drop-shadow(0 0 3px rgba(125,211,252,0.64))",
+    zIndex: 1,
+    width: "100%",
+    height: "100%",
+    display: "block",
+    overflow: "visible",
   },
   lessonSmartOrbMarkers: {
     position: "absolute",
-    right: -2,
-    bottom: -2,
+    right: 2,
+    bottom: 2,
+    zIndex: 2,
     display: "inline-flex",
     alignItems: "center",
-    gap: 1.2,
-    padding: "1.5px 2.5px",
+    gap: 1.5,
+    padding: "1px 1.5px",
     borderRadius: 999,
-    background: isDark ? "rgba(2,6,23,0.74)" : "rgba(255,255,255,0.84)",
-    border: `1px solid ${isDark ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.28)"}`,
-    backdropFilter: "blur(6px)",
-    boxShadow: isDark ? "0 2px 6px rgba(0,0,0,0.32)" : "0 2px 6px rgba(15,23,42,0.1)",
+    background: isDark ? "rgba(15,23,42,0.18)" : "rgba(255,255,255,0.16)",
+    boxShadow: isDark ? "0 1px 4px rgba(15,23,42,0.3)" : "0 1px 4px rgba(15,23,42,0.08)",
   },
   lessonSmartOrbMarker: (tone) => ({
-    width: 4,
-    height: 4,
+    width: 4.5,
+    height: 4.5,
     borderRadius: 999,
-    background: tone === "plan" ? "#a5b4fc" : tone === "trial" ? "#5eead4" : "#fbbf24",
+    background: tone === "plan" ? "#a78bfa" : tone === "trial" ? "#2dd4bf" : "#f59e0b",
     boxShadow: tone === "plan"
-      ? "0 0 5px rgba(165,180,252,0.78)"
+      ? "0 0 4px rgba(167,139,250,0.75)"
       : tone === "trial"
-        ? "0 0 5px rgba(94,234,212,0.78)"
-        : "0 0 5px rgba(251,191,36,0.74)",
+        ? "0 0 4px rgba(45,212,191,0.75)"
+        : "0 0 4px rgba(245,158,11,0.72)",
   }),
   lessonPlanSheet: (mobile) => ({
     position: "fixed",
@@ -2841,15 +2818,15 @@ export default function AttendanceTab({
     <div className="attendance-root" style={styles.wrap}>
       <style>{`
         .attendance-lesson-orb:hover {
-          transform: translateY(-1px) scale(1.045);
-          filter: saturate(1.08) brightness(1.06);
+          transform: translateY(-1px) scale(1.03);
+          filter: saturate(1.04) brightness(1.04) drop-shadow(0 0 12px rgba(255,47,61,0.3)) !important;
         }
         .attendance-lesson-orb:active {
-          transform: translateY(0) scale(0.97);
-          filter: saturate(1.02) brightness(0.98);
+          transform: translateY(0) scale(0.98);
+          filter: saturate(1.02) brightness(0.98) drop-shadow(0 0 8px rgba(255,47,61,0.2)) !important;
         }
         .attendance-lesson-orb:focus-visible {
-          box-shadow: 0 0 0 2px rgba(15,23,42,0.9), 0 0 0 4px rgba(125,211,252,0.62), 0 0 18px rgba(99,102,241,0.34) !important;
+          box-shadow: 0 0 0 2px rgba(15,23,42,0.9), 0 0 0 4px rgba(167,139,250,0.7) !important;
         }
 
         @media (max-width: 768px) {
@@ -3126,10 +3103,10 @@ export default function AttendanceTab({
           }
 
           .attendance-lesson-orb {
-            width: 26px !important;
-            min-width: 26px !important;
-            height: 26px !important;
-            min-height: 26px !important;
+            width: 30px !important;
+            min-width: 30px !important;
+            height: 30px !important;
+            min-height: 30px !important;
           }
 
           .attendance-menu-btn {
@@ -3457,6 +3434,7 @@ export default function AttendanceTab({
                   hasTrialInfo ? { key: "trial", label: "є пробні" } : null,
                   hasResultInfo ? { key: "result", label: "є результат" } : null,
                 ].filter(Boolean);
+                const orbGradientId = `lessonOrbGradient_${dateStr.replace(/-/g, "_")}`;
                 const headStyle = {
                   ...styles.headTop,
                   ...styles.dateHeadSticky,
@@ -3485,9 +3463,41 @@ export default function AttendanceTab({
                             openLessonInfoView(dateStr, { plan: lessonPlan, bookings: dayBookings, report: lessonReport, context: lessonContext });
                           }}
                         >
-                          <span aria-hidden="true" style={styles.lessonSmartOrbCore}>
-                            <span style={styles.lessonSmartOrbGlyph} />
-                          </span>
+                          <svg aria-hidden="true" viewBox="0 0 100 100" style={styles.lessonSmartOrbSvg}>
+                            <defs>
+                              <linearGradient id={orbGradientId} x1="16" y1="10" x2="86" y2="92" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stopColor={isDark ? "#ff2438" : "#ff3b4f"} />
+                                <stop offset="54%" stopColor={isDark ? "#ff3347" : "#ff4d5f"} />
+                                <stop offset="100%" stopColor="#ff6a3d" />
+                              </linearGradient>
+                            </defs>
+                            <path
+                              d="M50 7 C61 7 65 19 71 25 C77 31 93 30 93 50 C93 61 81 65 75 71 C69 77 70 93 50 93 C39 93 35 81 29 75 C23 69 7 70 7 50 C7 39 19 35 25 29 C31 23 30 7 50 7 Z"
+                              fill={`url(#${orbGradientId})`}
+                              stroke={isDark ? "rgba(255,241,214,0.22)" : "rgba(255,245,223,0.26)"}
+                              strokeWidth="2"
+                            />
+                            <path
+                              d="M50 21 C64 21 73 34 63 44 C56 51 44 51 37 44 C27 34 36 21 50 21 Z
+                                 M79 50 C79 64 66 73 56 63 C49 56 49 44 56 37 C66 27 79 36 79 50 Z
+                                 M50 79 C36 79 27 66 37 56 C44 49 56 49 63 56 C73 66 64 79 50 79 Z
+                                 M21 50 C21 36 34 27 44 37 C51 44 51 56 44 63 C34 73 21 64 21 50 Z"
+                              fill="none"
+                              stroke={isDark ? "#fff1d6" : "#fff5df"}
+                              strokeWidth="7.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              opacity="0.96"
+                            />
+                            <path
+                              d="M50 40 L60 50 L50 60 L40 50 Z"
+                              fill="none"
+                              stroke={isDark ? "#fff1d6" : "#fff5df"}
+                              strokeWidth="6.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
                           <span aria-hidden="true" style={styles.lessonSmartOrbMarkers}>
                             {lessonInfoMarkers.map((marker) => (
                               <span key={marker.key} style={styles.lessonSmartOrbMarker(marker.key)} />
