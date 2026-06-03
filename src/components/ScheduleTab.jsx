@@ -408,7 +408,7 @@ export default function ScheduleTab({
     "";
   const currentTrainerRecordId = currentTrainerFromState?.id ? String(currentTrainerFromState.id) : "";
   const currentTrainerAuthId = currentTrainerFromState?.authUserId ? String(currentTrainerFromState.authUserId) : currentTrainerId;
-  const currentTrainerScopeIds = [currentTrainerRecordId, currentTrainerAuthId, currentTrainerId].filter(Boolean);
+  const currentTrainerScopeIds = Array.from(new Set([currentTrainerRecordId, currentTrainerAuthId, currentTrainerId].filter(Boolean)));
   const getTrainerAuthIdForValue = (value) => {
     const raw = String(value || "");
     if (!raw) return "";
@@ -428,10 +428,14 @@ export default function ScheduleTab({
     if (!isAdmin) return currentTrainerAuthId || currentTrainerId;
     return getTrainerAuthIdForValue(event.trainerId || event.trainer_id || "");
   };
+  const isTrainerAssignedToCurrentUser = (trainerId) =>
+    !!trainerId && currentTrainerScopeIds.includes(String(trainerId));
+  const isEventAssignedToCurrentTrainer = (event) =>
+    isTrainerAssignedToCurrentUser(event?.trainerId || event?.trainer_id || event?.teacherId || event?.teacher_id || "");
   const isGroupOwnedByCurrentTrainer = (groupId) =>
     safeGroups.some((g) => (
       String(g.id) === String(groupId) &&
-      currentTrainerScopeIds.includes(String(g.trainer_id || g.trainerId || ""))
+      isTrainerAssignedToCurrentUser(g.trainer_id || g.trainerId || "")
     ));
   const canEditGroupSingleLesson = (event) =>
     isAdmin || (event?.kind === "group" && isGroupOwnedByCurrentTrainer(event.groupId));
@@ -757,7 +761,7 @@ export default function ScheduleTab({
     return map;
   }, [eventsByDay, selectedRoom, primaryRoomName]);
   const canMutateEvent = (event) =>
-    isAdmin || (event?.kind === "booking" && String(event.trainerId || "") === currentTrainerId);
+    isAdmin || (event?.kind === "booking" && isEventAssignedToCurrentTrainer(event));
   const normalizeBookingPayload = (source) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
@@ -889,8 +893,8 @@ export default function ScheduleTab({
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
-      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : currentTrainerId),
+      trainerId: isAdmin ? e.trainerId || "" : e.trainerId || currentTrainerId,
+      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : (e.trainerId || currentTrainerId)),
       title: e.title || "",
       roomName: e.roomName || primaryRoomName,
       note: e.note || "",
@@ -916,8 +920,8 @@ export default function ScheduleTab({
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
-      trainerId: isAdmin ? e.trainerId || "" : currentTrainerId,
-      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : currentTrainerId),
+      trainerId: isAdmin ? e.trainerId || "" : e.trainerId || currentTrainerId,
+      trainerName: getResolvedTrainerName(e.trainerName || e.trainer, isAdmin ? e.trainerId : (e.trainerId || currentTrainerId)),
       title: e.title || "",
       roomName: e.roomName || primaryRoomName,
       note: e.note || "",

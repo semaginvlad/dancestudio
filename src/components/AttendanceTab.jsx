@@ -183,7 +183,12 @@ const makeStyles = () => {
   tableWrap: {
     overflowX: "auto",
     overflowY: "auto",
+    maxWidth: "100%",
+    minWidth: 0,
     maxHeight: "calc(100vh - 132px)",
+    overscrollBehaviorX: "contain",
+    overscrollBehaviorY: "contain",
+    WebkitOverflowScrolling: "touch",
     border: `1px solid ${isDark ? "rgba(148,163,184,0.24)" : theme.border}`,
     borderRadius: 18,
     background: isDark ? "linear-gradient(180deg, rgba(21,30,43,0.98), rgba(16,23,34,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
@@ -3136,6 +3141,16 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-table-wrap {
+            max-width: calc(100vw - 8px) !important;
+            min-width: 0 !important;
+            overflow-x: auto !important;
+            overflow-y: auto !important;
+            overscroll-behavior-x: contain !important;
+            overscroll-behavior-y: contain !important;
+            -webkit-overflow-scrolling: touch !important;
+            touch-action: pan-x pan-y !important;
+            contain: paint !important;
+            clip-path: inset(0 round 14px) !important;
             border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
             box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 10px 22px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.36)" : "rgba(15,23,42,0.1)"} !important;
             background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;

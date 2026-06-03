@@ -1217,18 +1217,29 @@ export default function App() {
 
 
   // Frontend guard only; Supabase RLS is still required for server-side booking ownership enforcement.
+  const currentTrainerProfile = trainers.find(
+    (trainer) => String(trainer.authUserId || "") === String(user?.id || "") || String(trainer.id || "") === String(user?.id || ""),
+  );
+  const currentTrainerScopeIds = Array.from(new Set([
+    user?.id,
+    currentTrainerProfile?.id,
+    currentTrainerProfile?.authUserId,
+  ].filter(Boolean).map(String)));
+  const isAssignedToCurrentTrainer = (trainerId) =>
+    !!trainerId && currentTrainerScopeIds.includes(String(trainerId));
   const canMutateRoomBooking = (booking) => {
     if (isAdmin) return true;
-    return !!booking && String(booking.trainerId || "") === String(user?.id || "");
+    return !!booking && isAssignedToCurrentTrainer(booking.trainerId || booking.trainer_id);
   };
 
   const normalizeTrainerSchedulePayload = (payload = {}) => {
     const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
       ? payload.eventType
       : "room_booking";
+    const payloadTrainerId = payload?.trainerId || payload?.trainer_id || null;
     return {
       ...payload,
-      trainerId: user?.id || null,
+      trainerId: isAssignedToCurrentTrainer(payloadTrainerId) ? payloadTrainerId : user?.id || null,
       eventType,
       bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
       peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
