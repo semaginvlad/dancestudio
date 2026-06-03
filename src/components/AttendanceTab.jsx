@@ -901,6 +901,33 @@ const getScheduleRowTrainerId = (row = {}, group = {}) =>
 const getAttendanceLessonPlanKey = ({ groupId, trainerId, lessonDate, scheduleSlotIndex }) =>
   `${groupId}:${trainerId}:${String(lessonDate).slice(0, 10)}:${Number(scheduleSlotIndex || 0)}`;
 
+const getScheduleTimeMinutes = (value = "") => {
+  const raw = String(value || "").trim().replace(/\s+/g, "").replace(".", ":");
+  if (!raw) return null;
+  if (raw.includes("-")) return getScheduleTimeMinutes(raw.split("-")[0]);
+  if (/^\d{1,2}$/.test(raw)) return Number(raw) * 60;
+  const [h, m] = raw.split(":");
+  const hh = Number(h);
+  const mm = Number(m || 0);
+  return Number.isFinite(hh) && Number.isFinite(mm) ? hh * 60 + mm : null;
+};
+
+
+
+const getLessonPlanSeriesExplicitKey = (plan = {}) => {
+  const raw = plan.seriesId ?? plan.series_id ?? plan.planSeriesId ?? plan.plan_series_id ?? plan.bulkPlanId ?? plan.bulk_plan_id ?? plan.batchId ?? plan.batch_id ?? plan.planBatchId ?? plan.plan_batch_id ?? "";
+  return String(raw || "").trim();
+};
+const compareLessonPlanSeriesItems = (a = {}, b = {}) => (
+  String(a.lessonDate || "").localeCompare(String(b.lessonDate || "")) ||
+  Number(a.startMin ?? 0) - Number(b.startMin ?? 0) ||
+  Number(a.scheduleSlotIndex ?? 0) - Number(b.scheduleSlotIndex ?? 0)
+);
+const formatLessonPlanSeriesLabel = (series = null) => {
+  if (!series || !Number.isFinite(series.index) || !Number.isFinite(series.total) || series.total < 2) return "";
+  return `${series.index}/${series.total}`;
+};
+
 const splitPlanFragments = (value = "") => String(value || "").split(/[;\n]+/).map((x) => x.trim()).filter(Boolean);
 const extractTrackFromNotes = (notes = "") => {
   const line = String(notes || "").split(/\r?\n/).find((item) => /^\s*Трек\s*:/i.test(item));
@@ -1502,6 +1529,107 @@ export default function AttendanceTab({
   const getReportForAttendanceDate = (dateStr, contextOverride = null) => {
     const context = contextOverride || getAttendanceLessonContext(dateStr);
     return context ? trainingLessonReportMap.get(getAttendanceLessonPlanKey(context)) || null : null;
+  };
+  const lessonPlanSeriesMap = useMemo(() => {
+    const result = new Map();
+    const scopedPlans = safeTrainingLessonPlans.filter((plan) => (
+      String(plan?.groupId || "") === String(currentGroup?.id || "") &&
+      plan?.trainerId != null && plan?.lessonDate != null && plan?.scheduleSlotIndex != null
+    ));
+    const applySeries = (items) => {
+      const sorted = [...items].sort(compareLessonPlanSeriesItems);
+      if (sorted.length < 2) return;
+      const seenKeys = new Set();
+      sorted.forEach((item, idx) => {
+        const key = getAttendanceLessonPlanKey({
+          groupId: item.groupId,
+          trainerId: normalizeTrainerIdForPlan(item.trainerId),
+          lessonDate: item.lessonDate,
+          scheduleSlotIndex: item.scheduleSlotIndex,
+        });
+        if (!key || seenKeys.has(key)) return;
+        seenKeys.add(key);
+        result.set(key, { index: idx + 1, total: sorted.length });
+      });
+    };
+
+    const explicitGroups = new Map();
+    const implicitPlans = [];
+    scopedPlans.forEach((plan) => {
+      const normalizedPlan = { ...plan, trainerId: normalizeTrainerIdForPlan(plan.trainerId) };
+      const explicitKey = getLessonPlanSeriesExplicitKey(plan);
+      if (!explicitKey) {
+        implicitPlans.push(normalizedPlan);
+        return;
+      }
+      const groupKey = `${normalizedPlan.groupId}:${normalizedPlan.trainerId}:${explicitKey}`;
+      if (!explicitGroups.has(groupKey)) explicitGroups.set(groupKey, []);
+      explicitGroups.get(groupKey).push(normalizedPlan);
+    });
+    explicitGroups.forEach(applySeries);
+
+    const plansByScope = new Map();
+    implicitPlans.forEach((plan) => {
+      const scopeKey = `${plan.groupId}:${plan.trainerId}`;
+      if (!plansByScope.has(scopeKey)) plansByScope.set(scopeKey, []);
+      plansByScope.get(scopeKey).push(plan);
+    });
+
+    const buildDateRange = (first, last) => {
+      const start = new Date(`${first}T12:00:00`);
+      const end = new Date(`${last}T12:00:00`);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+      const out = [];
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) out.push(ymd(d));
+      return out;
+    };
+
+    plansByScope.forEach((plans) => {
+      const sortedDates = plans
+        .map((plan) => toDateKey(plan.lessonDate))
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+        .sort();
+      if (sortedDates.length < 2) return;
+      const planKeySet = new Set(plans.map((plan) => getAttendanceLessonPlanKey({
+        groupId: plan.groupId,
+        trainerId: plan.trainerId,
+        lessonDate: plan.lessonDate,
+        scheduleSlotIndex: plan.scheduleSlotIndex,
+      })));
+      const scope = plans[0] || {};
+      const sequence = buildDateRange(sortedDates[0], sortedDates[sortedDates.length - 1]).flatMap((dateStr) => {
+        const dow = getDayOfWeek(dateStr);
+        return schedule
+          .map((row, index) => ({ row, index }))
+          .filter(({ row }) => getScheduleRowWeekday(row) === dow)
+          .map(({ row, index }) => ({
+            groupId: currentGroup.id,
+            trainerId: normalizeTrainerIdForPlan(getScheduleRowTrainerId(row, currentGroup)),
+            lessonDate: dateStr,
+            scheduleSlotIndex: index,
+            startMin: getScheduleTimeMinutes(row.startTime || row.start || row.time || "") ?? 0,
+          }))
+          .filter((item) => item.trainerId && String(item.trainerId) === String(scope.trainerId || ""));
+      }).sort(compareLessonPlanSeriesItems);
+      let run = [];
+      sequence.forEach((item) => {
+        if (planKeySet.has(getAttendanceLessonPlanKey(item))) {
+          run.push(item);
+          return;
+        }
+        applySeries(run);
+        run = [];
+      });
+      applySeries(run);
+    });
+
+    return result;
+  }, [safeTrainingLessonPlans, currentGroup, schedule, safeTrainers]);
+
+  const getPlanSeriesLabel = (plan = null) => {
+    const context = getPlanContext(plan);
+    if (!context) return "";
+    return formatLessonPlanSeriesLabel(lessonPlanSeriesMap.get(getAttendanceLessonPlanKey(context)));
   };
 
   const trialBookingsByDate = useMemo(() => {
@@ -3886,19 +4014,25 @@ export default function AttendanceTab({
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
-              {selectedLessonPlanView.plan ? (
-                <section style={styles.lessonInfoSection}>
-                  <div style={styles.lessonInfoSectionTitle}>План</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                    {buildLessonPlanChips(selectedLessonPlanView.plan).map((chip, idx) => (
-                      <span key={`${chip}_${idx}`} style={styles.lessonPlanChip}>{chip}</span>
-                    ))}
-                  </div>
-                  {getLessonPlanNotes(selectedLessonPlanView.plan) ? (
-                    <div style={styles.lessonPlanNotes}>{getLessonPlanNotes(selectedLessonPlanView.plan)}</div>
-                  ) : null}
-                </section>
-              ) : null}
+              {selectedLessonPlanView.plan ? (() => {
+                const planSeriesLabel = getPlanSeriesLabel(selectedLessonPlanView.plan);
+                return (
+                  <section style={styles.lessonInfoSection}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                      <div style={{ ...styles.lessonInfoSectionTitle, marginBottom: 0 }}>План</div>
+                      {planSeriesLabel ? <span title={`Порядок плану ${planSeriesLabel}`} style={{ ...styles.lessonPlanChip, minHeight: 22, fontSize: 10.5, padding: "3px 8px", color: "#0f766e", background: "rgba(20,184,166,.12)", borderColor: "rgba(20,184,166,.28)" }}>{planSeriesLabel}</span> : null}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                      {buildLessonPlanChips(selectedLessonPlanView.plan).map((chip, idx) => (
+                        <span key={`${chip}_${idx}`} style={styles.lessonPlanChip}>{chip}</span>
+                      ))}
+                    </div>
+                    {getLessonPlanNotes(selectedLessonPlanView.plan) ? (
+                      <div style={styles.lessonPlanNotes}>{getLessonPlanNotes(selectedLessonPlanView.plan)}</div>
+                    ) : null}
+                  </section>
+                );
+              })() : null}
 
               {selectedLessonPlanView.bookings?.length ? (
                 <section style={styles.lessonInfoSection}>

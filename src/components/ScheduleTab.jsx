@@ -296,6 +296,21 @@ const normalizeLessonPlanFields = (plan = {}) => {
     notes: stripTrackFromNotes(rawNotes),
   };
 };
+
+const getLessonPlanSeriesExplicitKey = (plan = {}) => {
+  const raw = plan.seriesId ?? plan.series_id ?? plan.planSeriesId ?? plan.plan_series_id ?? plan.bulkPlanId ?? plan.bulk_plan_id ?? plan.batchId ?? plan.batch_id ?? plan.planBatchId ?? plan.plan_batch_id ?? "";
+  return String(raw || "").trim();
+};
+const compareLessonPlanSeriesItems = (a = {}, b = {}) => (
+  String(a.lessonDate || "").localeCompare(String(b.lessonDate || "")) ||
+  Number(a.startMin ?? toMin(a.startTime || "") ?? 0) - Number(b.startMin ?? toMin(b.startTime || "") ?? 0) ||
+  Number(a.scheduleSlotIndex ?? a.slotIndex ?? 0) - Number(b.scheduleSlotIndex ?? b.slotIndex ?? 0)
+);
+const formatLessonPlanSeriesLabel = (series = null) => {
+  if (!series || !Number.isFinite(series.index) || !Number.isFinite(series.total) || series.total < 2) return "";
+  return `${series.index}/${series.total}`;
+};
+
 const DEBUG_QUICK_CREATE = false;
 const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
 const palette = {
@@ -1078,6 +1093,91 @@ export default function ScheduleTab({
       : buildRegularGroupLessonInstances(group, filteredDates, trainerId);
     return Array.from(new Map(instances.map((instance) => [getLessonPlanKey(instance), instance])).values())
       .sort((a, b) => String(a.lessonDate).localeCompare(String(b.lessonDate)) || String(a.startTime).localeCompare(String(b.startTime)));
+  };
+  const lessonPlanSeriesMap = useMemo(() => {
+    const result = new Map();
+    const validPlans = safeTrainingLessonPlans.filter((plan) => (
+      plan?.groupId != null && plan?.trainerId != null && plan?.lessonDate != null && plan?.scheduleSlotIndex != null
+    ));
+    const applySeries = (items) => {
+      const sorted = [...items].sort(compareLessonPlanSeriesItems);
+      if (sorted.length < 2) return;
+      const seenKeys = new Set();
+      sorted.forEach((item, idx) => {
+        const key = getLessonPlanKey(item);
+        if (!key || seenKeys.has(key)) return;
+        seenKeys.add(key);
+        result.set(key, { index: idx + 1, total: sorted.length });
+      });
+    };
+
+    const explicitGroups = new Map();
+    const implicitPlans = [];
+    validPlans.forEach((plan) => {
+      const explicitKey = getLessonPlanSeriesExplicitKey(plan);
+      if (!explicitKey) {
+        implicitPlans.push(plan);
+        return;
+      }
+      const groupKey = `${plan.groupId}:${plan.trainerId}:${explicitKey}`;
+      if (!explicitGroups.has(groupKey)) explicitGroups.set(groupKey, []);
+      explicitGroups.get(groupKey).push({ ...plan, startMin: Number(plan.startMin ?? 0) });
+    });
+    explicitGroups.forEach(applySeries);
+
+    const plansByScope = new Map();
+    implicitPlans.forEach((plan) => {
+      const scopeKey = `${plan.groupId}:${plan.trainerId}`;
+      if (!plansByScope.has(scopeKey)) plansByScope.set(scopeKey, []);
+      plansByScope.get(scopeKey).push(plan);
+    });
+
+    plansByScope.forEach((plans) => {
+      const sortedDates = plans
+        .map((plan) => String(plan.lessonDate || "").slice(0, 10))
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+        .sort();
+      if (sortedDates.length < 2) return;
+      const dateRange = getDatesInRange(sortedDates[0], sortedDates[sortedDates.length - 1]);
+      if (!dateRange.length) return;
+      const planKeySet = new Set(plans.map((plan) => getLessonPlanKey(plan)));
+      const scope = plans[0] || {};
+      const sequence = Array.from(buildEventsByDayForDates(dateRange).values()).flat()
+        .filter((event) => event.kind === "group" && String(event.groupId || "") === String(scope.groupId || ""))
+        .map((event) => ({
+          groupId: event.groupId,
+          trainerId: getLessonPlanTrainerIdForEvent(event),
+          lessonDate: event.date,
+          scheduleSlotIndex: event.slotIndex,
+          startMin: event.startMin,
+          startTime: event.startTime,
+        }))
+        .filter((event) => event.trainerId && String(event.trainerId) === String(scope.trainerId || ""))
+        .sort(compareLessonPlanSeriesItems);
+      let run = [];
+      sequence.forEach((event) => {
+        if (planKeySet.has(getLessonPlanKey(event))) {
+          run.push(event);
+          return;
+        }
+        applySeries(run);
+        run = [];
+      });
+      applySeries(run);
+    });
+
+    return result;
+  }, [safeTrainingLessonPlans, buildEventsByDayForDates, isAdmin, currentTrainerAuthId, currentTrainerId, safeTrainers]);
+
+  const getLessonPlanSeriesLabelForEvent = (event = {}) => {
+    const trainerId = getLessonPlanTrainerIdForEvent(event);
+    if (!event.groupId || !trainerId || !event.date || event.slotIndex == null) return "";
+    return formatLessonPlanSeriesLabel(lessonPlanSeriesMap.get(getLessonPlanKey({
+      groupId: event.groupId,
+      trainerId,
+      lessonDate: event.date,
+      scheduleSlotIndex: event.slotIndex,
+    })));
   };
   const getSuggestedBulkDateRange = (group) => {
     const today = new Date(`${toLocalDateKey(new Date())}T12:00:00`);
@@ -2593,9 +2693,10 @@ export default function ScheduleTab({
                   {!isMobile && selectedRoom !== "all" ? previewItems.slice(0, 2).map((e) => {
                     const c = e.color ? { bg: `${e.color}18`, border: `${e.color}99` } : palette[colorKey(e)] || palette.default;
                     const hasPlan = hasLessonPlanForEvent(e);
+                    const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
                       <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
-                        {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", width: 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto" }}>✓</span> : null}
+                        {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", minWidth: planSeriesLabel ? 28 : 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto", padding: planSeriesLabel ? "0 4px" : 0 }}>✓{planSeriesLabel ? ` ${planSeriesLabel}` : ""}</span> : null}
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}</span>
                       </div>
                     );
@@ -2688,6 +2789,7 @@ export default function ScheduleTab({
                       const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                       const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                       const hasPlan = hasLessonPlanForEvent(e);
+                      const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                       return (
                         <div
                           key={e.id}
@@ -2700,7 +2802,8 @@ export default function ScheduleTab({
                           }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
-                          {hasPlan ? <span title="Є план" style={{ position: "absolute", top: isMobile ? 4 : 5, right: isMobile ? 4 : 5, zIndex: 6, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                          {hasPlan ? <span title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: isMobile ? 4 : 5, right: isMobile ? 4 : 5, zIndex: 6, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                          {planSeriesLabel ? <span title={`Порядок плану ${planSeriesLabel}`} style={{ position: "absolute", top: isMobile ? 20 : 24, right: isMobile ? 3 : 4, zIndex: 6, display: "inline-grid", placeItems: "center", minWidth: isMobile ? 22 : 26, height: isMobile ? 12 : 14, borderRadius: 999, padding: "0 4px", background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(255,255,255,.86)", color: isDarkTheme ? "#99f6e4" : "#0f766e", border: `1px solid ${isDarkTheme ? "rgba(153,246,228,.25)" : "rgba(15,118,110,.18)"}`, fontSize: isMobile ? 8 : 9, fontWeight: 900, lineHeight: 1 }}>{planSeriesLabel}</span> : null}
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0, paddingRight: hasPlan ? 18 : 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
@@ -2886,6 +2989,7 @@ export default function ScheduleTab({
                     const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
                     const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
                     const hasPlan = hasLessonPlanForEvent(e);
+                    const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
                       <div
                         key={e.id}
@@ -2917,7 +3021,8 @@ export default function ScheduleTab({
                           zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
                         }}
                       >
-                        {hasPlan ? <span title="Є план" style={{ position: "absolute", top: isMobile ? 4 : 6, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 24 : 30) : (isMobile ? 4 : 6), zIndex: 20, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                        {hasPlan ? <span title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: isMobile ? 4 : 6, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 24 : 30) : (isMobile ? 4 : 6), zIndex: 20, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
+                        {planSeriesLabel ? <span title={`Порядок плану ${planSeriesLabel}`} style={{ position: "absolute", top: isMobile ? 20 : 25, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 22 : 28) : (isMobile ? 3 : 4), zIndex: 20, display: "inline-grid", placeItems: "center", minWidth: isMobile ? 22 : 26, height: isMobile ? 12 : 14, borderRadius: 999, padding: "0 4px", background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(255,255,255,.86)", color: isDarkTheme ? "#99f6e4" : "#0f766e", border: `1px solid ${isDarkTheme ? "rgba(153,246,228,.25)" : "rgba(15,118,110,.18)"}`, fontSize: isMobile ? 8 : 9, fontWeight: 900, lineHeight: 1 }}>{planSeriesLabel}</span> : null}
                         <div style={{ minWidth: 0, paddingRight: textRightPadding + (hasPlan ? 18 : 0) }}>
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
