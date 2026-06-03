@@ -765,6 +765,45 @@ export async function insertAttendance(a) {
   }
 }
 
+
+export async function convertDebtAttendanceToSubscription({ studentId, groupId, subId, startDate, endDate }) {
+  if (!studentId || !groupId || !subId || !startDate || !endDate) {
+    throw new Error('studentId, groupId, subId, startDate and endDate are required')
+  }
+
+  const { data, error } = await supabase
+    .from('attendance')
+    .update({
+      sub_id: subId,
+      entry_type: 'subscription',
+      guest_name: null,
+      guest_type: null,
+    })
+    .eq('student_id', studentId)
+    .eq('group_id', groupId)
+    .eq('entry_type', 'debt')
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .select()
+
+  if (error) throw error
+
+  const attendance = (data || []).map(a => ({
+    id: a.id,
+    subId: a.sub_id,
+    studentId: a.student_id,
+    date: a.date,
+    guestName: a.guest_name,
+    guestType: a.guest_type,
+    groupId: a.group_id,
+    quantity: a.quantity || 1,
+    entryType: a.entry_type || 'subscription',
+  }))
+  const subscription = attendance.length ? await syncSubUsedTrainings(subId) : null
+
+  return { attendance, subscription }
+}
+
 export async function deleteAttendance(id) {
   const { data: existing } = await supabase
     .from('attendance')
