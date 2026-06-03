@@ -291,6 +291,38 @@ const isDueByTolerance = (currentHhmm, scheduledHhmm, toleranceMinutes) => {
   return current >= scheduled && current <= (scheduled + toleranceMinutes);
 };
 
+const dateKey = (value) => String(value || "").slice(0, 10);
+
+const buildSubGroupLookup = (subs = []) => (subs || []).reduce((acc, sub) => {
+  const subId = String(sub?.id || "").trim();
+  const groupId = String(sub?.group_id || sub?.groupId || "").trim();
+  if (subId && groupId) acc[subId] = groupId;
+  return acc;
+}, {});
+
+const countAttendanceForGroupDate = ({ attendanceRows = [], subGroupById = {}, groupId, date }) => {
+  const targetGroupId = String(groupId || "").trim();
+  const targetDate = dateKey(date);
+  if (!targetGroupId || !targetDate) return 0;
+  return (attendanceRows || []).filter((row) => {
+    if (dateKey(row?.date) !== targetDate) return false;
+    const directGroupId = String(row?.group_id || row?.groupId || "").trim();
+    const subId = String(row?.sub_id || row?.subId || "").trim();
+    const resolvedGroupId = directGroupId || (subId ? String(subGroupById[subId] || "").trim() : "");
+    return resolvedGroupId === targetGroupId;
+  }).length;
+};
+
+const logAttendanceReminderDecision = ({ groupId, date, trainerId = null, attendanceCount, action }) => {
+  console.info("[notification-schedule-attendance-reminder]", {
+    groupId: String(groupId || ""),
+    date: dateKey(date),
+    trainerId: trainerId ? String(trainerId) : null,
+    attendanceCount: Number(attendanceCount || 0),
+    action,
+  });
+};
+
 const hasActiveSubscription = (sub, localDate) => {
   const planType = String(sub?.plan_type || "").trim().toLowerCase();
   if (!planType || planType === "trial" || planType === "single") return false;
@@ -379,7 +411,7 @@ const handleDispatchScheduleRules = async (req, res) => {
     supabase.from("student_groups").select("student_id,group_id"),
     supabase.from("students").select("id,name,first_name,last_name"),
     supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
-    supabase.from("attendance").select("id,group_id,date"),
+    supabase.from("attendance").select("id,sub_id,group_id,date,entry_type"),
     supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
     supabase.from("trainers").select("id,auth_user_id,telegram"),
     supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
@@ -390,6 +422,7 @@ const handleDispatchScheduleRules = async (req, res) => {
 
   const groupsById = Object.fromEntries((groupsRaw.data || []).map((g) => [String(g.id), g]));
   const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
+  const subGroupById = buildSubGroupLookup(subsRaw.data || []);
   const existingRunKeys = new Set((runsRaw.data || []).map((r) => String(r.run_key || "")).filter(Boolean));
 
   const results = [];
@@ -434,8 +467,24 @@ const handleDispatchScheduleRules = async (req, res) => {
       const st = studentsById[studentId] || {};
       return String(st.name || [st.first_name, st.last_name].filter(Boolean).join(" ") || studentId);
     });
-    const attendanceRows = (attendanceRaw.data || []).filter((a) => String(a.group_id || "") === groupId && String(a.date || "") === localDate);
-    const messageText = buildRuleMessage({ rule, groupName, trialRows: trials, unpaidStudents, hasAttendance: attendanceRows.length > 0, dryRun });
+    const attendanceCount = countAttendanceForGroupDate({ attendanceRows: attendanceRaw.data || [], subGroupById, groupId, date: localDate });
+    const hasAttendance = attendanceCount > 0;
+    if (rule.include_attendance_reminder && hasAttendance) {
+      logAttendanceReminderDecision({
+        groupId,
+        date: localDate,
+        trainerId: rule.trainer_id || null,
+        attendanceCount,
+        action: "skipped",
+      });
+    }
+    const messageText = buildRuleMessage({ rule, groupName, trialRows: trials, unpaidStudents, hasAttendance, dryRun });
+
+    if (rule.include_attendance_reminder && hasAttendance && !messageText) {
+      skipped += 1;
+      results.push({ ruleId: rule.id, status: "skipped", reason: "attendance_already_marked", runKey, groupId, localDate, trainerId: rule.trainer_id || null, attendanceCount });
+      continue;
+    }
 
     if (!messageText) {
       skipped += 1;
@@ -447,6 +496,15 @@ const handleDispatchScheduleRules = async (req, res) => {
       const telegramTarget = (channel === "telegram" || channel === "both")
         ? resolveTrainerTelegramTarget(rule, trainersRaw.data || [], tgMetaRaw.data || [])
         : null;
+      if (rule.include_attendance_reminder && !hasAttendance) {
+        logAttendanceReminderDecision({
+          groupId,
+          date: localDate,
+          trainerId: rule.trainer_id || null,
+          attendanceCount,
+          action: "dry-run",
+        });
+      }
       results.push({
         ruleId: rule.id,
         status: "dry-run",
@@ -517,6 +575,16 @@ const handleDispatchScheduleRules = async (req, res) => {
 
     const snapshot = { messageText, channel, groupName, pushResult, telegramResult };
     await supabase.from("notification_rule_runs").update({ status: finalStatus, reason, payload_snapshot: snapshot, updated_at: new Date().toISOString() }).eq("id", runInserted.id);
+
+    if (rule.include_attendance_reminder && !hasAttendance) {
+      logAttendanceReminderDecision({
+        groupId,
+        date: localDate,
+        trainerId: rule.trainer_id || null,
+        attendanceCount,
+        action: finalStatus === "sent" ? "sent" : finalStatus,
+      });
+    }
 
     if (finalStatus === "sent") sent += 1;
     else if (finalStatus === "failed") failed += 1;
