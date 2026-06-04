@@ -1251,6 +1251,7 @@ export default function AttendanceTab({
   setWarnedStudents,
   trialBookings = [],
   setTrialBookings,
+  attendanceScale = 100,
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -1284,10 +1285,7 @@ export default function AttendanceTab({
   const [lessonReportSaved, setLessonReportSaved] = useState(false);
   const [markingTrialId, setMarkingTrialId] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
-  const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
-  const safeAttendanceScale = Math.min(120, Math.max(80, Number(attendanceScale) || 100));
-  const changeAttendanceScale = (delta) => setAttendanceScale((prev) => Math.min(120, Math.max(80, (Number(prev) || 100) + delta)));
-  const resetAttendanceScale = () => setAttendanceScale(100);
+  const safeAttendanceScale = Math.min(130, Math.max(60, Number(attendanceScale) || 100));
   const [openMenuState, setOpenMenuState] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
@@ -3032,44 +3030,7 @@ export default function AttendanceTab({
           --attendance-scale: 1;
           --attendance-cell-scale: var(--attendance-scale);
         }
-        .attendance-root .attendance-scale-control {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 6px;
-          border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.26)" : theme.border};
-          border-radius: 12px;
-          background: ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.72)"};
-        }
-        .attendance-root .attendance-scale-label {
-          font-size: 12px;
-          font-weight: 800;
-          color: ${theme.textMuted};
-          white-space: nowrap;
-        }
-        .attendance-root .attendance-scale-value {
-          min-width: 42px;
-          text-align: center;
-          font-size: 12px;
-          font-weight: 900;
-          color: ${theme.textMain};
-        }
-        .attendance-root .attendance-scale-btn {
-          width: 28px;
-          height: 28px;
-          min-height: 28px;
-          border-radius: 9px;
-          border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.28)" : theme.border};
-          background: ${theme.bg === "#0F131A" ? "rgba(15,23,42,0.62)" : "rgba(255,255,255,0.9)"};
-          color: ${theme.textMain};
-          font-weight: 900;
-          cursor: pointer;
-        }
-        .attendance-root .attendance-scale-reset {
-          width: auto;
-          padding: 0 8px;
-          font-size: 11px;
-        }
+
 
         @media (max-width: 768px) {
           .attendance-root {
@@ -3426,14 +3387,6 @@ export default function AttendanceTab({
             <span aria-hidden="true">{showCancellationControls ? "−" : "+"}</span>
             <span>{showCancellationControls ? "Скасування" : "Показати скасування"}</span>
           </button>
-
-          <div className="attendance-scale-control" role="group" aria-label="Масштаб відвідування">
-            <span className="attendance-scale-label">Масштаб</span>
-            <button type="button" className="attendance-scale-btn" onClick={() => changeAttendanceScale(-5)} disabled={safeAttendanceScale <= 80} aria-label="Зменшити масштаб">−</button>
-            <span className="attendance-scale-value">{safeAttendanceScale}%</span>
-            <button type="button" className="attendance-scale-btn" onClick={() => changeAttendanceScale(5)} disabled={safeAttendanceScale >= 120} aria-label="Збільшити масштаб">+</button>
-            <button type="button" className="attendance-scale-btn attendance-scale-reset" onClick={resetAttendanceScale} disabled={safeAttendanceScale === 100}>100%</button>
-          </div>
 
           {isAdmin && (
             <button
