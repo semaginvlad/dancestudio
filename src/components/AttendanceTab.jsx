@@ -1303,10 +1303,11 @@ export default function AttendanceTab({
     const isMobile = window.matchMedia?.("(max-width: 768px)")?.matches ?? window.innerWidth <= 768;
     if (!isMobile) return undefined;
 
+    const getMaxScrollLeft = () => Math.max(0, el.scrollWidth - el.clientWidth);
+    const clampValue = (value) => Math.min(Math.max(0, value), getMaxScrollLeft());
     const clampScrollLeft = () => {
-      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-      if (el.scrollLeft < 0) el.scrollLeft = 0;
-      else if (el.scrollLeft > maxLeft) el.scrollLeft = maxLeft;
+      const nextLeft = clampValue(el.scrollLeft);
+      if (el.scrollLeft !== nextLeft) el.scrollLeft = nextLeft;
     };
     const touchState = { x: 0, y: 0, left: 0, axis: "" };
     const onTouchStart = (event) => {
@@ -1327,19 +1328,34 @@ export default function AttendanceTab({
       }
       if (touchState.axis === "y") {
         el.scrollLeft = touchState.left;
-      } else {
-        clampScrollLeft();
+        return;
       }
+      if (touchState.axis === "x") {
+        const rawNextLeft = touchState.left - dx;
+        const nextLeft = clampValue(rawNextLeft);
+        el.scrollLeft = nextLeft;
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
+      clampScrollLeft();
+    };
+    const onTouchEnd = () => {
+      clampScrollLeft();
+      touchState.axis = "";
     };
 
     clampScrollLeft();
     el.addEventListener("scroll", clampScrollLeft, { passive: true });
     el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
     return () => {
       el.removeEventListener("scroll", clampScrollLeft);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
     };
   }, []);
 
