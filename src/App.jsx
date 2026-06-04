@@ -145,8 +145,13 @@ export default function App() {
   const [adminTab, setAdminTab] = useState("analytics");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
+  const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
   const [themeRenderTick, setThemeRenderTick] = useState(0);
   const safeThemeMode = themeMode === "light" || themeMode === "dark" ? themeMode : "dark";
+  const safeAttendanceScale = Math.min(130, Math.max(60, Number(attendanceScale) || 100));
+  const changeAttendanceScale = (delta) => setAttendanceScale((prev) => Math.min(130, Math.max(60, (Number(prev) || 100) + delta)));
+  const resetAttendanceScale = () => setAttendanceScale(100);
+  const attendanceScaleBtnStyle = { ...btnS, minHeight: 28, height: 28, minWidth: 32, padding: "0 8px", fontSize: 12, borderRadius: 8, display: "inline-flex", alignItems: "center", justifyContent: "center" };
   const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
   const [directionEdits, setDirectionEdits] = useState({});
 
@@ -1217,18 +1222,29 @@ export default function App() {
 
 
   // Frontend guard only; Supabase RLS is still required for server-side booking ownership enforcement.
+  const currentTrainerProfile = trainers.find(
+    (trainer) => String(trainer.authUserId || "") === String(user?.id || "") || String(trainer.id || "") === String(user?.id || ""),
+  );
+  const currentTrainerScopeIds = Array.from(new Set([
+    user?.id,
+    currentTrainerProfile?.id,
+    currentTrainerProfile?.authUserId,
+  ].filter(Boolean).map(String)));
+  const isAssignedToCurrentTrainer = (trainerId) =>
+    !!trainerId && currentTrainerScopeIds.includes(String(trainerId));
   const canMutateRoomBooking = (booking) => {
     if (isAdmin) return true;
-    return !!booking && String(booking.trainerId || "") === String(user?.id || "");
+    return !!booking && isAssignedToCurrentTrainer(booking.trainerId || booking.trainer_id);
   };
 
   const normalizeTrainerSchedulePayload = (payload = {}) => {
     const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
       ? payload.eventType
       : "room_booking";
+    const payloadTrainerId = payload?.trainerId || payload?.trainer_id || null;
     return {
       ...payload,
-      trainerId: user?.id || null,
+      trainerId: isAssignedToCurrentTrainer(payloadTrainerId) ? payloadTrainerId : user?.id || null,
       eventType,
       bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
       peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
@@ -1483,6 +1499,18 @@ export default function App() {
                 <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}>{safeThemeMode === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
                 <button type="button" style={{...btnS, opacity: pushBusy ? 0.8 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleEnablePush} disabled={pushBusy || !user}>{pushBusy ? "Увімкнення..." : "Увімкнути push"}</button>
                 <button type="button" style={{...btnS, opacity: testPushBusy || pushStatus !== PUSH_STATUS.subscribed ? 0.7 : 1, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={handleSendTestPush} disabled={testPushBusy || pushStatus !== PUSH_STATUS.subscribed || !user}>{testPushBusy ? "Надсилання..." : "Тест push"}</button>
+                {tab === "attendance" && (
+                  <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 6, display: "grid", gap: 5, background: theme.bg === "#0F131A" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMuted, textAlign: "left" }}>Масштаб</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <button type="button" style={attendanceScaleBtnStyle} onClick={() => changeAttendanceScale(-5)} disabled={safeAttendanceScale <= 60} aria-label="Зменшити масштаб відвідування">−</button>
+                      <span style={{ minWidth: 42, textAlign: "center", fontSize: 12, fontWeight: 900, color: theme.textMain }}>{safeAttendanceScale}%</span>
+                      <button type="button" style={attendanceScaleBtnStyle} onClick={() => changeAttendanceScale(5)} disabled={safeAttendanceScale >= 130} aria-label="Збільшити масштаб відвідування">+</button>
+                      <button type="button" style={{ ...attendanceScaleBtnStyle, minWidth: 48 }} onClick={resetAttendanceScale} disabled={safeAttendanceScale === 100}>100%</button>
+                    </div>
+                  </div>
+                )}
+
                 {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
                 {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
                 {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("manageDirections")}>⚙️ Напрямки</button>}
@@ -1563,7 +1591,7 @@ export default function App() {
           />
         )}
 
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}

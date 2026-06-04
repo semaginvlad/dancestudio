@@ -1251,6 +1251,7 @@ export default function AttendanceTab({
   setWarnedStudents,
   trialBookings = [],
   setTrialBookings,
+  attendanceScale = 100,
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -1284,6 +1285,7 @@ export default function AttendanceTab({
   const [lessonReportSaved, setLessonReportSaved] = useState(false);
   const [markingTrialId, setMarkingTrialId] = useState("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
+  const safeAttendanceScale = Math.min(130, Math.max(60, Number(attendanceScale) || 100));
   const [openMenuState, setOpenMenuState] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
@@ -1295,6 +1297,73 @@ export default function AttendanceTab({
   const [historyTab, setHistoryTab] = useState("attendance");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
+  const tableWrapRef = useRef(null);
+
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el || typeof window === "undefined") return undefined;
+    const isMobile = window.matchMedia?.("(max-width: 768px)")?.matches ?? window.innerWidth <= 768;
+    if (!isMobile) return undefined;
+
+    const getMaxScrollLeft = () => Math.max(0, el.scrollWidth - el.clientWidth);
+    const clampValue = (value) => Math.min(Math.max(0, value), getMaxScrollLeft());
+    const clampScrollLeft = () => {
+      const nextLeft = clampValue(el.scrollLeft);
+      if (el.scrollLeft !== nextLeft) el.scrollLeft = nextLeft;
+    };
+    const touchState = { x: 0, y: 0, left: 0, axis: "" };
+    const onTouchStart = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      touchState.x = touch.clientX;
+      touchState.y = touch.clientY;
+      touchState.left = el.scrollLeft;
+      touchState.axis = "";
+    };
+    const onTouchMove = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      const dx = touch.clientX - touchState.x;
+      const dy = touch.clientY - touchState.y;
+      if (!touchState.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 6) {
+        touchState.axis = Math.abs(dy) > Math.abs(dx) ? "y" : "x";
+      }
+      if (touchState.axis === "y") {
+        el.scrollLeft = touchState.left;
+        return;
+      }
+      if (touchState.axis === "x") {
+        const maxLeft = getMaxScrollLeft();
+        const currentLeft = clampValue(el.scrollLeft);
+        const pullingPastLeft = currentLeft <= 0 && dx > 0;
+        const pullingPastRight = currentLeft >= maxLeft && dx < 0;
+        if (pullingPastLeft || pullingPastRight) {
+          el.scrollLeft = pullingPastLeft ? 0 : maxLeft;
+          if (event.cancelable) event.preventDefault();
+        }
+        return;
+      }
+      clampScrollLeft();
+    };
+    const onTouchEnd = () => {
+      clampScrollLeft();
+      touchState.axis = "";
+    };
+
+    clampScrollLeft();
+    el.addEventListener("scroll", clampScrollLeft, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", clampScrollLeft);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
 
   useEffect(() => {
     if (!openMenuState) return;
@@ -2943,7 +3012,7 @@ export default function AttendanceTab({
   };
 
   return (
-    <div className="attendance-root" style={styles.wrap}>
+    <div className="attendance-root" style={{ ...styles.wrap, "--attendance-scale": safeAttendanceScale / 100 }}>
       <style>{`
         .attendance-lesson-orb:hover {
           transform: translateY(-1px) scale(1.03);
@@ -2956,6 +3025,12 @@ export default function AttendanceTab({
         .attendance-lesson-orb:focus-visible {
           box-shadow: 0 0 0 2px rgba(15,23,42,0.9), 0 0 0 4px rgba(167,139,250,0.7) !important;
         }
+
+        .attendance-root {
+          --attendance-scale: 1;
+          --attendance-cell-scale: var(--attendance-scale);
+        }
+
 
         @media (max-width: 768px) {
           .attendance-root {
@@ -2999,11 +3074,11 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-table th:first-child,
           .attendance-root .attendance-table td:first-child {
-            width: 182px !important;
-            min-width: 182px !important;
-            max-width: 182px !important;
+            width: calc(182px * var(--attendance-cell-scale, 1)) !important;
+            min-width: calc(182px * var(--attendance-cell-scale, 1)) !important;
+            max-width: calc(182px * var(--attendance-cell-scale, 1)) !important;
             padding: 2px 5px !important;
-            font-size: 12px !important;
+            font-size: calc(12px * var(--attendance-cell-scale, 1)) !important;
             vertical-align: middle !important;
             box-sizing: border-box !important;
             position: sticky !important;
@@ -3086,9 +3161,9 @@ export default function AttendanceTab({
 
           .attendance-root .attendance-day-head,
           .attendance-root .attendance-day-cell {
-            width: 39px !important;
-            min-width: 39px !important;
-            max-width: 39px !important;
+            width: calc(39px * var(--attendance-cell-scale, 1)) !important;
+            min-width: calc(39px * var(--attendance-cell-scale, 1)) !important;
+            max-width: calc(39px * var(--attendance-cell-scale, 1)) !important;
           }
 
           .attendance-root .attendance-day-head {
@@ -3099,17 +3174,17 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-day-cell {
-            height: 49px !important;
-            min-height: 49px !important;
-            max-height: 49px !important;
+            height: calc(49px * var(--attendance-cell-scale, 1)) !important;
+            min-height: calc(49px * var(--attendance-cell-scale, 1)) !important;
+            max-height: calc(49px * var(--attendance-cell-scale, 1)) !important;
             padding: 0 !important;
             text-align: center !important;
             vertical-align: middle !important;
           }
 
           .attendance-root .attendance-cell-shell {
-            width: 33px !important;
-            height: 33px !important;
+            width: calc(33px * var(--attendance-cell-scale, 1)) !important;
+            height: calc(33px * var(--attendance-cell-scale, 1)) !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -3120,11 +3195,11 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-cell-button {
-            min-width: 31px !important;
-            min-height: 31px !important;
-            font-size: 14px !important;
-            width: 31px !important;
-            height: 31px !important;
+            min-width: calc(31px * var(--attendance-cell-scale, 1)) !important;
+            min-height: calc(31px * var(--attendance-cell-scale, 1)) !important;
+            font-size: calc(14px * var(--attendance-cell-scale, 1)) !important;
+            width: calc(31px * var(--attendance-cell-scale, 1)) !important;
+            height: calc(31px * var(--attendance-cell-scale, 1)) !important;
             border-radius: 999px !important;
             display: flex !important;
             align-items: center !important;
@@ -3136,6 +3211,11 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-table-wrap {
+            max-height: none !important;
+            height: auto !important;
+            overflow-x: auto !important;
+            overflow-y: visible !important;
+            overscroll-behavior-x: contain !important;
             border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
             box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 10px 22px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.36)" : "rgba(15,23,42,0.1)"} !important;
             background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
@@ -3212,36 +3292,36 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-student-name {
-            font-size: 13px !important;
+            font-size: calc(13px * var(--attendance-cell-scale, 1)) !important;
             line-height: 1.15 !important;
           }
 
           .attendance-root .attendance-student-meta {
-            font-size: 11px !important;
+            font-size: calc(11px * var(--attendance-cell-scale, 1)) !important;
             line-height: 1.15 !important;
           }
 
           .attendance-day-cancel {
-            width: 28px !important;
-            min-width: 28px !important;
-            height: 28px !important;
-            min-height: 28px !important;
-            line-height: 26px !important;
-            font-size: 14px !important;
+            width: calc(28px * var(--attendance-cell-scale, 1)) !important;
+            min-width: calc(28px * var(--attendance-cell-scale, 1)) !important;
+            height: calc(28px * var(--attendance-cell-scale, 1)) !important;
+            min-height: calc(28px * var(--attendance-cell-scale, 1)) !important;
+            line-height: calc(26px * var(--attendance-cell-scale, 1)) !important;
+            font-size: calc(14px * var(--attendance-cell-scale, 1)) !important;
           }
 
           .attendance-lesson-orb {
-            width: 30px !important;
-            min-width: 30px !important;
-            height: 30px !important;
-            min-height: 30px !important;
+            width: calc(30px * var(--attendance-cell-scale, 1)) !important;
+            min-width: calc(30px * var(--attendance-cell-scale, 1)) !important;
+            height: calc(30px * var(--attendance-cell-scale, 1)) !important;
+            min-height: calc(30px * var(--attendance-cell-scale, 1)) !important;
           }
 
           .attendance-menu-btn {
             width: 22px !important;
             height: 22px !important;
             line-height: 20px !important;
-            font-size: 12px !important;
+            font-size: calc(12px * var(--attendance-cell-scale, 1)) !important;
             border-radius: 7px !important;
           }
 
@@ -3517,7 +3597,7 @@ export default function AttendanceTab({
         document.body
       )}
 
-      <div className="attendance-table-wrap" style={styles.tableWrap}>
+      <div ref={tableWrapRef} className="attendance-table-wrap" style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
