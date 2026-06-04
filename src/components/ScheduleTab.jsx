@@ -215,6 +215,16 @@ const colorKey = (e) => {
   return "default";
 };
 const recurrenceModes = ["none", "daily", "weekly", "monthly"];
+const addRecurrenceDate = (dateKey, recurrence, step = 1) => {
+  const d = new Date(`${dateKey}T12:00:00`);
+  if (recurrence === "daily") d.setDate(d.getDate() + step);
+  else if (recurrence === "weekly") d.setDate(d.getDate() + step * 7);
+  else if (recurrence === "monthly") d.setMonth(d.getMonth() + step);
+  return toLocalDateKey(d);
+};
+const isRecurringBookingEvent = (event) =>
+  event?.kind === "booking" && recurrenceModes.includes(String(event?.recurrence || "")) && String(event?.recurrence || "none") !== "none";
+const isDateOnOrBefore = (left, right) => !right || String(left || "") <= String(right || "");
 const LESSON_PLAN_TYPES = [
   { value: "choreography", label: "Хореографія" },
   { value: "technique", label: "Техніка" },
@@ -933,6 +943,83 @@ export default function ScheduleTab({
       status: e.status || "active",
     }));
   };
+  const buildRecurringContinuationPayload = (event, nextDate) => ({
+    date: nextDate,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    eventType: event.eventType || "room_booking",
+    bookingType: event.bookingType || null,
+    paymentMethod: event.paymentMethod || "none",
+    peopleCount: event.peopleCount || null,
+    price: event.price || null,
+    trainerId: event.trainerId || event.trainer_id || null,
+    trainerName: event.trainerName || event.trainer_name || event.trainer || null,
+    title: event.title || "Подія",
+    roomName: event.roomName || primaryRoomName,
+    note: event.note || "",
+    recurrence: event.recurrence || "none",
+    recurrenceUntil: event.recurrenceUntil || null,
+    color: event.color || null,
+    description: event.description || null,
+    status: event.status || "active",
+  });
+
+  const removeSingleRecurringBookingOccurrence = async (event) => {
+    const parentId = event.parentId || event.id;
+    const recurrence = String(event.recurrence || "none");
+    if (!parentId || !isRecurringBookingEvent(event)) return false;
+    const occurrenceDate = String(event.date || "").slice(0, 10);
+    const parentDate = String(event.parentDate || event.date || "").slice(0, 10);
+    const recurrenceUntil = event.recurrenceUntil ? String(event.recurrenceUntil).slice(0, 10) : "";
+    const nextDate = addRecurrenceDate(occurrenceDate, recurrence, 1);
+    const prevDate = addRecurrenceDate(occurrenceDate, recurrence, -1);
+    const hasNextOccurrence = isDateOnOrBefore(nextDate, recurrenceUntil);
+    const isFirstOccurrence = occurrenceDate === parentDate;
+
+    if (isFirstOccurrence) {
+      if (hasNextOccurrence) {
+        await onUpdateBooking(parentId, { date: nextDate, recurrenceUntil: recurrenceUntil || null });
+      } else {
+        await onDeleteBooking(parentId);
+      }
+      return true;
+    }
+
+    if (hasNextOccurrence && !onAddBooking) {
+      alert("Не вдалося змінити лише цю подію: немає дії для продовження серії.");
+      return false;
+    }
+
+    await onUpdateBooking(parentId, { recurrenceUntil: prevDate });
+    if (hasNextOccurrence) {
+      try {
+        await onAddBooking(buildRecurringContinuationPayload(event, nextDate));
+      } catch (error) {
+        await onUpdateBooking(parentId, { recurrenceUntil: recurrenceUntil || null });
+        throw error;
+      }
+    }
+    return true;
+  };
+
+  const deleteBookingEvent = async (event, scope = "series") => {
+    if (scope === "occurrence" && isRecurringBookingEvent(event)) {
+      await removeSingleRecurringBookingOccurrence(event);
+      return;
+    }
+    if (window.confirm(isRecurringBookingEvent(event) ? "Видалити всю серію?" : "Видалити подію?")) {
+      await onDeleteBooking(event.parentId || event.id);
+    }
+  };
+
+  const cancelBookingEvent = async (event, scope = "series") => {
+    if (scope === "occurrence" && isRecurringBookingEvent(event)) {
+      await removeSingleRecurringBookingOccurrence(event);
+      return;
+    }
+    await onUpdateBooking(event.parentId || event.id, { status: "cancelled" });
+  };
+
   const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null) => {
     const start = roundToNearest15(minute);
     const base = {
@@ -1752,6 +1839,28 @@ export default function ScheduleTab({
     borderColor: "rgba(255,255,255,.28)",
     boxShadow: `0 8px 20px ${theme.primary}35`,
   };
+  const scheduleMenuMaxHeight = typeof window !== "undefined" ? Math.min(isMobile ? 300 : 380, window.innerHeight - 16) : 300;
+  const scheduleMenuTop = openMenuState
+    ? Math.min(Math.max(8, Number(openMenuState.top || 8)), Math.max(8, (typeof window !== "undefined" ? window.innerHeight : 640) - scheduleMenuMaxHeight - 8))
+    : 8;
+  const scheduleMenuLeft = openMenuState
+    ? Math.min(Math.max(8, Number(openMenuState.left || 8)), Math.max(8, (typeof window !== "undefined" ? window.innerWidth : 1024) - 210))
+    : 8;
+  const menuActionBtnSt = {
+    ...btnS,
+    minHeight: isMobile ? 24 : 26,
+    height: "auto",
+    padding: isMobile ? "3px 7px" : "4px 8px",
+    borderRadius: 7,
+    fontSize: isMobile ? 10.5 : 11.5,
+    lineHeight: 1.15,
+    justifyContent: "flex-start",
+    textAlign: "left",
+    whiteSpace: "normal",
+  };
+  const menuHintSt = { fontSize: isMobile ? 9 : 10, color: theme.textLight, padding: "0 3px", lineHeight: 1.15 };
+  const menuChoiceRowSt = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 };
+  const menuSectionLabelSt = { fontSize: isMobile ? 9.5 : 10, color: theme.textLight, padding: "1px 3px", lineHeight: 1.1 };
   const dayEventsByDay = useMemo(() => buildEventsByDayForDates([selectedDateObj]), [buildEventsByDayForDates, selectedDateObj]);
   const selectedDateEvents = useMemo(() => {
     const arr = dayEventsByDay.get(selectedDate) || [];
@@ -3072,23 +3181,26 @@ export default function ScheduleTab({
                                     onClick={(ev) => ev.stopPropagation()}
                                     style={{
                                       position: "fixed",
-                                      left: Math.max(8, openMenuState.left),
-                                      top: Math.max(8, openMenuState.top),
+                                      left: scheduleMenuLeft,
+                                      top: scheduleMenuTop,
                                       zIndex: 3000,
-                                      minWidth: 190,
+                                      width: isMobile ? 176 : 196,
+                                      maxHeight: scheduleMenuMaxHeight,
+                                      overflowY: "auto",
+                                      overscrollBehavior: "contain",
                                       background: theme.card,
                                       border: `1px solid ${theme.border}`,
-                                      borderRadius: 8,
-                                      padding: 6,
+                                      borderRadius: 9,
+                                      padding: 4,
                                       display: "grid",
-                                      gap: 4,
+                                      gap: 3,
                                       boxShadow: "0 10px 28px rgba(0,0,0,.25)",
                                     }}
                                   >
                                   {e.kind === "booking" ? (
                                     <>
                                       <button
-                                        style={btnS}
+                                        style={menuActionBtnSt}
                                         onClick={() => {
                                           setOpenMenuState(null);
                                           setSelectedEventDetails(e);
@@ -3099,7 +3211,7 @@ export default function ScheduleTab({
                                       {canMutateThisEvent ? (
                                         <>
                                           <button
-                                            style={btnS}
+                                            style={menuActionBtnSt}
                                             onClick={() => {
                                               setOpenMenuState(null);
                                               startEdit(e);
@@ -3108,7 +3220,7 @@ export default function ScheduleTab({
                                             Редагувати
                                           </button>
                                           <button
-                                            style={btnS}
+                                            style={menuActionBtnSt}
                                             onClick={() => {
                                               setOpenMenuState(null);
                                               duplicateBookingLikeEvent(e);
@@ -3116,29 +3228,40 @@ export default function ScheduleTab({
                                           >
                                             Дублювати
                                           </button>
-                                          <button
-                                            style={btnS}
-                                            onClick={() => {
-                                              setOpenMenuState(null);
-                                              if (window.confirm("Видалити подію/серію?"))
-                                                onDeleteBooking(e.parentId || e.id);
-                                            }}
-                                          >
-                                            Видалити
-                                          </button>
-                                          <div style={{ fontSize: 11, color: theme.textLight, padding: "2px 4px" }}>Статус події</div>
-                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Позначити як попередню</button>
-                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "cancelled" }); }}>Позначити як скасовану</button>
-                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Повернути в активні</button>
-                                          <button style={btnS} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Прибрати власний колір</button>
-                                          <div style={{ fontSize: 10, color: theme.textLight, padding: "0 4px" }}>не видаляє подію, лише змінює статус</div>
+                                          {isRecurringBookingEvent(e) ? (
+                                            <>
+                                              <div style={menuSectionLabelSt}>Видалити</div>
+                                              <div style={menuChoiceRowSt}>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "occurrence"); }}>Цю</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Серію</button>
+                                              </div>
+                                            </>
+                                          ) : (
+                                            <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Видалити</button>
+                                          )}
+                                          <div style={menuSectionLabelSt}>Статус події</div>
+                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Попередня</button>
+                                          {isRecurringBookingEvent(e) ? (
+                                            <>
+                                              <div style={menuSectionLabelSt}>Скасувати</div>
+                                              <div style={menuChoiceRowSt}>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "occurrence"); }}>Цю</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Серію</button>
+                                              </div>
+                                            </>
+                                          ) : (
+                                            <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Скасована</button>
+                                          )}
+                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Активна</button>
+                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Без кольору</button>
+                                          <div style={menuHintSt}>Статус не видаляє подію.</div>
                                         </>
                                       ) : null}
                                     </>
                                   ) : (
                                     <>
                                       <button
-                                        style={btnS}
+                                        style={menuActionBtnSt}
                                         onClick={() => {
                                           setOpenMenuState(null);
                                           setSelectedEventDetails(e);
@@ -3148,7 +3271,7 @@ export default function ScheduleTab({
                                       </button>
                                       {canEditGroupSingleLesson(e) ? (
                                         <button
-                                          style={btnS}
+                                          style={menuActionBtnSt}
                                           onClick={() => {
                                             setOpenMenuState(null);
                                             openLessonPlanEditor(e);
@@ -3159,7 +3282,7 @@ export default function ScheduleTab({
                                       ) : null}
                                       {canEditGroupSingleLesson(e) ? (
                                         <button
-                                          style={btnS}
+                                          style={menuActionBtnSt}
                                           onClick={() => {
                                             setOpenMenuState(null);
                                             openGroupOverrideEditor(e);
@@ -3170,7 +3293,7 @@ export default function ScheduleTab({
                                       ) : null}
                                       {canEditGroupSingleLesson(e) ? (
                                         <button
-                                          style={btnS}
+                                          style={menuActionBtnSt}
                                           onClick={() => {
                                             setOpenMenuState(null);
                                             cancelSingleGroupLesson(e);
@@ -3182,7 +3305,7 @@ export default function ScheduleTab({
                                       {isAdmin && (
                                         <>
                                           <button
-                                            style={btnS}
+                                            style={menuActionBtnSt}
                                             onClick={() => {
                                               setOpenMenuState(null);
                                               openGroupSlotEditor(e);
