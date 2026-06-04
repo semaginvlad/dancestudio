@@ -1295,6 +1295,53 @@ export default function AttendanceTab({
   const [historyTab, setHistoryTab] = useState("attendance");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
+  const tableWrapRef = useRef(null);
+
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el || typeof window === "undefined") return undefined;
+    const isMobile = window.matchMedia?.("(max-width: 768px)")?.matches ?? window.innerWidth <= 768;
+    if (!isMobile) return undefined;
+
+    const clampScrollLeft = () => {
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      if (el.scrollLeft < 0) el.scrollLeft = 0;
+      else if (el.scrollLeft > maxLeft) el.scrollLeft = maxLeft;
+    };
+    const touchState = { x: 0, y: 0, left: 0, axis: "" };
+    const onTouchStart = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      touchState.x = touch.clientX;
+      touchState.y = touch.clientY;
+      touchState.left = el.scrollLeft;
+      touchState.axis = "";
+    };
+    const onTouchMove = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      const dx = touch.clientX - touchState.x;
+      const dy = touch.clientY - touchState.y;
+      if (!touchState.axis && Math.max(Math.abs(dx), Math.abs(dy)) > 6) {
+        touchState.axis = Math.abs(dy) > Math.abs(dx) ? "y" : "x";
+      }
+      if (touchState.axis === "y") {
+        el.scrollLeft = touchState.left;
+      } else {
+        clampScrollLeft();
+      }
+    };
+
+    clampScrollLeft();
+    el.addEventListener("scroll", clampScrollLeft, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", clampScrollLeft);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   useEffect(() => {
     if (!openMenuState) return;
@@ -3136,6 +3183,11 @@ export default function AttendanceTab({
           }
 
           .attendance-root .attendance-table-wrap {
+            max-height: none !important;
+            height: auto !important;
+            overflow-x: auto !important;
+            overflow-y: visible !important;
+            overscroll-behavior-x: contain !important;
             border: 1px solid ${theme.bg === "#0F131A" ? "rgba(148,163,184,0.22)" : "rgba(148,163,184,0.3)"} !important;
             box-shadow: inset 0 1px 0 ${theme.bg === "#0F131A" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.65)"}, 0 10px 22px ${theme.bg === "#0F131A" ? "rgba(2,6,23,0.36)" : "rgba(15,23,42,0.1)"} !important;
             background: ${theme.bg === "#0F131A" ? "linear-gradient(180deg, rgba(17,24,39,0.93), rgba(15,23,42,0.93))" : "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.92))"} !important;
@@ -3517,7 +3569,7 @@ export default function AttendanceTab({
         document.body
       )}
 
-      <div className="attendance-table-wrap" style={styles.tableWrap}>
+      <div ref={tableWrapRef} className="attendance-table-wrap" style={styles.tableWrap}>
         <table className="attendance-table" style={styles.table}>
           <thead>
             <tr>
