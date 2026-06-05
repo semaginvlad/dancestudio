@@ -313,13 +313,59 @@ const countAttendanceForGroupDate = ({ attendanceRows = [], subGroupById = {}, g
   }).length;
 };
 
-const logAttendanceReminderDecision = ({ groupId, date, trainerId = null, attendanceCount, action }) => {
+const countAttendanceRowsForGroupDate = async ({ supabase, attendanceRows = [], subGroupById = {}, groupId, date }) => {
+  const targetGroupId = String(groupId || "").trim();
+  const targetDate = dateKey(date);
+  if (!targetGroupId || !targetDate) return 0;
+
+  const fallbackCount = countAttendanceForGroupDate({ attendanceRows, subGroupById, groupId: targetGroupId, date: targetDate });
+  const { count, error } = await supabase
+    .from("attendance")
+    .select("id", { count: "exact", head: true })
+    .eq("group_id", targetGroupId)
+    .eq("date", targetDate);
+
+  if (error) {
+    console.warn("[notification-schedule-attendance-reminder-count-error]", {
+      groupId: targetGroupId,
+      trainingDate: targetDate,
+      fallbackAttendanceCount: fallbackCount,
+      error: String(error.message || error),
+    });
+    return fallbackCount;
+  }
+
+  return Number(count || 0);
+};
+
+const getTrainerDisplayName = (trainer) => {
+  if (!trainer) return null;
+  return String(
+    trainer.name
+    || [trainer.first_name, trainer.last_name].filter(Boolean).join(" ")
+    || trainer.email
+    || trainer.auth_user_id
+    || trainer.id
+    || ""
+  ).trim() || null;
+};
+
+const resolveTrainerRowForRule = (rule, trainerRows = []) => {
+  const trainerKey = String(rule?.trainer_id || "").trim();
+  if (!trainerKey) return null;
+  return (trainerRows || []).find((t) => String(t.auth_user_id || t.id || "") === trainerKey || String(t.id || "") === trainerKey) || null;
+};
+
+const logAttendanceReminderDecision = ({ trainerId = null, trainerName = null, groupId, groupName = null, trainingDate, attendanceCount, shouldSkipAttendanceReminder }) => {
   console.info("[notification-schedule-attendance-reminder]", {
-    groupId: String(groupId || ""),
-    date: dateKey(date),
     trainerId: trainerId ? String(trainerId) : null,
+    trainerName: trainerName || null,
+    groupId: String(groupId || ""),
+    groupName: groupName || null,
+    trainingDate: dateKey(trainingDate),
     attendanceCount: Number(attendanceCount || 0),
-    action,
+    shouldSkipAttendanceReminder: !!shouldSkipAttendanceReminder,
+    reason: shouldSkipAttendanceReminder ? "attendance_exists" : "no_attendance_rows",
   });
 };
 
@@ -413,7 +459,7 @@ const handleDispatchScheduleRules = async (req, res) => {
     supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
     supabase.from("attendance").select("id,sub_id,group_id,date,entry_type"),
     supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
-    supabase.from("trainers").select("id,auth_user_id,telegram"),
+    supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,email,telegram"),
     supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
   ]);
 
@@ -467,15 +513,21 @@ const handleDispatchScheduleRules = async (req, res) => {
       const st = studentsById[studentId] || {};
       return String(st.name || [st.first_name, st.last_name].filter(Boolean).join(" ") || studentId);
     });
-    const attendanceCount = countAttendanceForGroupDate({ attendanceRows: attendanceRaw.data || [], subGroupById, groupId, date: localDate });
+    const trainerRow = resolveTrainerRowForRule(rule, trainersRaw.data || []);
+    const trainerName = getTrainerDisplayName(trainerRow);
+    const attendanceCount = rule.include_attendance_reminder
+      ? await countAttendanceRowsForGroupDate({ attendanceRows: attendanceRaw.data || [], subGroupById, supabase, groupId, date: localDate })
+      : 0;
     const hasAttendance = attendanceCount > 0;
-    if (rule.include_attendance_reminder && hasAttendance) {
+    if (rule.include_attendance_reminder) {
       logAttendanceReminderDecision({
-        groupId,
-        date: localDate,
         trainerId: rule.trainer_id || null,
+        trainerName,
+        groupId,
+        groupName,
+        trainingDate: localDate,
         attendanceCount,
-        action: "skipped",
+        shouldSkipAttendanceReminder: hasAttendance,
       });
     }
     const messageText = buildRuleMessage({ rule, groupName, trialRows: trials, unpaidStudents, hasAttendance, dryRun });
@@ -496,15 +548,6 @@ const handleDispatchScheduleRules = async (req, res) => {
       const telegramTarget = (channel === "telegram" || channel === "both")
         ? resolveTrainerTelegramTarget(rule, trainersRaw.data || [], tgMetaRaw.data || [])
         : null;
-      if (rule.include_attendance_reminder && !hasAttendance) {
-        logAttendanceReminderDecision({
-          groupId,
-          date: localDate,
-          trainerId: rule.trainer_id || null,
-          attendanceCount,
-          action: "dry-run",
-        });
-      }
       results.push({
         ruleId: rule.id,
         status: "dry-run",
@@ -575,16 +618,6 @@ const handleDispatchScheduleRules = async (req, res) => {
 
     const snapshot = { messageText, channel, groupName, pushResult, telegramResult };
     await supabase.from("notification_rule_runs").update({ status: finalStatus, reason, payload_snapshot: snapshot, updated_at: new Date().toISOString() }).eq("id", runInserted.id);
-
-    if (rule.include_attendance_reminder && !hasAttendance) {
-      logAttendanceReminderDecision({
-        groupId,
-        date: localDate,
-        trainerId: rule.trainer_id || null,
-        attendanceCount,
-        action: finalStatus === "sent" ? "sent" : finalStatus,
-      });
-    }
 
     if (finalStatus === "sent") sent += 1;
     else if (finalStatus === "failed") failed += 1;
