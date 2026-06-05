@@ -407,6 +407,8 @@ export default function ScheduleTab({
   const safeGroupLessonOverrides = Array.isArray(groupLessonOverrides) ? groupLessonOverrides : [];
   const safeTrainingLessonPlans = Array.isArray(trainingLessonPlans) ? trainingLessonPlans : [];
   const canManageBookings = isAdmin || allowBookingMutations;
+  const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
+  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
   const currentTrainerFromState = safeTrainers.find(
     (t) => String(t.authUserId || "") === currentTrainerId,
@@ -469,7 +471,8 @@ export default function ScheduleTab({
     typeof window !== "undefined" && window.innerWidth < 900 ? "1" : "all",
     "ds_day_room_column_limit_v1",
   );
-  const [mobileScheduleFocus, setMobileScheduleFocus] = useStickyState("groups", "ds_schedule_mobile_focus_v1");
+  const [mobileFilterType, setMobileFilterType] = useStickyState("all", "ds_schedule_mobile_filter_type_v1");
+  const [mobileFilterValue, setMobileFilterValue] = useStickyState("", "ds_schedule_mobile_filter_value_v1");
   const [showRoomsManager, setShowRoomsManager] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
@@ -513,6 +516,11 @@ export default function ScheduleTab({
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
     [safeDirections],
   );
+  const getGroupDirectionId = (group = {}) => String(group.directionId ?? group.direction_id ?? group.direction ?? "").trim();
+  const getGroupDirectionName = (group = {}) => {
+    const directionId = getGroupDirectionId(group);
+    return getDirectionDisplayName(dirMap.get(String(directionId)) || group.directionName || group.direction_name || group.direction || "—");
+  };
   const trainerMap = useMemo(
     () =>
       new Map(
@@ -592,7 +600,8 @@ export default function ScheduleTab({
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
           title: slotTitle,
-          direction: getDirectionDisplayName(dirMap.get(String(g.directionId || "")) || "—"),
+          directionId: getGroupDirectionId(g),
+          direction: getGroupDirectionName(g),
           trainerId: slotTrainerId || null,
           trainer: trainerMap.get(String(slotTrainerId || "")) || "—",
           roomName: getRoomLabel(row) || getRoomLabel(g) || primaryRoomName,
@@ -670,7 +679,8 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           roomName: getRoomLabel(b) || primaryRoomName,
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          directionId: b.directionId || b.direction_id || "",
+          direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
@@ -708,7 +718,8 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           roomName: getRoomLabel(b) || primaryRoomName,
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          directionId: b.directionId || b.direction_id || "",
+          direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
@@ -764,14 +775,82 @@ export default function ScheduleTab({
     if (!set.size) set.add(DEFAULT_ROOM);
     return Array.from(set);
   }, [activeStudioRooms, eventsByDay]);
+  const mobileFilterTypes = [
+    { value: "all", label: "Усі" },
+    { value: "trainer", label: "Тренер" },
+    { value: "group", label: "Група" },
+    { value: "direction", label: "Напрямок" },
+  ];
+  const mobileTrainerFilterOptions = useMemo(
+    () => safeTrainers.map((trainer) => ({ value: String(trainer.id || trainer.authUserId || ""), label: getTrainerDisplayName(trainer) || trainer.email || trainer.id || "Тренер", altValues: [trainer.id, trainer.authUserId].filter(Boolean).map(String) })).filter((option) => option.value),
+    [safeTrainers],
+  );
+  const mobileGroupFilterOptions = useMemo(
+    () => safeGroups.map((group) => ({ value: String(group.id || ""), label: group.name || group.title || group.id || "Група" })).filter((option) => option.value),
+    [safeGroups],
+  );
+  const mobileDirectionFilterOptions = useMemo(() => {
+    const map = new Map();
+    safeDirections.forEach((direction) => {
+      const value = String(direction.id || direction.name || "").trim();
+      if (value) map.set(value, direction.name || direction.id || "Напрямок");
+    });
+    safeGroups.forEach((group) => {
+      const value = getGroupDirectionId(group) || getGroupDirectionName(group);
+      if (value && value !== "—" && !map.has(String(value))) map.set(String(value), getGroupDirectionName(group));
+    });
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+  }, [safeDirections, safeGroups, dirMap]);
+  const currentMobileFilterOptions = mobileFilterType === "trainer"
+    ? mobileTrainerFilterOptions
+    : mobileFilterType === "group"
+      ? mobileGroupFilterOptions
+      : mobileFilterType === "direction"
+        ? mobileDirectionFilterOptions
+        : [];
+  const mobileFilterValueIsValid = currentMobileFilterOptions.some((option) => String(option.value) === String(mobileFilterValue));
+  const effectiveMobileFilterValue = mobileFilterType === "all" ? "" : (mobileFilterValueIsValid ? mobileFilterValue : (currentMobileFilterOptions[0]?.value || ""));
+  const hasMobileScheduleFilter = isMobile && mobileFilterType !== "all" && Boolean(effectiveMobileFilterValue);
+  useEffect(() => {
+    if (mobileFilterType === "all") {
+      if (mobileFilterValue) setMobileFilterValue("");
+      return;
+    }
+    const firstValue = currentMobileFilterOptions[0]?.value || "";
+    if (!firstValue) return;
+    if (!currentMobileFilterOptions.some((option) => String(option.value) === String(mobileFilterValue))) setMobileFilterValue(firstValue);
+  }, [mobileFilterType, mobileFilterValue, currentMobileFilterOptions, setMobileFilterValue]);
+  const matchesMobileScheduleFilter = (event) => {
+    if (!hasMobileScheduleFilter) return true;
+    const wanted = String(effectiveMobileFilterValue);
+    if (mobileFilterType === "trainer") {
+      const selectedTrainer = mobileTrainerFilterOptions.find((option) => String(option.value) === wanted);
+      const acceptedIds = new Set([wanted, ...(selectedTrainer?.altValues || [])].filter(Boolean).map(String));
+      const eventIds = [event?.trainerId, event?.trainer_id, event?.teacherId, event?.teacher_id].filter(Boolean).map(String);
+      return eventIds.some((id) => acceptedIds.has(id));
+    }
+    if (mobileFilterType === "group") return String(event?.groupId || "") === wanted;
+    if (mobileFilterType === "direction") {
+      const group = event?.groupId != null ? safeGroups.find((g) => String(g.id) === String(event.groupId)) : null;
+      const selectedDirection = mobileDirectionFilterOptions.find((option) => String(option.value) === wanted);
+      const wantedLabel = normalizeLabel(selectedDirection?.label || wanted);
+      const candidateIds = [event?.directionId, event?.direction_id, getGroupDirectionId(group)].filter(Boolean).map(String);
+      const candidateLabels = [event?.direction, event?.directionName, event?.direction_name, getGroupDirectionName(group)].filter(Boolean).map(normalizeLabel);
+      return candidateIds.some((id) => id === wanted) || candidateLabels.some((label) => label === wantedLabel || label === normalizeLabel(wanted));
+    }
+    return true;
+  };
+  const applyRoomAndMobileFilters = (arr = []) => (arr || [])
+    .filter((e) => selectedRoom === "all" || (e.roomName || primaryRoomName) === selectedRoom)
+    .filter(matchesMobileScheduleFilter);
+  const mobileFilterEmptyText = hasMobileScheduleFilter ? "Немає подій за цим фільтром" : "У цій залі подій немає.";
   const roomFilteredEventsByDay = useMemo(() => {
-    if (selectedRoom === "all") return eventsByDay;
     const map = new Map();
     eventsByDay.forEach((arr, key) => {
-      map.set(key, (arr || []).filter((e) => (e.roomName || primaryRoomName) === selectedRoom));
+      map.set(key, applyRoomAndMobileFilters(arr));
     });
     return map;
-  }, [eventsByDay, selectedRoom, primaryRoomName]);
+  }, [eventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
   const canMutateEvent = (event) =>
     isAdmin || (event?.kind === "booking" && isEventAssignedToCurrentTrainer(event));
   const normalizeBookingPayload = (source) => {
@@ -1752,8 +1831,6 @@ export default function ScheduleTab({
     const now = new Date();
     return now.getHours() * 60 + now.getMinutes();
   })();
-  const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
-  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
   const safeScheduleScale = Math.min(130, Math.max(60, Number(scheduleScale) || 100));
   const scheduleScaleFactor = (isMobile ? safeScheduleScale : 100) / 100;
   const weekHourPx = Math.round(HOUR_PX * scheduleScaleFactor);
@@ -1763,12 +1840,7 @@ export default function ScheduleTab({
   const weekMinWidth = isMobile ? Math.max(560, Math.round(980 * scheduleScaleFactor)) : 980;
   const dayRoomMinWidth = isMobile ? Math.max(180, Math.round(240 * scheduleScaleFactor)) : 240;
   const dayRoomMaxWidth = isMobile ? Math.max(200, Math.round(260 * scheduleScaleFactor)) : 260;
-  const mobileCalendarBleedSt = isMobile ? { marginLeft: -6, marginRight: -6, width: "calc(100% + 12px)" } : null;
-  const scheduleFocusOptions = [
-    { value: "trainers", label: "по тренерах" },
-    { value: "groups", label: "по групах" },
-    { value: "directions", label: "по напрямках" },
-  ];
+  const mobileCalendarBleedSt = isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : null;
   const isDarkTheme = String(theme.bg || "").toLowerCase() === "#0f131a";
   const typeAccent = {
     group_lesson: { bg: "rgba(99,102,241,.12)", border: "#6366f1", text: isDarkTheme ? "#c7d2fe" : "#4338ca" },
@@ -1856,15 +1928,48 @@ export default function ScheduleTab({
     borderColor: "rgba(255,255,255,.28)",
     boxShadow: `0 8px 20px ${theme.primary}35`,
   };
-  const getEventFocusLabel = (event) => {
-    if (mobileScheduleFocus === "trainers") return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || "Без тренера";
-    if (mobileScheduleFocus === "directions") return getDirectionDisplayName(event?.direction || event?.eventType || event?.bookingType || event?.title || "—");
-    return event?.groupName || event?.title || "Подія";
+  const mobileToolbarBtnSt = {
+    ...toolbarBtnSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    padding: "0 8px",
+    fontSize: 11.5,
+    justifyContent: "center",
   };
-  const getEventSecondaryLabel = (event) => {
-    if (mobileScheduleFocus === "trainers") return event?.groupName || event?.title || getDirectionDisplayName(event?.direction || "");
-    if (mobileScheduleFocus === "directions") return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || event?.groupName || event?.title || "";
-    return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || getDirectionDisplayName(event?.direction || "");
+  const mobileToolbarActiveSt = {
+    ...toolbarActiveSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    padding: "0 8px",
+    fontSize: 11.5,
+    justifyContent: "center",
+  };
+  const mobileToolbarSelectSt = {
+    ...editorInputSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    maxWidth: "none",
+    borderRadius: 999,
+    padding: "0 9px",
+    fontSize: 11.5,
+  };
+  const setMobileFilterTypeAndDefault = (nextType) => {
+    setMobileFilterType(nextType);
+    if (nextType === "all") {
+      setMobileFilterValue("");
+      return;
+    }
+    const nextOptions = nextType === "trainer"
+      ? mobileTrainerFilterOptions
+      : nextType === "group"
+        ? mobileGroupFilterOptions
+        : nextType === "direction"
+          ? mobileDirectionFilterOptions
+          : [];
+    setMobileFilterValue(nextOptions[0]?.value || "");
   };
   const scheduleMenuMaxHeight = typeof window !== "undefined" ? Math.min(isMobile ? 300 : 380, window.innerHeight - 16) : 300;
   const scheduleMenuTop = openMenuState
@@ -1891,9 +1996,8 @@ export default function ScheduleTab({
   const dayEventsByDay = useMemo(() => buildEventsByDayForDates([selectedDateObj]), [buildEventsByDayForDates, selectedDateObj]);
   const selectedDateEvents = useMemo(() => {
     const arr = dayEventsByDay.get(selectedDate) || [];
-    if (selectedRoom === "all") return arr;
-    return arr.filter((e) => (e.roomName || primaryRoomName) === selectedRoom);
-  }, [dayEventsByDay, selectedDate, selectedRoom, primaryRoomName]);
+    return applyRoomAndMobileFilters(arr);
+  }, [dayEventsByDay, selectedDate, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
   const selectedDateByRoom = useMemo(() => {
     const map = new Map();
     selectedDateEvents.forEach((e) => {
@@ -2000,8 +2104,8 @@ export default function ScheduleTab({
     if (!allKnownRooms.includes(selectedRoom)) setSelectedRoom("all");
   }, [selectedRoom, allKnownRooms]);
   const monthHasEvents = useMemo(
-    () => monthCells.some((d) => ((selectedRoom === "all" ? monthEventsByDay.get(toLocalDateKey(d)) : (monthEventsByDay.get(toLocalDateKey(d)) || []).filter((e) => (e.roomName || primaryRoomName) === selectedRoom)) || []).length > 0),
-    [monthCells, monthEventsByDay, selectedRoom, primaryRoomName],
+    () => monthCells.some((d) => applyRoomAndMobileFilters(monthEventsByDay.get(toLocalDateKey(d)) || []).length > 0),
+    [monthCells, monthEventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups],
   );
   const weekHasEvents = useMemo(
     () => weekDays.some((d) => (roomFilteredEventsByDay.get(toLocalDateKey(d)) || []).length > 0),
@@ -2067,83 +2171,108 @@ export default function ScheduleTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: isMobile ? 10 : 12, ...(isMobile ? { marginLeft: -6, marginRight: -6, width: "calc(100% + 12px)" } : {}) }}>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? "6px 6px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button
-          style={toolbarBtnSt}
-          onClick={() => setWeekStart((d) => addDays(d, -7))}
-        >
-          {isMobile ? "←" : "← Попередній тиждень"}
-        </button>
-        <button
-          style={toolbarBtnSt}
-          onClick={() => setWeekStart(startOfWeek(new Date()))}
-        >
-          Сьогодні
-        </button>
-        <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>
-          {isMobile ? "→" : "Наступний тиждень →"}
-        </button>
-        </div>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 6, flexWrap: "wrap" }}>
-          {[
-            { id: "month", label: "Місяць" },
-            { id: "week", label: "Тиждень" },
-            { id: "day", label: "День" },
-          ].map((m) => (
-            <button
-              key={m.id}
-              style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt}
-              onClick={() => setViewMode(m.id)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
-        <select
-          style={{ ...editorInputSt, minHeight: isMobile ? 34 : 44, maxWidth: isMobile ? 160 : 210, fontSize: isMobile ? 12 : undefined, borderRadius: 999 }}
-          value={selectedRoom}
-          onChange={(e) => setSelectedRoom(e.target.value)}
-        >
-          <option value="all">Усі зали</option>
-          {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-        </select>
+    <div style={{ display: "grid", gap: isMobile ? 10 : 12, ...(isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : {}) }}>
+      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? "5px 5px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
         {isMobile ? (
-          <select
-            style={{ ...editorInputSt, minHeight: 34, maxWidth: 184, fontSize: 12, borderRadius: 999 }}
-            value={mobileScheduleFocus}
-            onChange={(e) => setMobileScheduleFocus(e.target.value)}
-            aria-label="Показувати графік"
-          >
-            {scheduleFocusOptions.map((option) => <option key={option.value} value={option.value}>Показувати {option.label}</option>)}
-          </select>
-        ) : null}
-        {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
-        {canOpenBulkPlanner ? (
-          <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>
-            План на період
-          </button>
-        ) : null}
-        <div
-          style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 10.5 : 12, color: theme.textLight, width: isMobile ? "100%" : undefined }}
-        >
-          Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
-        </div>
-        {canManageBookings && (
-          <button
-            style={{ ...toolbarActiveSt, minHeight: isMobile ? 34 : 40, padding: isMobile ? "0 12px" : "0 16px" }}
-            onClick={() => {
-              setEditingId(null);
-              setFormMode("full");
-              setShowForm((v) => !v);
-            }}
-          >
-            {isMobile ? "+ Додати" : "+ Додати тренування / резерв"}
-          </button>
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 44px", gap: 4 }}>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>←</button>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>→</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 4 }}>
+              {[
+                { id: "month", label: "Місяць" },
+                { id: "week", label: "Тиждень" },
+                { id: "day", label: "День" },
+              ].map((m) => (
+                <button key={m.id} style={viewMode === m.id ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "minmax(0,1fr) 58px" : "minmax(0,1fr)", gap: 4, alignItems: "center" }}>
+              <select style={mobileToolbarSelectSt} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+                <option value="all">Усі зали</option>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              {isAdmin ? <button style={mobileToolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
+            </div>
+            <div style={{ border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.18)" : "rgba(148,163,184,.28)"}`, borderRadius: 14, padding: 5, display: "grid", gap: 4, background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.48)" }}>
+              <div style={{ fontSize: 10, lineHeight: 1, color: theme.textLight, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em" }}>Показати тільки</div>
+              <div style={{ display: "grid", gridTemplateColumns: mobileFilterType === "all" ? "minmax(0,1fr)" : "0.82fr 1.18fr", gap: 4 }}>
+                <select style={mobileToolbarSelectSt} value={mobileFilterType} onChange={(e) => setMobileFilterTypeAndDefault(e.target.value)}>
+                  {mobileFilterTypes.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                {mobileFilterType !== "all" ? (
+                  <select style={mobileToolbarSelectSt} value={effectiveMobileFilterValue} onChange={(e) => setMobileFilterValue(e.target.value)} disabled={!currentMobileFilterOptions.length}>
+                    {currentMobileFilterOptions.length ? currentMobileFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>) : <option value="">Немає варіантів</option>}
+                  </select>
+                ) : null}
+              </div>
+            </div>
+            {(canOpenBulkPlanner || canManageBookings) ? (
+              <div style={{ display: "grid", gridTemplateColumns: canOpenBulkPlanner && canManageBookings ? "1fr 1fr" : "1fr", gap: 4 }}>
+                {canOpenBulkPlanner ? <button style={mobileToolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
+                {canManageBookings ? (
+                  <button
+                    style={mobileToolbarActiveSt}
+                    onClick={() => {
+                      setEditingId(null);
+                      setFormMode("full");
+                      setShowForm((v) => !v);
+                    }}
+                  >
+                    + Додати
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 10.5, color: theme.textLight, textAlign: "center", lineHeight: 1.2 }}>
+              {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>← Попередній тиждень</button>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>Наступний тиждень →</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[
+                { id: "month", label: "Місяць" },
+                { id: "week", label: "Тиждень" },
+                { id: "day", label: "День" },
+              ].map((m) => (
+                <button key={m.id} style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select style={{ ...editorInputSt, minHeight: 44, maxWidth: 210, borderRadius: 999 }} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+                <option value="all">Усі зали</option>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
+              {canOpenBulkPlanner ? <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
+              <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}</div>
+              {canManageBookings && (
+                <button
+                  style={{ ...toolbarActiveSt, minHeight: 40, padding: "0 16px" }}
+                  onClick={() => {
+                    setEditingId(null);
+                    setFormMode("full");
+                    setShowForm((v) => !v);
+                  }}
+                >
+                  + Додати тренування / резерв
+                </button>
+              )}
+            </div>
+          </>
         )}
-        </div>
       </div>
 
       {canManageBookings && showForm && (
@@ -2858,14 +2987,14 @@ export default function ScheduleTab({
           </div>
           {!monthHasEvents ? (
             <div style={{ marginTop: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
-              У цій залі подій немає.
+              {mobileFilterEmptyText}
             </div>
           ) : null}
         </div>
       ) : null}
 
       {viewMode === "day" ? (
-        <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: isMobile ? 4 : cardSt.padding, minWidth: 0, maxWidth: isMobile ? "calc(100% + 12px)" : "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
+        <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: isMobile ? 3 : cardSt.padding, minWidth: 0, maxWidth: isMobile ? "calc(100% + 16px)" : "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
           <div style={{ display: "flex", gap: isMobile ? 5 : 8, marginBottom: isMobile ? 6 : 10, flexWrap: "wrap", alignItems: "center", paddingBottom: isMobile ? 6 : 8, borderBottom: `1px solid ${theme.border}` }}>
             <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(-1)}>←</button>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
@@ -2967,10 +3096,10 @@ export default function ScheduleTab({
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0, paddingRight: hasPlan ? 18 : 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
-                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{isMobile ? getEventFocusLabel(e) : e.title}</div>
+                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 1 }}>
-                            <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}{isMobile ? ` · ${getEventSecondaryLabel(e)}` : ""}</span>
+                            <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
                         </div>
                       );
@@ -2978,9 +3107,9 @@ export default function ScheduleTab({
                   </div>
                 </div>
               ))}
-              {!dayRoomsToRender.length ? (
+              {!selectedDateEvents.length || !dayRoomsToRender.length ? (
                 <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 12, padding: 12, color: theme.textLight }}>
-                  У цій залі подій немає.
+                  {mobileFilterEmptyText}
                 </div>
               ) : null}
             </div>
@@ -3189,11 +3318,11 @@ export default function ScheduleTab({
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
                             <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                              {isMobile ? getEventFocusLabel(e) : e.title}
+                              {e.title}
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
-                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}{isMobile ? ` · ${getEventSecondaryLabel(e)}` : ""}</span>
+                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
                           {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
@@ -3383,8 +3512,8 @@ export default function ScheduleTab({
           </div>
         </div>
         {!weekHasEvents ? (
-          <div style={{ margin: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
-            У цій залі подій немає.
+          <div style={{ margin: isMobile ? 6 : 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
+            {mobileFilterEmptyText}
           </div>
         ) : null}
       </div>
