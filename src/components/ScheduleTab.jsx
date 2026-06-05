@@ -516,10 +516,59 @@ export default function ScheduleTab({
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
     [safeDirections],
   );
-  const getGroupDirectionId = (group = {}) => String(group.directionId ?? group.direction_id ?? group.direction ?? "").trim();
+  const getSafeDirectionText = (value) => {
+    const text = String(value ?? "").trim();
+    return text && text !== "—" ? text : "";
+  };
+  const getDirectionRecordId = (direction = {}) => {
+    if (!direction || typeof direction !== "object") return "";
+    return getSafeDirectionText(direction.id ?? direction.directionId ?? direction.direction_id);
+  };
+  const getDirectionRecordName = (direction = {}) => {
+    if (!direction || typeof direction !== "object") return "";
+    return getSafeDirectionText(direction.name ?? direction.title ?? direction.label);
+  };
+  const expandDirectionValue = (value) => {
+    const raw = getSafeDirectionText(value);
+    if (!raw) return [];
+    const mapped = getSafeDirectionText(dirMap.get(String(raw)));
+    return Array.from(new Set([raw, mapped, getDirectionDisplayName(mapped || raw)].filter(Boolean)));
+  };
+  const getGroupDirectionId = (group = {}) => {
+    if (!group || typeof group !== "object") return "";
+    return getSafeDirectionText(group.directionId ?? group.direction_id);
+  };
   const getGroupDirectionName = (group = {}) => {
+    if (!group || typeof group !== "object") return "";
     const directionId = getGroupDirectionId(group);
-    return getDirectionDisplayName(dirMap.get(String(directionId)) || group.directionName || group.direction_name || group.direction || "—");
+    const directName = getSafeDirectionText(group.directionName ?? group.direction_name ?? group.direction ?? group.type ?? group.category);
+    return getDirectionDisplayName(dirMap.get(String(directionId)) || directName || "");
+  };
+  const getGroupDirectionCandidates = (group = {}) => {
+    if (!group || typeof group !== "object") return [];
+    const values = [
+      group.directionId,
+      group.direction_id,
+      group.direction,
+      group.directionName,
+      group.direction_name,
+      group.type,
+      group.category,
+    ].flatMap(expandDirectionValue);
+    return Array.from(new Set(values.map(getSafeDirectionText).filter(Boolean)));
+  };
+  const getEventDirectionCandidates = (event = {}) => {
+    if (!event || typeof event !== "object") return [];
+    const group = event.groupId != null ? safeGroups.find((g) => String(g?.id) === String(event.groupId)) : null;
+    const values = [
+      event.directionId,
+      event.direction_id,
+      event.direction,
+      event.directionName,
+      event.direction_name,
+      ...getGroupDirectionCandidates(group),
+    ].flatMap(expandDirectionValue);
+    return Array.from(new Set(values.map(getSafeDirectionText).filter(Boolean)));
   };
   const trainerMap = useMemo(
     () =>
@@ -791,16 +840,30 @@ export default function ScheduleTab({
   );
   const mobileDirectionFilterOptions = useMemo(() => {
     const map = new Map();
+    const addDirectionOption = (value, label = "") => {
+      const safeValue = getSafeDirectionText(value);
+      if (!safeValue) return;
+      const safeLabel = getDirectionDisplayName(getSafeDirectionText(label) || dirMap.get(String(safeValue)) || safeValue);
+      if (!map.has(safeValue)) map.set(safeValue, safeLabel);
+    };
     safeDirections.forEach((direction) => {
-      const value = String(direction.id || direction.name || "").trim();
-      if (value) map.set(value, direction.name || direction.id || "Напрямок");
+      const id = getDirectionRecordId(direction);
+      const name = getDirectionRecordName(direction);
+      addDirectionOption(id || name, name || id);
     });
     safeGroups.forEach((group) => {
-      const value = getGroupDirectionId(group) || getGroupDirectionName(group);
-      if (value && value !== "—" && !map.has(String(value))) map.set(String(value), getGroupDirectionName(group));
+      const directionId = getGroupDirectionId(group);
+      const directionName = getGroupDirectionName(group);
+      addDirectionOption(directionId || directionName, directionName || directionId);
+    });
+    eventsByDay.forEach((items) => {
+      (items || []).forEach((event) => {
+        const candidates = getEventDirectionCandidates(event);
+        addDirectionOption(candidates[0], candidates.find((candidate) => !dirMap.has(String(candidate))) || candidates[0]);
+      });
     });
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
-  }, [safeDirections, safeGroups, dirMap]);
+  }, [safeDirections, safeGroups, dirMap, eventsByDay]);
   const currentMobileFilterOptions = mobileFilterType === "trainer"
     ? mobileTrainerFilterOptions
     : mobileFilterType === "group"
@@ -831,12 +894,11 @@ export default function ScheduleTab({
     }
     if (mobileFilterType === "group") return String(event?.groupId || "") === wanted;
     if (mobileFilterType === "direction") {
-      const group = event?.groupId != null ? safeGroups.find((g) => String(g.id) === String(event.groupId)) : null;
       const selectedDirection = mobileDirectionFilterOptions.find((option) => String(option.value) === wanted);
-      const wantedLabel = normalizeLabel(selectedDirection?.label || wanted);
-      const candidateIds = [event?.directionId, event?.direction_id, getGroupDirectionId(group)].filter(Boolean).map(String);
-      const candidateLabels = [event?.direction, event?.directionName, event?.direction_name, getGroupDirectionName(group)].filter(Boolean).map(normalizeLabel);
-      return candidateIds.some((id) => id === wanted) || candidateLabels.some((label) => label === wantedLabel || label === normalizeLabel(wanted));
+      const wantedCandidates = [wanted, selectedDirection?.label].flatMap(expandDirectionValue).map(normalizeLabel).filter(Boolean);
+      if (!wantedCandidates.length) return false;
+      const eventCandidates = getEventDirectionCandidates(event).map(normalizeLabel).filter(Boolean);
+      return eventCandidates.some((candidate) => wantedCandidates.includes(candidate));
     }
     return true;
   };
