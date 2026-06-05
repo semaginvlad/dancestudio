@@ -395,6 +395,7 @@ export default function ScheduleTab({
   onDeleteGroupLessonOverride,
   onUpsertTrainingLessonPlan,
   currentUser = null,
+  scheduleScale = 100,
 }) {
   const DEFAULT_ROOM = "Основна зала";
   const NO_ROOM = "Без залу";
@@ -468,6 +469,7 @@ export default function ScheduleTab({
     typeof window !== "undefined" && window.innerWidth < 900 ? "1" : "all",
     "ds_day_room_column_limit_v1",
   );
+  const [mobileScheduleFocus, setMobileScheduleFocus] = useStickyState("groups", "ds_schedule_mobile_focus_v1");
   const [showRoomsManager, setShowRoomsManager] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
@@ -1020,7 +1022,7 @@ export default function ScheduleTab({
     await onUpdateBooking(event.parentId || event.id, { status: "cancelled" });
   };
 
-  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null) => {
+  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null, roomNameOverride = "") => {
     const start = roundToNearest15(minute);
     const base = {
       date,
@@ -1037,7 +1039,7 @@ export default function ScheduleTab({
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
-      roomName: DEFAULT_ROOM,
+      roomName: normalizeRoomName(roomNameOverride || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM,
     };
     if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", base);
     setEditingId(null);
@@ -1046,8 +1048,8 @@ export default function ScheduleTab({
     setFormErrors({});
     setShowForm(true);
   };
-  const minuteFromY = (y) =>
-    roundToNearest15(DAY_START_HOUR * 60 + (y / HOUR_PX) * 60);
+  const minuteFromY = (y, hourPx = weekHourPx) =>
+    roundToNearest15(DAY_START_HOUR * 60 + (y / hourPx) * 60);
   const applyQuickToFullForm = () => setFormMode("full");
   const applyFullToCompactForm = () => setFormMode("compact");
 
@@ -1752,6 +1754,21 @@ export default function ScheduleTab({
   })();
   const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
   const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
+  const safeScheduleScale = Math.min(130, Math.max(60, Number(scheduleScale) || 100));
+  const scheduleScaleFactor = (isMobile ? safeScheduleScale : 100) / 100;
+  const weekHourPx = Math.round(HOUR_PX * scheduleScaleFactor);
+  const dayHourPx = Math.round(42 * scheduleScaleFactor);
+  const scheduleMinEventHeight = Math.max(18, Math.round(MIN_EVENT_HEIGHT * scheduleScaleFactor));
+  const weekTimeColumnWidth = Math.max(44, Math.round(70 * scheduleScaleFactor));
+  const weekMinWidth = isMobile ? Math.max(560, Math.round(980 * scheduleScaleFactor)) : 980;
+  const dayRoomMinWidth = isMobile ? Math.max(180, Math.round(240 * scheduleScaleFactor)) : 240;
+  const dayRoomMaxWidth = isMobile ? Math.max(200, Math.round(260 * scheduleScaleFactor)) : 260;
+  const mobileCalendarBleedSt = isMobile ? { marginLeft: -6, marginRight: -6, width: "calc(100% + 12px)" } : null;
+  const scheduleFocusOptions = [
+    { value: "trainers", label: "по тренерах" },
+    { value: "groups", label: "по групах" },
+    { value: "directions", label: "по напрямках" },
+  ];
   const isDarkTheme = String(theme.bg || "").toLowerCase() === "#0f131a";
   const typeAccent = {
     group_lesson: { bg: "rgba(99,102,241,.12)", border: "#6366f1", text: isDarkTheme ? "#c7d2fe" : "#4338ca" },
@@ -1839,6 +1856,16 @@ export default function ScheduleTab({
     borderColor: "rgba(255,255,255,.28)",
     boxShadow: `0 8px 20px ${theme.primary}35`,
   };
+  const getEventFocusLabel = (event) => {
+    if (mobileScheduleFocus === "trainers") return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || "Без тренера";
+    if (mobileScheduleFocus === "directions") return getDirectionDisplayName(event?.direction || event?.eventType || event?.bookingType || event?.title || "—");
+    return event?.groupName || event?.title || "Подія";
+  };
+  const getEventSecondaryLabel = (event) => {
+    if (mobileScheduleFocus === "trainers") return event?.groupName || event?.title || getDirectionDisplayName(event?.direction || "");
+    if (mobileScheduleFocus === "directions") return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || event?.groupName || event?.title || "";
+    return getResolvedTrainerName(event?.trainerName || event?.trainer, event?.trainerId || event?.trainer_id) || getDirectionDisplayName(event?.direction || "");
+  };
   const scheduleMenuMaxHeight = typeof window !== "undefined" ? Math.min(isMobile ? 300 : 380, window.innerHeight - 16) : 300;
   const scheduleMenuTop = openMenuState
     ? Math.min(Math.max(8, Number(openMenuState.top || 8)), Math.max(8, (typeof window !== "undefined" ? window.innerHeight : 640) - scheduleMenuMaxHeight - 8))
@@ -1897,16 +1924,16 @@ export default function ScheduleTab({
     const count = Math.max(1, dayRoomsToRender.length);
     if (isMobile) {
       if (dayRoomColumnLimit !== "all" && Math.max(1, Number(dayRoomColumnLimit || 1)) === 1) return "minmax(100%, 1fr)";
-      return `repeat(${count}, minmax(240px, 260px))`;
+      return `repeat(${count}, minmax(${dayRoomMinWidth}px, ${dayRoomMaxWidth}px))`;
     }
     if (dayRoomColumnLimit === "all") return `repeat(${count}, minmax(240px, 1fr))`;
     return `repeat(${Math.max(1, Number(dayRoomColumnLimit || 1))}, minmax(240px, 1fr))`;
-  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit, isMobile]);
+  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit, isMobile, dayRoomMinWidth, dayRoomMaxWidth]);
   const dayRoomScrollWidth = useMemo(() => {
     if (!isMobile || selectedRoom !== "all" || dayRoomColumnLimit === "1") return undefined;
     const count = Math.max(1, dayRoomsToRender.length);
-    return `${count * 250 + Math.max(0, count - 1) * 10}px`;
-  }, [isMobile, selectedRoom, dayRoomColumnLimit, dayRoomsToRender.length]);
+    return `${count * dayRoomMinWidth + Math.max(0, count - 1) * 6}px`;
+  }, [isMobile, selectedRoom, dayRoomColumnLimit, dayRoomsToRender.length, dayRoomMinWidth]);
 
   const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
   const loadStudioRooms = async () => {
@@ -2040,8 +2067,8 @@ export default function ScheduleTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? 8 : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
+    <div style={{ display: "grid", gap: isMobile ? 10 : 12, ...(isMobile ? { marginLeft: -6, marginRight: -6, width: "calc(100% + 12px)" } : {}) }}>
+      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? "6px 6px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
         <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
           style={toolbarBtnSt}
@@ -2083,6 +2110,16 @@ export default function ScheduleTab({
           <option value="all">Усі зали</option>
           {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
         </select>
+        {isMobile ? (
+          <select
+            style={{ ...editorInputSt, minHeight: 34, maxWidth: 184, fontSize: 12, borderRadius: 999 }}
+            value={mobileScheduleFocus}
+            onChange={(e) => setMobileScheduleFocus(e.target.value)}
+            aria-label="Показувати графік"
+          >
+            {scheduleFocusOptions.map((option) => <option key={option.value} value={option.value}>Показувати {option.label}</option>)}
+          </select>
+        ) : null}
         {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
         {canOpenBulkPlanner ? (
           <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>
@@ -2828,7 +2865,7 @@ export default function ScheduleTab({
       ) : null}
 
       {viewMode === "day" ? (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, minWidth: 0, maxWidth: "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
+        <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: isMobile ? 4 : cardSt.padding, minWidth: 0, maxWidth: isMobile ? "calc(100% + 12px)" : "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
           <div style={{ display: "flex", gap: isMobile ? 5 : 8, marginBottom: isMobile ? 6 : 10, flexWrap: "wrap", alignItems: "center", paddingBottom: isMobile ? 6 : 8, borderBottom: `1px solid ${theme.border}` }}>
             <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(-1)}>←</button>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
@@ -2849,51 +2886,61 @@ export default function ScheduleTab({
           </div>
           <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: selectedRoom === "all" ? "auto" : "visible", overflowY: "visible", WebkitOverflowScrolling: "touch", touchAction: selectedRoom === "all" ? "pan-x pan-y" : "auto", overscrollBehaviorX: "contain" }}>
             {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}</span>)}</div> : null}
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
+            <div style={{ display: "grid", gap: isMobile ? 6 : 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
               {dayRoomsToRender.map(([room, items]) => (
-                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : undefined }}>
+                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : undefined }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
-                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
-                    {canManageBookings && !isMobile ? (
+                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * dayHourPx, background: "rgba(255,255,255,.01)" }}>
+                    {canManageBookings ? (
                       <div
-                        style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
-                        onMouseDown={(ev) => {
+                        style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair", touchAction: "manipulation" }}
+                        onPointerDown={(ev) => {
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
+                          const mins = minuteFromY(y, dayHourPx);
                           setSelection({ date: selectedDate, startMinute: mins, endMinute: mins, dragging: true, roomName: room });
                         }}
-                        onMouseMove={(ev) => {
+                        onPointerMove={(ev) => {
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
-                          setHoverSlot({ date: selectedDate, minute: mins });
-                          setSelection((p) => (p?.dragging && p.date === selectedDate ? { ...p, endMinute: mins } : p));
+                          const mins = minuteFromY(y, dayHourPx);
+                          setHoverSlot({ date: selectedDate, minute: mins, roomName: room });
+                          setSelection((p) => (p?.dragging && p.date === selectedDate && p.roomName === room ? { ...p, endMinute: mins } : p));
                         }}
-                        onMouseUp={(ev) => {
+                        onPointerLeave={() => {
+                          setHoverSlot(null);
+                          setSelection((p) => (p?.dragging && p.date === selectedDate && p.roomName === room ? { ...p, dragging: false } : p));
+                        }}
+                        onPointerUp={(ev) => {
+                          ev.stopPropagation();
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
-                          const cur = selection && selection.date === selectedDate ? selection : { startMinute: mins, endMinute: mins };
+                          const mins = minuteFromY(y, dayHourPx);
+                          const cur = selection && selection.date === selectedDate && selection.roomName === room ? selection : { startMinute: mins, endMinute: mins };
                           const startMinute = Math.min(cur.startMinute, mins);
                           const endRaw = Math.max(cur.startMinute, mins);
                           const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
-                          openCreateAt(selectedDate, startMinute, ev, endMinute);
-                          setDraft((p) => ({ ...p, roomName: room || p.roomName }));
+                          openCreateAt(selectedDate, startMinute, ev, endMinute, room);
                           setSelection(null);
                         }}
                       />
                     ) : null}
+                    {canManageBookings && hoverSlot?.date === selectedDate && hoverSlot?.roomName === room ? (
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * dayHourPx, height: Math.max(8, dayHourPx / 4), background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
+                    ) : null}
+                    {canManageBookings && selection?.date === selectedDate && selection?.roomName === room ? (
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * dayHourPx, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * dayHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
+                    ) : null}
                     {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => (
-                      <div key={i} style={{ position: "absolute", top: i * 42, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
+                      <div key={i} style={{ position: "absolute", top: i * dayHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
                     ))}
                     {isTodaySelected ? (
-                      <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * 42, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * dayHourPx, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
                       const dur = Math.max(0, e.endMin - e.startMin);
-                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
-                      const height = Math.max(24, (dur / 60) * 42);
+                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * dayHourPx;
+                      const height = Math.max(scheduleMinEventHeight, (dur / 60) * dayHourPx);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -2920,10 +2967,10 @@ export default function ScheduleTab({
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0, paddingRight: hasPlan ? 18 : 0 }}>
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
-                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{e.title}</div>
+                            <div style={{ fontSize: isMobile ? 10.5 : 11, fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 42 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0 }}>{isMobile ? getEventFocusLabel(e) : e.title}</div>
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 1 }}>
-                            <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
+                            <span style={{ fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}{isMobile ? ` · ${getEventSecondaryLabel(e)}` : ""}</span>
                           </div>
                         </div>
                       );
@@ -2945,17 +2992,18 @@ export default function ScheduleTab({
       <div
         style={{
           ...cardSt,
+          ...mobileCalendarBleedSt,
           border: `1px solid ${theme.border}`,
           padding: 0,
           overflowX: "auto",
           overflowY: "hidden",
         }}
       >
-        <div style={{ minWidth: 980 }}>
+        <div style={{ minWidth: weekMinWidth }}>
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "70px repeat(7,1fr)",
+              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
               borderBottom: `1px solid ${theme.border}`,
               minHeight: 56,
             }}
@@ -2976,8 +3024,8 @@ export default function ScheduleTab({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "70px repeat(7,1fr)",
-              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * HOUR_PX,
+              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
+              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * weekHourPx,
             }}
           >
             <div
@@ -2993,7 +3041,7 @@ export default function ScheduleTab({
                     key={i}
                     style={{
                       position: "absolute",
-                      top: i * HOUR_PX - 8,
+                      top: i * weekHourPx - 8,
                       left: 8,
                       fontSize: 11,
                       color: theme.textLight,
@@ -3050,10 +3098,10 @@ export default function ScheduleTab({
                     />
                   ) : null}
                   {canManageBookings && hoverSlot?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: HOUR_PX / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
+                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
                   ) : null}
                   {canManageBookings && selection?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * HOUR_PX, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
+                    <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * weekHourPx, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
                   ) : null}
                   {Array.from(
                     { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
@@ -3062,7 +3110,7 @@ export default function ScheduleTab({
                         key={i}
                         style={{
                           position: "absolute",
-                          top: i * HOUR_PX,
+                          top: i * weekHourPx,
                           left: 0,
                           right: 0,
                           borderTop: `1px solid ${theme.border}`,
@@ -3074,10 +3122,10 @@ export default function ScheduleTab({
                   {dayEvents.map((e) => {
                     const dur = Math.max(0, e.endMin - e.startMin);
                     const top =
-                      ((e.startMin - DAY_START_HOUR * 60) / 60) * HOUR_PX;
+                      ((e.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
                     const height = Math.max(
-                      MIN_EVENT_HEIGHT,
-                      (dur / 60) * HOUR_PX,
+                      scheduleMinEventHeight,
+                      (dur / 60) * weekHourPx,
                     );
                     const gap = 2;
                     const available = 94;
@@ -3141,11 +3189,11 @@ export default function ScheduleTab({
                             {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
                             {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
                             <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                              {e.title}
+                              {isMobile ? getEventFocusLabel(e) : e.title}
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
-                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
+                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}{isMobile ? ` · ${getEventSecondaryLabel(e)}` : ""}</span>
                           </div>
                           {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
