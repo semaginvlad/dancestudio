@@ -2808,7 +2808,8 @@ export default function ScheduleTab({
               ))}
             </div>
             {bulkPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12, marginTop: 10 }}>{bulkPlanEdit.error}</div> : null}
-            <div style={{ display: "flex", gap: 6, marginTop: 12, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap" }}>
+            {isMobile ? <div aria-hidden="true" style={{ height: "calc(96px + env(safe-area-inset-bottom, 0px))" }} /> : null}
+            <div style={{ display: "flex", gap: 6, marginTop: isMobile ? 0 : 12, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap" }}>
               <button style={btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
               <button style={btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
             </div>
