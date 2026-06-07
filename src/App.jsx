@@ -146,12 +146,17 @@ export default function App() {
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
+  const [scheduleScale, setScheduleScale] = useStickyState(100, "ds_schedule_scale_v1");
   const [themeRenderTick, setThemeRenderTick] = useState(0);
   const safeThemeMode = themeMode === "light" || themeMode === "dark" ? themeMode : "dark";
   const safeAttendanceScale = Math.min(130, Math.max(60, Number(attendanceScale) || 100));
+  const safeScheduleScale = Math.min(130, Math.max(60, Number(scheduleScale) || 100));
   const changeAttendanceScale = (delta) => setAttendanceScale((prev) => Math.min(130, Math.max(60, (Number(prev) || 100) + delta)));
+  const changeScheduleScale = (delta) => setScheduleScale((prev) => Math.min(130, Math.max(60, (Number(prev) || 100) + delta)));
   const resetAttendanceScale = () => setAttendanceScale(100);
+  const resetScheduleScale = () => setScheduleScale(100);
   const attendanceScaleBtnStyle = { ...btnS, minHeight: 28, height: 28, minWidth: 32, padding: "0 8px", fontSize: 12, borderRadius: 8, display: "inline-flex", alignItems: "center", justifyContent: "center" };
+  const scheduleScaleBtnStyle = attendanceScaleBtnStyle;
   const [directionDraft, setDirectionDraft] = useState({ id: "", name: "", color: "#7b8ea8" });
   const [directionEdits, setDirectionEdits] = useState({});
 
@@ -1510,6 +1515,17 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {tab === "schedule" && (
+                  <div style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: 6, display: "grid", gap: 5, background: theme.bg === "#0F131A" ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.55)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: theme.textMuted, textAlign: "left" }}>Масштаб графіку</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <button type="button" style={scheduleScaleBtnStyle} onClick={() => changeScheduleScale(-5)} disabled={safeScheduleScale <= 60} aria-label="Зменшити масштаб графіку">−</button>
+                      <span style={{ minWidth: 42, textAlign: "center", fontSize: 12, fontWeight: 900, color: theme.textMain }}>{safeScheduleScale}%</span>
+                      <button type="button" style={scheduleScaleBtnStyle} onClick={() => changeScheduleScale(5)} disabled={safeScheduleScale >= 130} aria-label="Збільшити масштаб графіку">+</button>
+                      <button type="button" style={{ ...scheduleScaleBtnStyle, minWidth: 48 }} onClick={resetScheduleScale} disabled={safeScheduleScale === 100}>100%</button>
+                    </div>
+                  </div>
+                )}
 
                 {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addStudent")}>+ Учениця</button>}
                 {isAdmin && <button type="button" style={{...btnS, minHeight:32, height:32, width:"100%", padding:"0 10px", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center"}} onClick={()=>setModal("addGroup")}>+ Додати групу</button>}
@@ -1588,6 +1604,7 @@ export default function App() {
             onDeleteGroupLessonOverride={deleteGroupLessonOverrideAction}
             onUpsertTrainingLessonPlan={upsertTrainingLessonPlanAction}
             currentUser={user}
+            scheduleScale={safeScheduleScale}
           />
         )}
 

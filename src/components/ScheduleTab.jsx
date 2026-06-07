@@ -395,6 +395,7 @@ export default function ScheduleTab({
   onDeleteGroupLessonOverride,
   onUpsertTrainingLessonPlan,
   currentUser = null,
+  scheduleScale = 100,
 }) {
   const DEFAULT_ROOM = "Основна зала";
   const NO_ROOM = "Без залу";
@@ -406,6 +407,8 @@ export default function ScheduleTab({
   const safeGroupLessonOverrides = Array.isArray(groupLessonOverrides) ? groupLessonOverrides : [];
   const safeTrainingLessonPlans = Array.isArray(trainingLessonPlans) ? trainingLessonPlans : [];
   const canManageBookings = isAdmin || allowBookingMutations;
+  const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
+  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
   const currentTrainerFromState = safeTrainers.find(
     (t) => String(t.authUserId || "") === currentTrainerId,
@@ -468,6 +471,8 @@ export default function ScheduleTab({
     typeof window !== "undefined" && window.innerWidth < 900 ? "1" : "all",
     "ds_day_room_column_limit_v1",
   );
+  const [mobileFilterType, setMobileFilterType] = useStickyState("all", "ds_schedule_mobile_filter_type_v1");
+  const [mobileFilterValue, setMobileFilterValue] = useStickyState("", "ds_schedule_mobile_filter_value_v1");
   const [showRoomsManager, setShowRoomsManager] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
@@ -511,6 +516,60 @@ export default function ScheduleTab({
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
     [safeDirections],
   );
+  const getSafeDirectionText = (value) => {
+    const text = String(value ?? "").trim();
+    return text && text !== "—" ? text : "";
+  };
+  const getDirectionRecordId = (direction = {}) => {
+    if (!direction || typeof direction !== "object") return "";
+    return getSafeDirectionText(direction.id ?? direction.directionId ?? direction.direction_id);
+  };
+  const getDirectionRecordName = (direction = {}) => {
+    if (!direction || typeof direction !== "object") return "";
+    return getSafeDirectionText(direction.name ?? direction.title ?? direction.label);
+  };
+  const expandDirectionValue = (value) => {
+    const raw = getSafeDirectionText(value);
+    if (!raw) return [];
+    const mapped = getSafeDirectionText(dirMap.get(String(raw)));
+    return Array.from(new Set([raw, mapped, getDirectionDisplayName(mapped || raw)].filter(Boolean)));
+  };
+  const getGroupDirectionId = (group = {}) => {
+    if (!group || typeof group !== "object") return "";
+    return getSafeDirectionText(group.directionId ?? group.direction_id);
+  };
+  const getGroupDirectionName = (group = {}) => {
+    if (!group || typeof group !== "object") return "";
+    const directionId = getGroupDirectionId(group);
+    const directName = getSafeDirectionText(group.directionName ?? group.direction_name ?? group.direction ?? group.type ?? group.category);
+    return getDirectionDisplayName(dirMap.get(String(directionId)) || directName || "");
+  };
+  const getGroupDirectionCandidates = (group = {}) => {
+    if (!group || typeof group !== "object") return [];
+    const values = [
+      group.directionId,
+      group.direction_id,
+      group.direction,
+      group.directionName,
+      group.direction_name,
+      group.type,
+      group.category,
+    ].flatMap(expandDirectionValue);
+    return Array.from(new Set(values.map(getSafeDirectionText).filter(Boolean)));
+  };
+  const getEventDirectionCandidates = (event = {}) => {
+    if (!event || typeof event !== "object") return [];
+    const group = event.groupId != null ? safeGroups.find((g) => String(g?.id) === String(event.groupId)) : null;
+    const values = [
+      event.directionId,
+      event.direction_id,
+      event.direction,
+      event.directionName,
+      event.direction_name,
+      ...getGroupDirectionCandidates(group),
+    ].flatMap(expandDirectionValue);
+    return Array.from(new Set(values.map(getSafeDirectionText).filter(Boolean)));
+  };
   const trainerMap = useMemo(
     () =>
       new Map(
@@ -590,7 +649,8 @@ export default function ScheduleTab({
           startTime: minToHHMM(st),
           endTime: minToHHMM(en),
           title: slotTitle,
-          direction: getDirectionDisplayName(dirMap.get(String(g.directionId || "")) || "—"),
+          directionId: getGroupDirectionId(g),
+          direction: getGroupDirectionName(g),
           trainerId: slotTrainerId || null,
           trainer: trainerMap.get(String(slotTrainerId || "")) || "—",
           roomName: getRoomLabel(row) || getRoomLabel(g) || primaryRoomName,
@@ -668,7 +728,8 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           roomName: getRoomLabel(b) || primaryRoomName,
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          directionId: b.directionId || b.direction_id || "",
+          direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
@@ -706,7 +767,8 @@ export default function ScheduleTab({
           endMin: en,
           title: b.title || "Подія",
           roomName: getRoomLabel(b) || primaryRoomName,
-          direction: getDirectionDisplayName(bt?.label || "Reserve"),
+          directionId: b.directionId || b.direction_id || "",
+          direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
           trainerName: getResolvedTrainerName(b.trainerName || b.trainer_name, b.trainerId || b.trainer_id) || null,
           trainer:
@@ -762,14 +824,95 @@ export default function ScheduleTab({
     if (!set.size) set.add(DEFAULT_ROOM);
     return Array.from(set);
   }, [activeStudioRooms, eventsByDay]);
+  const mobileFilterTypes = [
+    { value: "all", label: "Усі" },
+    { value: "trainer", label: "Тренер" },
+    { value: "group", label: "Група" },
+    { value: "direction", label: "Напрямок" },
+  ];
+  const mobileTrainerFilterOptions = useMemo(
+    () => safeTrainers.map((trainer) => ({ value: String(trainer.id || trainer.authUserId || ""), label: getTrainerDisplayName(trainer) || trainer.email || trainer.id || "Тренер", altValues: [trainer.id, trainer.authUserId].filter(Boolean).map(String) })).filter((option) => option.value),
+    [safeTrainers],
+  );
+  const mobileGroupFilterOptions = useMemo(
+    () => safeGroups.map((group) => ({ value: String(group.id || ""), label: group.name || group.title || group.id || "Група" })).filter((option) => option.value),
+    [safeGroups],
+  );
+  const mobileDirectionFilterOptions = useMemo(() => {
+    const map = new Map();
+    const addDirectionOption = (value, label = "") => {
+      const safeValue = getSafeDirectionText(value);
+      if (!safeValue) return;
+      const safeLabel = getDirectionDisplayName(getSafeDirectionText(label) || dirMap.get(String(safeValue)) || safeValue);
+      if (!map.has(safeValue)) map.set(safeValue, safeLabel);
+    };
+    safeDirections.forEach((direction) => {
+      const id = getDirectionRecordId(direction);
+      const name = getDirectionRecordName(direction);
+      addDirectionOption(id || name, name || id);
+    });
+    safeGroups.forEach((group) => {
+      const directionId = getGroupDirectionId(group);
+      const directionName = getGroupDirectionName(group);
+      addDirectionOption(directionId || directionName, directionName || directionId);
+    });
+    eventsByDay.forEach((items) => {
+      (items || []).forEach((event) => {
+        const candidates = getEventDirectionCandidates(event);
+        addDirectionOption(candidates[0], candidates.find((candidate) => !dirMap.has(String(candidate))) || candidates[0]);
+      });
+    });
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+  }, [safeDirections, safeGroups, dirMap, eventsByDay]);
+  const currentMobileFilterOptions = mobileFilterType === "trainer"
+    ? mobileTrainerFilterOptions
+    : mobileFilterType === "group"
+      ? mobileGroupFilterOptions
+      : mobileFilterType === "direction"
+        ? mobileDirectionFilterOptions
+        : [];
+  const mobileFilterValueIsValid = currentMobileFilterOptions.some((option) => String(option.value) === String(mobileFilterValue));
+  const effectiveMobileFilterValue = mobileFilterType === "all" ? "" : (mobileFilterValueIsValid ? mobileFilterValue : (currentMobileFilterOptions[0]?.value || ""));
+  const hasMobileScheduleFilter = isMobile && mobileFilterType !== "all" && Boolean(effectiveMobileFilterValue);
+  useEffect(() => {
+    if (mobileFilterType === "all") {
+      if (mobileFilterValue) setMobileFilterValue("");
+      return;
+    }
+    const firstValue = currentMobileFilterOptions[0]?.value || "";
+    if (!firstValue) return;
+    if (!currentMobileFilterOptions.some((option) => String(option.value) === String(mobileFilterValue))) setMobileFilterValue(firstValue);
+  }, [mobileFilterType, mobileFilterValue, currentMobileFilterOptions, setMobileFilterValue]);
+  const matchesMobileScheduleFilter = (event) => {
+    if (!hasMobileScheduleFilter) return true;
+    const wanted = String(effectiveMobileFilterValue);
+    if (mobileFilterType === "trainer") {
+      const selectedTrainer = mobileTrainerFilterOptions.find((option) => String(option.value) === wanted);
+      const acceptedIds = new Set([wanted, ...(selectedTrainer?.altValues || [])].filter(Boolean).map(String));
+      const eventIds = [event?.trainerId, event?.trainer_id, event?.teacherId, event?.teacher_id].filter(Boolean).map(String);
+      return eventIds.some((id) => acceptedIds.has(id));
+    }
+    if (mobileFilterType === "group") return String(event?.groupId || "") === wanted;
+    if (mobileFilterType === "direction") {
+      const selectedDirection = mobileDirectionFilterOptions.find((option) => String(option.value) === wanted);
+      const wantedCandidates = [wanted, selectedDirection?.label].flatMap(expandDirectionValue).map(normalizeLabel).filter(Boolean);
+      if (!wantedCandidates.length) return false;
+      const eventCandidates = getEventDirectionCandidates(event).map(normalizeLabel).filter(Boolean);
+      return eventCandidates.some((candidate) => wantedCandidates.includes(candidate));
+    }
+    return true;
+  };
+  const applyRoomAndMobileFilters = (arr = []) => (arr || [])
+    .filter((e) => selectedRoom === "all" || (e.roomName || primaryRoomName) === selectedRoom)
+    .filter(matchesMobileScheduleFilter);
+  const mobileFilterEmptyText = hasMobileScheduleFilter ? "Немає подій за цим фільтром" : "У цій залі подій немає.";
   const roomFilteredEventsByDay = useMemo(() => {
-    if (selectedRoom === "all") return eventsByDay;
     const map = new Map();
     eventsByDay.forEach((arr, key) => {
-      map.set(key, (arr || []).filter((e) => (e.roomName || primaryRoomName) === selectedRoom));
+      map.set(key, applyRoomAndMobileFilters(arr));
     });
     return map;
-  }, [eventsByDay, selectedRoom, primaryRoomName]);
+  }, [eventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
   const canMutateEvent = (event) =>
     isAdmin || (event?.kind === "booking" && isEventAssignedToCurrentTrainer(event));
   const normalizeBookingPayload = (source) => {
@@ -1020,7 +1163,7 @@ export default function ScheduleTab({
     await onUpdateBooking(event.parentId || event.id, { status: "cancelled" });
   };
 
-  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null) => {
+  const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null, roomNameOverride = "") => {
     const start = roundToNearest15(minute);
     const base = {
       date,
@@ -1037,7 +1180,7 @@ export default function ScheduleTab({
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
-      roomName: DEFAULT_ROOM,
+      roomName: normalizeRoomName(roomNameOverride || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM,
     };
     if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", base);
     setEditingId(null);
@@ -1046,8 +1189,8 @@ export default function ScheduleTab({
     setFormErrors({});
     setShowForm(true);
   };
-  const minuteFromY = (y) =>
-    roundToNearest15(DAY_START_HOUR * 60 + (y / HOUR_PX) * 60);
+  const minuteFromY = (y, hourPx = weekHourPx) =>
+    roundToNearest15(DAY_START_HOUR * 60 + (y / hourPx) * 60);
   const applyQuickToFullForm = () => setFormMode("full");
   const applyFullToCompactForm = () => setFormMode("compact");
 
@@ -1750,8 +1893,16 @@ export default function ScheduleTab({
     const now = new Date();
     return now.getHours() * 60 + now.getMinutes();
   })();
-  const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
-  const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
+  const safeScheduleScale = Math.min(130, Math.max(60, Number(scheduleScale) || 100));
+  const scheduleScaleFactor = (isMobile ? safeScheduleScale : 100) / 100;
+  const weekHourPx = Math.round(HOUR_PX * scheduleScaleFactor);
+  const dayHourPx = Math.round(42 * scheduleScaleFactor);
+  const scheduleMinEventHeight = Math.max(18, Math.round(MIN_EVENT_HEIGHT * scheduleScaleFactor));
+  const weekTimeColumnWidth = Math.max(44, Math.round(70 * scheduleScaleFactor));
+  const weekMinWidth = isMobile ? Math.max(560, Math.round(980 * scheduleScaleFactor)) : 980;
+  const dayRoomMinWidth = isMobile ? Math.max(180, Math.round(240 * scheduleScaleFactor)) : 240;
+  const dayRoomMaxWidth = isMobile ? Math.max(200, Math.round(260 * scheduleScaleFactor)) : 260;
+  const mobileCalendarBleedSt = isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : null;
   const isDarkTheme = String(theme.bg || "").toLowerCase() === "#0f131a";
   const typeAccent = {
     group_lesson: { bg: "rgba(99,102,241,.12)", border: "#6366f1", text: isDarkTheme ? "#c7d2fe" : "#4338ca" },
@@ -1839,6 +1990,49 @@ export default function ScheduleTab({
     borderColor: "rgba(255,255,255,.28)",
     boxShadow: `0 8px 20px ${theme.primary}35`,
   };
+  const mobileToolbarBtnSt = {
+    ...toolbarBtnSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    padding: "0 8px",
+    fontSize: 11.5,
+    justifyContent: "center",
+  };
+  const mobileToolbarActiveSt = {
+    ...toolbarActiveSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    padding: "0 8px",
+    fontSize: 11.5,
+    justifyContent: "center",
+  };
+  const mobileToolbarSelectSt = {
+    ...editorInputSt,
+    minHeight: 32,
+    height: 32,
+    width: "100%",
+    maxWidth: "none",
+    borderRadius: 999,
+    padding: "0 9px",
+    fontSize: 11.5,
+  };
+  const setMobileFilterTypeAndDefault = (nextType) => {
+    setMobileFilterType(nextType);
+    if (nextType === "all") {
+      setMobileFilterValue("");
+      return;
+    }
+    const nextOptions = nextType === "trainer"
+      ? mobileTrainerFilterOptions
+      : nextType === "group"
+        ? mobileGroupFilterOptions
+        : nextType === "direction"
+          ? mobileDirectionFilterOptions
+          : [];
+    setMobileFilterValue(nextOptions[0]?.value || "");
+  };
   const scheduleMenuMaxHeight = typeof window !== "undefined" ? Math.min(isMobile ? 300 : 380, window.innerHeight - 16) : 300;
   const scheduleMenuTop = openMenuState
     ? Math.min(Math.max(8, Number(openMenuState.top || 8)), Math.max(8, (typeof window !== "undefined" ? window.innerHeight : 640) - scheduleMenuMaxHeight - 8))
@@ -1864,9 +2058,8 @@ export default function ScheduleTab({
   const dayEventsByDay = useMemo(() => buildEventsByDayForDates([selectedDateObj]), [buildEventsByDayForDates, selectedDateObj]);
   const selectedDateEvents = useMemo(() => {
     const arr = dayEventsByDay.get(selectedDate) || [];
-    if (selectedRoom === "all") return arr;
-    return arr.filter((e) => (e.roomName || primaryRoomName) === selectedRoom);
-  }, [dayEventsByDay, selectedDate, selectedRoom, primaryRoomName]);
+    return applyRoomAndMobileFilters(arr);
+  }, [dayEventsByDay, selectedDate, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
   const selectedDateByRoom = useMemo(() => {
     const map = new Map();
     selectedDateEvents.forEach((e) => {
@@ -1897,16 +2090,16 @@ export default function ScheduleTab({
     const count = Math.max(1, dayRoomsToRender.length);
     if (isMobile) {
       if (dayRoomColumnLimit !== "all" && Math.max(1, Number(dayRoomColumnLimit || 1)) === 1) return "minmax(100%, 1fr)";
-      return `repeat(${count}, minmax(240px, 260px))`;
+      return `repeat(${count}, minmax(${dayRoomMinWidth}px, ${dayRoomMaxWidth}px))`;
     }
     if (dayRoomColumnLimit === "all") return `repeat(${count}, minmax(240px, 1fr))`;
     return `repeat(${Math.max(1, Number(dayRoomColumnLimit || 1))}, minmax(240px, 1fr))`;
-  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit, isMobile]);
+  }, [selectedRoom, dayRoomsToRender.length, dayRoomColumnLimit, isMobile, dayRoomMinWidth, dayRoomMaxWidth]);
   const dayRoomScrollWidth = useMemo(() => {
     if (!isMobile || selectedRoom !== "all" || dayRoomColumnLimit === "1") return undefined;
     const count = Math.max(1, dayRoomsToRender.length);
-    return `${count * 250 + Math.max(0, count - 1) * 10}px`;
-  }, [isMobile, selectedRoom, dayRoomColumnLimit, dayRoomsToRender.length]);
+    return `${count * dayRoomMinWidth + Math.max(0, count - 1) * 6}px`;
+  }, [isMobile, selectedRoom, dayRoomColumnLimit, dayRoomsToRender.length, dayRoomMinWidth]);
 
   const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
   const loadStudioRooms = async () => {
@@ -1973,8 +2166,8 @@ export default function ScheduleTab({
     if (!allKnownRooms.includes(selectedRoom)) setSelectedRoom("all");
   }, [selectedRoom, allKnownRooms]);
   const monthHasEvents = useMemo(
-    () => monthCells.some((d) => ((selectedRoom === "all" ? monthEventsByDay.get(toLocalDateKey(d)) : (monthEventsByDay.get(toLocalDateKey(d)) || []).filter((e) => (e.roomName || primaryRoomName) === selectedRoom)) || []).length > 0),
-    [monthCells, monthEventsByDay, selectedRoom, primaryRoomName],
+    () => monthCells.some((d) => applyRoomAndMobileFilters(monthEventsByDay.get(toLocalDateKey(d)) || []).length > 0),
+    [monthCells, monthEventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups],
   );
   const weekHasEvents = useMemo(
     () => weekDays.some((d) => (roomFilteredEventsByDay.get(toLocalDateKey(d)) || []).length > 0),
@@ -2040,73 +2233,108 @@ export default function ScheduleTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? 8 : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button
-          style={toolbarBtnSt}
-          onClick={() => setWeekStart((d) => addDays(d, -7))}
-        >
-          {isMobile ? "←" : "← Попередній тиждень"}
-        </button>
-        <button
-          style={toolbarBtnSt}
-          onClick={() => setWeekStart(startOfWeek(new Date()))}
-        >
-          Сьогодні
-        </button>
-        <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>
-          {isMobile ? "→" : "Наступний тиждень →"}
-        </button>
-        </div>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 6, flexWrap: "wrap" }}>
-          {[
-            { id: "month", label: "Місяць" },
-            { id: "week", label: "Тиждень" },
-            { id: "day", label: "День" },
-          ].map((m) => (
-            <button
-              key={m.id}
-              style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt}
-              onClick={() => setViewMode(m.id)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap" }}>
-        <select
-          style={{ ...editorInputSt, minHeight: isMobile ? 34 : 44, maxWidth: isMobile ? 160 : 210, fontSize: isMobile ? 12 : undefined, borderRadius: 999 }}
-          value={selectedRoom}
-          onChange={(e) => setSelectedRoom(e.target.value)}
-        >
-          <option value="all">Усі зали</option>
-          {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-        </select>
-        {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
-        {canOpenBulkPlanner ? (
-          <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>
-            План на період
-          </button>
-        ) : null}
-        <div
-          style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 10.5 : 12, color: theme.textLight, width: isMobile ? "100%" : undefined }}
-        >
-          Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
-        </div>
-        {canManageBookings && (
-          <button
-            style={{ ...toolbarActiveSt, minHeight: isMobile ? 34 : 40, padding: isMobile ? "0 12px" : "0 16px" }}
-            onClick={() => {
-              setEditingId(null);
-              setFormMode("full");
-              setShowForm((v) => !v);
-            }}
-          >
-            {isMobile ? "+ Додати" : "+ Додати тренування / резерв"}
-          </button>
+    <div style={{ display: "grid", gap: isMobile ? 10 : 12, ...(isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : {}) }}>
+      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? "5px 5px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
+        {isMobile ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 44px", gap: 4 }}>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>←</button>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
+              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>→</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 4 }}>
+              {[
+                { id: "month", label: "Місяць" },
+                { id: "week", label: "Тиждень" },
+                { id: "day", label: "День" },
+              ].map((m) => (
+                <button key={m.id} style={viewMode === m.id ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "minmax(0,1fr) 58px" : "minmax(0,1fr)", gap: 4, alignItems: "center" }}>
+              <select style={mobileToolbarSelectSt} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+                <option value="all">Усі зали</option>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              {isAdmin ? <button style={mobileToolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
+            </div>
+            <div style={{ border: `1px solid ${isDarkTheme ? "rgba(148,163,184,.18)" : "rgba(148,163,184,.28)"}`, borderRadius: 14, padding: 5, display: "grid", gap: 4, background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.48)" }}>
+              <div style={{ fontSize: 10, lineHeight: 1, color: theme.textLight, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em" }}>Показати тільки</div>
+              <div style={{ display: "grid", gridTemplateColumns: mobileFilterType === "all" ? "minmax(0,1fr)" : "0.82fr 1.18fr", gap: 4 }}>
+                <select style={mobileToolbarSelectSt} value={mobileFilterType} onChange={(e) => setMobileFilterTypeAndDefault(e.target.value)}>
+                  {mobileFilterTypes.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                {mobileFilterType !== "all" ? (
+                  <select style={mobileToolbarSelectSt} value={effectiveMobileFilterValue} onChange={(e) => setMobileFilterValue(e.target.value)} disabled={!currentMobileFilterOptions.length}>
+                    {currentMobileFilterOptions.length ? currentMobileFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>) : <option value="">Немає варіантів</option>}
+                  </select>
+                ) : null}
+              </div>
+            </div>
+            {(canOpenBulkPlanner || canManageBookings) ? (
+              <div style={{ display: "grid", gridTemplateColumns: canOpenBulkPlanner && canManageBookings ? "1fr 1fr" : "1fr", gap: 4 }}>
+                {canOpenBulkPlanner ? <button style={mobileToolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
+                {canManageBookings ? (
+                  <button
+                    style={mobileToolbarActiveSt}
+                    onClick={() => {
+                      setEditingId(null);
+                      setFormMode("full");
+                      setShowForm((v) => !v);
+                    }}
+                  >
+                    + Додати
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 10.5, color: theme.textLight, textAlign: "center", lineHeight: 1.2 }}>
+              {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>← Попередній тиждень</button>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
+              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>Наступний тиждень →</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[
+                { id: "month", label: "Місяць" },
+                { id: "week", label: "Тиждень" },
+                { id: "day", label: "День" },
+              ].map((m) => (
+                <button key={m.id} style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select style={{ ...editorInputSt, minHeight: 44, maxWidth: 210, borderRadius: 999 }} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+                <option value="all">Усі зали</option>
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              </select>
+              {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
+              {canOpenBulkPlanner ? <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
+              <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}</div>
+              {canManageBookings && (
+                <button
+                  style={{ ...toolbarActiveSt, minHeight: 40, padding: "0 16px" }}
+                  onClick={() => {
+                    setEditingId(null);
+                    setFormMode("full");
+                    setShowForm((v) => !v);
+                  }}
+                >
+                  + Додати тренування / резерв
+                </button>
+              )}
+            </div>
+          </>
         )}
-        </div>
       </div>
 
       {canManageBookings && showForm && (
@@ -2509,8 +2737,9 @@ export default function ScheduleTab({
       )}
 
       {bulkPlanEdit && (
-        <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
-          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22, paddingBottom: isMobile ? "calc(92px + env(safe-area-inset-bottom, 0px))" : 72 }}>
+        <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "max(10px, env(safe-area-inset-top, 0px)) 8px calc(28px + env(safe-area-inset-bottom, 0px))" : 12 }}>
+          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "88vh" : "88vh", overflowY: isMobile ? "hidden" : "auto", borderRadius: isMobile ? 18 : 22, paddingBottom: isMobile ? 0 : 72, display: isMobile ? "flex" : undefined, flexDirection: isMobile ? "column" : undefined }}>
+            <div style={isMobile ? { flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingBottom: 10, WebkitOverflowScrolling: "touch" } : { display: "contents" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
               <div>
                 <div style={editorSectionLabelSt}>Графік · План на період</div>
@@ -2580,9 +2809,10 @@ export default function ScheduleTab({
               ))}
             </div>
             {bulkPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12, marginTop: 10 }}>{bulkPlanEdit.error}</div> : null}
-            <div style={{ display: "flex", gap: 6, marginTop: 12, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap" }}>
-              <button style={btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
-              <button style={btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
+            </div>
+            <div style={{ display: "flex", gap: isMobile ? 5 : 6, marginTop: isMobile ? 0 : 12, position: isMobile ? "static" : "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, padding: isMobile ? "6px 8px calc(6px + env(safe-area-inset-bottom, 0px))" : undefined, paddingTop: isMobile ? undefined : 8, paddingBottom: isMobile ? undefined : "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap", flexShrink: 0 }}>
+              <button style={isMobile ? { ...btnP, minHeight: 34, height: 34, padding: "0 12px", fontSize: 12, borderRadius: 10 } : btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
+              <button style={isMobile ? { ...btnS, minHeight: 34, height: 34, padding: "0 12px", fontSize: 12, borderRadius: 10 } : btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
             </div>
           </div>
         </div>
@@ -2821,14 +3051,14 @@ export default function ScheduleTab({
           </div>
           {!monthHasEvents ? (
             <div style={{ marginTop: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
-              У цій залі подій немає.
+              {mobileFilterEmptyText}
             </div>
           ) : null}
         </div>
       ) : null}
 
       {viewMode === "day" ? (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}`, minWidth: 0, maxWidth: "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
+        <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: isMobile ? 3 : cardSt.padding, minWidth: 0, maxWidth: isMobile ? "calc(100% + 16px)" : "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
           <div style={{ display: "flex", gap: isMobile ? 5 : 8, marginBottom: isMobile ? 6 : 10, flexWrap: "wrap", alignItems: "center", paddingBottom: isMobile ? 6 : 8, borderBottom: `1px solid ${theme.border}` }}>
             <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(-1)}>←</button>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
@@ -2849,51 +3079,61 @@ export default function ScheduleTab({
           </div>
           <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: selectedRoom === "all" ? "auto" : "visible", overflowY: "visible", WebkitOverflowScrolling: "touch", touchAction: selectedRoom === "all" ? "pan-x pan-y" : "auto", overscrollBehaviorX: "contain" }}>
             {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}</span>)}</div> : null}
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
+            <div style={{ display: "grid", gap: isMobile ? 6 : 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
               {dayRoomsToRender.map(([room, items]) => (
-                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? 240 : undefined }}>
+                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : undefined }}>
                   <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
-                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * 42, background: "rgba(255,255,255,.01)" }}>
-                    {canManageBookings && !isMobile ? (
+                  <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * dayHourPx, background: "rgba(255,255,255,.01)" }}>
+                    {canManageBookings ? (
                       <div
-                        style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
-                        onMouseDown={(ev) => {
+                        style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair", touchAction: "manipulation" }}
+                        onPointerDown={(ev) => {
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
+                          const mins = minuteFromY(y, dayHourPx);
                           setSelection({ date: selectedDate, startMinute: mins, endMinute: mins, dragging: true, roomName: room });
                         }}
-                        onMouseMove={(ev) => {
+                        onPointerMove={(ev) => {
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
-                          setHoverSlot({ date: selectedDate, minute: mins });
-                          setSelection((p) => (p?.dragging && p.date === selectedDate ? { ...p, endMinute: mins } : p));
+                          const mins = minuteFromY(y, dayHourPx);
+                          setHoverSlot({ date: selectedDate, minute: mins, roomName: room });
+                          setSelection((p) => (p?.dragging && p.date === selectedDate && p.roomName === room ? { ...p, endMinute: mins } : p));
                         }}
-                        onMouseUp={(ev) => {
+                        onPointerLeave={() => {
+                          setHoverSlot(null);
+                          setSelection((p) => (p?.dragging && p.date === selectedDate && p.roomName === room ? { ...p, dragging: false } : p));
+                        }}
+                        onPointerUp={(ev) => {
+                          ev.stopPropagation();
                           const rect = ev.currentTarget.getBoundingClientRect();
                           const y = ev.clientY - rect.top;
-                          const mins = minuteFromY(y);
-                          const cur = selection && selection.date === selectedDate ? selection : { startMinute: mins, endMinute: mins };
+                          const mins = minuteFromY(y, dayHourPx);
+                          const cur = selection && selection.date === selectedDate && selection.roomName === room ? selection : { startMinute: mins, endMinute: mins };
                           const startMinute = Math.min(cur.startMinute, mins);
                           const endRaw = Math.max(cur.startMinute, mins);
                           const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
-                          openCreateAt(selectedDate, startMinute, ev, endMinute);
-                          setDraft((p) => ({ ...p, roomName: room || p.roomName }));
+                          openCreateAt(selectedDate, startMinute, ev, endMinute, room);
                           setSelection(null);
                         }}
                       />
                     ) : null}
+                    {canManageBookings && hoverSlot?.date === selectedDate && hoverSlot?.roomName === room ? (
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * dayHourPx, height: Math.max(8, dayHourPx / 4), background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
+                    ) : null}
+                    {canManageBookings && selection?.date === selectedDate && selection?.roomName === room ? (
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * dayHourPx, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * dayHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
+                    ) : null}
                     {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => (
-                      <div key={i} style={{ position: "absolute", top: i * 42, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
+                      <div key={i} style={{ position: "absolute", top: i * dayHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: 0.25 }} />
                     ))}
                     {isTodaySelected ? (
-                      <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * 42, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
+                      <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * dayHourPx, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
                       const dur = Math.max(0, e.endMin - e.startMin);
-                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * 42;
-                      const height = Math.max(24, (dur / 60) * 42);
+                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * dayHourPx;
+                      const height = Math.max(scheduleMinEventHeight, (dur / 60) * dayHourPx);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -2931,9 +3171,9 @@ export default function ScheduleTab({
                   </div>
                 </div>
               ))}
-              {!dayRoomsToRender.length ? (
+              {!selectedDateEvents.length || !dayRoomsToRender.length ? (
                 <div style={{ border: `1px dashed ${theme.border}`, borderRadius: 12, padding: 12, color: theme.textLight }}>
-                  У цій залі подій немає.
+                  {mobileFilterEmptyText}
                 </div>
               ) : null}
             </div>
@@ -2945,17 +3185,18 @@ export default function ScheduleTab({
       <div
         style={{
           ...cardSt,
+          ...mobileCalendarBleedSt,
           border: `1px solid ${theme.border}`,
           padding: 0,
           overflowX: "auto",
           overflowY: "hidden",
         }}
       >
-        <div style={{ minWidth: 980 }}>
+        <div style={{ minWidth: weekMinWidth }}>
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "70px repeat(7,1fr)",
+              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
               borderBottom: `1px solid ${theme.border}`,
               minHeight: 56,
             }}
@@ -2976,8 +3217,8 @@ export default function ScheduleTab({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "70px repeat(7,1fr)",
-              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * HOUR_PX,
+              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
+              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * weekHourPx,
             }}
           >
             <div
@@ -2993,7 +3234,7 @@ export default function ScheduleTab({
                     key={i}
                     style={{
                       position: "absolute",
-                      top: i * HOUR_PX - 8,
+                      top: i * weekHourPx - 8,
                       left: 8,
                       fontSize: 11,
                       color: theme.textLight,
@@ -3050,10 +3291,10 @@ export default function ScheduleTab({
                     />
                   ) : null}
                   {canManageBookings && hoverSlot?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: HOUR_PX / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
+                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
                   ) : null}
                   {canManageBookings && selection?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * HOUR_PX, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * HOUR_PX, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
+                    <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * weekHourPx, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
                   ) : null}
                   {Array.from(
                     { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
@@ -3062,7 +3303,7 @@ export default function ScheduleTab({
                         key={i}
                         style={{
                           position: "absolute",
-                          top: i * HOUR_PX,
+                          top: i * weekHourPx,
                           left: 0,
                           right: 0,
                           borderTop: `1px solid ${theme.border}`,
@@ -3074,10 +3315,10 @@ export default function ScheduleTab({
                   {dayEvents.map((e) => {
                     const dur = Math.max(0, e.endMin - e.startMin);
                     const top =
-                      ((e.startMin - DAY_START_HOUR * 60) / 60) * HOUR_PX;
+                      ((e.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
                     const height = Math.max(
-                      MIN_EVENT_HEIGHT,
-                      (dur / 60) * HOUR_PX,
+                      scheduleMinEventHeight,
+                      (dur / 60) * weekHourPx,
                     );
                     const gap = 2;
                     const available = 94;
@@ -3335,8 +3576,8 @@ export default function ScheduleTab({
           </div>
         </div>
         {!weekHasEvents ? (
-          <div style={{ margin: 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
-            У цій залі подій немає.
+          <div style={{ margin: isMobile ? 6 : 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
+            {mobileFilterEmptyText}
           </div>
         ) : null}
       </div>
