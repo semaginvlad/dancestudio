@@ -2738,7 +2738,8 @@ export default function ScheduleTab({
 
       {bulkPlanEdit && (
         <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
-          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22, paddingBottom: isMobile ? "calc(92px + env(safe-area-inset-bottom, 0px))" : 72 }}>
+          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: isMobile ? "hidden" : "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22, paddingBottom: isMobile ? 0 : 72, display: isMobile ? "flex" : undefined, flexDirection: isMobile ? "column" : undefined }}>
+            <div style={isMobile ? { flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingBottom: 10, WebkitOverflowScrolling: "touch" } : { display: "contents" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
               <div>
                 <div style={editorSectionLabelSt}>Графік · План на період</div>
@@ -2808,10 +2809,10 @@ export default function ScheduleTab({
               ))}
             </div>
             {bulkPlanEdit.error ? <div style={{ color: theme.danger, fontSize: 12, marginTop: 10 }}>{bulkPlanEdit.error}</div> : null}
-            {isMobile ? <div aria-hidden="true" style={{ height: "calc(96px + env(safe-area-inset-bottom, 0px))" }} /> : null}
-            <div style={{ display: "flex", gap: 6, marginTop: isMobile ? 0 : 12, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap" }}>
-              <button style={btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
-              <button style={btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
+            </div>
+            <div style={{ display: "flex", gap: isMobile ? 5 : 6, marginTop: isMobile ? 0 : 12, position: isMobile ? "static" : "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, padding: isMobile ? "6px 8px calc(6px + env(safe-area-inset-bottom, 0px))" : undefined, paddingTop: isMobile ? undefined : 8, paddingBottom: isMobile ? undefined : "calc(8px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap", flexShrink: 0 }}>
+              <button style={isMobile ? { ...btnP, minHeight: 34, height: 34, padding: "0 12px", fontSize: 12, borderRadius: 10 } : btnP} onClick={saveBulkLessonPlans} disabled={bulkPlanEdit.saving}>{bulkPlanEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
+              <button style={isMobile ? { ...btnS, minHeight: 34, height: 34, padding: "0 12px", fontSize: 12, borderRadius: 10 } : btnS} onClick={() => setBulkPlanEdit(null)} disabled={bulkPlanEdit.saving}>Скасувати</button>
             </div>
           </div>
         </div>
