@@ -396,7 +396,6 @@ const getTrainerDisplayName = (trainer) => {
   return String(
     trainer.name
     || [trainer.first_name, trainer.last_name].filter(Boolean).join(" ")
-    || trainer.email
     || trainer.auth_user_id
     || trainer.id
     || ""
@@ -514,7 +513,7 @@ const handleDispatchScheduleRules = async (req, res) => {
     supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
     supabase.from("attendance").select("id,sub_id,group_id,date,entry_type"),
     supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
-    supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,email,telegram"),
+    supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,telegram"),
     supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
   ]);
 
