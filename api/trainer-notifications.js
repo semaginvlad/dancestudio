@@ -19,7 +19,60 @@ const readinessError = (res, error) => res.status(503).json({
   requiredSql: ["sql/trainer_notification_state.sql", "sql/trainer_dispatch_history.sql"],
 });
 
-const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
+const ALLOWED_OPS = ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"];
+const SENSITIVE_LOG_KEY_RE = /secret|token|authorization|password|key/i;
+
+const firstValue = (value) => {
+  if (Array.isArray(value)) return value[0];
+  return value;
+};
+
+const stripInvisibleChars = (value) => String(value || "")
+  .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\u2060\uFEFF]/g, "")
+  .trim();
+
+const getUrlSearchParam = (req, key) => {
+  try {
+    const parsedUrl = new URL(String(req.url || ""), "http://localhost");
+    const values = parsedUrl.searchParams.getAll(key);
+    return values.length ? values[0] : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+};
+
+const hasValue = (value) => value != null && String(value) !== "";
+
+const normalizeOp = (req) => {
+  const queryOp = firstValue(req.query?.op);
+  const urlOp = getUrlSearchParam(req, "op");
+  const bodyOp = firstValue(req.body?.op);
+  const rawOp = hasValue(queryOp) ? queryOp : hasValue(urlOp) ? urlOp : bodyOp ?? "";
+  return {
+    rawOp,
+    op: stripInvisibleChars(rawOp),
+  };
+};
+
+const redactForLog = (value) => {
+  if (Array.isArray(value)) return value.map((item) => redactForLog(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    SENSITIVE_LOG_KEY_RE.test(key) ? "[redacted]" : redactForLog(entry),
+  ]));
+};
+
+const logUnknownOp = ({ req, rawOp, op }) => {
+  console.warn("[trainer-notifications-unknown-op]", {
+    rawOp,
+    normalizedOp: op,
+    url: req.url || null,
+    query: redactForLog(req.query || {}),
+    allowedOps: ALLOWED_OPS,
+  });
+};
+
 const VALID_CHANNELS = new Set(["push", "telegram", "both"]);
 const TIME_RE = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
 
@@ -343,7 +396,6 @@ const getTrainerDisplayName = (trainer) => {
   return String(
     trainer.name
     || [trainer.first_name, trainer.last_name].filter(Boolean).join(" ")
-    || trainer.email
     || trainer.auth_user_id
     || trainer.id
     || ""
@@ -440,13 +492,15 @@ const resolveTrainerTelegramTarget = (rule, trainerRows, telegramMetaRows) => {
 };
 
 const handleDispatchScheduleRules = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const secret = process.env.CRON_SECRET || "";
-  const auth = String(req.headers?.authorization || "");
-  if (!secret || auth !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+  if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
+  if (req.method === "POST") {
+    const secret = process.env.CRON_SECRET || "";
+    const auth = String(req.headers?.authorization || "");
+    if (!secret || auth !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
+  }
 
-  const dryRun = isDryRunFlag(req.query?.dryRun ?? req.body?.dryRun);
-  const toleranceMinutes = parseToleranceMinutes(req.query?.toleranceMinutes ?? req.body?.toleranceMinutes);
+  const dryRun = isDryRunFlag(firstValue(req.query?.dryRun) ?? getUrlSearchParam(req, "dryRun") ?? firstValue(req.body?.dryRun));
+  const toleranceMinutes = parseToleranceMinutes(firstValue(req.query?.toleranceMinutes) ?? getUrlSearchParam(req, "toleranceMinutes") ?? firstValue(req.body?.toleranceMinutes));
   const now = new Date();
   const supabase = buildSupabase();
 
@@ -459,7 +513,7 @@ const handleDispatchScheduleRules = async (req, res) => {
     supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
     supabase.from("attendance").select("id,sub_id,group_id,date,entry_type"),
     supabase.from("notification_rule_runs").select("id,rule_id,run_key,status"),
-    supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,email,telegram"),
+    supabase.from("trainers").select("id,auth_user_id,name,first_name,last_name,telegram"),
     supabase.from("telegram_chat_meta").select("chat_id,internal_note"),
   ]);
 
@@ -756,14 +810,15 @@ const handleScheduleRules = async (req, res) => {
 };
 
 export default async function handler(req, res) {
-  const op = getOp(req);
+  const { rawOp, op } = normalizeOp(req);
   try {
     if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
     if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
     if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
-    if (req.method === "POST" && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
-    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"] });
+    if ((req.method === "GET" || req.method === "POST") && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
+    logUnknownOp({ req, rawOp, op });
+    return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ALLOWED_OPS });
   } catch (error) {
     return res.status(500).json({
       error: "Trainer notifications operation failed",
