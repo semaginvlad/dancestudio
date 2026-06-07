@@ -2737,8 +2737,8 @@ export default function ScheduleTab({
       )}
 
       {bulkPlanEdit && (
-        <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "0 8px" : 12 }}>
-          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "82vh" : "88vh", overflowY: isMobile ? "hidden" : "auto", borderRadius: isMobile ? "18px 18px 0 0" : 22, paddingBottom: isMobile ? 0 : 72, display: isMobile ? "flex" : undefined, flexDirection: isMobile ? "column" : undefined }}>
+        <div style={{ ...modalOverlaySt, zIndex: 5045, display: "grid", placeItems: isMobile ? "end center" : "center", padding: isMobile ? "max(10px, env(safe-area-inset-top, 0px)) 8px calc(28px + env(safe-area-inset-bottom, 0px))" : 12 }}>
+          <div style={{ ...plannerPanelSt, width: isMobile ? "calc(100vw - 16px)" : "min(940px,96vw)", maxHeight: isMobile ? "88vh" : "88vh", overflowY: isMobile ? "hidden" : "auto", borderRadius: isMobile ? 18 : 22, paddingBottom: isMobile ? 0 : 72, display: isMobile ? "flex" : undefined, flexDirection: isMobile ? "column" : undefined }}>
             <div style={isMobile ? { flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingBottom: 10, WebkitOverflowScrolling: "touch" } : { display: "contents" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, marginBottom: 10 }}>
               <div>
