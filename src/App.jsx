@@ -21,6 +21,7 @@ import {
   daysLeft,
   fmt,
   getDisplayName,
+  getNextTrainingDate,
   getNotifMsg,
   getSubStatus,
   today,
@@ -1399,18 +1400,44 @@ export default function App() {
     setAttn((prev) => (prev || []).map((row) => byId.get(String(row.id)) || row));
   };
 
+  const getCancelledTrainingCompensatedSubscription = (payload = {}) => {
+    const groupId = payload.groupId;
+    const startDate = payload.startDate;
+    const baseEndDate = payload.endDate;
+    if (!groupId || !startDate || !baseEndDate) return payload;
+
+    const group = groups.find((g) => String(g.id) === String(groupId));
+    const matchingCancelled = (cancelled || [])
+      .filter((row) => String(row.groupId) === String(groupId) && row.date >= startDate && row.date <= baseEndDate)
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+    if (!matchingCancelled.length) return payload;
+
+    let compensatedEndDate = baseEndDate;
+    matchingCancelled.forEach(() => {
+      compensatedEndDate = getNextTrainingDate(group?.schedule || [], compensatedEndDate);
+    });
+
+    return {
+      ...payload,
+      endDate: compensatedEndDate,
+      originalEndDate: payload.originalEndDate || baseEndDate,
+    };
+  };
+
   const createSubscriptionAction = async (payload) => {
+    const compensatedPayload = getCancelledTrainingCompensatedSubscription(payload);
     try {
-      let createdSub = await db.insertSub(payload);
-      const savedSub = createdSub || { id: uid(), ...payload, notificationSent: false };
+      let createdSub = await db.insertSub(compensatedPayload);
+      const savedSub = createdSub || { id: uid(), ...compensatedPayload, notificationSent: false };
 
       try {
         const conversion = await db.convertDebtAttendanceToSubscription({
-          studentId: savedSub.studentId || payload.studentId,
-          groupId: savedSub.groupId || payload.groupId,
+          studentId: savedSub.studentId || compensatedPayload.studentId,
+          groupId: savedSub.groupId || compensatedPayload.groupId,
           subId: savedSub.id,
-          startDate: savedSub.startDate || payload.startDate,
-          endDate: savedSub.endDate || payload.endDate,
+          startDate: savedSub.startDate || compensatedPayload.startDate,
+          endDate: savedSub.endDate || compensatedPayload.endDate,
         });
         applyConvertedDebtAttendance(conversion?.attendance || []);
         if (conversion?.subscription) {
@@ -1432,12 +1459,12 @@ export default function App() {
         console.warn("Failed to refresh subscriptions after subscription creation:", refreshErr);
         setSubs((prev) => [finalSub, ...(prev || []).filter((sub) => String(sub.id) !== String(finalSub.id))]);
       }
-      await clearSubscriptionWarningForStudent(finalSub.groupId || payload.groupId, finalSub.studentId || payload.studentId);
+      await clearSubscriptionWarningForStudent(finalSub.groupId || compensatedPayload.groupId, finalSub.studentId || compensatedPayload.studentId);
       setModal(null);
       setPrefillSub(null);
     } catch (e) {
       console.warn(e);
-      setSubs((prev) => [{ id: uid(), ...payload, notificationSent: false }, ...(prev || [])]);
+      setSubs((prev) => [{ id: uid(), ...compensatedPayload, notificationSent: false }, ...(prev || [])]);
       setModal(null);
       setPrefillSub(null);
     }
