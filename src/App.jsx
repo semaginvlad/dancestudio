@@ -21,6 +21,7 @@ import {
   daysLeft,
   fmt,
   getDisplayName,
+  getNextTrainingDate,
   getNotifMsg,
   getSubStatus,
   today,
@@ -1399,18 +1400,64 @@ export default function App() {
     setAttn((prev) => (prev || []).map((row) => byId.get(String(row.id)) || row));
   };
 
+  const getCancellationGroupId = (row = {}) => {
+    const value = row.groupId ?? row.group_id;
+    return value == null ? "" : String(value).trim();
+  };
+
+  const getCancellationDate = (row = {}) => {
+    const value = row.date ?? row.trainingDate ?? row.training_date;
+    if (!value) return "";
+    if (value instanceof Date) return toLocalISO(value);
+    return String(value).trim().slice(0, 10);
+  };
+
+  const getCancelledTrainingCompensatedSubscription = (payload = {}) => {
+    const groupId = payload.groupId == null ? "" : String(payload.groupId).trim();
+    const startDate = getCancellationDate({ date: payload.startDate });
+    const baseEndDate = getCancellationDate({ date: payload.endDate });
+    if (!groupId || !startDate || !baseEndDate) return payload;
+
+    const group = groups.find((g) => String(g.id).trim() === groupId);
+    const cancelledByDate = new Map();
+    [...(cancelled || []), ...(scheduleCancelled || [])].forEach((row) => {
+      const rowGroupId = getCancellationGroupId(row);
+      const rowDate = getCancellationDate(row);
+      if (rowGroupId !== groupId || !rowDate || rowDate < startDate || rowDate > baseEndDate) return;
+      cancelledByDate.set(rowDate, row);
+    });
+
+    const matchingCancelled = [...cancelledByDate.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([, row]) => row);
+
+    if (!matchingCancelled.length) return payload;
+
+    let compensatedEndDate = baseEndDate;
+    matchingCancelled.forEach(() => {
+      compensatedEndDate = getNextTrainingDate(group?.schedule || [], compensatedEndDate);
+    });
+
+    return {
+      ...payload,
+      endDate: compensatedEndDate,
+      originalEndDate: payload.originalEndDate || baseEndDate,
+    };
+  };
+
   const createSubscriptionAction = async (payload) => {
+    const compensatedPayload = getCancelledTrainingCompensatedSubscription(payload);
     try {
-      let createdSub = await db.insertSub(payload);
-      const savedSub = createdSub || { id: uid(), ...payload, notificationSent: false };
+      let createdSub = await db.insertSub(compensatedPayload);
+      const savedSub = createdSub || { id: uid(), ...compensatedPayload, notificationSent: false };
 
       try {
         const conversion = await db.convertDebtAttendanceToSubscription({
-          studentId: savedSub.studentId || payload.studentId,
-          groupId: savedSub.groupId || payload.groupId,
+          studentId: savedSub.studentId || compensatedPayload.studentId,
+          groupId: savedSub.groupId || compensatedPayload.groupId,
           subId: savedSub.id,
-          startDate: savedSub.startDate || payload.startDate,
-          endDate: savedSub.endDate || payload.endDate,
+          startDate: savedSub.startDate || compensatedPayload.startDate,
+          endDate: savedSub.endDate || compensatedPayload.endDate,
         });
         applyConvertedDebtAttendance(conversion?.attendance || []);
         if (conversion?.subscription) {
@@ -1432,12 +1479,12 @@ export default function App() {
         console.warn("Failed to refresh subscriptions after subscription creation:", refreshErr);
         setSubs((prev) => [finalSub, ...(prev || []).filter((sub) => String(sub.id) !== String(finalSub.id))]);
       }
-      await clearSubscriptionWarningForStudent(finalSub.groupId || payload.groupId, finalSub.studentId || payload.studentId);
+      await clearSubscriptionWarningForStudent(finalSub.groupId || compensatedPayload.groupId, finalSub.studentId || compensatedPayload.studentId);
       setModal(null);
       setPrefillSub(null);
     } catch (e) {
       console.warn(e);
-      setSubs((prev) => [{ id: uid(), ...payload, notificationSent: false }, ...(prev || [])]);
+      setSubs((prev) => [{ id: uid(), ...compensatedPayload, notificationSent: false }, ...(prev || [])]);
       setModal(null);
       setPrefillSub(null);
     }
