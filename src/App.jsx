@@ -1400,16 +1400,36 @@ export default function App() {
     setAttn((prev) => (prev || []).map((row) => byId.get(String(row.id)) || row));
   };
 
+  const getCancellationGroupId = (row = {}) => {
+    const value = row.groupId ?? row.group_id;
+    return value == null ? "" : String(value).trim();
+  };
+
+  const getCancellationDate = (row = {}) => {
+    const value = row.date ?? row.trainingDate ?? row.training_date;
+    if (!value) return "";
+    if (value instanceof Date) return toLocalISO(value);
+    return String(value).trim().slice(0, 10);
+  };
+
   const getCancelledTrainingCompensatedSubscription = (payload = {}) => {
-    const groupId = payload.groupId;
-    const startDate = payload.startDate;
-    const baseEndDate = payload.endDate;
+    const groupId = payload.groupId == null ? "" : String(payload.groupId).trim();
+    const startDate = getCancellationDate({ date: payload.startDate });
+    const baseEndDate = getCancellationDate({ date: payload.endDate });
     if (!groupId || !startDate || !baseEndDate) return payload;
 
-    const group = groups.find((g) => String(g.id) === String(groupId));
-    const matchingCancelled = (cancelled || [])
-      .filter((row) => String(row.groupId) === String(groupId) && row.date >= startDate && row.date <= baseEndDate)
-      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    const group = groups.find((g) => String(g.id).trim() === groupId);
+    const cancelledByDate = new Map();
+    [...(cancelled || []), ...(scheduleCancelled || [])].forEach((row) => {
+      const rowGroupId = getCancellationGroupId(row);
+      const rowDate = getCancellationDate(row);
+      if (rowGroupId !== groupId || !rowDate || rowDate < startDate || rowDate > baseEndDate) return;
+      cancelledByDate.set(rowDate, row);
+    });
+
+    const matchingCancelled = [...cancelledByDate.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([, row]) => row);
 
     if (!matchingCancelled.length) return payload;
 
