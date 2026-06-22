@@ -724,7 +724,8 @@ export default function App() {
     const oneOffPlanTypes = new Set(["trial", "single"]);
     const usedMap = {};
     attn.forEach(a => {
-      if (a.subId) usedMap[a.subId] = (usedMap[a.subId] || 0) + (a.quantity || 1);
+      const subId = a.subId ?? a.sub_id ?? a.subscriptionId ?? a.subscription_id;
+      if (subId) usedMap[subId] = (usedMap[subId] || 0) + (a.quantity || 1);
     });
     return subs.map(s => {
       const planType = String(s.planType || "").trim().toLowerCase();

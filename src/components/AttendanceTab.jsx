@@ -1007,6 +1007,16 @@ const fmtUaShortDate = (dateStr) => {
 
 const getActiveSubOnDate = (subs, studentId, groupId, dateStr) =>
   getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+const getTrainerId = (group) =>
+  group?.trainerId ?? group?.trainer_id ?? group?.coachId ?? group?.coach_id ?? group?.trainer ?? group?.trainer_id_fk ?? null;
+const sameTrainer = (a, b) => {
+  const left = getTrainerId(a);
+  const right = getTrainerId(b);
+  return !!left && !!right && String(left) === String(right);
+};
+const getRowSubId = (row) => row?.subId ?? row?.sub_id ?? row?.subscriptionId ?? row?.subscription_id ?? null;
+const getRowGroupId = (row) => row?.groupId ?? row?.group_id ?? null;
+const getGroupName = (group) => group?.name || group?.title || group?.label || (group?.id ? `Група ${group.id}` : "Група");
 const PACK_PLAN_TYPES = new Set(["4pack", "8pack", "12pack"]);
 const isPackSubscription = (sub) => PACK_PLAN_TYPES.has(String(sub?.planType || "").trim().toLowerCase());
 
@@ -1295,6 +1305,11 @@ export default function AttendanceTab({
   const [subscriptionHistoryLoading, setSubscriptionHistoryLoading] = useState(false);
   const [subscriptionHistoryError, setSubscriptionHistoryError] = useState("");
   const [historyTab, setHistoryTab] = useState("attendance");
+  const [transferState, setTransferState] = useState(null);
+  const [transferTargetGroupId, setTransferTargetGroupId] = useState("");
+  const [transferActiveSub, setTransferActiveSub] = useState(true);
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [transferError, setTransferError] = useState("");
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
   const tableWrapRef = useRef(null);
@@ -1476,6 +1491,34 @@ export default function AttendanceTab({
     () => subs.filter((s) => isPackSubscription(s)),
     [subs]
   );
+
+  const subscriptionUsageById = useMemo(() => {
+    const groupsById = new Map((groups || []).map((group) => [String(group.id), group]));
+    const map = new Map();
+    (attn || []).forEach((row) => {
+      const subId = getRowSubId(row);
+      if (!subId) return;
+      const key = String(subId);
+      const groupId = getRowGroupId(row);
+      const quantity = Number(row?.quantity || 1) || 1;
+      if (!map.has(key)) map.set(key, { total: 0, byGroup: new Map(), rows: [] });
+      const entry = map.get(key);
+      entry.total += quantity;
+      const groupKey = String(groupId || "unknown");
+      const groupEntry = entry.byGroup.get(groupKey) || { groupId, groupName: getGroupName(groupsById.get(groupKey)), count: 0 };
+      groupEntry.count += quantity;
+      entry.byGroup.set(groupKey, groupEntry);
+      entry.rows.push({
+        id: row.id,
+        date: row.date,
+        groupId,
+        groupName: getGroupName(groupsById.get(groupKey)),
+        status: row.entryType || row.status || row.guestType || "subscription",
+        quantity,
+      });
+    });
+    return map;
+  }, [attn, groups]);
 
   const currentDirectionId = currentGroup?.directionId || null;
   const schedule = useMemo(
@@ -2102,6 +2145,74 @@ export default function AttendanceTab({
       });
     } catch (err) {
       alert(err?.message || "Не вдалося прибрати ученицю з групи");
+    }
+  };
+
+  const getStudentActiveSubscription = (studentId, groupId = gid) =>
+    getActiveSubOnDate(subsForAttendanceSemantics, studentId, groupId, today());
+
+  const getSubscriptionTransferHistory = (sub) => {
+    if (!sub?.id) return null;
+    const usage = subscriptionUsageById.get(String(sub.id));
+    if (!usage) return { total: Number(sub.usedTrainings || 0), byGroup: [], rows: [], hasOtherGroups: false };
+    const currentGroupId = String(sub.groupId || "");
+    const byGroup = Array.from(usage.byGroup.values()).sort((a, b) => b.count - a.count);
+    return {
+      total: usage.total,
+      byGroup,
+      rows: [...usage.rows].sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))),
+      hasOtherGroups: byGroup.some((item) => String(item.groupId || "") !== currentGroupId),
+    };
+  };
+
+  const openTransferModal = (student) => {
+    const activeSub = getStudentActiveSubscription(student.id, gid);
+    const target = (groups || []).find((group) => String(group.id) !== String(gid) && sameTrainer(currentGroup, group));
+    setTransferState({ student, fromGroup: currentGroup, activeSub });
+    setTransferTargetGroupId(target?.id || "");
+    setTransferActiveSub(!!activeSub);
+    setTransferError("");
+    setOpenMenuState(null);
+  };
+
+  const closeTransferModal = () => {
+    if (transferSaving) return;
+    setTransferState(null);
+    setTransferTargetGroupId("");
+    setTransferError("");
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!transferState?.student || !transferState?.fromGroup || !transferTargetGroupId) return;
+    const toGroup = (groups || []).find((group) => String(group.id) === String(transferTargetGroupId));
+    if (!toGroup || !sameTrainer(transferState.fromGroup, toGroup)) {
+      setTransferError("Перенос між різними тренерами поки недоступний, щоб не зачепити фінанси.");
+      return;
+    }
+    const studentId = transferState.student.id;
+    const oldGroupId = transferState.fromGroup.id;
+    const newGroupId = toGroup.id;
+    setTransferSaving(true);
+    setTransferError("");
+    try {
+      await db.addStudentGroup(studentId, newGroupId);
+      let updatedSub = null;
+      if (transferActiveSub && transferState.activeSub?.id) {
+        updatedSub = await db.updateSub(transferState.activeSub.id, { groupId: newGroupId });
+      }
+      await db.removeStudentGroup(studentId, oldGroupId);
+      setStudentGrps((prev) => {
+        const withoutOld = (prev || []).filter((row) => !(String(row.studentId) === String(studentId) && String(row.groupId) === String(oldGroupId)));
+        if (withoutOld.some((row) => String(row.studentId) === String(studentId) && String(row.groupId) === String(newGroupId))) return withoutOld;
+        return [...withoutOld, { id: `local_transfer_${uid()}`, studentId, groupId: newGroupId }];
+      });
+      if (updatedSub) setSubs((prev) => (prev || []).map((sub) => String(sub.id) === String(updatedSub.id) ? { ...sub, ...updatedSub } : sub));
+      setGid(newGroupId);
+      closeTransferModal();
+    } catch (err) {
+      setTransferError(err?.message || "Не вдалося перенести ученицю");
+    } finally {
+      setTransferSaving(false);
     }
   };
 
@@ -3877,7 +3988,35 @@ export default function AttendanceTab({
                       </div>
                     </div>
                     <div className="attendance-student-meta" style={{ ...styles.studentMeta, color: metaColor }}>
-                      {statusInfo.text}
+                      {(() => {
+                        const activeSub = getStudentActiveSubscription(student.id, gid);
+                        const history = getSubscriptionTransferHistory(activeSub);
+                        const used = history?.total ?? activeSub?.usedTrainings;
+                        const historyLabel = history?.byGroup?.length
+                          ? history.byGroup.map((item) => `${item.count} ${item.groupName}`).join(" · ")
+                          : "";
+                        const movedFrom = history?.byGroup?.find((item) => String(item.groupId || "") !== String(activeSub?.groupId || ""));
+                        return (
+                          <>
+                            <span>{activeSub ? `Використано ${used || 0}/${activeSub.totalTrainings || 0} • ${statusInfo.text}` : statusInfo.text}</span>
+                            {history?.hasOtherGroups && (
+                              <details style={{ marginTop: 4 }}>
+                                <summary style={{ cursor: "pointer", color: theme.primary, fontWeight: 700 }}>
+                                  {movedFrom ? `Перенесено з ${movedFrom.groupName}` : `Історія: ${historyLabel}`}
+                                </summary>
+                                <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
+                                  <div>Історія: {historyLabel}</div>
+                                  {history.rows.map((row) => (
+                                    <div key={row.id || `${row.date}-${row.groupId}`} style={{ color: theme.textLight }}>
+                                      {fmtUaShortDate(row.date)} · {row.groupName} · {row.status}
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </td>
@@ -4231,6 +4370,41 @@ export default function AttendanceTab({
         document.body
       )}
 
+
+      {transferState && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "min(520px, 100%)", borderRadius: 18, border: `1px solid ${theme.border}`, background: theme.card, color: theme.textMain, boxShadow: "0 24px 60px rgba(15,23,42,0.28)", padding: 18 }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 18 }}>Перенести в іншу групу</h3>
+            <div style={{ display: "grid", gap: 8, fontSize: 14 }}>
+              <div><b>Учениця:</b> {getDisplayName(transferState.student)}</div>
+              <div><b>Поточна група:</b> {getGroupName(transferState.fromGroup)}</div>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span><b>Нова група</b> (тільки той самий тренер)</span>
+                <select style={styles.control} value={transferTargetGroupId} onChange={(e) => setTransferTargetGroupId(e.target.value)} disabled={transferSaving}>
+                  <option value="">Оберіть групу</option>
+                  {(groups || []).filter((group) => String(group.id) !== String(transferState.fromGroup.id) && sameTrainer(transferState.fromGroup, group)).map((group) => (
+                    <option key={group.id} value={group.id}>{getGroupName(group)}</option>
+                  ))}
+                </select>
+              </label>
+              {transferState.activeSub ? (
+                <label style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <input type="checkbox" checked={transferActiveSub} onChange={(e) => setTransferActiveSub(e.target.checked)} disabled={transferSaving} />
+                  <span>Перенести активний абонемент у нову групу</span>
+                </label>
+              ) : <div style={{ color: theme.textLight }}>Активний абонемент не знайдено — буде перенесено тільки ученицю.</div>}
+              <div style={{ color: theme.textMuted }}>Дати, кількість занять і оплата не зміняться. Старі відмітки залишаться в історії.</div>
+              {transferError && <div style={{ color: "#dc2626", fontWeight: 700 }}>{transferError}</div>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button type="button" style={styles.control} onClick={closeTransferModal} disabled={transferSaving}>Скасувати</button>
+              <button type="button" style={{ ...styles.control, background: theme.primary, color: "#fff" }} onClick={handleConfirmTransfer} disabled={transferSaving || !transferTargetGroupId}>{transferSaving ? "Переносимо…" : "Перенести"}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {openMenuState && createPortal(
         <div
           ref={menuPopupRef}
@@ -4262,6 +4436,7 @@ export default function AttendanceTab({
                   <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
                   <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
                   <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
+                  <button type="button" style={styles.menuItem} onClick={() => openTransferModal(student)}>Перенести в іншу групу</button>
                 </div>
                 <div style={styles.menuSection}>
                   <button type="button" style={styles.menuItem} onClick={() => handleMessageStudent(student)}>Написати повідомлення</button>
