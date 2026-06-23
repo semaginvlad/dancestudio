@@ -3991,14 +3991,13 @@ export default function AttendanceTab({
                       {(() => {
                         const activeSub = getStudentActiveSubscription(student.id, gid);
                         const history = getSubscriptionTransferHistory(activeSub);
-                        const used = history?.total ?? activeSub?.usedTrainings;
                         const historyLabel = history?.byGroup?.length
                           ? history.byGroup.map((item) => `${item.count} ${item.groupName}`).join(" · ")
                           : "";
                         const movedFrom = history?.byGroup?.find((item) => String(item.groupId || "") !== String(activeSub?.groupId || ""));
                         return (
                           <>
-                            <span>{activeSub ? `Використано ${used || 0}/${activeSub.totalTrainings || 0} • ${statusInfo.text}` : statusInfo.text}</span>
+                            <span>{statusInfo.text}</span>
                             {history?.hasOtherGroups && (
                               <details style={{ marginTop: 4 }}>
                                 <summary style={{ cursor: "pointer", color: theme.primary, fontWeight: 700 }}>
