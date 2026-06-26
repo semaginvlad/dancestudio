@@ -375,9 +375,7 @@ export default function App() {
       const fetchScheduleGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchScheduleGroups;
-      const fetchScheduleCancelled = isCurrentAdmin
-        ? db.fetchCancelled
-        : db.fetchScheduleCancelled;
+      const fetchScheduleCancelled = db.fetchScheduleCancelled;
       const fetchAttendanceSubscriptions = isCurrentAdmin
         ? () => db.fetchSubs({ includeFinancial: true })
         : db.fetchMyAttendanceSubscriptions;
@@ -421,7 +419,7 @@ export default function App() {
       setSubs(scopedSubs);
       setAttn(scopedAttn);
       setCancelled(scopedCancelled);
-      setScheduleCancelled(isCurrentAdmin ? (ca || []) : (scheduleCa || []));
+      setScheduleCancelled(scheduleCa || []);
       setStudentGrps(scopedStudentGrps);
       setWaitlist(wl || []);
       setTrialBookings(tb || []);
@@ -1419,7 +1417,8 @@ export default function App() {
     const baseEndDate = getCancellationDate({ date: payload.endDate });
     if (!groupId || !startDate || !baseEndDate) return payload;
 
-    const group = groups.find((g) => String(g.id).trim() === groupId);
+    const group = (groups || []).find((g) => String(g.id).trim() === groupId)
+      || (scheduleGroups || []).find((g) => String(g.id).trim() === groupId);
     const cancelledByDate = new Map();
     [...(cancelled || []), ...(scheduleCancelled || [])].forEach((row) => {
       const rowGroupId = getCancellationGroupId(row);
