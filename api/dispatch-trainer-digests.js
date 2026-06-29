@@ -8,6 +8,7 @@ import {
   parseTrainerGroups,
 } from "../src/shared/trainerDigest.js";
 import { ADMIN_LOG_CHAT_ID } from "../server/trainer-digest-send.js";
+import { authError, requireCronSecret } from "./_auth.js";
 
 const buildSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -57,6 +58,9 @@ export default async function handler(req, res) {
   if (method !== "POST" && method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  const cron = requireCronSecret(req);
+  if (!cron.ok) return authError(res, cron);
 
   const now = new Date();
   const input = method === "GET" ? (req.query || {}) : (req.body || {});
