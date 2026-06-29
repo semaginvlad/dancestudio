@@ -9,6 +9,7 @@ import {
   getEffectiveEndDate,
   isSubExhausted,
   getActiveSubOnDateForCoverage,
+  getCancelledDatesForGroup,
 } from "../shared/utils";
 import { theme } from "../shared/constants";
 
@@ -1005,8 +1006,10 @@ const fmtUaShortDate = (dateStr) => {
   return `${d}.${m}`;
 };
 
-const getActiveSubOnDate = (subs, studentId, groupId, dateStr) =>
-  getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+const getActiveSubOnDate = (subs, studentId, groupId, dateStr, cancelledDates = new Set()) => {
+  if (cancelledDates.has(toDateKey(dateStr))) return null;
+  return getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+};
 const getTrainerId = (group) =>
   group?.trainerId ?? group?.trainer_id ?? group?.coachId ?? group?.coach_id ?? group?.trainer ?? group?.trainer_id_fk ?? null;
 const sameTrainer = (a, b) => {
@@ -1251,6 +1254,7 @@ export default function AttendanceTab({
   studentGrps,
   setStudentGrps,
   cancelled,
+  scheduleCancelled = [],
   setCancelled,
   customOrders,
   onActionAddSub,
@@ -1538,6 +1542,11 @@ export default function AttendanceTab({
     if (!scheduleDays.length) return all;
     return all.filter((d) => scheduleDays.includes(getDayOfWeek(d)));
   }, [months, scheduleDays]);
+
+  const cancelledDatesForCurrentGroup = useMemo(
+    () => getCancelledDatesForGroup([cancelled || [], scheduleCancelled || []], gid),
+    [cancelled, scheduleCancelled, gid]
+  );
 
   const trainingLessonPlanMap = useMemo(() => {
     const map = new Map();
@@ -2149,7 +2158,7 @@ export default function AttendanceTab({
   };
 
   const getStudentActiveSubscription = (studentId, groupId = gid) =>
-    getActiveSubOnDate(subsForAttendanceSemantics, studentId, groupId, today());
+    getActiveSubOnDate(subsForAttendanceSemantics, studentId, groupId, today(), cancelledDatesForCurrentGroup);
 
   const getSubscriptionTransferHistory = (sub) => {
     if (!sub?.id) return null;
@@ -2233,7 +2242,7 @@ export default function AttendanceTab({
   };
 
   const handleEditSub = (student) => {
-    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, today());
+    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, today(), cancelledDatesForCurrentGroup);
     const lastSub = [...subsForAttendanceSemantics]
       .filter((s) => String(s.studentId) === String(student.id) && String(s.groupId) === String(gid))
       .sort((a, b) => {
@@ -2395,6 +2404,7 @@ export default function AttendanceTab({
   }, [subsForAttendanceSemantics, gid, lastAttendanceBySub]);
 
   const getSubPeriodForCell = (studentId, dateStr) => {
+    if (cancelledDatesForCurrentGroup.has(toDateKey(dateStr))) return null;
     const periods = subPeriodsByStudent[studentId] || [];
     return periods.find((p) => p.start <= dateStr && p.end >= dateStr) || null;
   };
@@ -2430,8 +2440,7 @@ export default function AttendanceTab({
     return all[0] || null;
   };
 
-  const isCancelledDate = (dateStr) =>
-    cancelled.some((c) => c.groupId === gid && c.date === dateStr);
+  const isCancelledDate = (dateStr) => cancelledDatesForCurrentGroup.has(toDateKey(dateStr));
 
   const loadAttendanceHistory = async () => {
     if (!isAdmin) return;
@@ -2513,7 +2522,7 @@ export default function AttendanceTab({
 
   const resolveNewEntry = (student, dateStr) => {
     if (entryMode === "subscription") {
-      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
+      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (!activeSub) {
         throw new Error("На цю дату немає активного абонемента.");
       }
@@ -2532,14 +2541,14 @@ export default function AttendanceTab({
     }
 
     if (entryMode === "debt") {
-      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
+      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (activeSub) {
         throw new Error("У учениці є активний абонемент, борг ставити не можна.");
       }
       return { entryType: "debt", subId: null };
     }
 
-    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr);
+    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
     if (activeSub) {
       return { entryType: "subscription", subId: activeSub.id };
     }

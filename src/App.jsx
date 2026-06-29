@@ -21,7 +21,9 @@ import {
   daysLeft,
   fmt,
   getDisplayName,
-  getNextTrainingDate,
+  getCancellationDate,
+  getCancelledDatesForGroup,
+  getNextNonCancelledTrainingDate,
   getNotifMsg,
   getSubStatus,
   today,
@@ -1399,18 +1401,6 @@ export default function App() {
     setAttn((prev) => (prev || []).map((row) => byId.get(String(row.id)) || row));
   };
 
-  const getCancellationGroupId = (row = {}) => {
-    const value = row.groupId ?? row.group_id;
-    return value == null ? "" : String(value).trim();
-  };
-
-  const getCancellationDate = (row = {}) => {
-    const value = row.date ?? row.trainingDate ?? row.training_date;
-    if (!value) return "";
-    if (value instanceof Date) return toLocalISO(value);
-    return String(value).trim().slice(0, 10);
-  };
-
   const getCancelledTrainingCompensatedSubscription = (payload = {}) => {
     const groupId = payload.groupId == null ? "" : String(payload.groupId).trim();
     const startDate = getCancellationDate({ date: payload.startDate });
@@ -1419,23 +1409,15 @@ export default function App() {
 
     const group = (groups || []).find((g) => String(g.id).trim() === groupId)
       || (scheduleGroups || []).find((g) => String(g.id).trim() === groupId);
-    const cancelledByDate = new Map();
-    [...(cancelled || []), ...(scheduleCancelled || [])].forEach((row) => {
-      const rowGroupId = getCancellationGroupId(row);
-      const rowDate = getCancellationDate(row);
-      if (rowGroupId !== groupId || !rowDate || rowDate < startDate || rowDate > baseEndDate) return;
-      cancelledByDate.set(rowDate, row);
-    });
+    const cancelledSources = [cancelled || [], scheduleCancelled || []];
+    const matchingCancelledDates = [...getCancelledDatesForGroup(cancelledSources, groupId, { startDate, endDate: baseEndDate })]
+      .sort((dateA, dateB) => dateA.localeCompare(dateB));
 
-    const matchingCancelled = [...cancelledByDate.entries()]
-      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-      .map(([, row]) => row);
-
-    if (!matchingCancelled.length) return payload;
+    if (!matchingCancelledDates.length) return payload;
 
     let compensatedEndDate = baseEndDate;
-    matchingCancelled.forEach(() => {
-      compensatedEndDate = getNextTrainingDate(group?.schedule || [], compensatedEndDate);
+    matchingCancelledDates.forEach(() => {
+      compensatedEndDate = getNextNonCancelledTrainingDate(group?.schedule || [], compensatedEndDate, groupId, cancelledSources);
     });
 
     return {
@@ -1655,7 +1637,7 @@ export default function App() {
           />
         )}
 
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
