@@ -158,6 +158,58 @@ function getNextTrainingDate(schedule, afterDateStr) {
   return afterDateStr;
 }
 
+
+const getCancellationGroupId = (row = {}) => {
+  const value = row.groupId ?? row.group_id;
+  return value == null ? "" : String(value).trim();
+};
+
+const getCancellationDate = (row = {}) => {
+  const value = row.date ?? row.trainingDate ?? row.training_date;
+  if (!value) return "";
+  if (value instanceof Date) return toLocalISO(value);
+  return String(value).trim().slice(0, 10);
+};
+
+function getCancelledDatesForGroup(cancelledSources = [], groupId, { startDate, endDate } = {}) {
+  const groupKey = groupId == null ? "" : String(groupId).trim();
+  if (!groupKey) return new Set();
+
+  const sources = Array.isArray(cancelledSources)
+    ? cancelledSources
+    : [cancelledSources];
+  const rows = sources.flatMap((source) => Array.isArray(source) ? source : []);
+  const result = new Set();
+
+  rows.forEach((row) => {
+    const rowGroupId = getCancellationGroupId(row);
+    const rowDate = getCancellationDate(row);
+    if (rowGroupId !== groupKey || !rowDate) return;
+    if (startDate && rowDate < startDate) return;
+    if (endDate && rowDate > endDate) return;
+    result.add(rowDate);
+  });
+
+  return result;
+}
+
+function getNextNonCancelledTrainingDate(schedule, afterDateStr, groupId, cancelledSources = [], maxIterations = 120) {
+  const groupKey = groupId == null ? "" : String(groupId).trim();
+  let cursor = afterDateStr;
+
+  for (let i = 0; i < maxIterations; i += 1) {
+    const nextDate = getNextTrainingDate(schedule, cursor);
+    if (!nextDate || nextDate === cursor) return nextDate || cursor;
+
+    const cancelledDates = getCancelledDatesForGroup(cancelledSources, groupKey, { startDate: nextDate, endDate: nextDate });
+    if (!cancelledDates.has(nextDate)) return nextDate;
+
+    cursor = nextDate;
+  }
+
+  return cursor;
+}
+
 function getPreviousTrainingDate(schedule, beforeDateStr) {
   if (!schedule || schedule.length === 0 || !beforeDateStr) {
     const d = new Date((beforeDateStr || today()) + "T12:00:00");
@@ -238,7 +290,11 @@ export {
   hasActiveSubscriptionCoverage,
   getActiveSubOnDateForCoverage,
   getNextTrainingDate,
+  getNextNonCancelledTrainingDate,
   getPreviousTrainingDate,
+  getCancellationGroupId,
+  getCancellationDate,
+  getCancelledDatesForGroup,
   getNotifMsg,
   useStickyState,
 };
