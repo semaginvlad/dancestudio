@@ -994,6 +994,7 @@ const toDateKey = (value) => {
 };
 
 const FUTURE_ATTENDANCE_MESSAGE = "Майбутні тренування не можна відмічати.";
+const CANCELLED_ATTENDANCE_MESSAGE = "Це тренування скасоване. Відмітку поставити не можна.";
 const isFutureAttendanceDate = (dateStr) => toDateKey(dateStr) > today();
 const ANON_GUEST_PREFIX = "__anon_guest__:";
 const isAnonymousGuestLabel = (value) => String(value || "").startsWith(ANON_GUEST_PREFIX);
@@ -2524,6 +2525,10 @@ export default function AttendanceTab({
   };
 
   const resolveNewEntry = (student, dateStr) => {
+    if (isCancelledDate(dateStr)) {
+      throw new Error(CANCELLED_ATTENDANCE_MESSAGE);
+    }
+
     if (entryMode === "subscription") {
       const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (!activeSub) {
@@ -2638,7 +2643,10 @@ export default function AttendanceTab({
 
   const handleToggleCell = async (student, dateStr) => {
     if (!gid) return;
-    if (isCancelledDate(dateStr)) return;
+    if (isCancelledDate(dateStr)) {
+      alert(CANCELLED_ATTENDANCE_MESSAGE);
+      return;
+    }
     if (isFutureAttendanceDate(dateStr)) {
       alert(FUTURE_ATTENDANCE_MESSAGE);
       return;
@@ -2800,7 +2808,11 @@ export default function AttendanceTab({
   };
 
   const handleToggleGuestCell = async (guestRow, dateStr) => {
-    if (!gid || isCancelledDate(dateStr)) return;
+    if (!gid) return;
+    if (isCancelledDate(dateStr)) {
+      alert(CANCELLED_ATTENDANCE_MESSAGE);
+      return;
+    }
     if (isFutureAttendanceDate(dateStr)) {
       alert(FUTURE_ATTENDANCE_MESSAGE);
       return;
@@ -3933,7 +3945,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr}>{cellView.mark}</button></div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button></div>
                         </td>
                       );
                     })}
@@ -4077,7 +4089,7 @@ export default function AttendanceTab({
                         disabled={cancelledDay || saving}
                         onClick={() => handleToggleCell(student, dateStr)}
                         style={styles.cellBtn(buttonBg, cancelledDay || futureDay, saving)}
-                        title={cancelledDay ? "Тренування скасоване" : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}
+                        title={cancelledDay ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}
                       >
                         {cellView.mark}
                       </button>
