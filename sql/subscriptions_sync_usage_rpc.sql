@@ -11,9 +11,11 @@
 --   their auth user through public.groups.trainer_id = auth.uid().
 -- - Recalculate used_trainings from public.attendance rows for the subscription.
 -- - Update only operational subscription fields:
---   used_trainings, activation_date.
--- - Attendance sync must not change subscription dates; end_date may already
---   include cancellation compensation and original_end_date keeps the base date.
+--   used_trainings, activation_date, and end_date only for fully used packs
+--   when the last attendance date is earlier than the current end_date.
+-- - Attendance sync must not recalculate subscription dates from activation,
+--   start, original_end_date, or cancellation compensation.
+-- - original_end_date keeps the base date and is never changed here.
 -- - Do not update financial/admin fields:
 --   amount, base_price, discount_pct, discount_source, paid, pay_method, notes.
 -- - Return only attendance-safe subscription fields.
@@ -48,7 +50,12 @@ declare
   v_has_group_access boolean;
   v_used_trainings integer := 0;
   v_first_date date;
+  v_last_date date;
   v_activation_date date;
+  v_next_end_date date;
+  v_plan_type text;
+  v_is_pack boolean;
+  v_is_fully_used boolean;
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated' using errcode = '28000';
@@ -82,8 +89,9 @@ begin
 
   select
     coalesce(sum(coalesce(a.quantity, 1)), 0)::integer,
-    min(a.date)
-  into v_used_trainings, v_first_date
+    min(a.date),
+    max(a.date)
+  into v_used_trainings, v_first_date, v_last_date
   from public.attendance a
   where a.sub_id = p_sub_id;
 
@@ -97,10 +105,25 @@ begin
     v_activation_date := null;
   end if;
 
+  v_next_end_date := v_sub.end_date;
+  v_plan_type := lower(trim(coalesce(v_sub.plan_type, '')));
+  v_is_pack := v_plan_type in ('4pack', '8pack', '12pack');
+  v_is_fully_used := v_is_pack
+    and coalesce(v_sub.total_trainings, 0) > 0
+    and v_used_trainings >= coalesce(v_sub.total_trainings, 0);
+
+  if v_is_fully_used
+    and v_last_date is not null
+    and v_sub.end_date is not null
+    and v_last_date < v_sub.end_date then
+    v_next_end_date := v_last_date;
+  end if;
+
   update public.subscriptions s
   set
     used_trainings = v_used_trainings,
-    activation_date = v_activation_date
+    activation_date = v_activation_date,
+    end_date = v_next_end_date
   where s.id = p_sub_id
   returning * into v_updated;
 
