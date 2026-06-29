@@ -1006,9 +1006,12 @@ const fmtUaShortDate = (dateStr) => {
   return `${d}.${m}`;
 };
 
-const getActiveSubOnDate = (subs, studentId, groupId, dateStr, cancelledDates = new Set()) => {
+const getActiveSubOnDatePlain = (subs, studentId, groupId, dateStr) =>
+  getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+
+const getActiveSubOnDateForCell = (subs, studentId, groupId, dateStr, cancelledDates = new Set()) => {
   if (cancelledDates.has(toDateKey(dateStr))) return null;
-  return getActiveSubOnDateForCoverage(subs, studentId, groupId, dateStr);
+  return getActiveSubOnDatePlain(subs, studentId, groupId, dateStr);
 };
 const getTrainerId = (group) =>
   group?.trainerId ?? group?.trainer_id ?? group?.coachId ?? group?.coach_id ?? group?.trainer ?? group?.trainer_id_fk ?? null;
@@ -1034,7 +1037,7 @@ const getStudentStatusText = (subs, studentId, groupId) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = ymd(tomorrow);
 
-  const activeNow = getActiveSubOnDate(groupSubs, studentId, groupId, todayStr);
+  const activeNow = getActiveSubOnDatePlain(groupSubs, studentId, groupId, todayStr);
   const latestAvailable = [...groupSubs]
     .filter((s) => (s.usedTrainings || 0) < (s.totalTrainings || 0) && !isSubExhausted(s))
     .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))[0];
@@ -2158,7 +2161,7 @@ export default function AttendanceTab({
   };
 
   const getStudentActiveSubscription = (studentId, groupId = gid) =>
-    getActiveSubOnDate(subsForAttendanceSemantics, studentId, groupId, today(), cancelledDatesForCurrentGroup);
+    getActiveSubOnDatePlain(subsForAttendanceSemantics, studentId, groupId, today());
 
   const getSubscriptionTransferHistory = (sub) => {
     if (!sub?.id) return null;
@@ -2242,7 +2245,7 @@ export default function AttendanceTab({
   };
 
   const handleEditSub = (student) => {
-    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, today(), cancelledDatesForCurrentGroup);
+    const activeSub = getActiveSubOnDatePlain(subsForAttendanceSemantics, student.id, gid, today());
     const lastSub = [...subsForAttendanceSemantics]
       .filter((s) => String(s.studentId) === String(student.id) && String(s.groupId) === String(gid))
       .sort((a, b) => {
@@ -2522,7 +2525,7 @@ export default function AttendanceTab({
 
   const resolveNewEntry = (student, dateStr) => {
     if (entryMode === "subscription") {
-      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
+      const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (!activeSub) {
         throw new Error("На цю дату немає активного абонемента.");
       }
@@ -2541,14 +2544,14 @@ export default function AttendanceTab({
     }
 
     if (entryMode === "debt") {
-      const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
+      const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (activeSub) {
         throw new Error("У учениці є активний абонемент, борг ставити не можна.");
       }
       return { entryType: "debt", subId: null };
     }
 
-    const activeSub = getActiveSubOnDate(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
+    const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
     if (activeSub) {
       return { entryType: "subscription", subId: activeSub.id };
     }
