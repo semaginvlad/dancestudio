@@ -4,6 +4,7 @@ import { withTelegramClient, resolveTelegramPeer } from "../server/telegram-user
 import { sendPushToUser } from "../server/push-send.js";
 import fs from "node:fs";
 import path from "node:path";
+import { authError, requireAdminUser, requireCronSecret } from "./_auth.js";
 
 const buildSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -493,11 +494,8 @@ const resolveTrainerTelegramTarget = (rule, trainerRows, telegramMetaRows) => {
 
 const handleDispatchScheduleRules = async (req, res) => {
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
-  if (req.method === "POST") {
-    const secret = process.env.CRON_SECRET || "";
-    const auth = String(req.headers?.authorization || "");
-    if (!secret || auth !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
-  }
+  const cron = requireCronSecret(req);
+  if (!cron.ok) return authError(res, cron);
 
   const dryRun = isDryRunFlag(firstValue(req.query?.dryRun) ?? getUrlSearchParam(req, "dryRun") ?? firstValue(req.body?.dryRun));
   const toleranceMinutes = parseToleranceMinutes(firstValue(req.query?.toleranceMinutes) ?? getUrlSearchParam(req, "toleranceMinutes") ?? firstValue(req.body?.toleranceMinutes));
@@ -812,17 +810,29 @@ const handleScheduleRules = async (req, res) => {
 export default async function handler(req, res) {
   const { rawOp, op } = normalizeOp(req);
   try {
-    if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
-    if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
-    if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
-    if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
+    const adminOnlyOp = (
+      (req.method === "GET" && op === "readiness")
+      || (["GET", "POST"].includes(req.method) && (op === "state" || op === "history"))
+      || (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules")
+    );
+
+    if (adminOnlyOp) {
+      const admin = await requireAdminUser(req);
+      if (!admin.ok) return authError(res, admin);
+
+      if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
+      if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
+      if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
+      if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
+    }
+
     if ((req.method === "GET" || req.method === "POST") && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
     logUnknownOp({ req, rawOp, op });
     return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ALLOWED_OPS });
   } catch (error) {
+    console.error("trainer notifications handler error:", String(error?.message || error));
     return res.status(500).json({
       error: "Trainer notifications operation failed",
-      details: String(error?.message || error),
       op,
     });
   }

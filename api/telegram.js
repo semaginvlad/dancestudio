@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getPeerTitle, normalizePeerId, resolveTelegramPeer, withTelegramClient } from "../server/telegram-user-client.js";
 import { ADMIN_LOG_CHAT_ID, reportTrainerDigestFailureToAdmin, sendTrainerDigestWithAdminLog } from "../server/trainer-digest-send.js";
+import { authError, requireAdminUser } from "./_auth.js";
 
 const buildSupabase = () => {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -157,7 +158,7 @@ const handleSendTrainerDigest = async (req, res) => {
       sentAt: sentAtIso,
     });
   } catch (error) {
-    console.error("send-trainer-digest error:", error);
+    console.error("send-trainer-digest error:", String(error?.message || error));
     const sentAtIso = new Date().toISOString();
     await reportTrainerDigestFailureToAdmin({
       peer,
@@ -169,7 +170,6 @@ const handleSendTrainerDigest = async (req, res) => {
 
     return res.status(500).json({
       error: "Failed to send trainer digest",
-      details: String(error?.message || error),
       status: "failed",
       sentAt: sentAtIso,
     });
@@ -180,6 +180,9 @@ export default async function handler(req, res) {
   const op = getOp(req);
 
   try {
+    const admin = await requireAdminUser(req);
+    if (!admin.ok) return authError(res, admin);
+
     if (req.method === "GET" && (op === "listDialogs" || op === "list-dialogs")) return await handleListDialogs(res);
     if (req.method === "GET" && (op === "chatMessages" || op === "chat-messages")) return await handleChatMessages(req, res);
     if ((req.method === "GET" || req.method === "POST") && (op === "chatMeta" || op === "chat-meta")) return await handleChatMeta(req, res);
@@ -187,10 +190,9 @@ export default async function handler(req, res) {
     if (req.method === "POST" && (op === "sendTrainerDigest" || op === "send-trainer-digest")) return await handleSendTrainerDigest(req, res);
     return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["listDialogs", "chatMessages", "chatMeta", "sendTest", "sendTrainerDigest"] });
   } catch (error) {
-    console.error("telegram consolidated handler error:", error);
+    console.error("telegram consolidated handler error:", String(error?.message || error));
     return res.status(500).json({
       error: "Telegram operation failed",
-      details: String(error?.message || error),
       op,
     });
   }

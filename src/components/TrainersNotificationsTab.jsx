@@ -1,7 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../supabase";
 import { theme } from "../shared/constants";
 import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerGroupIds, parseTrainerGroups } from "../shared/trainerDigest";
 import { today, useStickyState } from "../shared/utils";
+
+const buildAuthHeaders = async (headers = {}) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+};
+
+const authFetch = async (url, options = {}) => fetch(url, {
+  ...options,
+  headers: await buildAuthHeaders(options.headers || {}),
+});
 
 export default function TrainersNotificationsTab({
   groups = [],
@@ -81,7 +93,7 @@ export default function TrainersNotificationsTab({
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch("/api/telegram?op=listDialogs");
+        const res = await authFetch("/api/telegram?op=listDialogs");
         const payload = await res.json();
         if (!res.ok) throw new Error(payload?.details || payload?.error || "Failed to load dialogs");
         const loaded = payload.dialogs || [];
@@ -91,7 +103,7 @@ export default function TrainersNotificationsTab({
         const metaRows = await Promise.all(
           loaded.map(async (dlg) => {
             try {
-              const metaRes = await fetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(dlg.id)}`);
+              const metaRes = await authFetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(dlg.id)}`);
               const metaPayload = await metaRes.json();
               if (!metaRes.ok) return [dlg.id, null];
               return [dlg.id, metaPayload.meta || null];
@@ -102,7 +114,7 @@ export default function TrainersNotificationsTab({
         );
         if (!cancelled) setMetaByChat(Object.fromEntries(metaRows));
         try {
-          const rRes = await fetch("/api/trainer-notifications?op=readiness");
+          const rRes = await authFetch("/api/trainer-notifications?op=readiness");
           const rPayload = await rRes.json();
           if (!cancelled) {
             setReadiness({
@@ -119,7 +131,7 @@ export default function TrainersNotificationsTab({
         const stateRows = await Promise.all(
           loaded.map(async (dlg) => {
             try {
-              const stateRes = await fetch(`/api/trainer-notifications?op=state&chatId=${encodeURIComponent(dlg.id)}`);
+              const stateRes = await authFetch(`/api/trainer-notifications?op=state&chatId=${encodeURIComponent(dlg.id)}`);
               const statePayload = await stateRes.json();
               if (!stateRes.ok) return [dlg.id, {}];
               const byGroup = (statePayload.rows || []).reduce((acc, row) => {
@@ -137,7 +149,7 @@ export default function TrainersNotificationsTab({
         const historyRows = await Promise.all(
           loaded.map(async (dlg) => {
             try {
-              const hRes = await fetch(`/api/trainer-notifications?op=history&chatId=${encodeURIComponent(dlg.id)}&limit=50`);
+              const hRes = await authFetch(`/api/trainer-notifications?op=history&chatId=${encodeURIComponent(dlg.id)}&limit=50`);
               const hPayload = await hRes.json();
               if (!hRes.ok) return [dlg.id, []];
               return [dlg.id, hPayload.rows || []];
@@ -352,7 +364,7 @@ export default function TrainersNotificationsTab({
 
   const upsertGroupState = async (groupId, patch) => {
     if (!selectedDialog?.id || !groupId) return null;
-    const res = await fetch("/api/trainer-notifications?op=state", {
+    const res = await authFetch("/api/trainer-notifications?op=state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId: selectedDialog.id, groupId, ...patch }),
@@ -370,7 +382,7 @@ export default function TrainersNotificationsTab({
   };
 
   const appendHistory = async (entry) => {
-    const res = await fetch("/api/trainer-notifications?op=history", {
+    const res = await authFetch("/api/trainer-notifications?op=history", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(entry),
@@ -460,7 +472,7 @@ export default function TrainersNotificationsTab({
 
     setSendingNow(true);
     try {
-      const res = await fetch("/api/telegram?op=sendTrainerDigest", {
+      const res = await authFetch("/api/telegram?op=sendTrainerDigest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -555,7 +567,7 @@ export default function TrainersNotificationsTab({
     const nowIso = new Date().toISOString();
     setSendingNow(true);
     try {
-      const res = await fetch("/api/telegram?op=sendTrainerDigest", {
+      const res = await authFetch("/api/telegram?op=sendTrainerDigest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -693,7 +705,7 @@ export default function TrainersNotificationsTab({
     setScheduleRulesLoading(true);
     setScheduleRulesError("");
     try {
-      const res = await fetch("/api/trainer-notifications?op=schedule-rules");
+      const res = await authFetch("/api/trainer-notifications?op=schedule-rules");
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити правила");
       setScheduleRules(payload?.rows || payload?.rules || []);
@@ -766,7 +778,7 @@ export default function TrainersNotificationsTab({
         include_attendance_reminder: !!scheduleRuleDraft.includeAttendanceReminder,
         message_template: scheduleRuleDraft.messageTemplate ? String(scheduleRuleDraft.messageTemplate).trim() : null,
       };
-      const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+      const res = await authFetch("/api/trainer-notifications?op=schedule-rules", {
         method: editingRuleId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editingRuleId ? { id: editingRuleId, ...payload } : payload),
@@ -784,7 +796,7 @@ export default function TrainersNotificationsTab({
     }
   };
   const toggleScheduleRule = async (rule) => {
-    const res = await fetch("/api/trainer-notifications?op=schedule-rules", {
+    const res = await authFetch("/api/trainer-notifications?op=schedule-rules", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: rule.id, enabled: !(rule.enabled !== false) }),
@@ -1012,7 +1024,7 @@ export default function TrainersNotificationsTab({
                     <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
                     <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: `1px solid ${rule.enabled !== false ? (isLightTheme ? "#F59E0B" : "transparent") : (isLightTheme ? "#22C55E" : "transparent")}`, borderRadius: 10, background: rule.enabled !== false ? (isLightTheme ? "#FDE68A" : "#6E5337") : (isLightTheme ? "#BBF7D0" : "#2C6A47"), color: isLightTheme ? "#111827" : "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
                     <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${isLightTheme ? "#60A5FA" : "#425A80"}`, borderRadius: 10, background: isLightTheme ? "#DBEAFE" : "#2B3E5B", color: isLightTheme ? "#1E3A8A" : "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
-                                      <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await fetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
+                                      <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await authFetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
                   </div>
                 </div>
               );

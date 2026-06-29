@@ -1,8 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabase";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
 import { isTrainerChatByNote } from "../shared/trainerDigest";
 import { buildUnifiedContact, CONTACT_TYPES, CRM_STAGES, LEAD_STATUSES, PIPELINE_STATUSES, normalizeContactType, normalizeCrmStage, normalizeLeadStatus, normalizePipelineStatus } from "../shared/messagesContacts";
+
+const buildAuthHeaders = async (headers = {}) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+};
+
+const authFetch = async (url, options = {}) => fetch(url, {
+  ...options,
+  headers: await buildAuthHeaders(options.headers || {}),
+});
 
 const normalizeStudentGroupIds = (student, membership) => {
   const inline = [student?.groupId, ...(Array.isArray(student?.groupIds) ? student.groupIds : [])].filter(Boolean);
@@ -139,7 +151,7 @@ export default function MessagesTab({
     const loadDialogs = async () => {
       try {
         setDialogsError("");
-        const res = await fetch("/api/telegram?op=listDialogs");
+        const res = await authFetch("/api/telegram?op=listDialogs");
         const payload = await res.json();
         if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося завантажити діалоги");
         const loadedDialogs = payload.dialogs || [];
@@ -148,7 +160,7 @@ export default function MessagesTab({
         const metaRows = await Promise.all(
           loadedDialogs.map(async (dlg) => {
             try {
-              const metaRes = await fetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(dlg.id)}`);
+              const metaRes = await authFetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(dlg.id)}`);
               const metaPayload = await metaRes.json();
               if (!metaRes.ok) return [dlg.id, null];
               return [dlg.id, metaPayload.meta || null];
@@ -197,13 +209,13 @@ export default function MessagesTab({
     if (!chatId) return;
 
     if (!messagesByChat[chatId]) {
-      fetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`)
+      authFetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`)
         .then((r) => r.json().then((p) => (r.ok ? p : Promise.reject(new Error(p?.details || p?.error || "Не вдалося завантажити повідомлення")))))
         .then((p) => setMessagesByChat((prev) => ({ ...prev, [chatId]: p.messages || [] })))
         .catch(() => setMessagesByChat((prev) => ({ ...prev, [chatId]: [] })));
     }
 
-    fetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(chatId)}`)
+    authFetch(`/api/telegram?op=chatMeta&chatId=${encodeURIComponent(chatId)}`)
       .then((r) => r.json().then((p) => (r.ok ? p : Promise.reject(new Error(p?.details || p?.error || "Не вдалося завантажити метадані")))))
       .then((p) => setMetaByChat((prev) => ({ ...prev, [chatId]: p.meta || null })))
       .catch(() => setMetaByChat((prev) => ({ ...prev, [chatId]: null })));
@@ -598,7 +610,7 @@ export default function MessagesTab({
     if (Object.prototype.hasOwnProperty.call(patch || {}, "followUpState")) {
       body.followUpState = patch.followUpState ?? null;
     }
-    const res = await fetch("/api/telegram?op=chatMeta", {
+    const res = await authFetch("/api/telegram?op=chatMeta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -694,7 +706,7 @@ export default function MessagesTab({
 
   const refreshMessages = async (chatId) => {
     if (!chatId) return;
-    const res = await fetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`);
+    const res = await authFetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`);
     const payload = await res.json();
     if (res.ok) setMessagesByChat((prev) => ({ ...prev, [chatId]: payload.messages || [] }));
   };
@@ -1415,7 +1427,7 @@ export default function MessagesTab({
                       [activeDialog.id]: [...(prev[activeDialog.id] || []), optimisticMsg],
                     }));
 
-                    await fetch("/api/telegram?op=sendTest", {
+                    await authFetch("/api/telegram?op=sendTest", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ chatId: activeDialog.id, message: resolvedDraft }),
