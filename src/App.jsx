@@ -743,6 +743,48 @@ export default function App() {
     });
   }, [adminGroupRows, adminGroupArchiveFilter, adminGroupTrainerFilter, adminGroupSearch, dirMap]);
 
+  const getGroupFirstScheduleTime = (group) => {
+    const slots = parseGroupSchedule(group?.schedule)
+      .map((slot) => String(slot?.time || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "uk"));
+    return slots[0] || "";
+  };
+
+  const groupedAdminGroupSections = useMemo(() => {
+    const sections = new Map();
+    filteredAdminGroupRows.forEach((row) => {
+      const directionId = String(row.group?.directionId || "").trim();
+      const dir = directionId ? dirMap[directionId] : null;
+      const key = directionId || "__no_direction__";
+      if (!sections.has(key)) {
+        sections.set(key, {
+          key,
+          directionId,
+          directionName: dir?.name || directionId || "Без напрямку",
+          color: dir?.color || "#7b8ea8",
+          rows: [],
+        });
+      }
+      sections.get(key).rows.push(row);
+    });
+
+    return Array.from(sections.values())
+      .map((section) => ({
+        ...section,
+        rows: section.rows.slice().sort((a, b) => {
+          const nameCompare = String(a.group?.name || "").localeCompare(String(b.group?.name || ""), "uk", { sensitivity: "base" });
+          if (nameCompare !== 0) return nameCompare;
+          return getGroupFirstScheduleTime(a.group).localeCompare(getGroupFirstScheduleTime(b.group), "uk");
+        }),
+      }))
+      .sort((a, b) => {
+        if (!a.directionId && b.directionId) return 1;
+        if (a.directionId && !b.directionId) return -1;
+        return a.directionName.localeCompare(b.directionName, "uk", { sensitivity: "base" });
+      });
+  }, [filteredAdminGroupRows, dirMap]);
+
  const subsExt = useMemo(()=>{
     const oneOffPlanTypes = new Set(["trial", "single"]);
     const usedMap = {};
@@ -1730,37 +1772,52 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div>
                 </div>
-                {filteredAdminGroupRows.map(({ group: g, archiveMeta, trainerInfo }) => {
-                  const dir = dirMap[g.directionId];
-                  const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
-                  const scheduleText = formatGroupSchedule(g.schedule) || "—";
-                  const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
-                  return (
-                    <div key={g.id} style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                        <div style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
-                          <div>
-                            <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
-                            <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
-                          </div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
-                            <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
-                            <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
-                            <span style={badgeStyle}>Учениць: {studentsCount}</span>
-                            <span style={badgeStyle}>Розклад: {scheduleText}</span>
-                          </div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
-                        </div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode || archiveMeta.isArchived} onClick={() => archiveGroup(g)}>{archiveMeta.isArchived ? "Відновити (Phase 2)" : "Архівувати"}</button>
-                          <button type="button" style={{ ...btnS, opacity: 0.55, cursor: "not-allowed" }} disabled title="Phase 4: merge groups потребує окремого підтвердження">Обʼєднати</button>
-                        </div>
+                {groupedAdminGroupSections.map((section) => (
+                  <section key={section.key} style={{ display: "grid", gap: 10, padding: 12, borderRadius: 18, background: theme.cardSoft || theme.bg, border: `1px solid ${theme.border}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 999, background: section.color, flex: "0 0 auto" }} />
+                        <h3 style={{ margin: 0, fontSize: 16, color: theme.textMain }}>{section.directionName}</h3>
                       </div>
+                      <span style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 10px", fontSize: 12, fontWeight: 800, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                        {section.rows.length} {section.rows.length === 1 ? "група" : "груп"}
+                      </span>
                     </div>
-                  );
-                })}
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {section.rows.map(({ group: g, archiveMeta, trainerInfo }) => {
+                        const dir = dirMap[g.directionId];
+                        const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
+                        const scheduleText = formatGroupSchedule(g.schedule) || "—";
+                        const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
+                        return (
+                          <div key={g.id} style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                              <div style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
+                              <div>
+                                <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
+                                <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                                <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                                <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
+                                <span style={badgeStyle}>Учениць: {studentsCount}</span>
+                                <span style={badgeStyle}>Розклад: {scheduleText}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
+                            </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
+                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode || archiveMeta.isArchived} onClick={() => archiveGroup(g)}>{archiveMeta.isArchived ? "Відновити (Phase 2)" : "Архівувати"}</button>
+                              <button type="button" style={{ ...btnS, opacity: 0.55, cursor: "not-allowed" }} disabled title="Phase 4: merge groups потребує окремого підтвердження">Обʼєднати</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
                 {!filteredAdminGroupRows.length && <div style={{ ...cardSt, padding: 18, color: theme.textMuted }}>Груп за вибраними фільтрами не знайдено.</div>}
               </div>
             ) : (
