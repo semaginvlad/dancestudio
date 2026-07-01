@@ -32,6 +32,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
+import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
 import { StudentForm, SubForm, TrialBookingForm, WaitlistForm } from "./components/Forms";
@@ -121,6 +122,9 @@ export default function App() {
   const [filterToDate, setFilterToDate] = useStickyState("", "ds_filterToDate");
   const [filterDatePreset, setFilterDatePreset] = useStickyState("custom", "ds_filterDatePreset");
   const [filterAudit, setFilterAudit] = useStickyState("all", "ds_filterAudit");
+  const [adminGroupSearch, setAdminGroupSearch] = useStickyState("", "ds_adminGroupSearch");
+  const [adminGroupArchiveFilter, setAdminGroupArchiveFilter] = useStickyState("active", "ds_adminGroupArchiveFilter");
+  const [adminGroupTrainerFilter, setAdminGroupTrainerFilter] = useStickyState("all", "ds_adminGroupTrainerFilter");
   const [stFilterDir, setStFilterDir] = useStickyState("all", "ds_stFilterDir");
   const [stFilterGroup, setStFilterGroup] = useStickyState("all", "ds_stFilterGroup");
   const [finFilterDir, setFinFilterDir] = useStickyState("all", "ds_finFilterDir");
@@ -682,7 +686,6 @@ export default function App() {
       alert(e?.message || "Не вдалося видалити напрямок.");
     }
   };
-  const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
   const parseGroupSchedule = (schedule) => {
     if (Array.isArray(schedule)) return schedule;
     if (typeof schedule === "string") {
@@ -695,10 +698,10 @@ export default function App() {
     }
     return [];
   };
+  const resolveTrainerForGroup = (group) => resolveGroupTrainer({ group, trainerGroups, trainers });
   const getGroupPrimaryTrainerId = (groupId) => {
-    const rows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupId));
-    const primary = rows.find((tg) => tg.isPrimary) || rows[0];
-    return primary ? String(primary.trainerId) : "";
+    const group = groups.find((g) => String(g.id) === String(groupId)) || scheduleGroups.find((g) => String(g.id) === String(groupId)) || { id: groupId };
+    return resolveTrainerForGroup(group).trainerId;
   };
   const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
     .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
@@ -719,6 +722,26 @@ export default function App() {
     });
     return result;
   }, [groups]);
+
+
+  const adminGroupRows = useMemo(() => groups.map((group) => {
+    const archiveMeta = archiveMetaByGroupId[String(group.id)] || { mode: null, isArchived: false };
+    const trainerInfo = resolveGroupTrainer({ group, trainerGroups, trainers });
+    return { group, archiveMeta, trainerInfo };
+  }), [groups, archiveMetaByGroupId, trainerGroups, trainers]);
+
+  const filteredAdminGroupRows = useMemo(() => {
+    const q = String(adminGroupSearch || "").trim().toLowerCase();
+    return adminGroupRows.filter(({ group, archiveMeta, trainerInfo }) => {
+      if (adminGroupArchiveFilter === "active" && archiveMeta.isArchived) return false;
+      if (adminGroupArchiveFilter === "archived" && !archiveMeta.isArchived) return false;
+      if (adminGroupTrainerFilter !== "all" && String(trainerInfo.trainerId || "") !== String(adminGroupTrainerFilter)) return false;
+      if (!q) return true;
+      const dir = dirMap[group.directionId];
+      return [group.name, group.id, group.directionId, dir?.name, trainerInfo.trainerName, formatGroupSchedule(group.schedule)]
+        .some((value) => String(value || "").toLowerCase().includes(q));
+    });
+  }, [adminGroupRows, adminGroupArchiveFilter, adminGroupTrainerFilter, adminGroupSearch, dirMap]);
 
  const subsExt = useMemo(()=>{
     const oneOffPlanTypes = new Set(["trial", "single"]);
@@ -1691,31 +1714,54 @@ export default function App() {
                 themeMode={themeMode}
               />
             ) : trainersSubtab === "groups" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                {groups.map((g) => {
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ ...cardSt, padding: 14, display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <input style={{ ...inputSt, minWidth: 220, flex: "1 1 260px" }} placeholder="Пошук: назва, напрямок, тренер, розклад" value={adminGroupSearch} onChange={(e) => setAdminGroupSearch(e.target.value)} />
+                    <select style={{ ...inputSt, width: 180 }} value={adminGroupArchiveFilter} onChange={(e) => setAdminGroupArchiveFilter(e.target.value)}>
+                      <option value="active">Активні</option>
+                      <option value="archived">Архівні</option>
+                      <option value="all">Усі</option>
+                    </select>
+                    <select style={{ ...inputSt, width: 220 }} value={adminGroupTrainerFilter} onChange={(e) => setAdminGroupTrainerFilter(e.target.value)}>
+                      <option value="all">Усі тренери</option>
+                      {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div>
+                </div>
+                {filteredAdminGroupRows.map(({ group: g, archiveMeta, trainerInfo }) => {
                   const dir = dirMap[g.directionId];
-                  const trainerId = getGroupPrimaryTrainerId(g.id);
-                  const trainer = trainersById[String(trainerId)];
-                  const archiveMeta = archiveMetaByGroupId[String(g.id)] || { mode: null, isArchived: false };
+                  const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
+                  const scheduleText = formatGroupSchedule(g.schedule) || "—";
+                  const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
                   return (
-                    <div key={g.id} style={{ ...cardSt, padding: 14 }}>
+                    <div key={g.id} style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div style={{ fontWeight: 800, color: theme.textMain }}>{g.name}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Напрямок: {dir?.name || g.directionId || "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Графік: {formatGroupSchedule(g.schedule) || "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Тренер: {trainer ? (trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.id) : "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Відсоток тренера: {g.trainerPct ?? 0}%</div>
-                          <div style={{ fontSize: 12, color: archiveMeta.isArchived ? theme.danger : theme.success }}>Статус: {archiveMeta.isArchived ? "Архівна" : "Активна"}</div>
+                        <div style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
+                          <div>
+                            <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
+                            <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                            <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                            <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
+                            <span style={badgeStyle}>Учениць: {studentsCount}</span>
+                            <span style={badgeStyle}>Розклад: {scheduleText}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
                         </div>
-                        <div style={{ display: "flex", gap: 8 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                           <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} onClick={() => archiveGroup(g)}>Архівація</button>
+                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode || archiveMeta.isArchived} onClick={() => archiveGroup(g)}>{archiveMeta.isArchived ? "Відновити (Phase 2)" : "Архівувати"}</button>
+                          <button type="button" style={{ ...btnS, opacity: 0.55, cursor: "not-allowed" }} disabled title="Phase 4: merge groups потребує окремого підтвердження">Обʼєднати</button>
                         </div>
                       </div>
                     </div>
                   );
                 })}
+                {!filteredAdminGroupRows.length && <div style={{ ...cardSt, padding: 18, color: theme.textMuted }}>Груп за вибраними фільтрами не знайдено.</div>}
               </div>
             ) : (
               <TrainersNotificationsTab
