@@ -32,6 +32,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
+import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
 import { StudentForm, SubForm, TrialBookingForm, WaitlistForm } from "./components/Forms";
@@ -70,6 +71,21 @@ const addDaysForScheduleRange = (date, days) => {
   d.setDate(d.getDate() + days);
   return toLocalISO(d);
 };
+
+const getGroupArchiveMeta = (group = {}) => {
+  if (Object.prototype.hasOwnProperty.call(group, "is_active")) {
+    return { mode: "is_active", isArchived: group.is_active === false };
+  }
+  if (Object.prototype.hasOwnProperty.call(group, "active")) {
+    return { mode: "active", isArchived: group.active === false };
+  }
+  if (Object.prototype.hasOwnProperty.call(group, "archived_at")) {
+    return { mode: "archived_at", isArchived: !!group.archived_at };
+  }
+  return { mode: null, isArchived: false };
+};
+
+const isGroupArchived = (group) => getGroupArchiveMeta(group).isArchived;
 
 
 export default function App() {
@@ -121,6 +137,9 @@ export default function App() {
   const [filterToDate, setFilterToDate] = useStickyState("", "ds_filterToDate");
   const [filterDatePreset, setFilterDatePreset] = useStickyState("custom", "ds_filterDatePreset");
   const [filterAudit, setFilterAudit] = useStickyState("all", "ds_filterAudit");
+  const [adminGroupSearch, setAdminGroupSearch] = useStickyState("", "ds_adminGroupSearch");
+  const [adminGroupArchiveFilter, setAdminGroupArchiveFilter] = useStickyState("active", "ds_adminGroupArchiveFilter");
+  const [adminGroupTrainerFilter, setAdminGroupTrainerFilter] = useStickyState("all", "ds_adminGroupTrainerFilter");
   const [stFilterDir, setStFilterDir] = useStickyState("all", "ds_stFilterDir");
   const [stFilterGroup, setStFilterGroup] = useStickyState("all", "ds_stFilterGroup");
   const [finFilterDir, setFinFilterDir] = useStickyState("all", "ds_finFilterDir");
@@ -147,6 +166,7 @@ export default function App() {
   const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
   const [adminTab, setAdminTab] = useState("analytics");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
+  const [groupMergeDraft, setGroupMergeDraft] = useState(null);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
   const [scheduleScale, setScheduleScale] = useStickyState(100, "ds_schedule_scale_v1");
@@ -562,27 +582,49 @@ export default function App() {
     }
   };
 
-  const archiveGroup = async (group) => {
+  const buildGroupArchivePatch = (mode, shouldArchive) => {
+    if (mode === "is_active") return { is_active: !shouldArchive };
+    if (mode === "active") return { active: !shouldArchive };
+    if (mode === "archived_at") return { archived_at: shouldArchive ? today() : null };
+    return null;
+  };
+
+  const toggleGroupArchive = async (group) => {
     const meta = archiveMetaByGroupId[String(group.id)];
-    if (!meta?.mode) return;
-    const patch = meta.mode === "is_active"
-      ? { is_active: false }
-      : meta.mode === "active"
-        ? { active: false }
-        : { archived_at: today() };
+    if (!meta?.mode) {
+      alert("Для архівації груп потрібне поле is_active, active або archived_at у таблиці groups.");
+      return;
+    }
+
+    const shouldArchive = !meta.isArchived;
+    if (shouldArchive) {
+      const confirmed = window.confirm("Архівувати групу? Історія та абонементи залишаться, група зникне з активного списку.");
+      if (!confirmed) return;
+    }
+
+    const patch = buildGroupArchivePatch(meta.mode, shouldArchive);
+    if (!patch) return;
+
     try {
       const updated = await db.updateGroup(group.id, patch);
       setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+      setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? { ...g, ...updated } : g)));
     } catch (e) {
-      alert(e?.message || "Не вдалося архівувати групу");
+      alert(e?.message || (shouldArchive ? "Не вдалося архівувати групу" : "Не вдалося відновити групу"));
     }
   };
 
+  const activeGroups = useMemo(() => groups.filter((g) => !isGroupArchived(g)), [groups]);
+  const activeGroupIds = useMemo(() => new Set(activeGroups.map((g) => String(g.id))), [activeGroups]);
+  const activeScheduleGroups = useMemo(() => (
+    scheduleGroups.filter((g) => !isGroupArchived(g) && activeGroupIds.has(String(g.id)))
+  ), [scheduleGroups, activeGroupIds]);
+
   const visibleGroups = useMemo(() => {
     if (!user) return [];
-    if (isAdmin) return groups;
-    return groups.filter(g => g.trainer_id === user.id);
-  }, [groups, user, isAdmin]);
+    if (isAdmin) return activeGroups;
+    return activeGroups.filter(g => g.trainer_id === user.id);
+  }, [activeGroups, user, isAdmin]);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
@@ -682,7 +724,6 @@ export default function App() {
       alert(e?.message || "Не вдалося видалити напрямок.");
     }
   };
-  const trainersById = useMemo(() => Object.fromEntries((trainers || []).map((t) => [String(t.id), t])), [trainers]);
   const parseGroupSchedule = (schedule) => {
     if (Array.isArray(schedule)) return schedule;
     if (typeof schedule === "string") {
@@ -695,10 +736,10 @@ export default function App() {
     }
     return [];
   };
+  const resolveTrainerForGroup = (group) => resolveGroupTrainer({ group, trainerGroups, trainers });
   const getGroupPrimaryTrainerId = (groupId) => {
-    const rows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupId));
-    const primary = rows.find((tg) => tg.isPrimary) || rows[0];
-    return primary ? String(primary.trainerId) : "";
+    const group = groups.find((g) => String(g.id) === String(groupId)) || scheduleGroups.find((g) => String(g.id) === String(groupId)) || { id: groupId };
+    return resolveTrainerForGroup(group).trainerId;
   };
   const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
     .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
@@ -707,18 +748,72 @@ export default function App() {
   const archiveMetaByGroupId = useMemo(() => {
     const result = {};
     groups.forEach((g) => {
-      if (Object.prototype.hasOwnProperty.call(g, "is_active")) {
-        result[String(g.id)] = { mode: "is_active", isArchived: g.is_active === false };
-      } else if (Object.prototype.hasOwnProperty.call(g, "active")) {
-        result[String(g.id)] = { mode: "active", isArchived: g.active === false };
-      } else if (Object.prototype.hasOwnProperty.call(g, "archived_at")) {
-        result[String(g.id)] = { mode: "archived_at", isArchived: !!g.archived_at };
-      } else {
-        result[String(g.id)] = { mode: null, isArchived: false };
-      }
+      result[String(g.id)] = getGroupArchiveMeta(g);
     });
     return result;
   }, [groups]);
+
+
+  const adminGroupRows = useMemo(() => groups.map((group) => {
+    const archiveMeta = archiveMetaByGroupId[String(group.id)] || { mode: null, isArchived: false };
+    const trainerInfo = resolveGroupTrainer({ group, trainerGroups, trainers });
+    return { group, archiveMeta, trainerInfo };
+  }), [groups, archiveMetaByGroupId, trainerGroups, trainers]);
+
+  const filteredAdminGroupRows = useMemo(() => {
+    const q = String(adminGroupSearch || "").trim().toLowerCase();
+    return adminGroupRows.filter(({ group, archiveMeta, trainerInfo }) => {
+      if (adminGroupArchiveFilter === "active" && archiveMeta.isArchived) return false;
+      if (adminGroupArchiveFilter === "archived" && !archiveMeta.isArchived) return false;
+      if (adminGroupTrainerFilter !== "all" && String(trainerInfo.trainerId || "") !== String(adminGroupTrainerFilter)) return false;
+      if (!q) return true;
+      const dir = dirMap[group.directionId];
+      return [group.name, group.id, group.directionId, dir?.name, trainerInfo.trainerName, formatGroupSchedule(group.schedule)]
+        .some((value) => String(value || "").toLowerCase().includes(q));
+    });
+  }, [adminGroupRows, adminGroupArchiveFilter, adminGroupTrainerFilter, adminGroupSearch, dirMap]);
+
+  const getGroupFirstScheduleTime = (group) => {
+    const slots = parseGroupSchedule(group?.schedule)
+      .map((slot) => String(slot?.time || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "uk"));
+    return slots[0] || "";
+  };
+
+  const groupedAdminGroupSections = useMemo(() => {
+    const sections = new Map();
+    filteredAdminGroupRows.forEach((row) => {
+      const directionId = String(row.group?.directionId || "").trim();
+      const dir = directionId ? dirMap[directionId] : null;
+      const key = directionId || "__no_direction__";
+      if (!sections.has(key)) {
+        sections.set(key, {
+          key,
+          directionId,
+          directionName: dir?.name || directionId || "Без напрямку",
+          color: dir?.color || "#7b8ea8",
+          rows: [],
+        });
+      }
+      sections.get(key).rows.push(row);
+    });
+
+    return Array.from(sections.values())
+      .map((section) => ({
+        ...section,
+        rows: section.rows.slice().sort((a, b) => {
+          const nameCompare = String(a.group?.name || "").localeCompare(String(b.group?.name || ""), "uk", { sensitivity: "base" });
+          if (nameCompare !== 0) return nameCompare;
+          return getGroupFirstScheduleTime(a.group).localeCompare(getGroupFirstScheduleTime(b.group), "uk");
+        }),
+      }))
+      .sort((a, b) => {
+        if (!a.directionId && b.directionId) return 1;
+        if (a.directionId && !b.directionId) return -1;
+        return a.directionName.localeCompare(b.directionName, "uk", { sensitivity: "base" });
+      });
+  }, [filteredAdminGroupRows, dirMap]);
 
  const subsExt = useMemo(()=>{
     const oneOffPlanTypes = new Set(["trial", "single"]);
@@ -741,6 +836,154 @@ export default function App() {
 
 
   const activeSubs = useMemo(()=>subsExt.filter(s=>s.status!=="expired"),[subsExt]);
+
+  const openMergeGroup = (sourceGroup) => {
+    if (!sourceGroup?.id) return;
+    setGroupMergeDraft({
+      sourceGroupId: sourceGroup.id,
+      targetGroupId: "",
+      takeSourceSchedule: true,
+      isSaving: false,
+    });
+  };
+
+  const closeMergeGroup = () => setGroupMergeDraft(null);
+
+  const mergeSourceGroup = useMemo(() => (
+    groupMergeDraft?.sourceGroupId
+      ? groups.find((g) => String(g.id) === String(groupMergeDraft.sourceGroupId)) || null
+      : null
+  ), [groupMergeDraft?.sourceGroupId, groups]);
+
+  const mergeTargetGroup = useMemo(() => (
+    groupMergeDraft?.targetGroupId
+      ? groups.find((g) => String(g.id) === String(groupMergeDraft.targetGroupId)) || null
+      : null
+  ), [groupMergeDraft?.targetGroupId, groups]);
+
+  const getMergeActiveSubscriptions = (sourceGroupId) => subsExt.filter((sub) => {
+    if (String(sub.groupId || "") !== String(sourceGroupId || "")) return false;
+    const total = Number(sub.totalTrainings || 0);
+    const used = Number(sub.usedTrainings || 0);
+    const hasRemainingTrainings = total <= 0 || used < total;
+    return sub.status !== "expired" && hasRemainingTrainings;
+  });
+
+  const mergePreview = useMemo(() => {
+    if (!mergeSourceGroup) return null;
+    const sourceGroupId = String(mergeSourceGroup.id);
+    const targetGroupId = String(groupMergeDraft?.targetGroupId || "");
+    const sourceStudentIds = new Set(studentGrps.filter((sg) => String(sg.groupId) === sourceGroupId).map((sg) => String(sg.studentId)));
+    const targetStudentIds = new Set(studentGrps.filter((sg) => String(sg.groupId) === targetGroupId).map((sg) => String(sg.studentId)));
+    const studentIdsToRemoveFromSource = Array.from(sourceStudentIds);
+    const studentIdsToMove = studentIdsToRemoveFromSource.filter((studentId) => !targetStudentIds.has(studentId));
+    const activeSubscriptionsToMove = getMergeActiveSubscriptions(sourceGroupId);
+    return { studentIdsToMove, studentIdsToRemoveFromSource, activeSubscriptionsToMove };
+  }, [groupMergeDraft?.targetGroupId, mergeSourceGroup, studentGrps, subsExt]);
+
+  const mergeGroupsAction = async () => {
+    if (!groupMergeDraft || groupMergeDraft.isSaving) return;
+    if (!mergeSourceGroup) { alert("Оберіть групу-джерело."); return; }
+    if (!mergeTargetGroup) { alert("Оберіть цільову групу."); return; }
+    if (String(mergeSourceGroup.id) === String(mergeTargetGroup.id)) { alert("Цільова група має відрізнятись від групи-джерела."); return; }
+    if (isGroupArchived(mergeTargetGroup)) { alert("Цільова група має бути активною."); return; }
+    const sourceArchiveMeta = getGroupArchiveMeta(mergeSourceGroup);
+    if (!sourceArchiveMeta.mode) {
+      alert("Для архівації групи-джерела потрібне поле is_active, active або archived_at у таблиці groups.");
+      return;
+    }
+
+    if (!db.removeStudentGroup) {
+      alert("db.removeStudentGroup відсутній: потрібен helper для видалення звʼязку student_groups за student_id/group_id.");
+      return;
+    }
+
+    const studentCount = mergePreview?.studentIdsToRemoveFromSource.length || 0;
+    const subCount = mergePreview?.activeSubscriptionsToMove.length || 0;
+    const confirmed = window.confirm([
+      `Обʼєднати групи?`,
+      `Джерело: ${mergeSourceGroup.name || mergeSourceGroup.id}`,
+      `Цільова група: ${mergeTargetGroup.name || mergeTargetGroup.id}`,
+      `Учениць буде перенесено: ${studentCount}`,
+      `Активних абонементів буде перепривʼязано: ${subCount}`,
+      `Учениці будуть прибрані зі старої групи.`,
+      `Attendance history НЕ переноситься.`,
+      `Фінанси НЕ змінюються.`,
+      `Група-джерело буде архівована.`,
+    ].join("\n"));
+    if (!confirmed) return;
+
+    setGroupMergeDraft((prev) => prev ? { ...prev, isSaving: true } : prev);
+    try {
+      const sourceGroupId = String(mergeSourceGroup.id);
+      const targetGroupId = String(mergeTargetGroup.id);
+      const createdLinks = [];
+      for (const studentId of mergePreview?.studentIdsToMove || []) {
+        const link = await db.addStudentGroup(studentId, targetGroupId);
+        createdLinks.push(link || { studentId, groupId: targetGroupId });
+      }
+
+      const removedSourceStudentIds = [];
+      for (const studentId of mergePreview?.studentIdsToRemoveFromSource || []) {
+        await db.removeStudentGroup(studentId, sourceGroupId);
+        removedSourceStudentIds.push(String(studentId));
+      }
+
+      const updatedSubs = [];
+      for (const sub of mergePreview?.activeSubscriptionsToMove || []) {
+        const updated = await db.updateSub(sub.id, { groupId: targetGroupId });
+        updatedSubs.push(updated || { ...sub, groupId: targetGroupId });
+      }
+
+      let updatedTarget = null;
+      if (groupMergeDraft.takeSourceSchedule) {
+        updatedTarget = await db.updateGroup(targetGroupId, { schedule: parseGroupSchedule(mergeSourceGroup.schedule) });
+      }
+
+      const archivePatch = buildGroupArchivePatch(sourceArchiveMeta.mode, true);
+      const archivedSource = await db.updateGroup(sourceGroupId, archivePatch);
+
+      if (createdLinks.length || removedSourceStudentIds.length) {
+        setStudentGrps((prev) => {
+          const removedSet = new Set(removedSourceStudentIds);
+          const existing = new Set();
+          const next = prev.filter((sg) => {
+            const shouldRemove = String(sg.groupId) === sourceGroupId && removedSet.has(String(sg.studentId));
+            if (!shouldRemove) existing.add(`${String(sg.studentId)}:${String(sg.groupId)}`);
+            return !shouldRemove;
+          });
+          createdLinks.forEach((link) => {
+            const key = `${String(link.studentId)}:${String(link.groupId)}`;
+            if (!existing.has(key)) {
+              next.push(link);
+              existing.add(key);
+            }
+          });
+          return next;
+        });
+      }
+
+      if (updatedSubs.length) {
+        const updatedById = Object.fromEntries(updatedSubs.map((sub) => [String(sub.id), sub]));
+        setSubs((prev) => prev.map((sub) => updatedById[String(sub.id)] || sub));
+      }
+
+      setGroups((prev) => prev.map((g) => {
+        if (updatedTarget && String(g.id) === targetGroupId) return { ...g, ...updatedTarget };
+        if (String(g.id) === sourceGroupId) return { ...g, ...archivedSource };
+        return g;
+      }));
+      setScheduleGroups((prev) => prev.map((g) => {
+        if (updatedTarget && String(g.id) === targetGroupId) return { ...g, ...updatedTarget };
+        if (String(g.id) === sourceGroupId) return { ...g, ...archivedSource };
+        return g;
+      }));
+      setGroupMergeDraft(null);
+    } catch (e) {
+      alert(e?.message || "Не вдалося обʼєднати групи.");
+      setGroupMergeDraft((prev) => prev ? { ...prev, isSaving: false } : prev);
+    }
+  };
 
   const notifications = useMemo(()=>{
     const items=[];
@@ -1595,7 +1838,7 @@ export default function App() {
             subs={subs}
             students={students}
             studentGrps={studentGrps}
-            groups={groups}
+            groups={activeGroups}
             directionsList={directionsList}
             attn={attn}
             waitlist={waitlist}
@@ -1615,7 +1858,7 @@ export default function App() {
         )}
         {tab === "schedule" && (isAdmin || user) && (
           <ScheduleTab
-            groups={isAdmin ? groups : scheduleGroups}
+            groups={isAdmin ? activeGroups : activeScheduleGroups}
             directionsList={directionsList}
             trainers={trainers}
             cancelled={scheduleCancelled}
@@ -1691,31 +1934,69 @@ export default function App() {
                 themeMode={themeMode}
               />
             ) : trainersSubtab === "groups" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                {groups.map((g) => {
-                  const dir = dirMap[g.directionId];
-                  const trainerId = getGroupPrimaryTrainerId(g.id);
-                  const trainer = trainersById[String(trainerId)];
-                  const archiveMeta = archiveMetaByGroupId[String(g.id)] || { mode: null, isArchived: false };
-                  return (
-                    <div key={g.id} style={{ ...cardSt, padding: 14 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div style={{ fontWeight: 800, color: theme.textMain }}>{g.name}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Напрямок: {dir?.name || g.directionId || "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Графік: {formatGroupSchedule(g.schedule) || "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Тренер: {trainer ? (trainer.name || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || trainer.id) : "—"}</div>
-                          <div style={{ fontSize: 12, color: theme.textMuted }}>Відсоток тренера: {g.trainerPct ?? 0}%</div>
-                          <div style={{ fontSize: 12, color: archiveMeta.isArchived ? theme.danger : theme.success }}>Статус: {archiveMeta.isArchived ? "Архівна" : "Активна"}</div>
-                        </div>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                          <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} onClick={() => archiveGroup(g)}>Архівація</button>
-                        </div>
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ ...cardSt, padding: 14, display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <input style={{ ...inputSt, minWidth: 220, flex: "1 1 260px" }} placeholder="Пошук: назва, напрямок, тренер, розклад" value={adminGroupSearch} onChange={(e) => setAdminGroupSearch(e.target.value)} />
+                    <select style={{ ...inputSt, width: 180 }} value={adminGroupArchiveFilter} onChange={(e) => setAdminGroupArchiveFilter(e.target.value)}>
+                      <option value="active">Активні</option>
+                      <option value="archived">Архівні</option>
+                      <option value="all">Усі</option>
+                    </select>
+                    <select style={{ ...inputSt, width: 220 }} value={adminGroupTrainerFilter} onChange={(e) => setAdminGroupTrainerFilter(e.target.value)}>
+                      <option value="all">Усі тренери</option>
+                      {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div>
+                </div>
+                {groupedAdminGroupSections.map((section) => (
+                  <section key={section.key} style={{ display: "grid", gap: 10, padding: 12, borderRadius: 18, background: theme.cardSoft || theme.bg, border: `1px solid ${theme.border}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 999, background: section.color, flex: "0 0 auto" }} />
+                        <h3 style={{ margin: 0, fontSize: 16, color: theme.textMain }}>{section.directionName}</h3>
                       </div>
+                      <span style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 10px", fontSize: 12, fontWeight: 800, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                        {section.rows.length} {section.rows.length === 1 ? "група" : "груп"}
+                      </span>
                     </div>
-                  );
-                })}
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {section.rows.map(({ group: g, archiveMeta, trainerInfo }) => {
+                        const dir = dirMap[g.directionId];
+                        const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
+                        const scheduleText = formatGroupSchedule(g.schedule) || "—";
+                        const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
+                        return (
+                          <div key={g.id} style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                              <div style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
+                              <div>
+                                <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
+                                <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                                <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                                <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
+                                <span style={badgeStyle}>Учениць: {studentsCount}</span>
+                                <span style={badgeStyle}>Розклад: {scheduleText}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
+                            </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
+                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
+                              <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівну групу не можна обʼєднати як джерело" : "Обʼєднати групу з іншою активною групою"} onClick={() => openMergeGroup(g)}>Обʼєднати</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+                {!filteredAdminGroupRows.length && <div style={{ ...cardSt, padding: 18, color: theme.textMuted }}>Груп за вибраними фільтрами не знайдено.</div>}
               </div>
             ) : (
               <TrainersNotificationsTab
@@ -1742,7 +2023,7 @@ export default function App() {
             inputSt={inputSt}
             GroupSelect={GroupSelect}
             Badge={Badge}
-            groups={groups}
+            groups={activeGroups}
             directionsList={directionsList}
             studentGrps={studentGrps}
             setStudentGrps={setStudentGrps}
@@ -2042,7 +2323,7 @@ export default function App() {
           </div>
         </div>
       </Modal>
-      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
@@ -2120,6 +2401,58 @@ export default function App() {
           </div>
         </div>
       </Modal>
+      <Modal open={!!groupMergeDraft} onClose={groupMergeDraft?.isSaving ? () => {} : closeMergeGroup} title="Обʼєднати групи">
+        {groupMergeDraft && mergeSourceGroup && (
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ ...cardSt, padding: 14, display: "grid", gap: 6 }}>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Група-джерело</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: theme.textMain }}>{mergeSourceGroup.name || mergeSourceGroup.id}</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Після merge ця група буде архівована. Attendance history залишиться у цій групі.</div>
+            </div>
+            <Field label="Цільова група, яка залишиться активною">
+              <select
+                style={inputSt}
+                value={groupMergeDraft.targetGroupId}
+                onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, targetGroupId: e.target.value }))}
+                disabled={groupMergeDraft.isSaving}
+              >
+                <option value="">— Оберіть цільову групу —</option>
+                {activeGroups
+                  .filter((g) => String(g.id) !== String(mergeSourceGroup.id))
+                  .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), "uk", { sensitivity: "base" }))
+                  .map((g) => <option key={g.id} value={g.id}>{g.name || g.id}</option>)}
+              </select>
+            </Field>
+            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 14, color: theme.textMain }}>
+              <input
+                type="checkbox"
+                checked={!!groupMergeDraft.takeSourceSchedule}
+                disabled={groupMergeDraft.isSaving}
+                onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, takeSourceSchedule: e.target.checked }))}
+              />
+              Взяти графік із групи-джерела
+            </label>
+            <div style={{ ...cardSt, padding: 14, display: "grid", gap: 8, border: `1px solid ${theme.border}` }}>
+              <div style={{ fontWeight: 900, color: theme.textMain }}>Summary перед merge</div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Джерело: <b style={{ color: theme.textMain }}>{mergeSourceGroup.name || mergeSourceGroup.id}</b></div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Цільова група: <b style={{ color: theme.textMain }}>{mergeTargetGroup ? (mergeTargetGroup.name || mergeTargetGroup.id) : "—"}</b></div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Учениць буде перенесено: <b style={{ color: theme.textMain }}>{mergePreview?.studentIdsToRemoveFromSource.length || 0}</b></div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Нових links у цільову групу: <b style={{ color: theme.textMain }}>{mergePreview?.studentIdsToMove.length || 0}</b></div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Активних абонементів буде перепривʼязано: <b style={{ color: theme.textMain }}>{mergePreview?.activeSubscriptionsToMove.length || 0}</b></div>
+              <div style={{ fontSize: 13, color: theme.warning }}>Учениці будуть прибрані зі старої групи.</div>
+              <div style={{ fontSize: 13, color: theme.warning }}>Attendance history НЕ переноситься.</div>
+              <div style={{ fontSize: 13, color: theme.warning }}>Фінанси НЕ змінюються: amount / paid / payMethod / discount / dates / usedTrainings не редагуються.</div>
+              <div style={{ fontSize: 13, color: theme.textMuted }}>Група-джерело буде архівована через існуючий archive mechanism.</div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" style={btnS} onClick={closeMergeGroup} disabled={groupMergeDraft.isSaving}>Скасувати</button>
+              <button type="button" style={{ ...btnP, opacity: groupMergeDraft.targetGroupId ? 1 : 0.5 }} onClick={mergeGroupsAction} disabled={!groupMergeDraft.targetGroupId || groupMergeDraft.isSaving}>
+                {groupMergeDraft.isSaving ? "Обʼєднання..." : "Підтвердити merge"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
       <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
         {groupEditDraft && (
           <div style={{ display: "grid", gap: 12 }}>
@@ -2173,13 +2506,13 @@ export default function App() {
         )}
       </Modal>
       
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне"><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне"><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
     </div>
   );
 }
