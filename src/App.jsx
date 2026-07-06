@@ -566,19 +566,35 @@ export default function App() {
     }
   };
 
-  const archiveGroup = async (group) => {
+  const buildGroupArchivePatch = (mode, shouldArchive) => {
+    if (mode === "is_active") return { is_active: !shouldArchive };
+    if (mode === "active") return { active: !shouldArchive };
+    if (mode === "archived_at") return { archived_at: shouldArchive ? today() : null };
+    return null;
+  };
+
+  const toggleGroupArchive = async (group) => {
     const meta = archiveMetaByGroupId[String(group.id)];
-    if (!meta?.mode) return;
-    const patch = meta.mode === "is_active"
-      ? { is_active: false }
-      : meta.mode === "active"
-        ? { active: false }
-        : { archived_at: today() };
+    if (!meta?.mode) {
+      alert("Для архівації груп потрібне поле is_active, active або archived_at у таблиці groups.");
+      return;
+    }
+
+    const shouldArchive = !meta.isArchived;
+    if (shouldArchive) {
+      const confirmed = window.confirm("Архівувати групу? Історія та абонементи залишаться, група зникне з активного списку.");
+      if (!confirmed) return;
+    }
+
+    const patch = buildGroupArchivePatch(meta.mode, shouldArchive);
+    if (!patch) return;
+
     try {
       const updated = await db.updateGroup(group.id, patch);
       setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+      setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? { ...g, ...updated } : g)));
     } catch (e) {
-      alert(e?.message || "Не вдалося архівувати групу");
+      alert(e?.message || (shouldArchive ? "Не вдалося архівувати групу" : "Не вдалося відновити групу"));
     }
   };
 
@@ -1808,7 +1824,7 @@ export default function App() {
                             </div>
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode || archiveMeta.isArchived} onClick={() => archiveGroup(g)}>{archiveMeta.isArchived ? "Відновити (Phase 2)" : "Архівувати"}</button>
+                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
                               <button type="button" style={{ ...btnS, opacity: 0.55, cursor: "not-allowed" }} disabled title="Phase 4: merge groups потребує окремого підтвердження">Обʼєднати</button>
                               </div>
                             </div>
