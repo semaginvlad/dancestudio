@@ -168,6 +168,7 @@ export default function App() {
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [groupMergeDraft, setGroupMergeDraft] = useState(null);
   const [groupMergeBusy, setGroupMergeBusy] = useState(false);
+  const [groupMergeOperations, setGroupMergeOperations] = useState([]);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
   const [scheduleScale, setScheduleScale] = useStickyState(100, "ds_schedule_scale_v1");
@@ -405,7 +406,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr] = await Promise.all([
+      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -413,7 +414,8 @@ export default function App() {
         safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings"),
         safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
         safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans"),
-        safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports")
+        safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports"),
+        safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations")
       ]);
 
       const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -455,6 +457,7 @@ export default function App() {
       setGroupLessonOverrides(glo || []);
       setTrainingLessonPlans(tlp || []);
       setTrainingLessonReports(tlr || []);
+      setGroupMergeOperations(isCurrentAdmin ? (gmo || []) : []);
     } catch (e) {
       console.error("Global load error", e);
     } finally {
@@ -900,8 +903,8 @@ export default function App() {
       alert("Для архівації source group потрібне поле is_active, active або archived_at у таблиці groups.");
       return;
     }
-    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup) {
-      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup.");
+    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.insertGroupMergeOperation) {
+      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup, insertGroupMergeOperation.");
       return;
     }
 
@@ -910,6 +913,31 @@ export default function App() {
 
     setGroupMergeBusy(true);
     try {
+      const previousTargetSchedule = parseGroupSchedule(groupMergeSummary.targetGroup.schedule);
+      const newTargetSchedule = groupMergeDraft.takeSourceSchedule
+        ? parseGroupSchedule(groupMergeSummary.sourceGroup.schedule)
+        : previousTargetSchedule;
+      const previousSubscriptionGroupIds = Object.fromEntries(
+        groupMergeSummary.movableSubs.map((sub) => [String(sub.id), sub.groupId])
+      );
+      const operationDraft = {
+        id: uid(),
+        sourceGroupId: sourceId,
+        targetGroupId: targetId,
+        selectedStudentIds: groupMergeSummary.sourceStudentIds,
+        newTargetLinksStudentIds: groupMergeSummary.newLinkStudentIds,
+        removedSourceLinksStudentIds: groupMergeSummary.sourceStudentIds,
+        movedSubscriptionIds: groupMergeSummary.movableSubs.map((sub) => sub.id),
+        previousSubscriptionGroupIds,
+        previousTargetSchedule,
+        newTargetSchedule,
+        previousSourceArchiveState: sourceMeta,
+        sourceWasArchivedBefore: sourceMeta.isArchived,
+        scheduleMode: groupMergeDraft.takeSourceSchedule ? "source_to_target" : "keep_target",
+        executedBy: user?.id || user?.email || null,
+      };
+      const savedOperation = await db.insertGroupMergeOperation(operationDraft);
+
       const createdLinks = [];
       for (const studentId of groupMergeSummary.newLinkStudentIds) {
         const link = await db.addStudentGroup(studentId, targetId);
@@ -928,12 +956,13 @@ export default function App() {
 
       let updatedTargetGroup = null;
       if (groupMergeDraft.takeSourceSchedule) {
-        updatedTargetGroup = await db.updateGroup(targetId, { schedule: parseGroupSchedule(groupMergeSummary.sourceGroup.schedule) });
+        updatedTargetGroup = await db.updateGroup(targetId, { schedule: newTargetSchedule });
       }
 
       const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
       const archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
 
+      setGroupMergeOperations((prev) => [savedOperation, ...prev.filter((op) => String(op.id) !== String(savedOperation.id))]);
       setStudentGrps((prev) => {
         const withoutSource = prev.filter((link) => String(link.groupId) !== String(sourceId));
         const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
@@ -967,6 +996,81 @@ export default function App() {
     }
   };
 
+  const undoGroupMerge = async (operation) => {
+    if (!operation || operation.undoneAt) return;
+    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.markGroupMergeOperationUndone) {
+      alert("Не вистачає db helper-ів для скасування merge.");
+      return;
+    }
+    const confirmed = window.confirm(`Скасувати merge ${operation.sourceGroupId} → ${operation.targetGroupId}? Attendance і фінанси не змінюються.`);
+    if (!confirmed) return;
+
+    setGroupMergeBusy(true);
+    try {
+      const restoredSourceLinks = [];
+      for (const studentId of operation.selectedStudentIds || []) {
+        const link = await db.addStudentGroup(studentId, operation.sourceGroupId);
+        restoredSourceLinks.push(link);
+      }
+
+      for (const studentId of operation.newTargetLinksStudentIds || []) {
+        await db.removeStudentGroup(studentId, operation.targetGroupId);
+      }
+
+      const updatedSubs = [];
+      for (const subId of operation.movedSubscriptionIds || []) {
+        const previousGroupId = operation.previousSubscriptionGroupIds?.[String(subId)];
+        if (previousGroupId === undefined || previousGroupId === null) continue;
+        const updatedSub = await db.updateSub(subId, { groupId: previousGroupId });
+        updatedSubs.push(updatedSub);
+      }
+
+      const updatedTargetGroup = await db.updateGroup(operation.targetGroupId, {
+        schedule: Array.isArray(operation.previousTargetSchedule) ? operation.previousTargetSchedule : [],
+      });
+
+      const archiveMode = operation.previousSourceArchiveState?.mode;
+      let updatedSourceGroup = null;
+      if (archiveMode) {
+        const restorePatch = buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore);
+        if (restorePatch) updatedSourceGroup = await db.updateGroup(operation.sourceGroupId, restorePatch);
+      }
+
+      const updatedOperation = await db.markGroupMergeOperationUndone(operation.id, { undoneBy: user?.id || user?.email || null });
+
+      setGroupMergeOperations((prev) => prev.map((op) => String(op.id) === String(updatedOperation.id) ? updatedOperation : op));
+      setStudentGrps((prev) => {
+        const targetRemovalIds = new Set((operation.newTargetLinksStudentIds || []).map((id) => String(id)));
+        const withoutMergeTargetLinks = prev.filter((link) => !(String(link.groupId) === String(operation.targetGroupId) && targetRemovalIds.has(String(link.studentId))));
+        const existing = new Set(withoutMergeTargetLinks.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
+        const additions = restoredSourceLinks.filter((link) => {
+          const key = `${String(link.studentId)}:${String(link.groupId)}`;
+          if (existing.has(key)) return false;
+          existing.add(key);
+          return true;
+        });
+        return [...withoutMergeTargetLinks, ...additions];
+      });
+      setSubs((prev) => prev.map((sub) => {
+        const updated = updatedSubs.find((item) => String(item.id) === String(sub.id));
+        return updated ? { ...sub, ...updated } : sub;
+      }));
+      setGroups((prev) => prev.map((group) => {
+        if (String(group.id) === String(operation.targetGroupId)) return updatedTargetGroup;
+        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return updatedSourceGroup;
+        return group;
+      }));
+      setScheduleGroups((prev) => prev.map((group) => {
+        if (String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
+        return group;
+      }));
+    } catch (e) {
+      alert(e?.message || "Не вдалося скасувати merge");
+    } finally {
+      setGroupMergeBusy(false);
+    }
+  };
 
 
   const activeSubs = useMemo(()=>subsExt.filter(s=>s.status!=="expired"),[subsExt]);
@@ -1936,6 +2040,34 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div>
                 </div>
+                <details style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, color: theme.textMain }}>Історія обʼєднань ({groupMergeOperations.length})</summary>
+                  <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                    {!groupMergeOperations.length && <div style={{ color: theme.textMuted, fontSize: 13 }}>Історія обʼєднань порожня. Майбутні merge operations будуть збережені тут після застосування SQL.</div>}
+                    {groupMergeOperations.map((op) => {
+                      const sourceGroup = groups.find((group) => String(group.id) === String(op.sourceGroupId));
+                      const targetGroup = groups.find((group) => String(group.id) === String(op.targetGroupId));
+                      const isUndone = !!op.undoneAt;
+                      return (
+                        <div key={op.id} style={{ display: "grid", gap: 8, padding: 12, borderRadius: 14, border: `1px solid ${theme.border}`, background: theme.bg }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <div style={{ fontWeight: 900, color: theme.textMain }}>{getGroupLabel(sourceGroup || { id: op.sourceGroupId })} → {getGroupLabel(targetGroup || { id: op.targetGroupId })}</div>
+                            <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 800, color: isUndone ? theme.textMuted : theme.success, border: `1px solid ${theme.border}` }}>{isUndone ? "undone" : "active"}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: theme.textMuted }}>
+                            <span>Дата: {op.createdAt ? new Date(op.createdAt).toLocaleString("uk-UA") : "—"}</span>
+                            <span>Учениць: {(op.selectedStudentIds || []).length}</span>
+                            <span>Абонементів: {(op.movedSubscriptionIds || []).length}</span>
+                            {op.undoneAt && <span>Скасовано: {new Date(op.undoneAt).toLocaleString("uk-UA")}</span>}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                            <button type="button" style={{ ...btnS, opacity: isUndone || groupMergeBusy ? 0.55 : 1, cursor: isUndone || groupMergeBusy ? "not-allowed" : "pointer" }} disabled={isUndone || groupMergeBusy} onClick={() => undoGroupMerge(op)}>{isUndone ? "Merge скасовано" : "Скасувати merge"}</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
                 {groupedAdminGroupSections.map((section) => (
                   <section key={section.key} style={{ display: "grid", gap: 10, padding: 12, borderRadius: 18, background: theme.cardSoft || theme.bg, border: `1px solid ${theme.border}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -2416,6 +2548,7 @@ export default function App() {
               <div>Учениць буде перенесено: <b>{groupMergeSummary.sourceStudentsCount}</b></div>
               <div>Нових student_groups links буде створено: <b>{groupMergeSummary.newLinksCount}</b></div>
               <div>Активних / not fully used абонементів буде перепривʼязано: <b>{groupMergeSummary.movableSubsCount}</b></div>
+              <div style={{ color: theme.textMuted, fontSize: 13 }}>Операцію можна буде скасувати з Історії обʼєднань.</div>
               <ul style={{ margin: "6px 0 0 18px", padding: 0, color: theme.textMuted, display: "grid", gap: 4 }}>
                 <li>Учениці будуть прибрані зі старої групи.</li>
                 <li>Attendance history НЕ переноситься і НЕ змінюється.</li>
