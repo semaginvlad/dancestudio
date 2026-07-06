@@ -249,6 +249,10 @@ const mapGroupMergeOperation = (row) => ({
   sourceWasArchivedBefore: !!row.source_was_archived_before,
   scheduleMode: row.schedule_mode || 'keep_target',
   executedBy: row.executed_by || null,
+  status: row.status || (row.undone_at ? 'undone' : 'completed'),
+  completedAt: row.completed_at || null,
+  failedAt: row.failed_at || null,
+  errorMessage: row.error_message || null,
   undoneAt: row.undone_at || null,
   undoneBy: row.undone_by || null,
 });
@@ -278,6 +282,10 @@ export async function insertGroupMergeOperation(operation) {
     source_was_archived_before: !!operation.sourceWasArchivedBefore,
     schedule_mode: operation.scheduleMode || 'keep_target',
     executed_by: operation.executedBy || null,
+    status: operation.status || 'pending',
+    completed_at: operation.completedAt || null,
+    failed_at: operation.failedAt || null,
+    error_message: operation.errorMessage || null,
   }
   if (operation.createdAt !== undefined) payload.created_at = operation.createdAt
   const { data, error } = await supabase.from('group_merge_operations').insert(payload).select().single()
@@ -285,13 +293,31 @@ export async function insertGroupMergeOperation(operation) {
   return mapGroupMergeOperation(data)
 }
 
+export async function updateGroupMergeOperationStatus(id, status, patch = {}) {
+  const payload = { status }
+  if (status === 'completed') payload.completed_at = patch.completedAt || new Date().toISOString()
+  if (status === 'failed') {
+    payload.failed_at = patch.failedAt || new Date().toISOString()
+    payload.error_message = patch.errorMessage || null
+  }
+  const { data, error } = await supabase
+    .from('group_merge_operations')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return mapGroupMergeOperation(data)
+}
+
 export async function markGroupMergeOperationUndone(id, { undoneBy } = {}) {
-  const payload = { undone_at: new Date().toISOString() }
+  const payload = { status: 'undone', undone_at: new Date().toISOString() }
   if (undoneBy !== undefined) payload.undone_by = undoneBy
   const { data, error } = await supabase
     .from('group_merge_operations')
     .update(payload)
     .eq('id', id)
+    .eq('status', 'completed')
     .is('undone_at', null)
     .select()
     .single()

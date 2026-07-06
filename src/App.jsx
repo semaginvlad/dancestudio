@@ -903,8 +903,8 @@ export default function App() {
       alert("Для архівації source group потрібне поле is_active, active або archived_at у таблиці groups.");
       return;
     }
-    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.insertGroupMergeOperation) {
-      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup, insertGroupMergeOperation.");
+    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.insertGroupMergeOperation || !db.updateGroupMergeOperationStatus) {
+      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup, insertGroupMergeOperation, updateGroupMergeOperationStatus.");
       return;
     }
 
@@ -912,6 +912,7 @@ export default function App() {
     if (!confirmed) return;
 
     setGroupMergeBusy(true);
+    let savedOperation = null;
     try {
       const previousTargetSchedule = parseGroupSchedule(groupMergeSummary.targetGroup.schedule);
       const newTargetSchedule = groupMergeDraft.takeSourceSchedule
@@ -935,8 +936,9 @@ export default function App() {
         sourceWasArchivedBefore: sourceMeta.isArchived,
         scheduleMode: groupMergeDraft.takeSourceSchedule ? "source_to_target" : "keep_target",
         executedBy: user?.id || user?.email || null,
+        status: "pending",
       };
-      const savedOperation = await db.insertGroupMergeOperation(operationDraft);
+      savedOperation = await db.insertGroupMergeOperation(operationDraft);
 
       const createdLinks = [];
       for (const studentId of groupMergeSummary.newLinkStudentIds) {
@@ -961,8 +963,9 @@ export default function App() {
 
       const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
       const archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
+      const completedOperation = await db.updateGroupMergeOperationStatus(savedOperation.id, "completed");
 
-      setGroupMergeOperations((prev) => [savedOperation, ...prev.filter((op) => String(op.id) !== String(savedOperation.id))]);
+      setGroupMergeOperations((prev) => [completedOperation, ...prev.filter((op) => String(op.id) !== String(completedOperation.id))]);
       setStudentGrps((prev) => {
         const withoutSource = prev.filter((link) => String(link.groupId) !== String(sourceId));
         const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
@@ -979,8 +982,8 @@ export default function App() {
         return updated ? { ...sub, ...updated } : sub;
       }));
       setGroups((prev) => prev.map((group) => {
-        if (String(group.id) === String(targetId) && updatedTargetGroup) return updatedTargetGroup;
-        if (String(group.id) === String(sourceId)) return archivedSourceGroup;
+        if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
+        if (String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
         return group;
       }));
       setScheduleGroups((prev) => prev.map((group) => {
@@ -990,14 +993,22 @@ export default function App() {
       }));
       setGroupMergeDraft(null);
     } catch (e) {
-      alert(e?.message || "Не вдалося обʼєднати групи");
+      if (savedOperation?.id && db.updateGroupMergeOperationStatus) {
+        try {
+          const failedOperation = await db.updateGroupMergeOperationStatus(savedOperation.id, "failed", { errorMessage: e?.message || String(e) });
+          setGroupMergeOperations((prev) => [failedOperation, ...prev.filter((op) => String(op.id) !== String(failedOperation.id))]);
+        } catch (statusError) {
+          console.warn("Failed to mark group merge operation as failed", statusError);
+        }
+      }
+      alert(`${e?.message || "Не вдалося обʼєднати групи"}. Merge міг бути виконаний частково — потрібна ручна перевірка.`);
     } finally {
       setGroupMergeBusy(false);
     }
   };
 
   const undoGroupMerge = async (operation) => {
-    if (!operation || operation.undoneAt) return;
+    if (!operation || operation.undoneAt || operation.status !== "completed") return;
     if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.markGroupMergeOperationUndone) {
       alert("Не вистачає db helper-ів для скасування merge.");
       return;
@@ -1056,8 +1067,8 @@ export default function App() {
         return updated ? { ...sub, ...updated } : sub;
       }));
       setGroups((prev) => prev.map((group) => {
-        if (String(group.id) === String(operation.targetGroupId)) return updatedTargetGroup;
-        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return updatedSourceGroup;
+        if (String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
         return group;
       }));
       setScheduleGroups((prev) => prev.map((group) => {
@@ -2047,21 +2058,24 @@ export default function App() {
                     {groupMergeOperations.map((op) => {
                       const sourceGroup = groups.find((group) => String(group.id) === String(op.sourceGroupId));
                       const targetGroup = groups.find((group) => String(group.id) === String(op.targetGroupId));
-                      const isUndone = !!op.undoneAt;
+                      const status = op.undoneAt ? "undone" : (op.status || "completed");
+                      const isUndoAllowed = status === "completed" && !groupMergeBusy;
                       return (
                         <div key={op.id} style={{ display: "grid", gap: 8, padding: 12, borderRadius: 14, border: `1px solid ${theme.border}`, background: theme.bg }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                             <div style={{ fontWeight: 900, color: theme.textMain }}>{getGroupLabel(sourceGroup || { id: op.sourceGroupId })} → {getGroupLabel(targetGroup || { id: op.targetGroupId })}</div>
-                            <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 800, color: isUndone ? theme.textMuted : theme.success, border: `1px solid ${theme.border}` }}>{isUndone ? "undone" : "active"}</span>
+                            <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 800, color: status === "failed" ? theme.danger : status === "completed" ? theme.success : theme.textMuted, border: `1px solid ${theme.border}` }}>{status === "completed" ? "completed" : status}</span>
                           </div>
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: theme.textMuted }}>
                             <span>Дата: {op.createdAt ? new Date(op.createdAt).toLocaleString("uk-UA") : "—"}</span>
                             <span>Учениць: {(op.selectedStudentIds || []).length}</span>
                             <span>Абонементів: {(op.movedSubscriptionIds || []).length}</span>
+                            {op.completedAt && <span>Завершено: {new Date(op.completedAt).toLocaleString("uk-UA")}</span>}
+                            {op.failedAt && <span style={{ color: theme.danger }}>Помилка: {op.errorMessage || "—"}</span>}
                             {op.undoneAt && <span>Скасовано: {new Date(op.undoneAt).toLocaleString("uk-UA")}</span>}
                           </div>
                           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <button type="button" style={{ ...btnS, opacity: isUndone || groupMergeBusy ? 0.55 : 1, cursor: isUndone || groupMergeBusy ? "not-allowed" : "pointer" }} disabled={isUndone || groupMergeBusy} onClick={() => undoGroupMerge(op)}>{isUndone ? "Merge скасовано" : "Скасувати merge"}</button>
+                            <button type="button" style={{ ...btnS, opacity: isUndoAllowed ? 1 : 0.55, cursor: isUndoAllowed ? "pointer" : "not-allowed" }} disabled={!isUndoAllowed} onClick={() => undoGroupMerge(op)}>{status === "undone" ? "Merge скасовано" : status === "completed" ? "Скасувати merge" : "Undo недоступний"}</button>
                           </div>
                         </div>
                       );
