@@ -72,6 +72,21 @@ const addDaysForScheduleRange = (date, days) => {
   return toLocalISO(d);
 };
 
+const getGroupArchiveMeta = (group = {}) => {
+  if (Object.prototype.hasOwnProperty.call(group, "is_active")) {
+    return { mode: "is_active", isArchived: group.is_active === false };
+  }
+  if (Object.prototype.hasOwnProperty.call(group, "active")) {
+    return { mode: "active", isArchived: group.active === false };
+  }
+  if (Object.prototype.hasOwnProperty.call(group, "archived_at")) {
+    return { mode: "archived_at", isArchived: !!group.archived_at };
+  }
+  return { mode: null, isArchived: false };
+};
+
+const isGroupArchived = (group) => getGroupArchiveMeta(group).isArchived;
+
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -598,11 +613,17 @@ export default function App() {
     }
   };
 
+  const activeGroups = useMemo(() => groups.filter((g) => !isGroupArchived(g)), [groups]);
+  const activeGroupIds = useMemo(() => new Set(activeGroups.map((g) => String(g.id))), [activeGroups]);
+  const activeScheduleGroups = useMemo(() => (
+    scheduleGroups.filter((g) => !isGroupArchived(g) && activeGroupIds.has(String(g.id)))
+  ), [scheduleGroups, activeGroupIds]);
+
   const visibleGroups = useMemo(() => {
     if (!user) return [];
-    if (isAdmin) return groups;
-    return groups.filter(g => g.trainer_id === user.id);
-  }, [groups, user, isAdmin]);
+    if (isAdmin) return activeGroups;
+    return activeGroups.filter(g => g.trainer_id === user.id);
+  }, [activeGroups, user, isAdmin]);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
@@ -726,15 +747,7 @@ export default function App() {
   const archiveMetaByGroupId = useMemo(() => {
     const result = {};
     groups.forEach((g) => {
-      if (Object.prototype.hasOwnProperty.call(g, "is_active")) {
-        result[String(g.id)] = { mode: "is_active", isArchived: g.is_active === false };
-      } else if (Object.prototype.hasOwnProperty.call(g, "active")) {
-        result[String(g.id)] = { mode: "active", isArchived: g.active === false };
-      } else if (Object.prototype.hasOwnProperty.call(g, "archived_at")) {
-        result[String(g.id)] = { mode: "archived_at", isArchived: !!g.archived_at };
-      } else {
-        result[String(g.id)] = { mode: null, isArchived: false };
-      }
+      result[String(g.id)] = getGroupArchiveMeta(g);
     });
     return result;
   }, [groups]);
@@ -1676,7 +1689,7 @@ export default function App() {
             subs={subs}
             students={students}
             studentGrps={studentGrps}
-            groups={groups}
+            groups={activeGroups}
             directionsList={directionsList}
             attn={attn}
             waitlist={waitlist}
@@ -1696,7 +1709,7 @@ export default function App() {
         )}
         {tab === "schedule" && (isAdmin || user) && (
           <ScheduleTab
-            groups={isAdmin ? groups : scheduleGroups}
+            groups={isAdmin ? activeGroups : activeScheduleGroups}
             directionsList={directionsList}
             trainers={trainers}
             cancelled={scheduleCancelled}
@@ -1861,7 +1874,7 @@ export default function App() {
             inputSt={inputSt}
             GroupSelect={GroupSelect}
             Badge={Badge}
-            groups={groups}
+            groups={activeGroups}
             directionsList={directionsList}
             studentGrps={studentGrps}
             setStudentGrps={setStudentGrps}
@@ -2161,7 +2174,7 @@ export default function App() {
           </div>
         </div>
       </Modal>
-      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
@@ -2292,13 +2305,13 @@ export default function App() {
         )}
       </Modal>
       
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={groups}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне"><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={groups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне"><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
     </div>
   );
 }
