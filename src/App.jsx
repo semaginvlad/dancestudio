@@ -166,6 +166,8 @@ export default function App() {
   const [trainersSubtab, setTrainersSubtab] = useStickyState("trainers", "ds_trainersSubtab");
   const [adminTab, setAdminTab] = useState("analytics");
   const [groupEditDraft, setGroupEditDraft] = useState(null);
+  const [groupMergeDraft, setGroupMergeDraft] = useState(null);
+  const [groupMergeBusy, setGroupMergeBusy] = useState(false);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
   const [scheduleScale, setScheduleScale] = useStickyState(100, "ds_schedule_scale_v1");
@@ -613,6 +615,7 @@ export default function App() {
     }
   };
 
+
   const activeGroups = useMemo(() => groups.filter((g) => !isGroupArchived(g)), [groups]);
   const activeGroupIds = useMemo(() => new Set(activeGroups.map((g) => String(g.id))), [activeGroups]);
   const activeScheduleGroups = useMemo(() => (
@@ -743,6 +746,7 @@ export default function App() {
   const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
     .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
     .join(" · ");
+  const getGroupLabel = (group) => group ? `${group.name || group.id} (${group.id})` : "—";
 
   const archiveMetaByGroupId = useMemo(() => {
     const result = {};
@@ -831,6 +835,137 @@ export default function App() {
       return extSub;
     });
   },[subs, attn]);
+
+
+  const openGroupMerge = (sourceGroup) => {
+    const sourceMeta = archiveMetaByGroupId[String(sourceGroup.id)] || getGroupArchiveMeta(sourceGroup);
+    if (sourceMeta.isArchived) return;
+    const firstTarget = activeGroups.find((group) => String(group.id) !== String(sourceGroup.id));
+    setGroupMergeDraft({
+      sourceGroupId: sourceGroup.id,
+      targetGroupId: firstTarget?.id || "",
+      takeSourceSchedule: true,
+    });
+  };
+
+  const groupMergeSummary = useMemo(() => {
+    if (!groupMergeDraft?.sourceGroupId) return null;
+    const sourceGroup = groups.find((group) => String(group.id) === String(groupMergeDraft.sourceGroupId));
+    const targetGroup = groups.find((group) => String(group.id) === String(groupMergeDraft.targetGroupId));
+    const sourceStudentIds = Array.from(new Set(
+      studentGrps
+        .filter((link) => String(link.groupId) === String(groupMergeDraft.sourceGroupId))
+        .map((link) => String(link.studentId))
+        .filter(Boolean)
+    ));
+    const targetStudentIds = new Set(
+      studentGrps
+        .filter((link) => String(link.groupId) === String(groupMergeDraft.targetGroupId))
+        .map((link) => String(link.studentId))
+        .filter(Boolean)
+    );
+    const newLinkStudentIds = sourceStudentIds.filter((studentId) => !targetStudentIds.has(studentId));
+    const movableSubs = subsExt.filter((sub) => {
+      if (String(sub.groupId) !== String(groupMergeDraft.sourceGroupId)) return false;
+      const total = Number(sub.totalTrainings || 0);
+      const used = Number(sub.usedTrainings || 0);
+      return sub.status !== "expired" && (!total || used < total);
+    });
+    return {
+      sourceGroup,
+      targetGroup,
+      sourceStudentsCount: sourceStudentIds.length,
+      newLinksCount: newLinkStudentIds.length,
+      movableSubsCount: movableSubs.length,
+      sourceStudentIds,
+      newLinkStudentIds,
+      movableSubs,
+    };
+  }, [groupMergeDraft, groups, studentGrps, subsExt]);
+
+  const executeGroupMerge = async () => {
+    if (!groupMergeDraft || !groupMergeSummary?.sourceGroup || !groupMergeSummary?.targetGroup) return;
+    const sourceId = groupMergeDraft.sourceGroupId;
+    const targetId = groupMergeDraft.targetGroupId;
+    if (!targetId || String(sourceId) === String(targetId)) {
+      alert("Оберіть іншу активну цільову групу.");
+      return;
+    }
+    const sourceMeta = archiveMetaByGroupId[String(sourceId)] || getGroupArchiveMeta(groupMergeSummary.sourceGroup);
+    if (sourceMeta.isArchived) {
+      alert("Архівні групи не можна обʼєднувати як джерело.");
+      return;
+    }
+    if (!sourceMeta.mode) {
+      alert("Для архівації source group потрібне поле is_active, active або archived_at у таблиці groups.");
+      return;
+    }
+    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup) {
+      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Обʼєднати ${getGroupLabel(groupMergeSummary.sourceGroup)} → ${getGroupLabel(groupMergeSummary.targetGroup)}? Source group буде архівована.`);
+    if (!confirmed) return;
+
+    setGroupMergeBusy(true);
+    try {
+      const createdLinks = [];
+      for (const studentId of groupMergeSummary.newLinkStudentIds) {
+        const link = await db.addStudentGroup(studentId, targetId);
+        createdLinks.push(link);
+      }
+
+      for (const studentId of groupMergeSummary.sourceStudentIds) {
+        await db.removeStudentGroup(studentId, sourceId);
+      }
+
+      const updatedSubs = [];
+      for (const sub of groupMergeSummary.movableSubs) {
+        const updatedSub = await db.updateSub(sub.id, { groupId: targetId });
+        updatedSubs.push(updatedSub);
+      }
+
+      let updatedTargetGroup = null;
+      if (groupMergeDraft.takeSourceSchedule) {
+        updatedTargetGroup = await db.updateGroup(targetId, { schedule: parseGroupSchedule(groupMergeSummary.sourceGroup.schedule) });
+      }
+
+      const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
+      const archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
+
+      setStudentGrps((prev) => {
+        const withoutSource = prev.filter((link) => String(link.groupId) !== String(sourceId));
+        const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
+        const additions = createdLinks.filter((link) => {
+          const key = `${String(link.studentId)}:${String(link.groupId)}`;
+          if (existing.has(key)) return false;
+          existing.add(key);
+          return true;
+        });
+        return [...withoutSource, ...additions];
+      });
+      setSubs((prev) => prev.map((sub) => {
+        const updated = updatedSubs.find((item) => String(item.id) === String(sub.id));
+        return updated ? { ...sub, ...updated } : sub;
+      }));
+      setGroups((prev) => prev.map((group) => {
+        if (String(group.id) === String(targetId) && updatedTargetGroup) return updatedTargetGroup;
+        if (String(group.id) === String(sourceId)) return archivedSourceGroup;
+        return group;
+      }));
+      setScheduleGroups((prev) => prev.map((group) => {
+        if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
+        if (String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
+        return group;
+      }));
+      setGroupMergeDraft(null);
+    } catch (e) {
+      alert(e?.message || "Не вдалося обʼєднати групи");
+    } finally {
+      setGroupMergeBusy(false);
+    }
+  };
 
 
 
@@ -1838,7 +1973,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
                               <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
-                              <button type="button" style={{ ...btnS, opacity: 0.55, cursor: "not-allowed" }} disabled title="Phase 4: merge groups потребує окремого підтвердження">Обʼєднати</button>
+                              <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
                               </div>
                             </div>
                           </div>
@@ -2251,6 +2386,49 @@ export default function App() {
             <button type="button" style={btnP} onClick={createGroupAction}>Створити групу</button>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={!!groupMergeDraft} onClose={() => !groupMergeBusy && setGroupMergeDraft(null)} title="Обʼєднати групи" wide>
+        {groupMergeDraft && groupMergeSummary && (
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>Source group</div>
+              <div style={{ fontWeight: 900, color: theme.textMain }}>{getGroupLabel(groupMergeSummary.sourceGroup)}</div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>Графік: {formatGroupSchedule(groupMergeSummary.sourceGroup?.schedule) || "—"}</div>
+            </div>
+            <Field label="Target group (активна, може бути іншого тренера)">
+              <select style={inputSt} value={groupMergeDraft.targetGroupId} onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, targetGroupId: e.target.value }))} disabled={groupMergeBusy}>
+                <option value="">— Оберіть цільову групу —</option>
+                {activeGroups.filter((group) => String(group.id) !== String(groupMergeDraft.sourceGroupId)).map((group) => {
+                  const trainerInfo = resolveTrainerForGroup(group);
+                  return <option key={group.id} value={group.id}>{group.name || group.id} · {trainerInfo.trainerName || trainerInfo.trainerId || "без тренера"}</option>;
+                })}
+              </select>
+            </Field>
+            <label style={{ display: "flex", gap: 10, alignItems: "center", color: theme.textMain, fontWeight: 800 }}>
+              <input type="checkbox" checked={!!groupMergeDraft.takeSourceSchedule} onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, takeSourceSchedule: e.target.checked }))} disabled={groupMergeBusy} />
+              Взяти графік із групи-джерела
+            </label>
+            <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}`, display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 900, color: theme.textMain }}>Summary перед merge</div>
+              <div>Source group: <b>{getGroupLabel(groupMergeSummary.sourceGroup)}</b></div>
+              <div>Target group: <b>{getGroupLabel(groupMergeSummary.targetGroup)}</b></div>
+              <div>Учениць буде перенесено: <b>{groupMergeSummary.sourceStudentsCount}</b></div>
+              <div>Нових student_groups links буде створено: <b>{groupMergeSummary.newLinksCount}</b></div>
+              <div>Активних / not fully used абонементів буде перепривʼязано: <b>{groupMergeSummary.movableSubsCount}</b></div>
+              <ul style={{ margin: "6px 0 0 18px", padding: 0, color: theme.textMuted, display: "grid", gap: 4 }}>
+                <li>Учениці будуть прибрані зі старої групи.</li>
+                <li>Attendance history НЕ переноситься і НЕ змінюється.</li>
+                <li>Фінанси НЕ змінюються.</li>
+                <li>Source group буде архівована через існуючий механізм.</li>
+              </ul>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" style={btnS} onClick={() => setGroupMergeDraft(null)} disabled={groupMergeBusy}>Скасувати</button>
+              <button type="button" style={{ ...btnP, opacity: groupMergeBusy || !groupMergeDraft.targetGroupId ? 0.6 : 1 }} onClick={executeGroupMerge} disabled={groupMergeBusy || !groupMergeDraft.targetGroupId}>{groupMergeBusy ? "Обʼєднання…" : "Підтвердити merge"}</button>
+            </div>
+          </div>
+        )}
       </Modal>
       <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
         {groupEditDraft && (
