@@ -510,6 +510,7 @@ export default function App() {
     try {
       const created = await db.insertGroup(payload);
       setGroups((prev) => [created, ...prev]);
+      setScheduleGroups((prev) => (prev.some((g) => String(g.id) === String(created.id)) ? prev.map((g) => String(g.id) === String(created.id) ? { ...g, ...created } : g) : [created, ...prev]));
       if (validTrainerId && db.upsertTrainerGroup) {
         const binding = await db.upsertTrainerGroup(validTrainerId, created.id);
         setTrainerGroups((prev) => (
@@ -844,10 +845,19 @@ export default function App() {
     const sourceMeta = archiveMetaByGroupId[String(sourceGroup.id)] || getGroupArchiveMeta(sourceGroup);
     if (sourceMeta.isArchived) return;
     const firstTarget = activeGroups.find((group) => String(group.id) !== String(sourceGroup.id));
+    const sourceStudentIds = Array.from(new Set(
+      studentGrps
+        .filter((link) => String(link.groupId) === String(sourceGroup.id))
+        .map((link) => String(link.studentId))
+        .filter(Boolean)
+    ));
     setGroupMergeDraft({
       sourceGroupId: sourceGroup.id,
       targetGroupId: firstTarget?.id || "",
-      takeSourceSchedule: true,
+      scheduleMode: "use_source_schedule",
+      customSchedule: parseGroupSchedule(sourceGroup.schedule),
+      selectedStudentIds: sourceStudentIds,
+      studentSearch: "",
     });
   };
 
@@ -861,15 +871,21 @@ export default function App() {
         .map((link) => String(link.studentId))
         .filter(Boolean)
     ));
+    const selectedSet = new Set(
+      (Array.isArray(groupMergeDraft.selectedStudentIds) ? groupMergeDraft.selectedStudentIds : sourceStudentIds)
+        .map((id) => String(id))
+    );
+    const selectedStudentIds = sourceStudentIds.filter((studentId) => selectedSet.has(String(studentId)));
     const targetStudentIds = new Set(
       studentGrps
         .filter((link) => String(link.groupId) === String(groupMergeDraft.targetGroupId))
         .map((link) => String(link.studentId))
         .filter(Boolean)
     );
-    const newLinkStudentIds = sourceStudentIds.filter((studentId) => !targetStudentIds.has(studentId));
+    const newLinkStudentIds = selectedStudentIds.filter((studentId) => !targetStudentIds.has(studentId));
     const movableSubs = subsExt.filter((sub) => {
       if (String(sub.groupId) !== String(groupMergeDraft.sourceGroupId)) return false;
+      if (!selectedSet.has(String(sub.studentId))) return false;
       const total = Number(sub.totalTrainings || 0);
       const used = Number(sub.usedTrainings || 0);
       return sub.status !== "expired" && (!total || used < total);
@@ -878,10 +894,13 @@ export default function App() {
       sourceGroup,
       targetGroup,
       sourceStudentsCount: sourceStudentIds.length,
+      selectedStudentsCount: selectedStudentIds.length,
       newLinksCount: newLinkStudentIds.length,
       movableSubsCount: movableSubs.length,
       sourceStudentIds,
+      selectedStudentIds,
       newLinkStudentIds,
+      shouldArchiveSource: selectedStudentIds.length === sourceStudentIds.length,
       movableSubs,
     };
   }, [groupMergeDraft, groups, studentGrps, subsExt]);
@@ -899,7 +918,7 @@ export default function App() {
       alert("Архівні групи не можна обʼєднувати як джерело.");
       return;
     }
-    if (!sourceMeta.mode) {
+    if (groupMergeSummary.shouldArchiveSource && !sourceMeta.mode) {
       alert("Для архівації source group потрібне поле is_active, active або archived_at у таблиці groups.");
       return;
     }
@@ -908,16 +927,23 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm(`Обʼєднати ${getGroupLabel(groupMergeSummary.sourceGroup)} → ${getGroupLabel(groupMergeSummary.targetGroup)}? Source group буде архівована.`);
+    if (!groupMergeSummary.selectedStudentsCount) {
+      alert("Оберіть хоча б одну ученицю для переносу.");
+      return;
+    }
+    const confirmed = window.confirm(`Обʼєднати ${getGroupLabel(groupMergeSummary.sourceGroup)} → ${getGroupLabel(groupMergeSummary.targetGroup)}? ${groupMergeSummary.shouldArchiveSource ? "Source group буде архівована." : "Обрано не всіх учениць, source group залишиться активною."}`);
     if (!confirmed) return;
 
     setGroupMergeBusy(true);
     let savedOperation = null;
     try {
       const previousTargetSchedule = parseGroupSchedule(groupMergeSummary.targetGroup.schedule);
-      const newTargetSchedule = groupMergeDraft.takeSourceSchedule
+      const scheduleMode = groupMergeDraft.scheduleMode || "use_source_schedule";
+      const newTargetSchedule = scheduleMode === "use_source_schedule"
         ? parseGroupSchedule(groupMergeSummary.sourceGroup.schedule)
-        : previousTargetSchedule;
+        : scheduleMode === "custom_schedule"
+          ? parseGroupSchedule(groupMergeDraft.customSchedule)
+          : previousTargetSchedule;
       const previousSubscriptionGroupIds = Object.fromEntries(
         groupMergeSummary.movableSubs.map((sub) => [String(sub.id), sub.groupId])
       );
@@ -925,16 +951,16 @@ export default function App() {
         id: uid(),
         sourceGroupId: sourceId,
         targetGroupId: targetId,
-        selectedStudentIds: groupMergeSummary.sourceStudentIds,
+        selectedStudentIds: groupMergeSummary.selectedStudentIds,
         newTargetLinksStudentIds: groupMergeSummary.newLinkStudentIds,
-        removedSourceLinksStudentIds: groupMergeSummary.sourceStudentIds,
+        removedSourceLinksStudentIds: groupMergeSummary.selectedStudentIds,
         movedSubscriptionIds: groupMergeSummary.movableSubs.map((sub) => sub.id),
         previousSubscriptionGroupIds,
         previousTargetSchedule,
         newTargetSchedule,
         previousSourceArchiveState: sourceMeta,
         sourceWasArchivedBefore: sourceMeta.isArchived,
-        scheduleMode: groupMergeDraft.takeSourceSchedule ? "source_to_target" : "keep_target",
+        scheduleMode,
         executedBy: user?.id || user?.email || null,
         status: "pending",
       };
@@ -946,7 +972,7 @@ export default function App() {
         createdLinks.push(link);
       }
 
-      for (const studentId of groupMergeSummary.sourceStudentIds) {
+      for (const studentId of groupMergeSummary.selectedStudentIds) {
         await db.removeStudentGroup(studentId, sourceId);
       }
 
@@ -957,17 +983,21 @@ export default function App() {
       }
 
       let updatedTargetGroup = null;
-      if (groupMergeDraft.takeSourceSchedule) {
+      if (scheduleMode !== "keep_target_schedule") {
         updatedTargetGroup = await db.updateGroup(targetId, { schedule: newTargetSchedule });
       }
 
-      const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
-      const archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
+      let archivedSourceGroup = null;
+      if (groupMergeSummary.shouldArchiveSource) {
+        const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
+        archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
+      }
       const completedOperation = await db.updateGroupMergeOperationStatus(savedOperation.id, "completed");
 
       setGroupMergeOperations((prev) => [completedOperation, ...prev.filter((op) => String(op.id) !== String(completedOperation.id))]);
       setStudentGrps((prev) => {
-        const withoutSource = prev.filter((link) => String(link.groupId) !== String(sourceId));
+        const removedIds = new Set(groupMergeSummary.selectedStudentIds.map((id) => String(id)));
+        const withoutSource = prev.filter((link) => !(String(link.groupId) === String(sourceId) && removedIds.has(String(link.studentId))));
         const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
         const additions = createdLinks.filter((link) => {
           const key = `${String(link.studentId)}:${String(link.groupId)}`;
@@ -983,12 +1013,12 @@ export default function App() {
       }));
       setGroups((prev) => prev.map((group) => {
         if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
-        if (String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
+        if (archivedSourceGroup && String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
         return group;
       }));
       setScheduleGroups((prev) => prev.map((group) => {
         if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
-        if (String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
+        if (archivedSourceGroup && String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
         return group;
       }));
       setGroupMergeDraft(null);
@@ -1081,6 +1111,31 @@ export default function App() {
     } finally {
       setGroupMergeBusy(false);
     }
+  };
+
+  const ScheduleEditor = ({ value, onChange, disabled = false }) => {
+    const rows = parseGroupSchedule(value);
+    const updateRow = (index, patch) => {
+      onChange(rows.map((slot, slotIndex) => (
+        slotIndex === index ? { ...slot, ...patch } : slot
+      )));
+    };
+    const removeRow = (index) => onChange(rows.filter((_, slotIndex) => slotIndex !== index));
+    return (
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((slot, index) => (
+          <div key={`${slot.day}-${slot.time}-${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 120px auto", gap: 8, alignItems: "center" }}>
+            <select style={inputSt} value={Number(slot.day) || 0} onChange={(e) => updateRow(index, { day: Number(e.target.value) })} disabled={disabled}>
+              {UI_WEEKDAY_ORDER.map((dayIdx) => <option key={dayIdx} value={dayIdx}>{WEEKDAYS[dayIdx]}</option>)}
+            </select>
+            <input style={inputSt} type="time" value={String(slot.time || "")} onChange={(e) => updateRow(index, { time: e.target.value })} disabled={disabled} />
+            <button type="button" style={{ ...btnS, color: theme.danger }} onClick={() => removeRow(index)} disabled={disabled}>Видалити</button>
+          </div>
+        ))}
+        {!rows.length && <div style={{ fontSize: 12, color: theme.textMuted }}>Графік порожній — групу можна створити без занять.</div>}
+        <button type="button" style={btnS} onClick={() => onChange([...rows, { day: 1, time: "19:00" }])} disabled={disabled}>Додати заняття</button>
+      </div>
+    );
   };
 
 
@@ -2479,27 +2534,8 @@ export default function App() {
               )}
             </div>
           </Field>
-          <Field label="Schedule">
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {UI_WEEKDAY_ORDER.map((dayIdx) => {
-                const label = WEEKDAYS[dayIdx];
-                const active = newGroupDraft.schedule.some((x) => Number(x.day) === dayIdx);
-                return (
-                  <Pill
-                    key={dayIdx}
-                    active={active}
-                    onClick={() => setNewGroupDraft((p) => ({
-                      ...p,
-                      schedule: active
-                        ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
-                        : [...p.schedule, { day: dayIdx, time: "19:00" }],
-                    }))}
-                  >
-                    {label}
-                  </Pill>
-                );
-              })}
-            </div>
+          <Field label="Графік занять">
+            <ScheduleEditor value={newGroupDraft.schedule} onChange={(schedule) => setNewGroupDraft((p) => ({ ...p, schedule }))} />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Відсоток тренера">
@@ -2551,23 +2587,88 @@ export default function App() {
                 })}
               </select>
             </Field>
-            <label style={{ display: "flex", gap: 10, alignItems: "center", color: theme.textMain, fontWeight: 800 }}>
-              <input type="checkbox" checked={!!groupMergeDraft.takeSourceSchedule} onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, takeSourceSchedule: e.target.checked }))} disabled={groupMergeBusy} />
-              Взяти графік із групи-джерела
-            </label>
+            <Field label="Schedule mode">
+              <select
+                style={inputSt}
+                value={groupMergeDraft.scheduleMode || "use_source_schedule"}
+                onChange={(e) => setGroupMergeDraft((prev) => ({
+                  ...prev,
+                  scheduleMode: e.target.value,
+                  customSchedule: e.target.value === "custom_schedule" && !parseGroupSchedule(prev.customSchedule).length
+                    ? parseGroupSchedule(groupMergeSummary.sourceGroup?.schedule)
+                    : prev.customSchedule,
+                }))}
+                disabled={groupMergeBusy}
+              >
+                <option value="keep_target_schedule">Залишити графік цільової групи</option>
+                <option value="use_source_schedule">Взяти графік групи-джерела</option>
+                <option value="custom_schedule">Ввести графік вручну</option>
+              </select>
+            </Field>
+            {groupMergeDraft.scheduleMode === "custom_schedule" && (
+              <Field label="Custom schedule">
+                <div style={{ display: "grid", gap: 8 }}>
+                  <button type="button" style={btnS} onClick={() => setGroupMergeDraft((prev) => ({ ...prev, customSchedule: parseGroupSchedule(groupMergeSummary.sourceGroup?.schedule) }))} disabled={groupMergeBusy}>Взяти за основу source schedule</button>
+                  <ScheduleEditor value={groupMergeDraft.customSchedule} onChange={(customSchedule) => setGroupMergeDraft((prev) => ({ ...prev, customSchedule }))} disabled={groupMergeBusy} />
+                </div>
+              </Field>
+            )}
+            <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}`, display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ fontWeight: 900, color: theme.textMain }}>Учениці для переносу</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" style={btnS} onClick={() => setGroupMergeDraft((prev) => ({ ...prev, selectedStudentIds: groupMergeSummary.sourceStudentIds }))} disabled={groupMergeBusy}>Обрати всіх</button>
+                  <button type="button" style={btnS} onClick={() => setGroupMergeDraft((prev) => ({ ...prev, selectedStudentIds: [] }))} disabled={groupMergeBusy}>Зняти всіх</button>
+                </div>
+              </div>
+              <input style={inputSt} placeholder="Пошук по імені" value={groupMergeDraft.studentSearch || ""} onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, studentSearch: e.target.value }))} disabled={groupMergeBusy} />
+              <div style={{ display: "grid", gap: 6, maxHeight: 220, overflow: "auto" }}>
+                {groupMergeSummary.sourceStudentIds
+                  .filter((studentId) => {
+                    const st = studentMap[studentId];
+                    const name = String(st?.name || [st?.firstName, st?.lastName].filter(Boolean).join(" ") || studentId).toLowerCase();
+                    return !groupMergeDraft.studentSearch || name.includes(String(groupMergeDraft.studentSearch).toLowerCase());
+                  })
+                  .map((studentId) => {
+                    const st = studentMap[studentId];
+                    const label = st?.name || [st?.firstName, st?.lastName].filter(Boolean).join(" ") || studentId;
+                    const selected = (groupMergeDraft.selectedStudentIds || []).map((id) => String(id)).includes(String(studentId));
+                    return (
+                      <label key={studentId} style={{ display: "flex", gap: 8, alignItems: "center", color: theme.textMain }}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) => setGroupMergeDraft((prev) => ({
+                            ...prev,
+                            selectedStudentIds: e.target.checked
+                              ? Array.from(new Set([...(prev.selectedStudentIds || []), studentId]))
+                              : (prev.selectedStudentIds || []).filter((id) => String(id) !== String(studentId)),
+                          }))}
+                          disabled={groupMergeBusy}
+                        />
+                        {label}
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
             <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}`, display: "grid", gap: 8 }}>
               <div style={{ fontWeight: 900, color: theme.textMain }}>Summary перед merge</div>
               <div>Source group: <b>{getGroupLabel(groupMergeSummary.sourceGroup)}</b></div>
               <div>Target group: <b>{getGroupLabel(groupMergeSummary.targetGroup)}</b></div>
-              <div>Учениць буде перенесено: <b>{groupMergeSummary.sourceStudentsCount}</b></div>
+              <div>Schedule mode: <b>{groupMergeDraft.scheduleMode || "use_source_schedule"}</b></div>
+              <div>Усього учениць у source group: <b>{groupMergeSummary.sourceStudentsCount}</b></div>
+              <div>Selected students: <b>{groupMergeSummary.selectedStudentsCount}</b></div>
               <div>Нових student_groups links буде створено: <b>{groupMergeSummary.newLinksCount}</b></div>
               <div>Активних / not fully used абонементів буде перепривʼязано: <b>{groupMergeSummary.movableSubsCount}</b></div>
+              <div>Source group буде архівована: <b>{groupMergeSummary.shouldArchiveSource ? "так" : "ні"}</b></div>
+              {!groupMergeSummary.shouldArchiveSource && <div style={{ color: theme.warning || theme.textMuted }}>Обрано не всіх учениць, тому стара група залишиться активною.</div>}
               <div style={{ color: theme.textMuted, fontSize: 13 }}>Операцію можна буде скасувати з Історії обʼєднань.</div>
               <ul style={{ margin: "6px 0 0 18px", padding: 0, color: theme.textMuted, display: "grid", gap: 4 }}>
-                <li>Учениці будуть прибрані зі старої групи.</li>
+                <li>Тільки selected students будуть прибрані зі старої групи.</li>
                 <li>Attendance history НЕ переноситься і НЕ змінюється.</li>
                 <li>Фінанси НЕ змінюються.</li>
-                <li>Source group буде архівована через існуючий механізм.</li>
+                <li>Undo доступний через Історію обʼєднань.</li>
               </ul>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
