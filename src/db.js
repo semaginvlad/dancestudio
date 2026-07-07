@@ -390,11 +390,15 @@ const mapTrainer = (t) => ({
   name: t.name || "",
   firstName: t.first_name || "",
   lastName: t.last_name || "",
+  email: t.email || "",
   phone: t.phone || "",
   telegram: t.telegram || "",
   instagramHandle: t.instagram_handle || "",
   notes: t.notes || "",
   isActive: t.is_active !== false,
+  archivedAt: t.archived_at || null,
+  accessDisabledAt: t.access_disabled_at || null,
+  hasAccessGuardFields: Object.prototype.hasOwnProperty.call(t, "access_disabled_at") && Object.prototype.hasOwnProperty.call(t, "archived_at"),
 });
 
 export async function fetchTrainers() {
@@ -419,6 +423,7 @@ export async function insertTrainer(trainer) {
     name: fullName,
     first_name: firstName || null,
     last_name: lastName || null,
+    email: trainer.email || null,
     phone: trainer.phone || null,
     telegram: trainer.telegram || null,
     instagram_handle: trainer.instagramHandle || null,
@@ -440,14 +445,35 @@ export async function updateTrainer(id, trainer) {
     const fallbackName = trainer.name || "";
     payload.name = [nextFirstName || "", nextLastName || ""].filter(Boolean).join(" ").trim() || fallbackName || null;
   }
+  if (trainer.email !== undefined) payload.email = trainer.email || null;
   if (trainer.phone !== undefined) payload.phone = trainer.phone || null;
   if (trainer.telegram !== undefined) payload.telegram = trainer.telegram || null;
   if (trainer.instagramHandle !== undefined) payload.instagram_handle = trainer.instagramHandle || null;
   if (trainer.notes !== undefined) payload.notes = trainer.notes || null;
   if (trainer.isActive !== undefined) payload.is_active = !!trainer.isActive;
+  if (trainer.archivedAt !== undefined) payload.archived_at = trainer.archivedAt;
+  if (trainer.accessDisabledAt !== undefined) payload.access_disabled_at = trainer.accessDisabledAt;
+  if (trainer.authUserId !== undefined) payload.auth_user_id = trainer.authUserId || null;
   const { data, error } = await supabase.from('trainers').update(payload).eq('id', id).select('*').single();
   if (error) throw error;
   return mapTrainer(data);
+}
+
+export async function callAdminTrainerOperation(payload = {}) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) throw new Error("Потрібна активна адмін-сесія");
+  const res = await fetch("/api/admin-trainers", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.details || data?.error || "Admin trainers API failed");
+  return data;
 }
 
 export async function fetchTrainerGroups() {

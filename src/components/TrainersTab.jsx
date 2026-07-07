@@ -266,8 +266,10 @@ export default function TrainersTab({
   const isDark = theme.bg === "#0F131A";
   const [selectedTrainerId, setSelectedTrainerId] = useStickyState(trainers[0]?.id || "", "ds_trainers_selectedTrainerId");
   const [isCreateMode, setIsCreateMode] = useState(false);
-  const [draft, setDraft] = useState({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
+  const [draft, setDraft] = useState({ firstName: "", lastName: "", email: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true, createAccess: false, password: "" });
   const [saving, setSaving] = useState(false);
+  const [trainerSearch, setTrainerSearch] = useState("");
+  const [trainerArchiveFilter, setTrainerArchiveFilter] = useStickyState("active", "ds_trainers_archive_filter");
   const [periodMonthIso, setPeriodMonthIso] = useStickyState(toISO(monthStart(new Date())), "ds_trainers_selectedMonth");
   const [trendMonths, setTrendMonths] = useStickyState(3, "ds_trainers_trend_months_v2");
   const periodDate = useMemo(() => monthStart(new Date(`${String(periodMonthIso || toISO(monthStart(new Date()))).slice(0, 10)}T12:00:00`)), [periodMonthIso]);
@@ -280,6 +282,18 @@ export default function TrainersTab({
     });
   };
   const [detailState, setDetailState] = useState({ type: "overview", title: "Огляд", payload: null });
+
+  const isTrainerArchived = (t) => !!t?.archivedAt || t?.isActive === false;
+  const filteredTrainers = useMemo(() => {
+    const q = trainerSearch.trim().toLowerCase();
+    return trainers.filter((t) => {
+      const archived = isTrainerArchived(t);
+      if (trainerArchiveFilter === "active" && archived) return false;
+      if (trainerArchiveFilter === "archived" && !archived) return false;
+      if (!q) return true;
+      return [getTrainerDisplayName(t), t.email, t.phone, t.telegram, t.id].some((v) => String(v || "").toLowerCase().includes(q));
+    });
+  }, [trainerArchiveFilter, trainerSearch, trainers]);
 
   const selectedTrainer = useMemo(() => trainers.find((t) => t.id === selectedTrainerId) || null, [trainers, selectedTrainerId]);
 
@@ -307,6 +321,7 @@ export default function TrainersTab({
       setDraft({
         firstName: trainers[0].firstName || "",
         lastName: trainers[0].lastName || "",
+        email: trainers[0].email || "",
         phone: trainers[0].phone || "",
         telegram: trainers[0].telegram || "",
         instagramHandle: trainers[0].instagramHandle || "",
@@ -955,10 +970,12 @@ export default function TrainersTab({
     });
   }, [trendSeries]);
 
+  const generateTempPassword = () => `Dance${Math.random().toString(36).slice(2, 8)}!${Math.floor(10 + Math.random() * 89)}`;
+
   const beginCreate = () => {
     setIsCreateMode(true);
     setSelectedTrainerId("");
-    setDraft({ firstName: "", lastName: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true });
+    setDraft({ firstName: "", lastName: "", email: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true, createAccess: false, password: generateTempPassword() });
   };
 
   const beginEdit = () => {
@@ -967,11 +984,14 @@ export default function TrainersTab({
     setDraft({
       firstName: selectedTrainer.firstName || "",
       lastName: selectedTrainer.lastName || "",
+      email: selectedTrainer.email || "",
       phone: selectedTrainer.phone || "",
       telegram: selectedTrainer.telegram || "",
       instagramHandle: selectedTrainer.instagramHandle || "",
       notes: selectedTrainer.notes || "",
       isActive: selectedTrainer.isActive !== false,
+      createAccess: false,
+      password: "",
     });
   };
 
@@ -984,14 +1004,23 @@ export default function TrainersTab({
     try {
       const payload = {
         ...draft,
+        email: String(draft.email || "").trim().toLowerCase(),
         instagramHandle: normalizeInstagramHandle(draft.instagramHandle),
       };
+      delete payload.createAccess;
+      delete payload.password;
       if (selectedTrainer && !isCreateMode) {
         const updated = await db.updateTrainer(selectedTrainer.id, payload);
         setTrainers((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
         setSelectedTrainerId(updated.id);
       } else {
-        const created = await db.insertTrainer(payload);
+        let created = await db.insertTrainer(payload);
+        if (draft.createAccess) {
+          if (!payload.email) throw new Error("Для створення доступу потрібен email");
+          if (!draft.password || draft.password.length < 6) throw new Error("Тимчасовий пароль має містити мінімум 6 символів");
+          const result = await db.callAdminTrainerOperation({ op: "create_auth_user_for_trainer", trainer_id: created.id, email: payload.email, password: draft.password });
+          created = result.trainer ? { ...created, authUserId: result.trainer.auth_user_id || result.auth_user_id, email: result.trainer.email || created.email, accessDisabledAt: result.trainer.access_disabled_at || null } : created;
+        }
         setTrainers((prev) => [created, ...prev]);
         setSelectedTrainerId(created.id);
       }
@@ -1000,6 +1029,43 @@ export default function TrainersTab({
       alert(e?.message || "Не вдалося зберегти тренера");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleTrainerArchive = async (trainer) => {
+    if (!trainer) return;
+    try {
+      const shouldArchive = !isTrainerArchived(trainer);
+      const updated = await db.updateTrainer(trainer.id, { isActive: !shouldArchive, archivedAt: shouldArchive ? new Date().toISOString() : null });
+      setTrainers((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося змінити архівний статус тренера. Можливо, потрібне поле archived_at.");
+    }
+  };
+
+  const createOrResetAccess = async (trainer, reset = false) => {
+    if (!trainer?.email) return alert("Для доступу потрібен email тренера");
+    const password = window.prompt("Тимчасовий пароль (мінімум 6 символів)", generateTempPassword());
+    if (!password) return;
+    try {
+      const result = await db.callAdminTrainerOperation({ op: reset ? "reset_trainer_password" : "create_auth_user_for_trainer", trainer_id: trainer.id, email: trainer.email, password });
+      const row = result.trainer || {};
+      setTrainers((prev) => prev.map((t) => (t.id === trainer.id ? { ...t, authUserId: row.auth_user_id || result.auth_user_id || t.authUserId, email: row.email || t.email, accessDisabledAt: row.access_disabled_at || null } : t)));
+      alert(reset ? "Пароль оновлено" : "Доступ створено");
+    } catch (e) {
+      alert(e?.message || "Не вдалося оновити доступ");
+    }
+  };
+
+  const toggleAccess = async (trainer) => {
+    if (!trainer?.authUserId) return;
+    const disabled = !!trainer.accessDisabledAt;
+    try {
+      const result = await db.callAdminTrainerOperation({ op: disabled ? "enable_trainer_access" : "disable_trainer_access", trainer_id: trainer.id });
+      const row = result.trainer || {};
+      setTrainers((prev) => prev.map((t) => (t.id === trainer.id ? { ...t, accessDisabledAt: row.access_disabled_at || null } : t)));
+    } catch (e) {
+      alert(e?.message || "Не вдалося змінити доступ");
     }
   };
 
@@ -1287,14 +1353,21 @@ export default function TrainersTab({
       <aside style={{ ...card(), padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
-          <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>+ Додати</button>
+          <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>Додати тренера</button>
+        </div>
+
+        <div style={{ display: "grid", gap: 6 }}>
+          <input value={trainerSearch} onChange={(e) => setTrainerSearch(e.target.value)} placeholder="Пошук тренера" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }} />
+          <select value={trainerArchiveFilter} onChange={(e) => setTrainerArchiveFilter(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }}>
+            <option value="active">Активні</option><option value="archived">Архівні</option><option value="all">Усі</option>
+          </select>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflow: "auto", paddingRight: 2 }}>
-          {trainers.map((t) => (
+          {filteredTrainers.map((t) => (
             <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? `${theme.primary}33` : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
               <div style={{ fontWeight: 700 }}>{getTrainerDisplayName(t)}</div>
-              <div style={{ fontSize: 11, color: t.isActive ? theme.good : theme.textSoft }}>{t.isActive ? "Активний" : "Неактивний"}</div>
+              <div style={{ fontSize: 11, color: !isTrainerArchived(t) ? theme.good : theme.textSoft }}>{isTrainerArchived(t) ? "Архівний" : "Активний"}{t.authUserId ? " · має доступ" : ""}{t.accessDisabledAt ? " · доступ закрито" : ""}</div>
             </button>
           ))}
         </div>
@@ -1304,16 +1377,21 @@ export default function TrainersTab({
           <div style={{ display: "grid", gap: 8 }}>
             <input value={draft.firstName} onChange={(e) => setDraft((p) => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.lastName} onChange={(e) => setDraft((p) => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
+            <input value={draft.email} onChange={(e) => setDraft((p) => ({ ...p, email: e.target.value }))} placeholder="Email" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.phone} onChange={(e) => setDraft((p) => ({ ...p, phone: e.target.value }))} placeholder="Телефон" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.telegram} onChange={(e) => setDraft((p) => ({ ...p, telegram: e.target.value }))} placeholder="Telegram" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.instagramHandle} onChange={(e) => setDraft((p) => ({ ...p, instagramHandle: e.target.value }))} placeholder="Instagram" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textSoft }}>
               <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft((p) => ({ ...p, isActive: e.target.checked }))} /> Активний
             </label>
+            {isCreateMode && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: theme.textSoft }}>
+              <input type="checkbox" checked={draft.createAccess} onChange={(e) => setDraft((p) => ({ ...p, createAccess: e.target.checked, password: p.password || generateTempPassword() }))} /> Одразу створити доступ до входу
+            </label>}
+            {isCreateMode && draft.createAccess && <input value={draft.password} onChange={(e) => setDraft((p) => ({ ...p, password: e.target.value }))} placeholder="Тимчасовий пароль" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />}
             <textarea value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Нотатки" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", resize: "vertical", background: theme.panelSoft, color: theme.text }} />
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" disabled={saving} onClick={saveTrainer} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "9px 14px", cursor: "pointer", fontWeight: 700, flex: 1 }}>{saving ? "Збереження..." : "Зберегти"}</button>
-              {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "9px 12px", cursor: "pointer" }}>Ред.</button>}
+              {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "9px 12px", cursor: "pointer" }}>Редагувати</button>}
             </div>
           </div>
         </div>
@@ -1323,7 +1401,12 @@ export default function TrainersTab({
             <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
               {selectedTrainer.telegram && <a href={`https://t.me/${String(selectedTrainer.telegram).replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.secondary, fontSize: 12, fontWeight: 700 }}>Telegram</a>}
               {selectedTrainer.instagramHandle && <a href={`https://instagram.com/${normalizeInstagramHandle(selectedTrainer.instagramHandle)}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.primary, fontSize: 12, fontWeight: 700 }}>Instagram</a>}
+              {selectedTrainer.email && <span style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", color: theme.textSoft, fontSize: 12, fontWeight: 700 }}>{selectedTrainer.email}</span>}
               {selectedTrainer.phone && <a href={`tel:${selectedTrainer.phone}`} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.good, fontSize: 12, fontWeight: 700 }}>Call</a>}
+
+              <button type="button" onClick={() => toggleTrainerArchive(selectedTrainer)} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", background: theme.panelSoft, color: theme.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isTrainerArchived(selectedTrainer) ? "Відновити" : "Архівувати"}</button>
+              {selectedTrainer.email && <button type="button" onClick={() => createOrResetAccess(selectedTrainer, !!selectedTrainer.authUserId)} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", background: theme.panelSoft, color: theme.text, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{selectedTrainer.authUserId ? "Скинути пароль" : "Створити доступ"}</button>}
+              {selectedTrainer.authUserId && <button type="button" onClick={() => toggleAccess(selectedTrainer)} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", background: theme.panelSoft, color: selectedTrainer.accessDisabledAt ? theme.good : theme.bad, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{selectedTrainer.accessDisabledAt ? "Відкрити доступ" : "Закрити доступ"}</button>}
             </div>
 
             <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>

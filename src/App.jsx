@@ -93,6 +93,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+  const [authBlockMessage, setAuthBlockMessage] = useState("");
   const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushInfo, setPushInfo] = useState("");
@@ -340,19 +341,34 @@ export default function App() {
   }, [safeThemeMode]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       const currentUser = session?.user || null;
+      if (!mounted) return;
+      if (!currentUser) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      const allowed = await validateTrainerSession(currentUser);
+      if (!mounted || !allowed) return;
       setUser(currentUser);
-      if (currentUser) loadAllData(currentUser);
-      else setLoading(false);
+      await loadAllData(currentUser);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (!session?.user) setLoading(false);
+      if (!mounted) return;
+      if (!session?.user) {
+        setUser(null);
+        setLoading(false);
+      }
     });
 
-    return () => subscription?.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -360,6 +376,70 @@ export default function App() {
       setTab("attendance");
     }
   }, [user, isAdmin, tab, setTab]);
+
+
+  const clearLoadedData = () => {
+    setStudents([]);
+    setSubs([]);
+    setAttn([]);
+    setGroups(DEFAULT_GROUPS);
+    setScheduleGroups(DEFAULT_GROUPS);
+    setCancelled([]);
+    setScheduleCancelled([]);
+    setStudentGrps([]);
+    setWaitlist([]);
+    setTrialBookings([]);
+    setTrainers([]);
+    setTrainerGroups([]);
+    setRoomBookings([]);
+    setGroupLessonOverrides([]);
+    setTrainingLessonPlans([]);
+    setTrainingLessonReports([]);
+    setGroupMergeOperations([]);
+  };
+
+  const blockTrainerSession = async (message = "Доступ до CRM закрито. Зверніться до адміністратора.") => {
+    setAuthBlockMessage(message);
+    setUser(null);
+    clearLoadedData();
+    setLoading(false);
+    await supabase.auth.signOut();
+  };
+
+  const validateTrainerSession = async (currentUser) => {
+    if (!currentUser) return false;
+    if (isAdminEmail(currentUser.email, adminEmails)) {
+      setAuthBlockMessage("");
+      return true;
+    }
+
+    try {
+      const trainerProfile = await db.fetchMyTrainerProfile();
+      if (!trainerProfile) {
+        await blockTrainerSession("Доступ до CRM не знайдено. Зверніться до адміністратора.");
+        return false;
+      }
+      if (!trainerProfile.hasAccessGuardFields) {
+        console.warn("[access guard] crm_get_my_trainer_profile must return archived_at and access_disabled_at for full enforcement");
+        await blockTrainerSession("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
+        return false;
+      }
+      if (trainerProfile.accessDisabledAt) {
+        await blockTrainerSession("Доступ до CRM закрито. Зверніться до адміністратора.");
+        return false;
+      }
+      if (trainerProfile.archivedAt || trainerProfile.isActive === false) {
+        await blockTrainerSession("Профіль тренера архівовано або деактивовано. Зверніться до адміністратора.");
+        return false;
+      }
+      setAuthBlockMessage("");
+      return true;
+    } catch (e) {
+      console.warn("[access guard] trainer profile check failed", e);
+      await blockTrainerSession("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
+      return false;
+    }
+  };
 
   const loadAllData = async (currentUser = user) => {
     setLoading(true);
@@ -392,7 +472,7 @@ export default function App() {
 
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
-        : () => db.fetchMyTrainerProfile(currentUser?.id);
+        : () => db.fetchMyTrainerProfile();
       const fetchScheduleBookings = isCurrentAdmin
         ? db.fetchRoomBookings
         : db.fetchScheduleRoomBookings;
@@ -468,11 +548,18 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
+      setAuthBlockMessage("");
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPass });
       if (error) throw error;
-      setUser(data.user);
-      window.location.reload(); 
-    } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
+      const currentUser = data?.user || null;
+      const allowed = await validateTrainerSession(currentUser);
+      if (!allowed) return;
+      setUser(currentUser);
+      await loadAllData(currentUser);
+    } catch (e) {
+      setAuthBlockMessage("");
+      alert("Помилка входу: перевірте email та пароль");
+    }
   };
 
   const createGroupAction = async () => {
@@ -1463,6 +1550,7 @@ export default function App() {
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg, fontFamily:"'Poppins',sans-serif"}}>
         <form onSubmit={handleLogin} style={{background:theme.card, padding:40, borderRadius:32, width:350, boxShadow:"0 20px 50px rgba(0,0,0,0.1)"}}>
           <h2 style={{marginTop:0, marginBottom:24, textAlign:"center", color:theme.secondary}}>Dance Studio</h2>
+          {authBlockMessage && <div style={{marginBottom:16, padding:"10px 12px", borderRadius:12, background:"rgba(234,84,85,0.12)", color:theme.danger, fontSize:13, fontWeight:700, lineHeight:1.35}}>{authBlockMessage}</div>}
           <input style={{...inputSt, marginBottom:16}} type="email" placeholder="Email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} required />
           <input style={{...inputSt, marginBottom:24}} type="password" placeholder="Пароль" value={authPass} onChange={e=>setAuthPass(e.target.value)} required />
           <button style={{...btnP, width:"100%"}} type="submit">Увійти</button>
