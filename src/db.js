@@ -463,7 +463,7 @@ export async function callAdminTrainerOperation(payload = {}) {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
   if (!token) throw new Error("Потрібна активна адмін-сесія");
-  const res = await fetch("/api/admin-trainers", {
+  const res = await fetch("/api/trainer-notifications", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

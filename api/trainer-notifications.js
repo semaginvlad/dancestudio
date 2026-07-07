@@ -20,7 +20,7 @@ const readinessError = (res, error) => res.status(503).json({
   requiredSql: ["sql/trainer_notification_state.sql", "sql/trainer_dispatch_history.sql"],
 });
 
-const ALLOWED_OPS = ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules"];
+const ALLOWED_OPS = ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules", "create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"];
 const SENSITIVE_LOG_KEY_RE = /secret|token|authorization|password|key/i;
 
 const firstValue = (value) => {
@@ -155,6 +155,93 @@ const detectSchedulerStatus = () => {
   } catch (error) {
     return { active: false, reason: "scheduler_check_failed", details: String(error?.message || error), targetPath: "/api/dispatch-trainer-digests" };
   }
+};
+
+const cleanTrainerEmail = (value) => String(value || "").trim().toLowerCase();
+const cleanTrainerId = (value) => String(value || "").trim();
+
+const fetchTrainerForAdminOperation = async (supabase, trainerId) => {
+  const { data, error } = await supabase.from("trainers").select("*").eq("id", trainerId).single();
+  if (error) throw error;
+  return data;
+};
+
+const updateTrainerForAdminOperation = async (supabase, trainerId, payload) => {
+  const { data, error } = await supabase.from("trainers").update(payload).eq("id", trainerId).select("*").single();
+  if (error) throw error;
+  return data;
+};
+
+const handleCreateAuthUserForTrainer = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const body = req.body || {};
+  const trainerId = cleanTrainerId(body.trainer_id || body.trainerId);
+  const email = cleanTrainerEmail(body.email);
+  const password = String(body.password || "");
+  if (!trainerId) return res.status(400).json({ error: "trainer_id_required" });
+  if (!email) return res.status(400).json({ error: "email_required" });
+  if (password.length < 6) return res.status(400).json({ error: "password_min_6_chars" });
+
+  const supabase = buildSupabase();
+  const trainer = await fetchTrainerForAdminOperation(supabase, trainerId);
+  if (trainer.auth_user_id) return res.status(409).json({ error: "trainer_already_has_auth_user" });
+
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { role: "trainer", trainer_id: trainerId },
+    app_metadata: { role: "trainer", trainer_id: trainerId },
+  });
+  if (error) throw error;
+
+  const authUserId = data?.user?.id;
+  if (!authUserId) return res.status(500).json({ error: "auth_user_not_created" });
+
+  const updatedTrainer = await updateTrainerForAdminOperation(supabase, trainerId, {
+    auth_user_id: authUserId,
+    email,
+    access_disabled_at: null,
+  });
+  return res.status(200).json({ ok: true, trainer: updatedTrainer, auth_user_id: authUserId });
+};
+
+const handleDisableTrainerAccess = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const body = req.body || {};
+  const trainerId = cleanTrainerId(body.trainer_id || body.trainerId);
+  if (!trainerId) return res.status(400).json({ error: "trainer_id_required" });
+
+  const supabase = buildSupabase();
+  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: new Date().toISOString() });
+  if (trainer.auth_user_id) {
+    await supabase.auth.admin.updateUserById(trainer.auth_user_id, {
+      app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
+      user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
+    });
+  }
+  return res.status(200).json({ ok: true, trainer });
+};
+
+const handleEnableTrainerAccess = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const body = req.body || {};
+  const trainerId = cleanTrainerId(body.trainer_id || body.trainerId);
+  const password = body.password === undefined ? null : String(body.password || "");
+  if (!trainerId) return res.status(400).json({ error: "trainer_id_required" });
+  if (password !== null && password.length < 6) return res.status(400).json({ error: "password_min_6_chars" });
+
+  const supabase = buildSupabase();
+  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: null });
+  if (trainer.auth_user_id) {
+    const updatePayload = {
+      app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
+      user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
+    };
+    if (password) updatePayload.password = password;
+    await supabase.auth.admin.updateUserById(trainer.auth_user_id, updatePayload);
+  }
+  return res.status(200).json({ ok: true, trainer });
 };
 
 const handleReadiness = async (res) => {
@@ -810,16 +897,21 @@ const handleScheduleRules = async (req, res) => {
 export default async function handler(req, res) {
   const { rawOp, op } = normalizeOp(req);
   try {
+    const trainerAccessAdminOps = new Set(["create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"]);
     const adminOnlyOp = (
       (req.method === "GET" && op === "readiness")
       || (["GET", "POST"].includes(req.method) && (op === "state" || op === "history"))
       || (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules")
+      || (req.method === "POST" && trainerAccessAdminOps.has(op))
     );
 
     if (adminOnlyOp) {
       const admin = await requireAdminUser(req);
       if (!admin.ok) return authError(res, admin);
 
+      if (op === "create_auth_user_for_trainer") return await handleCreateAuthUserForTrainer(req, res);
+      if (op === "disable_trainer_access") return await handleDisableTrainerAccess(req, res);
+      if (op === "enable_trainer_access" || op === "reset_trainer_password") return await handleEnableTrainerAccess(req, res);
       if (req.method === "GET" && op === "readiness") return await handleReadiness(res);
       if ((req.method === "GET" || req.method === "POST") && op === "state") return await handleState(req, res);
       if ((req.method === "GET" || req.method === "POST") && op === "history") return await handleHistory(req, res);
