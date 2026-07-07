@@ -751,6 +751,11 @@ export default function App() {
     .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
     .join(" · ");
   const getGroupLabel = (group) => group ? `${group.name || group.id} (${group.id})` : "—";
+  const getGroupMergeScheduleModeLabel = (mode) => {
+    if (mode === "keep_target_schedule") return "Залишити графік цільової групи";
+    if (mode === "custom_schedule") return "Використати вручну заданий графік";
+    return "Взяти графік групи, яку приєднуємо";
+  };
 
   const archiveMetaByGroupId = useMemo(() => {
     const result = {};
@@ -919,7 +924,7 @@ export default function App() {
       return;
     }
     if (groupMergeSummary.shouldArchiveSource && !sourceMeta.mode) {
-      alert("Для архівації source group потрібне поле is_active, active або archived_at у таблиці groups.");
+      alert("Для архівації старої групи потрібне поле is_active, active або archived_at у таблиці groups.");
       return;
     }
     if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.insertGroupMergeOperation || !db.updateGroupMergeOperationStatus) {
@@ -931,7 +936,7 @@ export default function App() {
       alert("Оберіть хоча б одну ученицю для переносу.");
       return;
     }
-    const confirmed = window.confirm(`Обʼєднати ${getGroupLabel(groupMergeSummary.sourceGroup)} → ${getGroupLabel(groupMergeSummary.targetGroup)}? ${groupMergeSummary.shouldArchiveSource ? "Source group буде архівована." : "Обрано не всіх учениць, source group залишиться активною."}`);
+    const confirmed = window.confirm(`Обʼєднати ${getGroupLabel(groupMergeSummary.sourceGroup)} → ${getGroupLabel(groupMergeSummary.targetGroup)}? ${groupMergeSummary.shouldArchiveSource ? "Стара група буде архівована." : "Обрано не всіх учениць, стара група залишиться активною."}`);
     if (!confirmed) return;
 
     setGroupMergeBusy(true);
@@ -2130,7 +2135,7 @@ export default function App() {
                             {op.undoneAt && <span>Скасовано: {new Date(op.undoneAt).toLocaleString("uk-UA")}</span>}
                           </div>
                           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <button type="button" style={{ ...btnS, opacity: isUndoAllowed ? 1 : 0.55, cursor: isUndoAllowed ? "pointer" : "not-allowed" }} disabled={!isUndoAllowed} onClick={() => undoGroupMerge(op)}>{status === "undone" ? "Merge скасовано" : status === "completed" ? "Скасувати merge" : "Undo недоступний"}</button>
+                            <button type="button" style={{ ...btnS, opacity: isUndoAllowed ? 1 : 0.55, cursor: isUndoAllowed ? "pointer" : "not-allowed" }} disabled={!isUndoAllowed} onClick={() => undoGroupMerge(op)}>{status === "undone" ? "Обʼєднання скасовано" : status === "completed" ? "Скасувати обʼєднання" : "Скасування недоступне"}</button>
                           </div>
                         </div>
                       );
@@ -2574,11 +2579,11 @@ export default function App() {
         {groupMergeDraft && groupMergeSummary && (
           <div style={{ display: "grid", gap: 14 }}>
             <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>Source group</div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>Група, яку приєднуємо</div>
               <div style={{ fontWeight: 900, color: theme.textMain }}>{getGroupLabel(groupMergeSummary.sourceGroup)}</div>
               <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>Графік: {formatGroupSchedule(groupMergeSummary.sourceGroup?.schedule) || "—"}</div>
             </div>
-            <Field label="Target group (активна, може бути іншого тренера)">
+            <Field label="Група, яка залишається (активна, може бути іншого тренера)">
               <select style={inputSt} value={groupMergeDraft.targetGroupId} onChange={(e) => setGroupMergeDraft((prev) => ({ ...prev, targetGroupId: e.target.value }))} disabled={groupMergeBusy}>
                 <option value="">— Оберіть цільову групу —</option>
                 {activeGroups.filter((group) => String(group.id) !== String(groupMergeDraft.sourceGroupId)).map((group) => {
@@ -2587,7 +2592,7 @@ export default function App() {
                 })}
               </select>
             </Field>
-            <Field label="Schedule mode">
+            <Field label="Графік після обʼєднання">
               <select
                 style={inputSt}
                 value={groupMergeDraft.scheduleMode || "use_source_schedule"}
@@ -2601,14 +2606,14 @@ export default function App() {
                 disabled={groupMergeBusy}
               >
                 <option value="keep_target_schedule">Залишити графік цільової групи</option>
-                <option value="use_source_schedule">Взяти графік групи-джерела</option>
-                <option value="custom_schedule">Ввести графік вручну</option>
+                <option value="use_source_schedule">Взяти графік групи, яку приєднуємо</option>
+                <option value="custom_schedule">Використати вручну заданий графік</option>
               </select>
             </Field>
             {groupMergeDraft.scheduleMode === "custom_schedule" && (
-              <Field label="Custom schedule">
+              <Field label="Графік занять">
                 <div style={{ display: "grid", gap: 8 }}>
-                  <button type="button" style={btnS} onClick={() => setGroupMergeDraft((prev) => ({ ...prev, customSchedule: parseGroupSchedule(groupMergeSummary.sourceGroup?.schedule) }))} disabled={groupMergeBusy}>Взяти за основу source schedule</button>
+                  <button type="button" style={btnS} onClick={() => setGroupMergeDraft((prev) => ({ ...prev, customSchedule: parseGroupSchedule(groupMergeSummary.sourceGroup?.schedule) }))} disabled={groupMergeBusy}>Взяти за основу графік групи, яку приєднуємо</button>
                   <ScheduleEditor value={groupMergeDraft.customSchedule} onChange={(customSchedule) => setGroupMergeDraft((prev) => ({ ...prev, customSchedule }))} disabled={groupMergeBusy} />
                 </div>
               </Field>
@@ -2653,27 +2658,43 @@ export default function App() {
               </div>
             </div>
             <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}`, display: "grid", gap: 8 }}>
-              <div style={{ fontWeight: 900, color: theme.textMain }}>Summary перед merge</div>
-              <div>Source group: <b>{getGroupLabel(groupMergeSummary.sourceGroup)}</b></div>
-              <div>Target group: <b>{getGroupLabel(groupMergeSummary.targetGroup)}</b></div>
-              <div>Schedule mode: <b>{groupMergeDraft.scheduleMode || "use_source_schedule"}</b></div>
-              <div>Усього учениць у source group: <b>{groupMergeSummary.sourceStudentsCount}</b></div>
-              <div>Selected students: <b>{groupMergeSummary.selectedStudentsCount}</b></div>
-              <div>Нових student_groups links буде створено: <b>{groupMergeSummary.newLinksCount}</b></div>
-              <div>Активних / not fully used абонементів буде перепривʼязано: <b>{groupMergeSummary.movableSubsCount}</b></div>
-              <div>Source group буде архівована: <b>{groupMergeSummary.shouldArchiveSource ? "так" : "ні"}</b></div>
-              {!groupMergeSummary.shouldArchiveSource && <div style={{ color: theme.warning || theme.textMuted }}>Обрано не всіх учениць, тому стара група залишиться активною.</div>}
-              <div style={{ color: theme.textMuted, fontSize: 13 }}>Операцію можна буде скасувати з Історії обʼєднань.</div>
-              <ul style={{ margin: "6px 0 0 18px", padding: 0, color: theme.textMuted, display: "grid", gap: 4 }}>
-                <li>Тільки selected students будуть прибрані зі старої групи.</li>
-                <li>Attendance history НЕ переноситься і НЕ змінюється.</li>
-                <li>Фінанси НЕ змінюються.</li>
-                <li>Undo доступний через Історію обʼєднань.</li>
-              </ul>
+              <div style={{ fontWeight: 900, color: theme.textMain }}>Підсумок перед обʼєднанням</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 900, color: theme.textMain }}>Що буде обʼєднано</div>
+                <div>Група, яку приєднуємо: <b>{getGroupLabel(groupMergeSummary.sourceGroup)}</b></div>
+                <div>Група, яка залишається: <b>{getGroupLabel(groupMergeSummary.targetGroup)}</b></div>
+                <div>Учениці: <b>{groupMergeSummary.selectedStudentsCount} з {groupMergeSummary.sourceStudentsCount}</b></div>
+                <div>Активні абонементи: <b>{groupMergeSummary.movableSubsCount}</b></div>
+              </div>
+              <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                <div style={{ fontWeight: 900, color: theme.textMain }}>Що буде після підтвердження</div>
+                <div>Обрані учениці перейдуть у групу <b>“{groupMergeSummary.targetGroup?.name || groupMergeSummary.targetGroup?.id || "—"}”</b>.</div>
+                <div>Графік: <b>{getGroupMergeScheduleModeLabel(groupMergeDraft.scheduleMode)}</b></div>
+                <div>Стара група буде архівована: <b>{groupMergeSummary.shouldArchiveSource ? "Так" : "Ні"}</b></div>
+                {!groupMergeSummary.shouldArchiveSource && (
+                  <div style={{ border: `1px solid ${theme.warning || theme.border}`, background: theme.input, color: theme.warning || theme.textMain, borderRadius: 12, padding: 10, fontWeight: 900 }}>
+                    Обрано не всіх учениць, тому стара група залишиться активною.
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                <div style={{ fontWeight: 900, color: theme.textMain }}>Що не змінюється</div>
+                <div>Історія відвідувань не переноситься і не змінюється.</div>
+                <div>Фінансові дані не змінюються.</div>
+                <div>Операцію можна буде скасувати в “Історії обʼєднань”.</div>
+              </div>
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 900, color: theme.textMain }}>Технічні деталі</summary>
+                <div style={{ display: "grid", gap: 4, marginTop: 8, color: theme.textMuted, fontSize: 13 }}>
+                  <div>Нові привʼязки учениць: <b>{groupMergeSummary.newLinksCount}</b></div>
+                  <div>Режим графіка: <b>{getGroupMergeScheduleModeLabel(groupMergeDraft.scheduleMode)}</b></div>
+                  <div>Кількість links: <b>{groupMergeSummary.newLinksCount}</b></div>
+                </div>
+              </details>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button type="button" style={btnS} onClick={() => setGroupMergeDraft(null)} disabled={groupMergeBusy}>Скасувати</button>
-              <button type="button" style={{ ...btnP, opacity: groupMergeBusy || !groupMergeDraft.targetGroupId ? 0.6 : 1 }} onClick={executeGroupMerge} disabled={groupMergeBusy || !groupMergeDraft.targetGroupId}>{groupMergeBusy ? "Обʼєднання…" : "Підтвердити merge"}</button>
+              <button type="button" style={{ ...btnP, opacity: groupMergeBusy || !groupMergeDraft.targetGroupId ? 0.6 : 1 }} onClick={executeGroupMerge} disabled={groupMergeBusy || !groupMergeDraft.targetGroupId}>{groupMergeBusy ? "Обʼєднання…" : "Підтвердити обʼєднання"}</button>
             </div>
           </div>
         )}
