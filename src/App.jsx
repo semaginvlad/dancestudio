@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import Analytics from "./pages/Analytics";
@@ -94,6 +94,9 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authBlockMessage, setAuthBlockMessage] = useState("");
+  const [accessChecking, setAccessChecking] = useState(true);
+  const [accessAllowed, setAccessAllowed] = useState(false);
+  const accessCheckSeq = useRef(0);
   const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushInfo, setPushInfo] = useState("");
@@ -344,24 +347,30 @@ export default function App() {
     let mounted = true;
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const currentUser = session?.user || null;
       if (!mounted) return;
+      const currentUser = session?.user || null;
       if (!currentUser) {
         setUser(null);
+        setAccessAllowed(false);
+        setAccessChecking(false);
         setLoading(false);
         return;
       }
-      const allowed = await validateTrainerSession(currentUser);
-      if (!mounted || !allowed) return;
-      setUser(currentUser);
-      await loadAllData(currentUser);
+      await handleAuthenticatedUser(currentUser, "getSession", () => mounted);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
-      if (!session?.user) {
+      const currentUser = session?.user || null;
+      if (!currentUser) {
         setUser(null);
+        setAccessAllowed(false);
+        setAccessChecking(false);
         setLoading(false);
+        return;
+      }
+      if (["SIGNED_IN", "TOKEN_REFRESHED", "USER_UPDATED", "INITIAL_SESSION"].includes(event)) {
+        await handleAuthenticatedUser(currentUser, `auth:${event}`, () => mounted);
       }
     });
 
@@ -399,49 +408,92 @@ export default function App() {
   };
 
   const blockTrainerSession = async (message = "Доступ до CRM закрито. Зверніться до адміністратора.") => {
+    console.info("[access guard] denying trainer session", { message });
     setAuthBlockMessage(message);
     setUser(null);
+    setAccessAllowed(false);
+    setAccessChecking(false);
     clearLoadedData();
     setLoading(false);
     await supabase.auth.signOut();
   };
 
-  const validateTrainerSession = async (currentUser) => {
-    if (!currentUser) return false;
-    if (isAdminEmail(currentUser.email, adminEmails)) {
-      setAuthBlockMessage("");
-      return true;
+  const validateTrainerSession = async (currentUser, source = "unknown") => {
+    if (!currentUser) return { allowed: false, message: "Доступ до CRM не знайдено. Зверніться до адміністратора." };
+    const adminResult = isAdminEmail(currentUser.email, adminEmails);
+    console.info("[access guard] checking", { source, email: currentUser.email || null, isAdmin: adminResult });
+    if (adminResult) {
+      console.info("[access guard] decision", { source, email: currentUser.email || null, allowed: true, reason: "admin" });
+      return { allowed: true, isAdmin: true };
     }
 
     try {
       const trainerProfile = await db.fetchMyTrainerProfile();
+      console.info("[access guard] trainer profile", {
+        source,
+        email: currentUser.email || null,
+        profile: trainerProfile,
+        access_disabled_at: trainerProfile?.accessDisabledAt || null,
+        archived_at: trainerProfile?.archivedAt || null,
+        is_active: trainerProfile?.isActive,
+      });
       if (!trainerProfile) {
-        await blockTrainerSession("Доступ до CRM не знайдено. Зверніться до адміністратора.");
-        return false;
+        return { allowed: false, message: "Доступ до CRM не знайдено. Зверніться до адміністратора.", reason: "missing_profile" };
       }
       if (!trainerProfile.hasAccessGuardFields) {
         console.warn("[access guard] crm_get_my_trainer_profile must return archived_at and access_disabled_at for full enforcement");
-        await blockTrainerSession("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
-        return false;
+        return { allowed: false, message: "Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.", reason: "missing_guard_fields" };
       }
       if (trainerProfile.accessDisabledAt) {
-        await blockTrainerSession("Доступ до CRM закрито. Зверніться до адміністратора.");
-        return false;
+        return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "access_disabled" };
       }
-      if (trainerProfile.archivedAt || trainerProfile.isActive === false) {
-        await blockTrainerSession("Профіль тренера архівовано або деактивовано. Зверніться до адміністратора.");
-        return false;
+      if (trainerProfile.archivedAt) {
+        return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "archived" };
       }
-      setAuthBlockMessage("");
-      return true;
+      if (trainerProfile.isActive === false) {
+        return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "inactive" };
+      }
+      return { allowed: true, isAdmin: false, trainerProfile };
     } catch (e) {
       console.warn("[access guard] trainer profile check failed", e);
-      await blockTrainerSession("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
-      return false;
+      return { allowed: false, message: "Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.", reason: "profile_check_failed" };
     }
   };
 
+  const handleAuthenticatedUser = async (currentUser, source = "unknown", isStillMounted = () => true) => {
+    const seq = accessCheckSeq.current + 1;
+    accessCheckSeq.current = seq;
+    setAccessChecking(true);
+    setAccessAllowed(false);
+    setUser(null);
+    setLoading(true);
+
+    const guard = await validateTrainerSession(currentUser, source);
+    console.info("[access guard] decision", {
+      source,
+      email: currentUser?.email || null,
+      allowed: !!guard.allowed,
+      reason: guard.reason || (guard.isAdmin ? "admin" : "allowed"),
+    });
+    if (!isStillMounted() || accessCheckSeq.current !== seq) return false;
+
+    if (!guard.allowed) {
+      await blockTrainerSession(guard.message || "Доступ до CRM закрито. Зверніться до адміністратора.");
+      return false;
+    }
+
+    setAuthBlockMessage("");
+    setAccessAllowed(true);
+    setUser(currentUser);
+    console.info("[access guard] loadAllData start", { source, email: currentUser?.email || null });
+    await loadAllData(currentUser);
+    if (!isStillMounted() || accessCheckSeq.current !== seq) return true;
+    setAccessChecking(false);
+    return true;
+  };
+
   const loadAllData = async (currentUser = user) => {
+    console.info("[access guard] loadAllData invoked", { email: currentUser?.email || null, isAdmin: currentUser ? isAdminEmail(currentUser.email, adminEmails) : false });
     setLoading(true);
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
@@ -552,10 +604,7 @@ export default function App() {
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPass });
       if (error) throw error;
       const currentUser = data?.user || null;
-      const allowed = await validateTrainerSession(currentUser);
-      if (!allowed) return;
-      setUser(currentUser);
-      await loadAllData(currentUser);
+      await handleAuthenticatedUser(currentUser, "signInWithPassword");
     } catch (e) {
       setAuthBlockMessage("");
       alert("Помилка входу: перевірте email та пароль");
@@ -1543,9 +1592,9 @@ export default function App() {
     if (row) { setFilterFromDate(row[0]); setFilterToDate(row[1]); }
   }, [filterDatePreset, setFilterFromDate, setFilterToDate]);
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18}}>Завантаження...</div>;
+  if(loading || accessChecking) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18}}>Завантаження...</div>;
 
-  if (!user) {
+  if (!user || !accessAllowed) {
     return (
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg, fontFamily:"'Poppins',sans-serif"}}>
         <form onSubmit={handleLogin} style={{background:theme.card, padding:40, borderRadius:32, width:350, boxShadow:"0 20px 50px rgba(0,0,0,0.1)"}}>
