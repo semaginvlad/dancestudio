@@ -230,6 +230,101 @@ export async function updateGroup(id, g) {
   return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
 }
 
+
+
+// ─── GROUP MERGE OPERATIONS ───
+const mapGroupMergeOperation = (row) => ({
+  id: row.id,
+  createdAt: row.created_at,
+  sourceGroupId: row.source_group_id,
+  targetGroupId: row.target_group_id,
+  selectedStudentIds: row.selected_student_ids || [],
+  newTargetLinksStudentIds: row.new_target_links_student_ids || [],
+  removedSourceLinksStudentIds: row.removed_source_links_student_ids || [],
+  movedSubscriptionIds: row.moved_subscription_ids || [],
+  previousSubscriptionGroupIds: row.previous_subscription_group_ids || {},
+  previousTargetSchedule: row.previous_target_schedule || [],
+  newTargetSchedule: row.new_target_schedule || [],
+  previousSourceArchiveState: row.previous_source_archive_state || null,
+  sourceWasArchivedBefore: !!row.source_was_archived_before,
+  scheduleMode: row.schedule_mode || 'keep_target',
+  executedBy: row.executed_by || null,
+  status: row.status || (row.undone_at ? 'undone' : 'completed'),
+  completedAt: row.completed_at || null,
+  failedAt: row.failed_at || null,
+  errorMessage: row.error_message || null,
+  undoneAt: row.undone_at || null,
+  undoneBy: row.undone_by || null,
+});
+
+export async function fetchGroupMergeOperations() {
+  const { data, error } = await supabase
+    .from('group_merge_operations')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map(mapGroupMergeOperation)
+}
+
+export async function insertGroupMergeOperation(operation) {
+  const payload = {
+    id: operation.id,
+    source_group_id: operation.sourceGroupId,
+    target_group_id: operation.targetGroupId,
+    selected_student_ids: operation.selectedStudentIds || [],
+    new_target_links_student_ids: operation.newTargetLinksStudentIds || [],
+    removed_source_links_student_ids: operation.removedSourceLinksStudentIds || [],
+    moved_subscription_ids: operation.movedSubscriptionIds || [],
+    previous_subscription_group_ids: operation.previousSubscriptionGroupIds || {},
+    previous_target_schedule: operation.previousTargetSchedule || [],
+    new_target_schedule: operation.newTargetSchedule || [],
+    previous_source_archive_state: operation.previousSourceArchiveState || null,
+    source_was_archived_before: !!operation.sourceWasArchivedBefore,
+    schedule_mode: operation.scheduleMode || 'keep_target',
+    executed_by: operation.executedBy || null,
+    status: operation.status || 'pending',
+    completed_at: operation.completedAt || null,
+    failed_at: operation.failedAt || null,
+    error_message: operation.errorMessage || null,
+  }
+  if (operation.createdAt !== undefined) payload.created_at = operation.createdAt
+  const { data, error } = await supabase.from('group_merge_operations').insert(payload).select().single()
+  if (error) throw error
+  return mapGroupMergeOperation(data)
+}
+
+export async function updateGroupMergeOperationStatus(id, status, patch = {}) {
+  const payload = { status }
+  if (status === 'completed') payload.completed_at = patch.completedAt || new Date().toISOString()
+  if (status === 'failed') {
+    payload.failed_at = patch.failedAt || new Date().toISOString()
+    payload.error_message = patch.errorMessage || null
+  }
+  const { data, error } = await supabase
+    .from('group_merge_operations')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return mapGroupMergeOperation(data)
+}
+
+export async function markGroupMergeOperationUndone(id, { undoneBy } = {}) {
+  const payload = { status: 'undone', undone_at: new Date().toISOString() }
+  if (undoneBy !== undefined) payload.undone_by = undoneBy
+  const { data, error } = await supabase
+    .from('group_merge_operations')
+    .update(payload)
+    .eq('id', id)
+    .eq('status', 'completed')
+    .is('undone_at', null)
+    .select()
+    .single()
+  if (error) throw error
+  return mapGroupMergeOperation(data)
+}
+
 export async function insertGroup(group) {
   const payload = {
     id: group.id,
