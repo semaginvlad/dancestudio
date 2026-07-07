@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard, resolveAttendanceClassification } from "../shared/analytics";
-import { PLAN_TYPES, theme as appTheme } from "../shared/constants";
+import { PLAN_TYPES, WEEKDAYS, theme as appTheme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
+import { resolveGroupTrainer } from "../shared/groupTrainer";
 
 const theme = {
   get bg() { return appTheme.bg; },
@@ -257,6 +258,7 @@ export default function TrainersTab({
   trainerGroups = [],
   setTrainerGroups,
   groups = [],
+  directions = [],
   students = [],
   studentGrps = [],
   subs = [],
@@ -268,6 +270,8 @@ export default function TrainersTab({
   const [isCreateMode, setIsCreateMode] = useState(false);
   const [draft, setDraft] = useState({ firstName: "", lastName: "", email: "", phone: "", telegram: "", instagramHandle: "", notes: "", isActive: true, createAccess: false, password: "" });
   const [saving, setSaving] = useState(false);
+  const [groupDraftIds, setGroupDraftIds] = useState([]);
+  const [savingGroups, setSavingGroups] = useState(false);
   const [trainerSearch, setTrainerSearch] = useState("");
   const [trainerArchiveFilter, setTrainerArchiveFilter] = useStickyState("active", "ds_trainers_archive_filter");
   const [periodMonthIso, setPeriodMonthIso] = useStickyState(toISO(monthStart(new Date())), "ds_trainers_selectedMonth");
@@ -339,6 +343,10 @@ export default function TrainersTab({
     () => trainerGroups.filter((tg) => tg.trainerId === selectedTrainerId).map((tg) => tg.groupId),
     [trainerGroups, selectedTrainerId],
   );
+
+  useEffect(() => {
+    setGroupDraftIds(trainerGroupIds.map(String));
+  }, [trainerGroupIds.join("|")]);
 
   const trainerGroupSet = useMemo(() => new Set(trainerGroupIds.map(String)), [trainerGroupIds]);
   const trainerBoundGroups = useMemo(() => groups.filter((g) => trainerGroupSet.has(String(g.id))), [groups, trainerGroupSet]);
@@ -1069,21 +1077,68 @@ export default function TrainersTab({
     }
   };
 
-  const toggleGroup = async (groupId, checked) => {
-    if (!selectedTrainerId) return;
-    try {
-      if (checked) {
-        const row = await db.upsertTrainerGroup(selectedTrainerId, groupId);
-        setTrainerGroups((prev) => {
-          if (prev.some((x) => x.trainerId === row.trainerId && x.groupId === row.groupId)) return prev;
-          return [...prev, row];
-        });
-      } else {
-        await db.deleteTrainerGroup(selectedTrainerId, groupId);
-        setTrainerGroups((prev) => prev.filter((x) => !(x.trainerId === selectedTrainerId && x.groupId === groupId)));
+
+  const directionMap = useMemo(() => Object.fromEntries((directions || []).map((d) => [String(d.id), d])), [directions]);
+  const activeTrainerGroups = useMemo(() => (groups || []).filter((g) => !g.archived_at && g.is_active !== false && g.active !== false), [groups]);
+  const groupDraftSet = useMemo(() => new Set(groupDraftIds.map(String)), [groupDraftIds]);
+
+  const parseGroupSchedule = (schedule) => {
+    if (Array.isArray(schedule)) return schedule;
+    if (typeof schedule === "string") {
+      try {
+        const parsed = JSON.parse(schedule);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
       }
+    }
+    return [];
+  };
+
+  const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
+    .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
+    .join(" · ");
+
+  const setGroupDraftChecked = (groupId, checked) => {
+    const normalized = String(groupId);
+    setGroupDraftIds((prev) => {
+      const current = new Set(prev.map(String));
+      if (checked) current.add(normalized);
+      else current.delete(normalized);
+      return Array.from(current);
+    });
+  };
+
+  const saveTrainerGroups = async () => {
+    if (!selectedTrainerId) return;
+    setSavingGroups(true);
+    try {
+      const desired = new Set(groupDraftIds.map(String));
+      const existing = new Set(trainerGroupIds.map(String));
+      const toAdd = Array.from(desired).filter((groupId) => !existing.has(groupId));
+      const toRemove = Array.from(existing).filter((groupId) => !desired.has(groupId));
+
+      const addedRows = [];
+      for (const groupId of toAdd) {
+        addedRows.push(await db.upsertTrainerGroup(selectedTrainerId, groupId));
+      }
+      for (const groupId of toRemove) {
+        await db.deleteTrainerGroup(selectedTrainerId, groupId);
+      }
+
+      setTrainerGroups((prev) => {
+        const withoutRemoved = prev.filter((row) => !(String(row.trainerId) === String(selectedTrainerId) && toRemove.includes(String(row.groupId))));
+        const next = [...withoutRemoved];
+        addedRows.forEach((row) => {
+          if (!next.some((x) => String(x.trainerId) === String(row.trainerId) && String(x.groupId) === String(row.groupId))) next.push(row);
+        });
+        return next;
+      });
+      alert("Групи тренера збережено");
     } catch (e) {
-      alert(e?.message || "Не вдалося оновити прив'язку груп");
+      alert(e?.message || "Не вдалося зберегти групи тренера");
+    } finally {
+      setSavingGroups(false);
     }
   };
 
@@ -1410,14 +1465,34 @@ export default function TrainersTab({
             </div>
 
             <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Прив'язані групи</div>
-              <div style={{ display: "grid", gap: 6 }}>
-                {groups.map((g) => (
-                  <label key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 8px", color: theme.textSoft }}>
-                    <input type="checkbox" checked={trainerGroupIds.includes(g.id)} onChange={(e) => toggleGroup(g.id, e.target.checked)} />
-                    <span style={{ fontSize: 12 }}>{g.name}</span>
-                  </label>
-                ))}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Групи тренера</div>
+                  {!trainerGroupIds.length && <div style={{ fontSize: 11, color: theme.warn, marginTop: 3 }}>Тренер ще не привʼязаний до жодної групи, тому не бачитиме відвідування.</div>}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                <button type="button" onClick={() => setGroupDraftIds(activeTrainerGroups.map((g) => String(g.id)))} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer", fontSize: 12 }}>Обрати всі</button>
+                <button type="button" onClick={() => setGroupDraftIds([])} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer", fontSize: 12 }}>Зняти всі</button>
+                <button type="button" disabled={savingGroups} onClick={saveTrainerGroups} style={{ border: "none", borderRadius: 9, background: theme.primary, color: "#fff", padding: "6px 10px", cursor: savingGroups ? "wait" : "pointer", fontSize: 12, fontWeight: 800 }}>{savingGroups ? "Збереження..." : "Зберегти групи"}</button>
+              </div>
+              <div style={{ display: "grid", gap: 6, maxHeight: 260, overflow: "auto", paddingRight: 2 }}>
+                {activeTrainerGroups.map((g) => {
+                  const direction = directionMap[String(g.directionId || g.direction_id || "")];
+                  const trainerInfo = resolveGroupTrainer({ group: g, trainerGroups, trainers });
+                  return (
+                    <label key={g.id} style={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr)", gap: 8, border: `1px solid ${groupDraftSet.has(String(g.id)) ? theme.primary : theme.border}`, borderRadius: 9, padding: "7px 8px", color: theme.textSoft, background: groupDraftSet.has(String(g.id)) ? `${theme.primary}1f` : theme.panel }}>
+                      <input type="checkbox" checked={groupDraftSet.has(String(g.id))} onChange={(e) => setGroupDraftChecked(g.id, e.target.checked)} />
+                      <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: theme.text }}>{g.name || g.id}</span>
+                        <span style={{ fontSize: 11 }}>Напрямок: {direction?.name || g.directionId || g.direction_id || "—"}</span>
+                        <span style={{ fontSize: 11 }}>Графік: {formatGroupSchedule(g.schedule) || "—"}</span>
+                        <span style={{ fontSize: 11 }}>Поточний тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {!activeTrainerGroups.length && <div style={{ fontSize: 12, color: theme.textSoft }}>Активних груп не знайдено.</div>}
               </div>
             </div>
           </>

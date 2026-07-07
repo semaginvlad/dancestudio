@@ -2174,6 +2174,7 @@ export default function App() {
                 trainerGroups={trainerGroups}
                 setTrainerGroups={setTrainerGroups}
                 groups={groups}
+                directions={directionsList}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}

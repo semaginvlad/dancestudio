@@ -159,6 +159,10 @@ const detectSchedulerStatus = () => {
 
 const cleanTrainerEmail = (value) => String(value || "").trim().toLowerCase();
 const cleanTrainerId = (value) => String(value || "").trim();
+const isEmailAlreadyExistsError = (error) => {
+  const text = `${error?.message || ""} ${error?.code || ""} ${error?.status || ""}`.toLowerCase();
+  return text.includes("already") || text.includes("exists") || text.includes("registered") || text.includes("duplicate");
+};
 
 const fetchTrainerForAdminOperation = async (supabase, trainerId) => {
   const { data, error } = await supabase.from("trainers").select("*").eq("id", trainerId).single();
@@ -193,7 +197,15 @@ const handleCreateAuthUserForTrainer = async (req, res) => {
     user_metadata: { role: "trainer", trainer_id: trainerId },
     app_metadata: { role: "trainer", trainer_id: trainerId },
   });
-  if (error) throw error;
+  if (error) {
+    if (isEmailAlreadyExistsError(error)) {
+      return res.status(409).json({
+        error: "auth_email_already_exists",
+        message: "Користувач з таким email вже існує. Використайте іншу пошту або привʼяжіть доступ до існуючого користувача.",
+      });
+    }
+    throw error;
+  }
 
   const authUserId = data?.user?.id;
   if (!authUserId) return res.status(500).json({ error: "auth_user_not_created" });
@@ -925,6 +937,7 @@ export default async function handler(req, res) {
     console.error("trainer notifications handler error:", String(error?.message || error));
     return res.status(500).json({
       error: "Trainer notifications operation failed",
+      details: String(error?.message || error),
       op,
     });
   }

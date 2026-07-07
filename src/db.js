@@ -472,7 +472,7 @@ export async function callAdminTrainerOperation(payload = {}) {
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.details || data?.error || "Admin trainers API failed");
+  if (!res.ok) throw new Error(data?.message || data?.details || data?.error || "Admin trainers API failed");
   return data;
 }
 
