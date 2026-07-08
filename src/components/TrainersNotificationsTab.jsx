@@ -52,6 +52,7 @@ export default function TrainersNotificationsTab({
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [showMessageTemplate, setShowMessageTemplate] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState(null);
+  const [automationSubtab, setAutomationSubtab] = useState("admin");
   const [showArchivedRecipients, setShowArchivedRecipients] = useState(false);
   const [adminChatDraft, setAdminChatDraft] = useState("");
   const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
@@ -1039,36 +1040,15 @@ export default function TrainersNotificationsTab({
     lineHeight: 1.2,
   };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
-      <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: theme.textMuted, fontWeight: 700 }}><input type="checkbox" checked={showArchivedRecipients} onChange={(e) => setShowArchivedRecipients(e.target.checked)} /> Архівні</label></div>
-        {!notificationRecipients.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає отримувачів.</div>}
-        {notificationRecipients.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            onClick={() => setSelectedRecipientId(d.id)}
-            style={{
-              textAlign: "left",
-              border: `1px solid ${selectedRecipient?.id === d.id ? theme.primary : theme.border}`,
-              borderRadius: 10,
-              background: selectedRecipient?.id === d.id ? `${theme.primary}18` : theme.input,
-              color: theme.textMain,
-              padding: "8px 10px",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontWeight: 800, fontSize: 14 }}>{d.title || d.id}{d.isTest ? " (test)" : ""}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-              <span style={recipientChipBase}>{d.telegram ? `TG ${String(d.telegram).startsWith("@") ? d.telegram : `@${d.telegram}`}` : "TG —"}</span>
-              <span style={{ ...recipientChipBase, border: `1px solid ${d.hasAuth ? (isLightTheme ? "#22C55E" : theme.success) : (isLightTheme ? "#CBD5E1" : theme.border)}`, background: d.hasAuth ? (isLightTheme ? "#DCFCE7" : `${theme.success}22`) : (isLightTheme ? "#F8FAFC" : theme.input), color: d.hasAuth ? (isLightTheme ? "#14532D" : "#9FF5C6") : (isLightTheme ? "#374151" : theme.textMuted) }}>{d.hasAuth ? "Push ✓" : "Push —"}</span>
-              {d.isArchived && <span style={recipientChipBase}>архівний</span>}
-            </div>
-          </button>
-        ))}
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, width: "fit-content", border: `1px solid ${theme.border}` }}>
+        <button type="button" onClick={() => setAutomationSubtab("admin")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: automationSubtab === "admin" ? theme.primary : "transparent", color: automationSubtab === "admin" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 800 }}>Адмін-звіт</button>
+        <button type="button" onClick={() => setAutomationSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: automationSubtab === "trainers" ? theme.primary : "transparent", color: automationSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 800 }}>Тренерські нагадування</button>
       </div>
 
-      <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
+      {automationSubtab === "admin" ? (
+        <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
+          <div style={{ width: "fit-content", border: `1px solid ${theme.primary}55`, borderRadius: 999, background: `${theme.primary}18`, color: theme.primary, padding: "5px 10px", fontSize: 12, fontWeight: 900 }}>Адміністратор</div>
         <form onSubmit={saveAdminNotificationSettings} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div>
@@ -1109,6 +1089,39 @@ export default function TrainersNotificationsTab({
           </div>
         </form>
 
+
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
+      <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: theme.textMuted, fontWeight: 700 }}><input type="checkbox" checked={showArchivedRecipients} onChange={(e) => setShowArchivedRecipients(e.target.checked)} /> Архівні</label></div>
+        {!notificationRecipients.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає отримувачів.</div>}
+        {notificationRecipients.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => setSelectedRecipientId(d.id)}
+            style={{
+              textAlign: "left",
+              border: `1px solid ${selectedRecipient?.id === d.id ? theme.primary : theme.border}`,
+              borderRadius: 10,
+              background: selectedRecipient?.id === d.id ? `${theme.primary}18` : theme.input,
+              color: theme.textMain,
+              padding: "8px 10px",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 14 }}>{d.title || d.id}{d.isTest ? " (test)" : ""}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+              <span style={recipientChipBase}>{d.telegram ? `TG ${String(d.telegram).startsWith("@") ? d.telegram : `@${d.telegram}`}` : "TG —"}</span>
+              <span style={{ ...recipientChipBase, border: `1px solid ${d.hasAuth ? (isLightTheme ? "#22C55E" : theme.success) : (isLightTheme ? "#CBD5E1" : theme.border)}`, background: d.hasAuth ? (isLightTheme ? "#DCFCE7" : `${theme.success}22`) : (isLightTheme ? "#F8FAFC" : theme.input), color: d.hasAuth ? (isLightTheme ? "#14532D" : "#9FF5C6") : (isLightTheme ? "#374151" : theme.textMuted) }}>{d.hasAuth ? "Push ✓" : "Push —"}</span>
+              {d.isArchived && <span style={recipientChipBase}>архівний</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила автоматичних сповіщень</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
           <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
@@ -1220,6 +1233,8 @@ export default function TrainersNotificationsTab({
           )}
         </div>
       </div>
+        </div>
+      )}
     </div>
   );
 }
