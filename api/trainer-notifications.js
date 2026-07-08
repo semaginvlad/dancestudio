@@ -20,7 +20,7 @@ const readinessError = (res, error) => res.status(503).json({
   requiredSql: ["sql/trainer_notification_state.sql", "sql/trainer_dispatch_history.sql"],
 });
 
-const ALLOWED_OPS = ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules", "create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"];
+const ALLOWED_OPS = ["readiness", "state", "history", "schedule-rules", "dispatch-schedule-rules", "dispatch-admin-daily-digest", "create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"];
 const SENSITIVE_LOG_KEY_RE = /secret|token|authorization|password|key/i;
 
 const firstValue = (value) => {
@@ -136,6 +136,91 @@ const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {
   }
 
   return { errors, payload };
+};
+
+
+const sendAdminNotificationTestMessage = async ({ chatId, message = "Тестове адмін-сповіщення SOROKA CRM ✅" }) => {
+  const peer = String(chatId || "").trim();
+  if (!peer) return { ok: false, status: 400, error: "missing_telegram_chat_id" };
+  try {
+    await withTelegramClient(async (client) => {
+      const username = peer.startsWith("@") ? peer : undefined;
+      const entity = await resolveTelegramPeer(client, { chatId: username ? undefined : peer, username, context: "admin-notification-test" });
+      await client.sendMessage(entity, { message });
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, status: 502, error: "telegram_send_failed", details: String(error?.message || error) };
+  }
+};
+
+
+const normalizeAdminNotificationSettingsPayload = (body = {}, adminUser = {}) => {
+  const payload = body?.payload && typeof body.payload === "object" ? body.payload : body;
+  const cleanText = (value) => String(value || "").trim();
+  const cleanInt = (value, fallback, min, max) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  return {
+    admin_user_id: adminUser.id,
+    admin_email: adminUser.email || cleanText(payload.admin_email || payload.adminEmail) || null,
+    telegram_chat_id: cleanText(payload.telegram_chat_id || payload.telegramChatId) || null,
+    enabled: !!payload.enabled,
+    send_time_local: cleanText(payload.send_time_local || payload.sendTimeLocal) || "08:00",
+    timezone: cleanText(payload.timezone) || "Europe/Kyiv",
+    include_today_trials: payload.include_today_trials ?? payload.includeTodayTrials ?? true,
+    include_expiring_subscriptions: payload.include_expiring_subscriptions ?? payload.includeExpiringSubscriptions ?? true,
+    include_inactive_students: payload.include_inactive_students ?? payload.includeInactiveStudents ?? true,
+    expiring_lessons_threshold: cleanInt(payload.expiring_lessons_threshold ?? payload.expiringLessonsThreshold, 2, 0, 50),
+    expiring_days_threshold: cleanInt(payload.expiring_days_threshold ?? payload.expiringDaysThreshold, 7, 0, 365),
+    inactive_days_threshold: cleanInt(payload.inactive_days_threshold ?? payload.inactiveDaysThreshold, 14, 1, 365),
+  };
+};
+
+const handleLoadAdminNotificationSettings = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const { data, error } = await supabase
+    .from("admin_notification_settings")
+    .select("*")
+    .eq("admin_user_id", req.adminUser.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: "settings_read_failed", details: String(error.message || error) });
+  return res.status(200).json({ ok: true, settings: data || null });
+};
+
+const handleSaveAdminNotificationSettings = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const payload = normalizeAdminNotificationSettingsPayload(req.body || {}, req.adminUser);
+  const { data, error } = await supabase
+    .from("admin_notification_settings")
+    .upsert(payload, { onConflict: "admin_user_id" })
+    .select("*")
+    .single();
+  if (error) return res.status(500).json({ error: "settings_save_failed", details: String(error.message || error) });
+  return res.status(200).json({ ok: true, settings: data });
+};
+
+const handleAdminNotificationTest = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const { data: settings, error } = await supabase
+    .from("admin_notification_settings")
+    .select("id, admin_user_id, telegram_chat_id, enabled")
+    .eq("admin_user_id", req.adminUser.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: "settings_read_failed", details: String(error.message || error) });
+
+  const requestedChatId = String(req.body?.telegramChatId || req.body?.telegram_chat_id || "").trim();
+  const chatId = requestedChatId || String(settings?.telegram_chat_id || "").trim();
+  if (!chatId) return res.status(400).json({ error: "missing_telegram_chat_id", details: "Спочатку виберіть Telegram-чат адміністратора" });
+
+  const sent = await sendAdminNotificationTestMessage({ chatId });
+  if (!sent.ok) return res.status(sent.status).json({ error: sent.error, details: sent.details });
+  return res.status(200).json({ ok: true });
 };
 
 const detectSchedulerStatus = () => {
@@ -611,6 +696,200 @@ const resolveTrainerTelegramTarget = (rule, trainerRows, telegramMetaRows) => {
   return { chatId: null, telegramTargetSource: "none", telegramReason: "missing_chat_id", trainerFound: true, trainerTelegram };
 };
 
+
+const parseGroupSchedule = (schedule) => {
+  if (Array.isArray(schedule)) return schedule;
+  if (typeof schedule === "string") {
+    try {
+      const parsed = JSON.parse(schedule);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const parseScheduleWeekday = (raw) => {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n >= 1 && n <= 7) return n;
+    if (n === 0) return 7;
+  }
+  const map = { mon: 1, monday: 1, пн: 1, tue: 2, tuesday: 2, вт: 2, wed: 3, wednesday: 3, ср: 3, thu: 4, thursday: 4, чт: 4, fri: 5, friday: 5, пт: 5, sat: 6, saturday: 6, сб: 6, sun: 7, sunday: 7, нд: 7 };
+  return map[String(raw).trim().toLowerCase()] || null;
+};
+
+const scheduleRowWeekday = (row = {}) => parseScheduleWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
+const scheduleRowTime = (row = {}) => String(row.time || row.start || row.startTime || row.start_time || row.hour || "").trim();
+const studentDisplayName = (student = {}, fallback = "") => String(student.name || [student.first_name, student.last_name].filter(Boolean).join(" ") || fallback || "Без імені").trim();
+
+const addDaysIso = (isoDate, days) => {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const isoWeekday = (isoDate) => {
+  const day = new Date(`${isoDate}T00:00:00.000Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+};
+
+const groupScheduleInfo = (group = {}) => {
+  const rows = parseGroupSchedule(group.schedule);
+  const weekdays = rows.map(scheduleRowWeekday).filter(Boolean);
+  return { rows, weekdays: Array.from(new Set(weekdays)) };
+};
+
+const groupHasLessonOnDate = (group = {}, isoDate) => groupScheduleInfo(group).weekdays.includes(isoWeekday(isoDate));
+
+const recentLessonDatesForGroup = (group = {}, localDate, count) => {
+  const dates = [];
+  for (let offset = 0; offset >= -45 && dates.length < count; offset -= 1) {
+    const date = addDaysIso(localDate, offset);
+    if (groupHasLessonOnDate(group, date)) dates.push(date);
+  }
+  return dates;
+};
+
+const buildAdminDailyDigestMessage = ({ settings, localDate, groups = [], directionsById = {}, trials = [], studentGroups = [], studentsById = {}, subs = [], attendance = [] }) => {
+  const activeGroups = groups.filter((g) => !g.archived_at && g.is_active !== false);
+  const todayGroups = activeGroups.filter((g) => groupHasLessonOnDate(g, localDate));
+  const groupById = Object.fromEntries(activeGroups.map((g) => [String(g.id), g]));
+  const todayGroupIds = new Set(todayGroups.map((g) => String(g.id)));
+  const lines = ["Добрий ранок, SOROKA Admin 🌿", ""];
+
+  const section = (title, rows) => {
+    lines.push(`${title}:`);
+    if (!rows.length) lines.push("— немає");
+    else rows.forEach((row) => lines.push(`• ${row}`));
+    lines.push("");
+  };
+
+  if (settings.include_today_trials !== false) {
+    const trialRows = (trials || [])
+      .filter((t) => String(t.trial_date || "") === localDate && !["cancelled", "declined"].includes(String(t.status || "").toLowerCase()))
+      .map((t) => {
+        const group = groupById[String(t.group_id || "")] || {};
+        const direction = directionsById[String(t.direction_id || group.direction_id || "")]?.name || "";
+        const slot = groupScheduleInfo(group).rows.find((row) => scheduleRowWeekday(row) === isoWeekday(localDate));
+        const time = scheduleRowTime(slot);
+        const phone = t.phone || t.contact || t.telegram || "";
+        return [t.name || "Без імені", group.name ? `група ${group.name}` : "група —", direction || null, time ? `час ${time}` : null, phone ? `тел. ${phone}` : null].filter(Boolean).join(" · ");
+      });
+    section("Пробні на сьогодні", trialRows);
+  }
+
+  if (settings.include_expiring_subscriptions !== false) {
+    const problemRows = [];
+    for (const link of (studentGroups || []).filter((row) => todayGroupIds.has(String(row.group_id || "")))) {
+      const studentId = String(link.student_id || "");
+      const groupId = String(link.group_id || "");
+      const activeSub = (subs || []).some((sub) => String(sub.student_id || "") === studentId && String(sub.group_id || "") === groupId && hasActiveSubscription(sub, localDate));
+      if (!activeSub) {
+        const student = studentsById[studentId] || {};
+        const group = groupById[groupId] || {};
+        problemRows.push(`${studentDisplayName(student, studentId)} · ${group.name || groupId}`);
+      }
+    }
+    section("Проблемні абонементи на сьогодні", problemRows);
+  }
+
+  if (settings.include_inactive_students !== false) {
+    const absenceRows = [];
+    const attendanceSet = new Set((attendance || []).map((row) => `${String(row.student_id || row.studentId || "")}:${String(row.group_id || row.groupId || "")}:${String(row.date || "").slice(0, 10)}`));
+    for (const group of todayGroups) {
+      const scheduleDaysCount = groupScheduleInfo(group).weekdays.length;
+      const threshold = scheduleDaysCount >= 3 ? 3 : scheduleDaysCount >= 2 ? 2 : null;
+      if (!threshold) continue;
+      const lessonDates = recentLessonDatesForGroup(group, localDate, threshold);
+      if (lessonDates.length < threshold) continue;
+      const groupId = String(group.id || "");
+      for (const link of (studentGroups || []).filter((row) => String(row.group_id || "") === groupId)) {
+        const studentId = String(link.student_id || "");
+        const missedAll = lessonDates.every((date) => !attendanceSet.has(`${studentId}:${groupId}:${date}`));
+        if (missedAll) absenceRows.push(`${studentDisplayName(studentsById[studentId] || {}, studentId)} · ${group.name || groupId} · ${threshold} підряд`);
+      }
+    }
+    section("Пропуски підряд", absenceRows);
+  }
+
+  return lines.join("\n").trim();
+};
+
+const handleDispatchAdminDailyDigest = async (req, res) => {
+  if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
+  const cron = requireCronSecret(req);
+  if (!cron.ok) return authError(res, cron);
+
+  const dryRun = isDryRunFlag(firstValue(req.query?.dryRun) ?? getUrlSearchParam(req, "dryRun") ?? firstValue(req.body?.dryRun));
+  const force = isDryRunFlag(firstValue(req.query?.force) ?? getUrlSearchParam(req, "force") ?? firstValue(req.body?.force));
+  const toleranceMinutes = parseToleranceMinutes(firstValue(req.query?.toleranceMinutes) ?? getUrlSearchParam(req, "toleranceMinutes") ?? firstValue(req.body?.toleranceMinutes));
+  const now = new Date();
+  const supabase = buildSupabase();
+
+  const { data: settingsRows, error: settingsError } = await supabase.from("admin_notification_settings").select("*").eq("enabled", true);
+  if (settingsError) return res.status(500).json({ error: "admin_settings_read_failed", details: String(settingsError.message || settingsError) });
+
+  const results = [];
+  for (const settings of settingsRows || []) {
+    const timezone = String(settings.timezone || "Europe/Kyiv").trim() || "Europe/Kyiv";
+    const localDate = getLocalDateParts(timezone, now);
+    const { hhmm } = getLocalWeekdayAndTime(timezone, now);
+    const sendTime = String(settings.send_time_local || "08:00").slice(0, 5);
+
+    if (!force && !isDueByTolerance(hhmm, sendTime, toleranceMinutes)) {
+      results.push({ admin_user_id: settings.admin_user_id, status: "skipped", reason: "time_window_mismatch", timezone, hhmm, sendTime, localDate });
+      continue;
+    }
+
+    const chatId = String(settings.telegram_chat_id || "").trim();
+    if (!chatId) {
+      results.push({ admin_user_id: settings.admin_user_id, status: "skipped", reason: "missing_telegram_chat_id", localDate });
+      continue;
+    }
+
+    const [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw] = await Promise.all([
+      supabase.from("groups").select("id,name,direction_id,schedule,archived_at,is_active"),
+      supabase.from("directions").select("id,name"),
+      supabase.from("trial_bookings").select("id,group_id,direction_id,name,phone,contact,telegram,trial_date,status"),
+      supabase.from("student_groups").select("student_id,group_id"),
+      supabase.from("students").select("id,name,first_name,last_name"),
+      supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,plan_type,total_trainings,used_trainings"),
+      supabase.from("attendance").select("id,student_id,group_id,date"),
+    ]);
+    const firstErr = [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw].find((r) => r.error);
+    if (firstErr?.error) {
+      results.push({ admin_user_id: settings.admin_user_id, status: "failed", reason: "data_load_failed", details: String(firstErr.error.message || firstErr.error) });
+      continue;
+    }
+
+    const message = buildAdminDailyDigestMessage({
+      settings,
+      localDate,
+      groups: groupsRaw.data || [],
+      directionsById: Object.fromEntries((directionsRaw.data || []).map((d) => [String(d.id), d])),
+      trials: trialsRaw.data || [],
+      studentGroups: studentGroupsRaw.data || [],
+      studentsById: Object.fromEntries((studentsRaw.data || []).map((st) => [String(st.id), st])),
+      subs: subsRaw.data || [],
+      attendance: attendanceRaw.data || [],
+    });
+
+    if (dryRun) {
+      results.push({ admin_user_id: settings.admin_user_id, status: "dry-run", localDate, chatId, message });
+      continue;
+    }
+
+    const sent = await sendAdminNotificationTestMessage({ chatId, message });
+    if (!sent.ok) results.push({ admin_user_id: settings.admin_user_id, status: "failed", reason: sent.error, details: sent.details, localDate });
+    else results.push({ admin_user_id: settings.admin_user_id, status: "sent", localDate });
+  }
+
+  return res.status(200).json({ ok: true, checked: (settingsRows || []).length, results });
+};
+
 const handleDispatchScheduleRules = async (req, res) => {
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
   const cron = requireCronSecret(req);
@@ -929,9 +1208,14 @@ const handleScheduleRules = async (req, res) => {
 export default async function handler(req, res) {
   const { rawOp, op } = normalizeOp(req);
   try {
+    const action = stripInvisibleChars(firstValue(req.body?.action) || "");
+    const isAdminNotificationTest = req.method === "POST" && action === "admin_notification_test";
+    const isAdminNotificationSettingsAction = req.method === "POST" && (action === "load_admin_notification_settings" || action === "save_admin_notification_settings");
     const trainerAccessAdminOps = new Set(["create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"]);
     const adminOnlyOp = (
-      (req.method === "GET" && op === "readiness")
+      isAdminNotificationTest
+      || isAdminNotificationSettingsAction
+      || (req.method === "GET" && op === "readiness")
       || (["GET", "POST"].includes(req.method) && (op === "state" || op === "history"))
       || (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules")
       || (req.method === "POST" && trainerAccessAdminOps.has(op))
@@ -942,6 +1226,9 @@ export default async function handler(req, res) {
       if (!admin.ok) return authError(res, admin);
       req.adminUser = admin.user;
 
+      if (action === "load_admin_notification_settings") return await handleLoadAdminNotificationSettings(req, res);
+      if (action === "save_admin_notification_settings") return await handleSaveAdminNotificationSettings(req, res);
+      if (isAdminNotificationTest) return await handleAdminNotificationTest(req, res);
       if (op === "create_auth_user_for_trainer") return await handleCreateAuthUserForTrainer(req, res);
       if (op === "disable_trainer_access") return await handleDisableTrainerAccess(req, res);
       if (op === "enable_trainer_access" || op === "reset_trainer_password") return await handleEnableTrainerAccess(req, res);
@@ -951,6 +1238,7 @@ export default async function handler(req, res) {
       if (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules") return await handleScheduleRules(req, res);
     }
 
+    if ((req.method === "GET" || req.method === "POST") && op === "dispatch-admin-daily-digest") return await handleDispatchAdminDailyDigest(req, res);
     if ((req.method === "GET" || req.method === "POST") && op === "dispatch-schedule-rules") return await handleDispatchScheduleRules(req, res);
     logUnknownOp({ req, rawOp, op });
     return res.status(400).json({ error: "Unknown trainer notifications op", allowedOps: ALLOWED_OPS });
