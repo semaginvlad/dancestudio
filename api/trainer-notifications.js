@@ -164,8 +164,9 @@ const handleAdminNotificationTest = async (req, res) => {
     .maybeSingle();
   if (error) return res.status(500).json({ error: "settings_read_failed", details: String(error.message || error) });
 
-  const chatId = String(settings?.telegram_chat_id || "").trim();
-  if (!chatId) return res.status(400).json({ error: "missing_telegram_chat_id" });
+  const requestedChatId = String(req.body?.telegramChatId || req.body?.telegram_chat_id || "").trim();
+  const chatId = requestedChatId || String(settings?.telegram_chat_id || "").trim();
+  if (!chatId) return res.status(400).json({ error: "missing_telegram_chat_id", details: "Спочатку виберіть Telegram-чат адміністратора" });
 
   const sent = await sendAdminNotificationTestMessage({ chatId });
   if (!sent.ok) return res.status(sent.status).json({ error: sent.error, details: sent.details });

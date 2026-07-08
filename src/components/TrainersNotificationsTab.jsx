@@ -764,37 +764,43 @@ export default function TrainersNotificationsTab({
     setAdminNotificationSettings((prev) => ({ ...prev, ...patch }));
   };
 
+  const buildAdminNotificationPayload = () => ({
+    admin_user_id: currentUser.id,
+    admin_email: currentUser.email || adminNotificationSettings.adminEmail || null,
+    telegram_chat_id: String(adminNotificationSettings.telegramChatId || "").trim() || null,
+    enabled: !!adminNotificationSettings.enabled,
+    send_time_local: adminNotificationSettings.sendTimeLocal || "08:00",
+    timezone: adminNotificationSettings.timezone || "Europe/Kyiv",
+    include_today_trials: !!adminNotificationSettings.includeTodayTrials,
+    include_expiring_subscriptions: !!adminNotificationSettings.includeExpiringSubscriptions,
+    include_inactive_students: !!adminNotificationSettings.includeInactiveStudents,
+    expiring_lessons_threshold: Number(adminNotificationSettings.expiringLessonsThreshold) || 2,
+    expiring_days_threshold: Number(adminNotificationSettings.expiringDaysThreshold) || 7,
+    inactive_days_threshold: Number(adminNotificationSettings.inactiveDaysThreshold) || 14,
+  });
+
+  const persistAdminNotificationSettings = async ({ statusMessage = "Налаштування адмін-сповіщень збережено" } = {}) => {
+    if (!currentUser?.id) throw new Error("Немає активного admin user у сесії");
+    const payload = buildAdminNotificationPayload();
+    const { data, error } = await supabase
+      .from("admin_notification_settings")
+      .upsert(payload, { onConflict: "admin_user_id" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    const mapped = mapAdminSettingsRow(data);
+    setAdminNotificationSettings(mapped);
+    setAdminChatDraft(mapped.telegramChatId || "");
+    setAdminSettingsStatus(statusMessage);
+    return mapped;
+  };
+
   const saveAdminNotificationSettings = async (event) => {
     event?.preventDefault?.();
-    if (!currentUser?.id) {
-      setAdminSettingsStatus("Немає активного admin user у сесії");
-      return;
-    }
     setAdminSettingsSaving(true);
     setAdminSettingsStatus("");
     try {
-      const payload = {
-        admin_user_id: currentUser.id,
-        admin_email: currentUser.email || adminNotificationSettings.adminEmail || null,
-        telegram_chat_id: String(adminNotificationSettings.telegramChatId || "").trim() || null,
-        enabled: !!adminNotificationSettings.enabled,
-        send_time_local: adminNotificationSettings.sendTimeLocal || "08:00",
-        timezone: adminNotificationSettings.timezone || "Europe/Kyiv",
-        include_today_trials: !!adminNotificationSettings.includeTodayTrials,
-        include_expiring_subscriptions: !!adminNotificationSettings.includeExpiringSubscriptions,
-        include_inactive_students: !!adminNotificationSettings.includeInactiveStudents,
-        expiring_lessons_threshold: Number(adminNotificationSettings.expiringLessonsThreshold) || 2,
-        expiring_days_threshold: Number(adminNotificationSettings.expiringDaysThreshold) || 7,
-        inactive_days_threshold: Number(adminNotificationSettings.inactiveDaysThreshold) || 14,
-      };
-      const { data, error } = await supabase
-        .from("admin_notification_settings")
-        .upsert(payload, { onConflict: "admin_user_id" })
-        .select("*")
-        .single();
-      if (error) throw error;
-      setAdminNotificationSettings(mapAdminSettingsRow(data));
-      setAdminSettingsStatus("Налаштування адмін-сповіщень збережено");
+      await persistAdminNotificationSettings();
     } catch (error) {
       setAdminSettingsStatus(`Не вдалося зберегти: ${error?.message || error}`);
     } finally {
@@ -803,16 +809,28 @@ export default function TrainersNotificationsTab({
   };
 
   const sendAdminNotificationTest = async () => {
+    const telegramChatId = String(adminNotificationSettings.telegramChatId || "").trim();
+    if (!telegramChatId) {
+      setAdminSettingsStatus("Спочатку виберіть Telegram-чат адміністратора");
+      return;
+    }
     setAdminSettingsTesting(true);
-    setAdminSettingsStatus("");
+    setAdminSettingsSaving(true);
+    setAdminSettingsStatus("Збережено, надсилаю тест…");
     try {
-      const res = await authFetch("/api/trainer-notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "admin_notification_test" }) });
+      const saved = await persistAdminNotificationSettings({ statusMessage: "Збережено, надсилаю тест…" });
+      const res = await authFetch("/api/trainer-notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "admin_notification_test", telegramChatId: saved.telegramChatId || telegramChatId }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося надіслати тест");
       setAdminSettingsStatus("Тестове повідомлення надіслано");
     } catch (error) {
       setAdminSettingsStatus(`Тест не надіслано: ${error?.message || error}`);
     } finally {
+      setAdminSettingsSaving(false);
       setAdminSettingsTesting(false);
     }
   };
