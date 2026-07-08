@@ -548,13 +548,22 @@ export default function App() {
         safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations")
       ]);
 
-      const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const scheduleGroupRows = scheduleGr || [];
+      const allGroups = isCurrentAdmin
+        ? baseGroups
+        : Array.from(new Map([...baseGroups, ...scheduleGroupRows].map((group) => [String(group.id), group])).values());
       const allScheduleGroups = isCurrentAdmin
         ? allGroups
-        : (scheduleGr || []);
+        : scheduleGroupRows;
+      const currentTrainerId = String(tr?.id || "");
+      const currentTrainerGroupRows = isCurrentAdmin
+        ? (trg || [])
+        : (trg || []).filter((row) => String(row.trainerId) === currentTrainerId);
+      const trainerGroupIdsForAttendance = new Set(currentTrainerGroupRows.map((row) => String(row.groupId)));
       const allowedGroups = isCurrentAdmin
         ? allGroups
-        : allGroups.filter((g) => String(g.trainer_id || "") === String(currentUser?.id || ""));
+        : allGroups.filter((g) => trainerGroupIdsForAttendance.has(String(g.id)));
       const allowedGroupIds = new Set(allowedGroups.map((g) => String(g.id)));
       const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
       const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
@@ -581,7 +590,7 @@ export default function App() {
       setCustomOrders(ord || {});
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
-      setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
+      setTrainerGroups(currentTrainerGroupRows);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
       setGroupLessonOverrides(glo || []);

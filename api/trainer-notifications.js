@@ -230,15 +230,22 @@ const handleDisableTrainerAccess = async (req, res) => {
     return res.status(400).json({ error: "cannot_disable_current_admin" });
   }
 
-  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: new Date().toISOString() });
-  if (trainer.auth_user_id) {
-    await supabase.auth.admin.updateUserById(trainer.auth_user_id, {
-      ban_duration: "876000h",
-      app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
-      user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
-    });
+  if (!existingTrainer.auth_user_id) {
+    return res.status(400).json({ error: "trainer_auth_user_missing", message: "У тренера немає auth_user_id, тому доступ до входу неможливо закрити через Supabase Auth." });
   }
-  return res.status(200).json({ ok: true, trainer });
+
+  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: new Date().toISOString(), is_active: false });
+  const { data: authUpdate, error: authError } = await supabase.auth.admin.updateUserById(trainer.auth_user_id, {
+    ban_duration: "876000h",
+    app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
+    user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
+  });
+  if (authError) {
+    return res.status(500).json({ error: "trainer_auth_ban_failed", message: String(authError.message || authError) });
+  }
+  const authUser = authUpdate?.user || null;
+  console.info("[trainer access] disabled", { trainerId, auth_user_id: trainer.auth_user_id, auth_banned_until: authUser?.banned_until || null });
+  return res.status(200).json({ ok: true, trainer, auth_user_id: trainer.auth_user_id, auth_banned_until: authUser?.banned_until || null, auth_update_confirmed: true });
 };
 
 const handleEnableTrainerAccess = async (req, res) => {
@@ -251,16 +258,22 @@ const handleEnableTrainerAccess = async (req, res) => {
 
   const supabase = buildSupabase();
   const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: null, archived_at: null, is_active: true });
-  if (trainer.auth_user_id) {
-    const updatePayload = {
-      ban_duration: "none",
-      app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
-      user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
-    };
-    if (password) updatePayload.password = password;
-    await supabase.auth.admin.updateUserById(trainer.auth_user_id, updatePayload);
+  if (!trainer.auth_user_id) {
+    return res.status(400).json({ error: "trainer_auth_user_missing", message: "У тренера немає auth_user_id, тому доступ до входу неможливо відкрити через Supabase Auth." });
   }
-  return res.status(200).json({ ok: true, trainer });
+  const updatePayload = {
+    ban_duration: "none",
+    app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
+    user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
+  };
+  if (password) updatePayload.password = password;
+  const { data: authUpdate, error: authError } = await supabase.auth.admin.updateUserById(trainer.auth_user_id, updatePayload);
+  if (authError) {
+    return res.status(500).json({ error: "trainer_auth_unban_failed", message: String(authError.message || authError) });
+  }
+  const authUser = authUpdate?.user || null;
+  console.info("[trainer access] enabled", { trainerId, auth_user_id: trainer.auth_user_id, auth_banned_until: authUser?.banned_until || null });
+  return res.status(200).json({ ok: true, trainer, auth_user_id: trainer.auth_user_id, auth_banned_until: authUser?.banned_until || null, auth_update_confirmed: true });
 };
 
 const handleReadiness = async (res) => {
