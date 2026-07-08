@@ -225,9 +225,15 @@ const handleDisableTrainerAccess = async (req, res) => {
   if (!trainerId) return res.status(400).json({ error: "trainer_id_required" });
 
   const supabase = buildSupabase();
+  const existingTrainer = await fetchTrainerForAdminOperation(supabase, trainerId);
+  if (existingTrainer.auth_user_id && String(existingTrainer.auth_user_id) === String(req.adminUser?.id || "")) {
+    return res.status(400).json({ error: "cannot_disable_current_admin" });
+  }
+
   const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: new Date().toISOString() });
   if (trainer.auth_user_id) {
     await supabase.auth.admin.updateUserById(trainer.auth_user_id, {
+      ban_duration: "876000h",
       app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
       user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: true },
     });
@@ -244,9 +250,10 @@ const handleEnableTrainerAccess = async (req, res) => {
   if (password !== null && password.length < 6) return res.status(400).json({ error: "password_min_6_chars" });
 
   const supabase = buildSupabase();
-  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: null });
+  const trainer = await updateTrainerForAdminOperation(supabase, trainerId, { access_disabled_at: null, archived_at: null, is_active: true });
   if (trainer.auth_user_id) {
     const updatePayload = {
+      ban_duration: "none",
       app_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
       user_metadata: { role: "trainer", trainer_id: trainerId, access_disabled: false },
     };
@@ -920,6 +927,7 @@ export default async function handler(req, res) {
     if (adminOnlyOp) {
       const admin = await requireAdminUser(req);
       if (!admin.ok) return authError(res, admin);
+      req.adminUser = admin.user;
 
       if (op === "create_auth_user_for_trainer") return await handleCreateAuthUserForTrainer(req, res);
       if (op === "disable_trainer_access") return await handleDisableTrainerAccess(req, res);
