@@ -113,6 +113,75 @@ const handleChatMeta = async (req, res) => {
   return res.status(405).json({ error: "Method not allowed" });
 };
 
+
+const handleLinkStudent = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const { studentId, chatId } = req.body || {};
+  if (!studentId || !chatId) return res.status(400).json({ error: "studentId and chatId are required" });
+
+  const supabase = buildSupabase();
+  const { data, error } = await supabase
+    .from("telegram_chat_meta")
+    .upsert({ chat_id: String(chatId), student_id: studentId, updated_at: new Date().toISOString() }, { onConflict: "chat_id" })
+    .select("*")
+    .single();
+  if (error) return res.status(500).json({ error: "Failed to link telegram to student", details: String(error.message || error) });
+  return res.status(200).json({ success: true, meta: data });
+};
+
+const handleCalendar = async (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET");
+
+  try {
+    const { google } = await import("googleapis");
+    let privateKey = process.env.GOOGLE_PRIVATE_KEY || "";
+    privateKey = privateKey.replace(/\\n/g, "\n").replace(/"/g, "");
+
+    const auth = new google.auth.GoogleAuth({
+      credentials: { client_email: process.env.GOOGLE_CLIENT_EMAIL, private_key: privateKey },
+      scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+    });
+    const calendar = google.calendar({ version: "v3", auth });
+
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + daysToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const twoWeeksLater = new Date(monday);
+    twoWeeksLater.setDate(monday.getDate() + 14);
+    const calendarId = process.env.CALENDAR_ID || "zhusha3004@gmail.com";
+
+    const response = await calendar.events.list({
+      calendarId,
+      timeMin: monday.toISOString(),
+      timeMax: twoWeeksLater.toISOString(),
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 250,
+    });
+
+    const events = (response.data.items || [])
+      .filter((ev) => ev.start?.dateTime)
+      .map((ev) => ({
+        id: ev.id,
+        title: ev.summary || "Без назви",
+        start: ev.start.dateTime,
+        end: ev.end.dateTime,
+        description: ev.description || "",
+      }));
+
+    res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=300");
+    return res.status(200).json({ events, fetchedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error("Помилка Google Calendar API:", err);
+    return res.status(500).json({ error: "Не вдалося отримати події", details: err.message });
+  }
+};
+
 const handleSendTest = async (req, res) => {
   const { chatId, username, message } = req.body || {};
   const peer = chatId || username;
@@ -180,15 +249,18 @@ export default async function handler(req, res) {
   const op = getOp(req);
 
   try {
+    if (req.method === "GET" && op === "calendar") return await handleCalendar(req, res);
+
     const admin = await requireAdminUser(req);
     if (!admin.ok) return authError(res, admin);
 
+    if (req.method === "POST" && (op === "linkStudent" || op === "link-student")) return await handleLinkStudent(req, res);
     if (req.method === "GET" && (op === "listDialogs" || op === "list-dialogs")) return await handleListDialogs(res);
     if (req.method === "GET" && (op === "chatMessages" || op === "chat-messages")) return await handleChatMessages(req, res);
     if ((req.method === "GET" || req.method === "POST") && (op === "chatMeta" || op === "chat-meta")) return await handleChatMeta(req, res);
     if (req.method === "POST" && (op === "sendTest" || op === "send-test")) return await handleSendTest(req, res);
     if (req.method === "POST" && (op === "sendTrainerDigest" || op === "send-trainer-digest")) return await handleSendTrainerDigest(req, res);
-    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["listDialogs", "chatMessages", "chatMeta", "sendTest", "sendTrainerDigest"] });
+    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["calendar", "linkStudent", "listDialogs", "chatMessages", "chatMeta", "sendTest", "sendTrainerDigest"] });
   } catch (error) {
     console.error("telegram consolidated handler error:", String(error?.message || error));
     return res.status(500).json({
