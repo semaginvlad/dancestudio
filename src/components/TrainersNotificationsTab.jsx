@@ -795,7 +795,7 @@ export default function TrainersNotificationsTab({
     setAdminSettingsTesting(true);
     setAdminSettingsStatus("");
     try {
-      const res = await authFetch("/api/admin-notification-test", { method: "POST", headers: { "Content-Type": "application/json" } });
+      const res = await authFetch("/api/trainer-notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "admin_notification_test" }) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося надіслати тест");
       setAdminSettingsStatus("Тестове повідомлення надіслано");

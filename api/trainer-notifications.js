@@ -138,6 +138,40 @@ const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {
   return { errors, payload };
 };
 
+
+const sendAdminNotificationTestMessage = async ({ chatId }) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, status: 500, error: "missing_telegram_bot_token" };
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: "Тестове адмін-сповіщення SOROKA CRM ✅" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) {
+    return { ok: false, status: 502, error: "telegram_send_failed", details: payload?.description || "Telegram API error" };
+  }
+  return { ok: true };
+};
+
+const handleAdminNotificationTest = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const { data: settings, error } = await supabase
+    .from("admin_notification_settings")
+    .select("id, admin_user_id, telegram_chat_id, enabled")
+    .eq("admin_user_id", req.adminUser.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: "settings_read_failed", details: String(error.message || error) });
+
+  const chatId = String(settings?.telegram_chat_id || "").trim();
+  if (!chatId) return res.status(400).json({ error: "missing_telegram_chat_id" });
+
+  const sent = await sendAdminNotificationTestMessage({ chatId });
+  if (!sent.ok) return res.status(sent.status).json({ error: sent.error, details: sent.details });
+  return res.status(200).json({ ok: true });
+};
+
 const detectSchedulerStatus = () => {
   try {
     const vercelPath = path.join(process.cwd(), "vercel.json");
@@ -929,9 +963,12 @@ const handleScheduleRules = async (req, res) => {
 export default async function handler(req, res) {
   const { rawOp, op } = normalizeOp(req);
   try {
+    const action = stripInvisibleChars(firstValue(req.body?.action) || "");
+    const isAdminNotificationTest = req.method === "POST" && action === "admin_notification_test";
     const trainerAccessAdminOps = new Set(["create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"]);
     const adminOnlyOp = (
-      (req.method === "GET" && op === "readiness")
+      isAdminNotificationTest
+      || (req.method === "GET" && op === "readiness")
       || (["GET", "POST"].includes(req.method) && (op === "state" || op === "history"))
       || (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules")
       || (req.method === "POST" && trainerAccessAdminOps.has(op))
@@ -942,6 +979,7 @@ export default async function handler(req, res) {
       if (!admin.ok) return authError(res, admin);
       req.adminUser = admin.user;
 
+      if (isAdminNotificationTest) return await handleAdminNotificationTest(req, res);
       if (op === "create_auth_user_for_trainer") return await handleCreateAuthUserForTrainer(req, res);
       if (op === "disable_trainer_access") return await handleDisableTrainerAccess(req, res);
       if (op === "enable_trainer_access" || op === "reset_trainer_password") return await handleEnableTrainerAccess(req, res);
