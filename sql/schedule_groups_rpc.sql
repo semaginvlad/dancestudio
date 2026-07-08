@@ -1,12 +1,13 @@
--- Documentation/draft only. Do not apply from this PR.
--- The production Supabase project already has this RPC applied manually:
--- public.crm_fetch_schedule_groups()
+-- Documentation/draft only. Do not apply from this PR automatically.
+-- The recommended full trainer visibility patch is in:
+--   sql/trainer_visibility_rpcs.sql
 --
+-- public.crm_fetch_schedule_groups()
 -- Purpose:
--- - Return the wider group schedule for trainer/non-admin users.
--- - Keep Attendance scoped to own groups by leaving normal group reads unchanged.
--- - The frontend should call this RPC for non-admin schedule reads instead of
---   falling back to groups.select('*').
+-- - Return safe schedule metadata for ALL active/non-archived studio groups to
+--   authenticated admin or active trainer sessions.
+-- - Do not filter by current trainer, groups.trainer_id, or trainer_groups.
+-- - Keep Attendance scoped separately via public.crm_fetch_my_attendance_groups().
 
 create or replace function public.crm_fetch_schedule_groups()
 returns table (
@@ -15,9 +16,13 @@ returns table (
   direction_id text,
   schedule jsonb,
   trainer_id text,
-  created_at timestamptz
+  trainer_pct numeric,
+  created_at timestamptz,
+  archived_at timestamptz,
+  is_active boolean
 )
 language sql
+stable
 security definer
 set search_path = public
 as $$
@@ -27,8 +32,14 @@ as $$
     g.direction_id,
     g.schedule,
     g.trainer_id::text as trainer_id,
-    g.created_at
+    g.trainer_pct,
+    g.created_at,
+    g.archived_at,
+    coalesce(g.is_active, true) as is_active
   from public.groups g
+  where (public.crm_is_admin_session() or public.crm_is_active_trainer_session())
+    and g.archived_at is null
+    and coalesce(g.is_active, true) = true
   order by g.name asc;
 $$;
 

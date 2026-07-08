@@ -93,6 +93,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
+  const [authBlockMessage, setAuthBlockMessage] = useState("");
+  const [accessChecking, setAccessChecking] = useState(true);
+  const [accessAllowed, setAccessAllowed] = useState(false);
   const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushInfo, setPushInfo] = useState("");
@@ -187,6 +190,8 @@ export default function App() {
 
   const adminEmails = ADMIN_EMAILS;
   const isAdmin = user && isAdminEmail(user.email, adminEmails);
+
+
 
   const pushStatusLabel = useMemo(() => {
     switch (pushStatus) {
@@ -340,19 +345,49 @@ export default function App() {
   }, [safeThemeMode]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let mounted = true;
+
+    const initSession = async () => {
+      setLoading(true);
+      setAccessChecking(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
       const currentUser = session?.user || null;
-      setUser(currentUser);
-      if (currentUser) loadAllData(currentUser);
-      else setLoading(false);
+      if (!currentUser) {
+        setUser(null);
+        setAccessAllowed(false);
+        setAccessChecking(false);
+        setLoading(false);
+        return;
+      }
+      await acceptAuthenticatedUser(currentUser, "getSession", () => mounted);
+    };
+
+    initSession().catch((error) => {
+      console.warn("[access guard] initial session failed", String(error?.message || error));
+      if (mounted) {
+        setUser(null);
+        setAccessAllowed(false);
+        setAccessChecking(false);
+        setLoading(false);
+      }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (!session?.user) setLoading(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.info("[access guard] auth event", { event, email: session?.user?.email || null });
+      if (!mounted) return;
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        setAccessAllowed(false);
+        setAccessChecking(false);
+        setLoading(false);
+      }
     });
 
-    return () => subscription?.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -361,7 +396,102 @@ export default function App() {
     }
   }, [user, isAdmin, tab, setTab]);
 
+
+  const clearLoadedData = () => {
+    setStudents([]);
+    setSubs([]);
+    setAttn([]);
+    setGroups(DEFAULT_GROUPS);
+    setScheduleGroups(DEFAULT_GROUPS);
+    setCancelled([]);
+    setScheduleCancelled([]);
+    setStudentGrps([]);
+    setWaitlist([]);
+    setTrialBookings([]);
+    setTrainers([]);
+    setTrainerGroups([]);
+    setRoomBookings([]);
+    setGroupLessonOverrides([]);
+    setTrainingLessonPlans([]);
+    setTrainingLessonReports([]);
+    setGroupMergeOperations([]);
+  };
+
+  const resetAuthState = () => {
+    setUser(null);
+    setAccessAllowed(false);
+    setAccessChecking(false);
+    setLoading(false);
+    clearLoadedData();
+  };
+
+  const denyAccess = async (message = "Доступ до CRM закрито. Зверніться до адміністратора.") => {
+    console.info("[access guard] deny", { message });
+    setAuthBlockMessage(message);
+    resetAuthState();
+    await supabase.auth.signOut();
+  };
+
+  const validateTrainerSession = async (currentUser, source = "unknown") => {
+    if (!currentUser) return { allowed: false, message: "Доступ до CRM не знайдено. Зверніться до адміністратора.", reason: "missing_user" };
+    const adminResult = isAdminEmail(currentUser.email, adminEmails);
+    console.info("[access guard] checking", { source, email: currentUser.email || null, isAdmin: adminResult });
+    if (adminResult) return { allowed: true, isAdmin: true, reason: "admin" };
+
+    try {
+      const trainerProfile = await db.fetchMyTrainerProfile();
+      console.info("[access guard] trainer profile", {
+        source,
+        email: currentUser.email || null,
+        access_disabled_at: trainerProfile?.accessDisabledAt || null,
+        archived_at: trainerProfile?.archivedAt || null,
+        is_active: trainerProfile?.isActive,
+        has_profile: !!trainerProfile,
+      });
+      if (!trainerProfile) return { allowed: false, message: "Доступ до CRM не знайдено. Зверніться до адміністратора.", reason: "missing_profile" };
+      if (!trainerProfile.hasAccessGuardFields) return { allowed: false, message: "Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.", reason: "missing_guard_fields" };
+      if (trainerProfile.accessDisabledAt) return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "access_disabled" };
+      if (trainerProfile.archivedAt) return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "archived" };
+      if (trainerProfile.isActive === false) return { allowed: false, message: "Доступ до CRM закрито. Зверніться до адміністратора.", reason: "inactive" };
+      return { allowed: true, isAdmin: false, trainerProfile, reason: "trainer_active" };
+    } catch (error) {
+      console.warn("[access guard] trainer profile check failed", String(error?.message || error));
+      return { allowed: false, message: "Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.", reason: "profile_check_failed" };
+    }
+  };
+
+  const acceptAuthenticatedUser = async (currentUser, source = "unknown", isStillMounted = () => true) => {
+    console.info("[access guard] start", { source, email: currentUser?.email || null });
+    setAccessChecking(true);
+    setLoading(true);
+    try {
+      const guard = await validateTrainerSession(currentUser, source);
+      console.info("[access guard] decision", { source, email: currentUser?.email || null, allowed: !!guard.allowed, reason: guard.reason || null });
+      if (!isStillMounted()) return false;
+      if (!guard.allowed) {
+        await denyAccess(guard.message || "Доступ до CRM закрито. Зверніться до адміністратора.");
+        return false;
+      }
+      setAuthBlockMessage("");
+      setAccessAllowed(true);
+      setUser(currentUser);
+      await loadAllData(currentUser);
+      return true;
+    } catch (error) {
+      console.warn("[access guard] acceptAuthenticatedUser failed", String(error?.message || error));
+      if (isStillMounted()) await denyAccess("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
+      return false;
+    } finally {
+      if (isStillMounted()) {
+        console.info("[access guard] finish", { source, email: currentUser?.email || null });
+        setAccessChecking(false);
+        setLoading(false);
+      }
+    }
+  };
+
   const loadAllData = async (currentUser = user) => {
+    console.info("[access guard] loadAllData", { email: currentUser?.email || null, isAdmin: currentUser ? isAdminEmail(currentUser.email, adminEmails) : false });
     setLoading(true);
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
@@ -392,7 +522,7 @@ export default function App() {
 
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
-        : () => db.fetchMyTrainerProfile(currentUser?.id);
+        : () => db.fetchMyTrainerProfile();
       const fetchScheduleBookings = isCurrentAdmin
         ? db.fetchRoomBookings
         : db.fetchScheduleRoomBookings;
@@ -403,11 +533,17 @@ export default function App() {
       const fetchAttendanceSubscriptions = isCurrentAdmin
         ? () => db.fetchSubs({ includeFinancial: true })
         : db.fetchMyAttendanceSubscriptions;
+      const fetchAttendanceGroupRows = isCurrentAdmin
+        ? () => null
+        : db.fetchMyAttendanceGroups;
+      const fetchAttendanceRosterRows = isCurrentAdmin
+        ? () => null
+        : db.fetchMyAttendanceRoster;
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
-        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
+        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
@@ -418,24 +554,69 @@ export default function App() {
         safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations")
       ]);
 
-      const allGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
+      const scheduleGroupRows = scheduleGr || [];
+      const attendanceGroupRows = attendanceGr || [];
+      const allGroups = isCurrentAdmin
+        ? baseGroups
+        : Array.from(new Map([...baseGroups, ...scheduleGroupRows, ...attendanceGroupRows].map((group) => [String(group.id), group])).values());
       const allScheduleGroups = isCurrentAdmin
         ? allGroups
-        : (scheduleGr || []);
+        : scheduleGroupRows;
+      const currentTrainerId = String(tr?.id || "");
+      const currentTrainerGroupRows = isCurrentAdmin
+        ? (trg || [])
+        : (trg || []).filter((row) => String(row.trainerId) === currentTrainerId);
+      const trainerGroupIdsForAttendance = new Set(currentTrainerGroupRows.map((row) => String(row.groupId)));
       const allowedGroups = isCurrentAdmin
         ? allGroups
-        : allGroups.filter((g) => String(g.trainer_id || "") === String(currentUser?.id || ""));
+        : (attendanceGroupRows.length
+          ? attendanceGroupRows
+          : allGroups.filter((g) => trainerGroupIdsForAttendance.has(String(g.id))));
       const allowedGroupIds = new Set(allowedGroups.map((g) => String(g.id)));
+      if (!isCurrentAdmin) {
+        console.info("[trainer visibility] loaded groups", {
+          trainerProfileId: currentTrainerId || null,
+          scheduleGroupRows: scheduleGroupRows.length,
+          attendanceGroupRows: attendanceGroupRows.length,
+          trainerGroupRows: currentTrainerGroupRows.length,
+          attendanceGroupIds: Array.from(allowedGroupIds),
+          attendanceGroupNames: allowedGroups.map((group) => group.name || group.id),
+        });
+      }
       const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
       const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
-      const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
+      const rosterStudents = attendanceRoster?.students || [];
+      const rosterStudentGroups = attendanceRoster?.studentGroups || [];
+      const scopedStudentGrps = isCurrentAdmin
+        ? (sg || [])
+        : (rosterStudentGroups.length
+          ? rosterStudentGroups.filter((row) => allowedGroupIds.has(String(row.groupId)))
+          : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId))));
       const scopedCancelled = isCurrentAdmin ? (ca || []) : (ca || []).filter((c) => allowedGroupIds.has(String(c.groupId)));
       const allowedStudentIds = new Set([
         ...scopedStudentGrps.map((row) => String(row.studentId)),
         ...scopedSubs.map((sub) => String(sub.studentId)),
         ...scopedAttn.map((row) => String(row.studentId || "")).filter(Boolean),
       ]);
-      const scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+      const scopedStudents = isCurrentAdmin
+        ? (st || [])
+        : (rosterStudents.length
+          ? rosterStudents.filter((student) => allowedStudentIds.has(String(student.id)))
+          : (st || []).filter((student) => allowedStudentIds.has(String(student.id))));
+      if (!isCurrentAdmin) {
+        console.info("[trainer visibility] loaded roster", {
+          attendanceGroupIds: Array.from(allowedGroupIds),
+          directStudentGroupsBefore: (sg || []).length,
+          rosterStudentGroups: rosterStudentGroups.length,
+          studentGroupsAfter: scopedStudentGrps.length,
+          directStudentsBefore: (st || []).length,
+          rosterStudents: rosterStudents.length,
+          studentsAfter: scopedStudents.length,
+          subscriptionsAfter: scopedSubs.length,
+          attendanceRowsAfter: scopedAttn.length,
+        });
+      }
 
       // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
       setStudents(scopedStudents);
@@ -451,7 +632,7 @@ export default function App() {
       setCustomOrders(ord || {});
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
-      setTrainerGroups(isCurrentAdmin ? (trg || []) : []);
+      setTrainerGroups(currentTrainerGroupRows);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
       setGroupLessonOverrides(glo || []);
@@ -468,11 +649,15 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
+      setAuthBlockMessage("");
       const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPass });
       if (error) throw error;
-      setUser(data.user);
-      window.location.reload(); 
-    } catch (e) { alert("Помилка входу: перевірте email та пароль"); }
+      const currentUser = data?.user || null;
+      await acceptAuthenticatedUser(currentUser, "signInWithPassword");
+    } catch (e) {
+      setAuthBlockMessage("");
+      alert("Помилка входу: перевірте email та пароль");
+    }
   };
 
   const createGroupAction = async () => {
@@ -621,16 +806,18 @@ export default function App() {
 
 
   const activeGroups = useMemo(() => groups.filter((g) => !isGroupArchived(g)), [groups]);
-  const activeGroupIds = useMemo(() => new Set(activeGroups.map((g) => String(g.id))), [activeGroups]);
   const activeScheduleGroups = useMemo(() => (
-    scheduleGroups.filter((g) => !isGroupArchived(g) && activeGroupIds.has(String(g.id)))
-  ), [scheduleGroups, activeGroupIds]);
+    scheduleGroups.filter((g) => !isGroupArchived(g))
+  ), [scheduleGroups]);
 
   const visibleGroups = useMemo(() => {
     if (!user) return [];
-    if (isAdmin) return activeGroups;
-    return activeGroups.filter(g => g.trainer_id === user.id);
-  }, [activeGroups, user, isAdmin]);
+    // For trainer users, groups state is already scoped to Attendance access via
+    // crm_fetch_my_attendance_groups()/trainer_groups in loadAllData. Do not
+    // re-filter by groups.trainer_id here, because substitutions can bind one
+    // group to multiple trainers through trainer_groups.
+    return activeGroups;
+  }, [activeGroups, user]);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
@@ -1456,13 +1643,14 @@ export default function App() {
     if (row) { setFilterFromDate(row[0]); setFilterToDate(row[1]); }
   }, [filterDatePreset, setFilterFromDate, setFilterToDate]);
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18}}>Завантаження...</div>;
+  if(loading || accessChecking) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg,color:theme.textMuted,fontFamily:"Poppins, sans-serif",fontSize:18}}>Завантаження...</div>;
 
-  if (!user) {
+  if (!user || !accessAllowed) {
     return (
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:theme.bg, fontFamily:"'Poppins',sans-serif"}}>
         <form onSubmit={handleLogin} style={{background:theme.card, padding:40, borderRadius:32, width:350, boxShadow:"0 20px 50px rgba(0,0,0,0.1)"}}>
           <h2 style={{marginTop:0, marginBottom:24, textAlign:"center", color:theme.secondary}}>Dance Studio</h2>
+          {authBlockMessage && <div style={{marginBottom:16, padding:"10px 12px", borderRadius:12, background:"rgba(234,84,85,0.12)", color:theme.danger, fontSize:13, fontWeight:700, lineHeight:1.35}}>{authBlockMessage}</div>}
           <input style={{...inputSt, marginBottom:16}} type="email" placeholder="Email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} required />
           <input style={{...inputSt, marginBottom:24}} type="password" placeholder="Пароль" value={authPass} onChange={e=>setAuthPass(e.target.value)} required />
           <button style={{...btnP, width:"100%"}} type="submit">Увійти</button>
@@ -2026,6 +2214,7 @@ export default function App() {
             roomBookings={roomBookings}
             groupLessonOverrides={groupLessonOverrides}
             trainingLessonPlans={trainingLessonPlans}
+            currentUser={user}
             isAdmin={isAdmin}
             allowBookingMutations={!isAdmin}
             onAddBooking={addRoomBookingAction}
@@ -2036,7 +2225,6 @@ export default function App() {
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}
             onDeleteGroupLessonOverride={deleteGroupLessonOverrideAction}
             onUpsertTrainingLessonPlan={upsertTrainingLessonPlanAction}
-            currentUser={user}
             scheduleScale={safeScheduleScale}
           />
         )}
@@ -2086,6 +2274,7 @@ export default function App() {
                 trainerGroups={trainerGroups}
                 setTrainerGroups={setTrainerGroups}
                 groups={groups}
+                directions={directionsList}
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}

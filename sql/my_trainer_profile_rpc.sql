@@ -14,7 +14,9 @@ returns table (
   first_name text,
   last_name text,
   instagram_handle text,
-  is_active boolean
+  is_active boolean,
+  archived_at timestamptz,
+  access_disabled_at timestamptz
 )
 language sql
 security definer
@@ -27,7 +29,9 @@ as $$
     t.first_name,
     t.last_name,
     t.instagram_handle,
-    t.is_active
+    t.is_active,
+    t.archived_at,
+    t.access_disabled_at
   from public.trainers t
   where t.auth_user_id = auth.uid()
   limit 1;
