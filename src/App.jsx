@@ -3,6 +3,7 @@ import * as db from "./db";
 import { supabase } from "./supabase";
 import Analytics from "./pages/Analytics";
 import {
+  APP_BUILD_LABEL,
   DEFAULT_GROUPS,
   DIRECTIONS,
   PLAN_TYPES,
@@ -42,6 +43,7 @@ import DashboardTab from "./components/DashboardTab";
 import MessagesTab from "./components/MessagesTab";
 import TrainersTab from "./components/TrainersTab";
 import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
+import AppUpdateBanner from "./components/AppUpdateBanner";
 import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
 import {
@@ -51,6 +53,7 @@ import {
   requestPushSubscription,
   sendTestPushRequest,
 } from "./push";
+import { applyPwaUpdate, subscribeToPwaUpdates } from "./pwaUpdate";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -102,6 +105,8 @@ export default function App() {
   const [testPushBusy, setTestPushBusy] = useState(false);
   const [testPushInfo, setTestPushInfo] = useState("");
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
 
   const [students, setStudents] = useState([]);
   const [subs, setSubs] = useState([]);
@@ -192,6 +197,16 @@ export default function App() {
   const isAdmin = user && isAdminEmail(user.email, adminEmails);
 
 
+
+
+  useEffect(() => {
+    return subscribeToPwaUpdates(() => setUpdateAvailable(true));
+  }, []);
+
+  const handleApplyUpdate = () => {
+    setUpdateInstalling(true);
+    applyPwaUpdate();
+  };
 
   const pushStatusLabel = useMemo(() => {
     switch (pushStatus) {
@@ -2065,7 +2080,7 @@ export default function App() {
   };
 
   return (
-    <div data-theme-version={themeRenderTick} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
+    <div data-theme-version={themeRenderTick} data-build-label={APP_BUILD_LABEL} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
@@ -2888,6 +2903,14 @@ export default function App() {
           </div>
         )}
       </Modal>
+      {updateAvailable && (
+        <AppUpdateBanner
+          updating={updateInstalling}
+          onUpdate={handleApplyUpdate}
+          onDismiss={() => setUpdateAvailable(false)}
+        />
+      )}
+
       <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
         {groupEditDraft && (
           <div style={{ display: "grid", gap: 12 }}>

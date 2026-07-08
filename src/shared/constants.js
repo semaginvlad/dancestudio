@@ -1,3 +1,4 @@
+export const APP_BUILD_LABEL = "pwa-update-test-1";
 const theme = {
   primary: "#5A81FA",
   secondary: "#2C3D8F",

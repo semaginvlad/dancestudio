@@ -1,7 +1,15 @@
+import { clientsClaim } from 'workbox-core'
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching'
 
 precacheAndRoute(self.__WB_MANIFEST || [])
 cleanupOutdatedCaches()
+clientsClaim()
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
+})
 
 self.addEventListener('push', (event) => {
   const fallback = {
