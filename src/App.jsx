@@ -97,6 +97,8 @@ export default function App() {
   const [accessChecking, setAccessChecking] = useState(true);
   const [accessAllowed, setAccessAllowed] = useState(false);
   const accessCheckSeq = useRef(0);
+  const accessAllowedRef = useRef(false);
+  const currentUserIdRef = useRef("");
   const [pushStatus, setPushStatus] = useState(PUSH_STATUS.permissionDefault);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushInfo, setPushInfo] = useState("");
@@ -191,6 +193,28 @@ export default function App() {
 
   const adminEmails = ADMIN_EMAILS;
   const isAdmin = user && isAdminEmail(user.email, adminEmails);
+
+  const setAccessCheckingState = (value, reason = "unknown") => {
+    console.info("[access guard] accessChecking", { value, reason });
+    setAccessChecking(value);
+  };
+
+  const setAccessAllowedState = (value, reason = "unknown") => {
+    console.info("[access guard] accessAllowed", { value, reason });
+    accessAllowedRef.current = value;
+    setAccessAllowed(value);
+  };
+
+  const setCurrentUserState = (nextUser, reason = "unknown") => {
+    console.info("[access guard] setUser", { hasUser: !!nextUser, email: nextUser?.email || null, reason });
+    currentUserIdRef.current = nextUser?.id || "";
+    setUser(nextUser);
+  };
+
+  const setLoadingState = (value, reason = "unknown") => {
+    console.info("[access guard] loading", { value, reason });
+    setLoading(value);
+  };
 
   const pushStatusLabel = useMemo(() => {
     switch (pushStatus) {
@@ -350,10 +374,10 @@ export default function App() {
       if (!mounted) return;
       const currentUser = session?.user || null;
       if (!currentUser) {
-        setUser(null);
-        setAccessAllowed(false);
-        setAccessChecking(false);
-        setLoading(false);
+        setCurrentUserState(null, "getSession:no-user");
+        setAccessAllowedState(false, "getSession:no-user");
+        setAccessCheckingState(false, "getSession:no-user");
+        setLoadingState(false, "getSession:no-user");
         return;
       }
       await handleAuthenticatedUser(currentUser, "getSession", () => mounted);
@@ -363,12 +387,22 @@ export default function App() {
       if (!mounted) return;
       const currentUser = session?.user || null;
       if (!currentUser) {
-        setUser(null);
-        setAccessAllowed(false);
-        setAccessChecking(false);
-        setLoading(false);
+        setCurrentUserState(null, `auth:${event}:no-user`);
+        setAccessAllowedState(false, `auth:${event}:no-user`);
+        setAccessCheckingState(false, `auth:${event}:no-user`);
+        setLoadingState(false, `auth:${event}:no-user`);
         return;
       }
+
+      const sameAllowedUser = accessAllowedRef.current && currentUserIdRef.current === currentUser.id;
+      const eventIsAdmin = isAdminEmail(currentUser.email, adminEmails);
+      console.info("[access guard] auth event", { event, email: currentUser.email || null, sameAllowedUser, isAdmin: eventIsAdmin });
+
+      if (sameAllowedUser && eventIsAdmin && ["SIGNED_IN", "TOKEN_REFRESHED", "USER_UPDATED", "INITIAL_SESSION"].includes(event)) {
+        console.info("[access guard] skip guard for already-allowed admin auth event", { event, email: currentUser.email || null });
+        return;
+      }
+
       if (["SIGNED_IN", "TOKEN_REFRESHED", "USER_UPDATED", "INITIAL_SESSION"].includes(event)) {
         await handleAuthenticatedUser(currentUser, `auth:${event}`, () => mounted);
       }
@@ -410,11 +444,11 @@ export default function App() {
   const blockTrainerSession = async (message = "Доступ до CRM закрито. Зверніться до адміністратора.") => {
     console.info("[access guard] denying trainer session", { message });
     setAuthBlockMessage(message);
-    setUser(null);
-    setAccessAllowed(false);
-    setAccessChecking(false);
+    setCurrentUserState(null, "deny");
+    setAccessAllowedState(false, "deny");
+    setAccessCheckingState(false, "deny");
     clearLoadedData();
-    setLoading(false);
+    setLoadingState(false, "deny");
     await supabase.auth.signOut();
   };
 
@@ -463,12 +497,14 @@ export default function App() {
   const handleAuthenticatedUser = async (currentUser, source = "unknown", isStillMounted = () => true) => {
     const seq = accessCheckSeq.current + 1;
     accessCheckSeq.current = seq;
-    setAccessChecking(true);
-    setAccessAllowed(false);
-    setUser(null);
-    setLoading(true);
+    setAccessCheckingState(true, `${source}:start seq=${seq}`);
+    setAccessAllowedState(false, `${source}:start seq=${seq}`);
+    setCurrentUserState(null, `${source}:start seq=${seq}`);
+    setLoadingState(true, `${source}:start seq=${seq}`);
 
-    const guard = await validateTrainerSession(currentUser, source);
+    let guard = { allowed: false, message: "Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.", reason: "unknown" };
+    try {
+      guard = await validateTrainerSession(currentUser, source);
     console.info("[access guard] decision", {
       source,
       email: currentUser?.email || null,
@@ -477,24 +513,34 @@ export default function App() {
     });
     if (!isStillMounted() || accessCheckSeq.current !== seq) return false;
 
-    if (!guard.allowed) {
-      await blockTrainerSession(guard.message || "Доступ до CRM закрито. Зверніться до адміністратора.");
-      return false;
-    }
+      if (!guard.allowed) {
+        await blockTrainerSession(guard.message || "Доступ до CRM закрито. Зверніться до адміністратора.");
+        return false;
+      }
 
-    setAuthBlockMessage("");
-    setAccessAllowed(true);
-    setUser(currentUser);
-    console.info("[access guard] loadAllData start", { source, email: currentUser?.email || null });
-    await loadAllData(currentUser);
-    if (!isStillMounted() || accessCheckSeq.current !== seq) return true;
-    setAccessChecking(false);
-    return true;
+      setAuthBlockMessage("");
+      setAccessAllowedState(true, `${source}:allowed seq=${seq}`);
+      setCurrentUserState(currentUser, `${source}:allowed seq=${seq}`);
+      console.info("[access guard] loadAllData start", { source, email: currentUser?.email || null, seq });
+      await loadAllData(currentUser);
+      return true;
+    } catch (error) {
+      console.warn("[access guard] handleAuthenticatedUser failed", { source, seq, message: String(error?.message || error) });
+      if (isStillMounted() && accessCheckSeq.current === seq) {
+        await blockTrainerSession("Не вдалося перевірити доступ до CRM. Зверніться до адміністратора.");
+      }
+      return false;
+    } finally {
+      if (isStillMounted() && accessCheckSeq.current === seq) {
+        setAccessCheckingState(false, `${source}:finally seq=${seq}`);
+        setLoadingState(false, `${source}:finally seq=${seq}`);
+      }
+    }
   };
 
   const loadAllData = async (currentUser = user) => {
     console.info("[access guard] loadAllData invoked", { email: currentUser?.email || null, isAdmin: currentUser ? isAdminEmail(currentUser.email, adminEmails) : false });
-    setLoading(true);
+    setLoadingState(true, "loadAllData:start");
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
       const isCurrentAdmin = currentUser && isAdminEmail(currentUser.email, adminEmails);
@@ -593,7 +639,7 @@ export default function App() {
     } catch (e) {
       console.error("Global load error", e);
     } finally {
-      setLoading(false);
+      setLoadingState(false, "loadAllData:finally");
     }
   };
 
