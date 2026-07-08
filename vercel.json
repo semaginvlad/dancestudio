@@ -27,6 +27,8 @@
   ],
   "rewrites": [
     { "source": "/api/instagram/oauth/callback", "destination": "/api/instagram-oauth" },
+    { "source": "/api/calendar", "destination": "/api/telegram?op=calendar" },
+    { "source": "/api/link-student-telegram", "destination": "/api/telegram?op=linkStudent" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ]
 }

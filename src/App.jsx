@@ -2404,6 +2404,7 @@ export default function App() {
                 subs={subsExt}
                 attn={attn}
                 cancelled={cancelled}
+                currentUser={user}
               />
             ))}
             
