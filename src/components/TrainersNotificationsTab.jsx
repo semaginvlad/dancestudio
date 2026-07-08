@@ -52,6 +52,8 @@ export default function TrainersNotificationsTab({
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [showMessageTemplate, setShowMessageTemplate] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState(null);
+  const [showArchivedRecipients, setShowArchivedRecipients] = useState(false);
+  const [adminChatDraft, setAdminChatDraft] = useState("");
   const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
   const [adminSettingsSaving, setAdminSettingsSaving] = useState(false);
   const [adminSettingsTesting, setAdminSettingsTesting] = useState(false);
@@ -204,6 +206,12 @@ export default function TrainersNotificationsTab({
   }, [dialogs, metaByChat]);
 
   const selectedDialog = useMemo(() => trainerDialogs.find((d) => d.id === selectedChatId) || trainerDialogs[0] || null, [trainerDialogs, selectedChatId]);
+  const adminChatOptions = useMemo(() => dialogs.map((dialog) => ({
+    id: String(dialog?.id || ""),
+    title: dialog?.title || dialog?.username || dialog?.id || "Без назви",
+    username: dialog?.username || "",
+  })).filter((dialog) => dialog.id), [dialogs]);
+
 
   const normalizeTelegram = (value = "") => String(value || "")
     .trim()
@@ -739,7 +747,9 @@ export default function TrainersNotificationsTab({
         .eq("admin_user_id", currentUser.id)
         .maybeSingle();
       if (error) throw error;
-      setAdminNotificationSettings(mapAdminSettingsRow(data || {}));
+      const mapped = mapAdminSettingsRow(data || {});
+      setAdminNotificationSettings(mapped);
+      setAdminChatDraft(mapped.telegramChatId || "");
     } catch (error) {
       setAdminSettingsStatus(`Не вдалося завантажити адмін-сповіщення: ${error?.message || error}`);
     } finally {
@@ -849,7 +859,7 @@ export default function TrainersNotificationsTab({
   const saveScheduleRule = async (event) => {
     event?.preventDefault?.();
     const selectedGroup = groups.find((g) => String(g.id) === String(scheduleRuleDraft.groupId));
-    const resolvedTrainerId = String(selectedRecipient?.id || scheduleRuleDraft.trainerId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "").trim();
+    const resolvedTrainerId = String(selectedRecipient?.authId || scheduleRuleDraft.trainerId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "").trim();
     if (!scheduleRuleDraft.name.trim()) {
       setScheduleRuleFormError("Вкажіть назву правила");
       setScheduleRuleFormSuccess("");
@@ -978,31 +988,44 @@ export default function TrainersNotificationsTab({
     return raw ? `${raw.slice(0, 8)}…` : "—";
   };
 
+  const isTrainerArchivedOrInactive = (trainer = {}) => {
+    const archivedAt = trainer.archived_at || trainer.archivedAt || null;
+    const accessDisabledAt = trainer.access_disabled_at || trainer.accessDisabledAt || null;
+    const explicitlyArchived = trainer.archived === true || trainer.is_archived === true || trainer.isArchived === true;
+    const explicitlyInactive = trainer.is_active === false || trainer.isActive === false || trainer.active === false;
+    return !!archivedAt || !!accessDisabledAt || explicitlyArchived || explicitlyInactive;
+  };
+
   const notificationRecipients = useMemo(() => {
-    const mapped = (trainers || []).map((t) => {
-      const authId = String(t?.authUserId || t?.auth_user_id || "").trim();
-      const fallbackId = String(t?.id || "").trim();
-      const name = [t?.first_name || t?.firstName || "", t?.last_name || t?.lastName || ""].filter(Boolean).join(" ").trim() || t?.name || null;
-      const contact = t?.telegram || t?.instagram_handle || null;
-      return {
-        id: authId,
-        fallbackId,
-        hasAuth: !!authId,
-        title: name || contact || `${(authId || fallbackId || "").slice(0, 8)}…`,
-        subtitle: contact || "Контакт не вказано",
-        telegram: t?.telegram || null,
-        isTest: String(t?.name || "").toLowerCase().includes("влад") || String(t?.name || "").toLowerCase().includes("semagin"),
-      };
-    });
+    const mapped = (trainers || [])
+      .filter((t) => showArchivedRecipients || !isTrainerArchivedOrInactive(t))
+      .map((t) => {
+        const authId = String(t?.authUserId || t?.auth_user_id || "").trim();
+        const fallbackId = String(t?.id || "").trim();
+        const id = authId || fallbackId;
+        const name = [t?.first_name || t?.firstName || "", t?.last_name || t?.lastName || ""].filter(Boolean).join(" ").trim() || t?.name || null;
+        const contact = t?.telegram || t?.instagram_handle || null;
+        return {
+          id,
+          authId,
+          fallbackId,
+          hasAuth: !!authId,
+          title: name || contact || `${(id || "").slice(0, 8)}…`,
+          subtitle: contact || "Контакт не вказано",
+          telegram: t?.telegram || null,
+          isArchived: isTrainerArchivedOrInactive(t),
+          isTest: String(t?.name || "").toLowerCase().includes("влад") || String(t?.name || "").toLowerCase().includes("semagin"),
+        };
+      });
     const uniq = []; const seen = new Set();
-    mapped.forEach((x) => { if (!seen.has(x.id)) { seen.add(x.id); uniq.push(x); } });
+    mapped.forEach((x) => { if (x.id && !seen.has(x.id)) { seen.add(x.id); uniq.push(x); } });
     return uniq;
-  }, [trainers]);
+  }, [trainers, showArchivedRecipients]);
 
   const selectedRecipient = notificationRecipients.find((r) => r.id === selectedRecipientId) || notificationRecipients[0] || null;
-  const selectedRecipientHasAuth = !!String(selectedRecipient?.id || "").trim();
+  const selectedRecipientHasAuth = !!String(selectedRecipient?.authId || "").trim();
   const visibleScheduleRules = selectedRecipientHasAuth
-    ? scheduleRules.filter((rule) => String(rule?.trainer_id || "") === String(selectedRecipient.id))
+    ? scheduleRules.filter((rule) => String(rule?.trainer_id || "") === String(selectedRecipient.authId))
     : [];
 
   const recipientChipBase = {
@@ -1018,7 +1041,7 @@ export default function TrainersNotificationsTab({
   return (
     <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: 12 }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
-        <div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: theme.textMuted, fontWeight: 700 }}><input type="checkbox" checked={showArchivedRecipients} onChange={(e) => setShowArchivedRecipients(e.target.checked)} /> Архівні</label></div>
         {!notificationRecipients.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає отримувачів.</div>}
         {notificationRecipients.map((d) => (
           <button
@@ -1039,6 +1062,7 @@ export default function TrainersNotificationsTab({
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
               <span style={recipientChipBase}>{d.telegram ? `TG ${String(d.telegram).startsWith("@") ? d.telegram : `@${d.telegram}`}` : "TG —"}</span>
               <span style={{ ...recipientChipBase, border: `1px solid ${d.hasAuth ? (isLightTheme ? "#22C55E" : theme.success) : (isLightTheme ? "#CBD5E1" : theme.border)}`, background: d.hasAuth ? (isLightTheme ? "#DCFCE7" : `${theme.success}22`) : (isLightTheme ? "#F8FAFC" : theme.input), color: d.hasAuth ? (isLightTheme ? "#14532D" : "#9FF5C6") : (isLightTheme ? "#374151" : theme.textMuted) }}>{d.hasAuth ? "Push ✓" : "Push —"}</span>
+              {d.isArchived && <span style={recipientChipBase}>архівний</span>}
             </div>
           </button>
         ))}
@@ -1059,20 +1083,24 @@ export default function TrainersNotificationsTab({
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
             <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Отримувач / admin email<input value={currentUser?.email || adminNotificationSettings.adminEmail || ""} readOnly style={fieldStyle} /></label>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram chat id / identifier<input value={adminNotificationSettings.telegramChatId} onChange={(e) => patchAdminNotificationSettings({ telegramChatId: e.target.value })} placeholder="Напр. 123456789" style={fieldStyle} /></label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram-чат адміністратора<select value={adminChatDraft} onChange={(e) => { const value = e.target.value; setAdminChatDraft(value); if (value) patchAdminNotificationSettings({ telegramChatId: value }); }} style={fieldStyle}><option value="">Вибрати з чатів CRM…</option>{adminChatOptions.map((chat) => <option key={chat.id} value={chat.id}>{chat.title}{chat.username ? ` · ${chat.username}` : ""} · {chat.id}</option>)}</select><button type="button" onClick={() => adminChatDraft && patchAdminNotificationSettings({ telegramChatId: adminChatDraft })} disabled={!adminChatDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "7px 10px", cursor: adminChatDraft ? "pointer" : "default", fontWeight: 700, opacity: adminChatDraft ? 1 : 0.55 }}>Підставити вибраний чат</button></label>
             <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Час надсилання<input type="time" value={adminNotificationSettings.sendTimeLocal} onChange={(e) => patchAdminNotificationSettings({ sendTimeLocal: e.target.value })} style={fieldStyle} /></label>
           </div>
+          <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram dialog / chat identifier<input value={adminNotificationSettings.telegramChatId} onChange={(e) => patchAdminNotificationSettings({ telegramChatId: e.target.value })} placeholder="Напр. dialog id із CRM або @username" style={fieldStyle} /><span style={{ color: theme.textMuted, fontWeight: 600 }}>Беріть із вкладки Повідомлення / CRM, не з BotFather. Тест надсилається через робочий Telegram-профіль CRM.</span></label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {[["includeTodayTrials", "пробні на сьогодні"], ["includeExpiringSubscriptions", "абонементи скоро закінчуються"], ["includeInactiveStudents", "учениці давно не ходили"]].map(([key, label]) => (
+            {[["includeTodayTrials", "Пробні на сьогодні"], ["includeExpiringSubscriptions", "Проблемні абонементи на сьогодні"], ["includeInactiveStudents", "Пропуски підряд"]].map(([key, label]) => (
               <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMain, background: theme.card, fontWeight: 700, fontSize: 12 }}>
                 <input type="checkbox" checked={!!adminNotificationSettings[key]} onChange={(e) => patchAdminNotificationSettings({ [key]: e.target.checked })} /> {label}
               </label>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Занять до завершення<input type="number" min="0" max="50" value={adminNotificationSettings.expiringLessonsThreshold} onChange={(e) => patchAdminNotificationSettings({ expiringLessonsThreshold: e.target.value })} style={fieldStyle} /></label>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Днів до завершення<input type="number" min="0" max="365" value={adminNotificationSettings.expiringDaysThreshold} onChange={(e) => patchAdminNotificationSettings({ expiringDaysThreshold: e.target.value })} style={fieldStyle} /></label>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Давно не ходили, днів<input type="number" min="1" max="365" value={adminNotificationSettings.inactiveDaysThreshold} onChange={(e) => patchAdminNotificationSettings({ inactiveDaysThreshold: e.target.value })} style={fieldStyle} /></label>
+          <div style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 4 }}>
+            <div>• Пробні на сьогодні: майбутній digest по всіх групах із групою / напрямком / часом / телефоном, якщо є.</div>
+            <div>• Проблемні абонементи на сьогодні: майбутня перевірка тільки груп сьогодні, без змін subscriptions logic.</div>
+            <div>• Пропуски підряд: майбутній розрахунок по заняттях групи, без змін attendance rows logic.</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {["Інше правило 1", "Інше правило 2"].map((label) => <span key={label} style={{ border: `1px dashed ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMuted, background: theme.card, fontWeight: 700, fontSize: 12 }}>{label} · coming soon</span>)}
           </div>
           {!!adminSettingsStatus && <div style={{ fontSize: 12, color: adminSettingsStatus.includes("Не вдалося") || adminSettingsStatus.includes("не надіслано") ? theme.danger : theme.success, fontWeight: 700 }}>{adminSettingsStatus}</div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1093,7 +1121,7 @@ export default function TrainersNotificationsTab({
               <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
                 const groupId = e.target.value;
                 const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
-                return { ...p, groupId, trainerId: String(selectedRecipient?.id || selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
+                return { ...p, groupId, trainerId: String(selectedRecipient?.authId || selectedGroup?.trainer_id || selectedGroup?.trainerId || "") };
               })} style={fieldStyle}><option value="">Оберіть групу</option>{groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name}</option>)}</select>
               <div style={{ fontSize: 12, color: theme.textMuted, display: "flex", alignItems: "center", padding: "0 4px" }}>
                 {selectedRecipientHasAuth ? `Отримувач: ${selectedRecipient?.title || "—"}` : "У цього тренера немає привʼязаного акаунта, сповіщення не можна налаштувати"}

@@ -140,18 +140,18 @@ const normalizeScheduleRuleInput = (body = {}, { requireCoreFields = false } = {
 
 
 const sendAdminNotificationTestMessage = async ({ chatId }) => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return { ok: false, status: 500, error: "missing_telegram_bot_token" };
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: "Тестове адмін-сповіщення SOROKA CRM ✅" }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.ok === false) {
-    return { ok: false, status: 502, error: "telegram_send_failed", details: payload?.description || "Telegram API error" };
+  const peer = String(chatId || "").trim();
+  if (!peer) return { ok: false, status: 400, error: "missing_telegram_chat_id" };
+  try {
+    await withTelegramClient(async (client) => {
+      const username = peer.startsWith("@") ? peer : undefined;
+      const entity = await resolveTelegramPeer(client, { chatId: username ? undefined : peer, username, context: "admin-notification-test" });
+      await client.sendMessage(entity, { message: "Тестове адмін-сповіщення SOROKA CRM ✅" });
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, status: 502, error: "telegram_send_failed", details: String(error?.message || error) };
   }
-  return { ok: true };
 };
 
 const handleAdminNotificationTest = async (req, res) => {
