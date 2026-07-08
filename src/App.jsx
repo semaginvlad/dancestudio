@@ -536,11 +536,14 @@ export default function App() {
       const fetchAttendanceGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchMyAttendanceGroups;
+      const fetchAttendanceRosterRows = isCurrentAdmin
+        ? () => null
+        : db.fetchMyAttendanceRoster;
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
-        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
+        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
@@ -583,14 +586,37 @@ export default function App() {
       }
       const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
       const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
-      const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
+      const rosterStudents = attendanceRoster?.students || [];
+      const rosterStudentGroups = attendanceRoster?.studentGroups || [];
+      const scopedStudentGrps = isCurrentAdmin
+        ? (sg || [])
+        : (rosterStudentGroups.length
+          ? rosterStudentGroups.filter((row) => allowedGroupIds.has(String(row.groupId)))
+          : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId))));
       const scopedCancelled = isCurrentAdmin ? (ca || []) : (ca || []).filter((c) => allowedGroupIds.has(String(c.groupId)));
       const allowedStudentIds = new Set([
         ...scopedStudentGrps.map((row) => String(row.studentId)),
         ...scopedSubs.map((sub) => String(sub.studentId)),
         ...scopedAttn.map((row) => String(row.studentId || "")).filter(Boolean),
       ]);
-      const scopedStudents = isCurrentAdmin ? (st || []) : (st || []).filter((student) => allowedStudentIds.has(String(student.id)));
+      const scopedStudents = isCurrentAdmin
+        ? (st || [])
+        : (rosterStudents.length
+          ? rosterStudents.filter((student) => allowedStudentIds.has(String(student.id)))
+          : (st || []).filter((student) => allowedStudentIds.has(String(student.id))));
+      if (!isCurrentAdmin) {
+        console.info("[trainer visibility] loaded roster", {
+          attendanceGroupIds: Array.from(allowedGroupIds),
+          directStudentGroupsBefore: (sg || []).length,
+          rosterStudentGroups: rosterStudentGroups.length,
+          studentGroupsAfter: scopedStudentGrps.length,
+          directStudentsBefore: (st || []).length,
+          rosterStudents: rosterStudents.length,
+          studentsAfter: scopedStudents.length,
+          subscriptionsAfter: scopedSubs.length,
+          attendanceRowsAfter: scopedAttn.length,
+        });
+      }
 
       // Frontend/data-layer scoping only; Supabase RLS is still required for true server-side enforcement.
       setStudents(scopedStudents);

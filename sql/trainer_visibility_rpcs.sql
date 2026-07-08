@@ -188,12 +188,50 @@ as $$
   order by s.created_at desc;
 $$;
 
+
+-- Attendance roster for the current trainer. This returns only minimal student
+-- identity fields and student_group links for groups available through
+-- trainer_groups. It does not expose phones, notes, payments, salary, or global
+-- student lists.
+create or replace function public.crm_fetch_my_attendance_roster()
+returns table (
+  student_group_id uuid,
+  student_id uuid,
+  group_id text,
+  name text,
+  first_name text,
+  last_name text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    sg.id as student_group_id,
+    st.id as student_id,
+    sg.group_id,
+    st.name,
+    st.first_name,
+    st.last_name
+  from public.trainers t
+  join public.trainer_groups tg on tg.trainer_id = t.id
+  join public.student_groups sg on sg.group_id = tg.group_id
+  join public.students st on st.id = sg.student_id
+  where t.auth_user_id = auth.uid()
+    and coalesce(t.is_active, true) = true
+    and t.archived_at is null
+    and t.access_disabled_at is null
+  order by sg.group_id asc, st.name asc;
+$$;
+
 revoke execute on function public.crm_is_active_trainer_session() from public, anon;
 revoke execute on function public.crm_is_admin_session() from public, anon;
 revoke execute on function public.crm_fetch_schedule_groups() from public, anon;
 revoke execute on function public.crm_fetch_my_attendance_groups() from public, anon;
 revoke execute on function public.rls_owns_group(text) from public, anon;
 revoke execute on function public.crm_fetch_my_attendance_subscriptions() from public, anon;
+revoke execute on function public.crm_fetch_my_attendance_roster() from public, anon;
 
 grant execute on function public.crm_is_active_trainer_session() to authenticated;
 grant execute on function public.crm_is_admin_session() to authenticated;
@@ -201,5 +239,6 @@ grant execute on function public.crm_fetch_schedule_groups() to authenticated;
 grant execute on function public.crm_fetch_my_attendance_groups() to authenticated;
 grant execute on function public.rls_owns_group(text) to authenticated;
 grant execute on function public.crm_fetch_my_attendance_subscriptions() to authenticated;
+grant execute on function public.crm_fetch_my_attendance_roster() to authenticated;
 
 commit;

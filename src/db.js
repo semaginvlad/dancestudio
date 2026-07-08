@@ -222,6 +222,29 @@ export async function fetchMyAttendanceGroups() {
   return (data || []).map(mapGroup)
 }
 
+export async function fetchMyAttendanceRoster() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_attendance_roster')
+  if (error) throw error
+  const rows = data || []
+  const studentsById = new Map()
+  const studentGroups = []
+  rows.forEach((row) => {
+    const studentId = row.student_id
+    if (studentId && !studentsById.has(String(studentId))) {
+      studentsById.set(String(studentId), mapStudent({
+        id: studentId,
+        name: row.name || '',
+        first_name: row.first_name || '',
+        last_name: row.last_name || '',
+      }))
+    }
+    if (row.student_group_id && studentId && row.group_id) {
+      studentGroups.push({ id: row.student_group_id, studentId, groupId: row.group_id })
+    }
+  })
+  return { students: Array.from(studentsById.values()), studentGroups }
+}
+
 export async function updateGroup(id, g) {
   const payload = {}
   if (g.name !== undefined) payload.name = g.name

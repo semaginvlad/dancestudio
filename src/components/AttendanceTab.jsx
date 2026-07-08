@@ -1807,6 +1807,15 @@ export default function AttendanceTab({
       .filter((studentId) => activeStudentMap[studentId]);
   }, [studentGrps, gid, activeStudentMap]);
 
+  useEffect(() => {
+    console.info("[attendance roster]", {
+      selectedGroupId: gid || null,
+      studentGroupsCount: (studentGrps || []).length,
+      studentsCount: (students || []).length,
+      rosterCountForSelectedGroup: studentIdsInGroup.length,
+    });
+  }, [gid, studentGrps, studentIdsInGroup.length, students]);
+
   const orderedStudents = useMemo(() => {
     const list = studentIdsInGroup
       .map((id) => activeStudentMap[id])
