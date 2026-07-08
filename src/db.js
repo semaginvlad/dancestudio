@@ -200,6 +200,8 @@ const mapGroup = (g) => ({
   directionId: g.direction_id,
   trainerPct: g.trainer_pct,
   trainer_id: g.trainer_id,
+  archivedAt: g.archived_at ?? g.archivedAt ?? null,
+  isActive: g.is_active ?? g.isActive ?? true,
 })
 
 export async function fetchGroups() {
@@ -210,6 +212,12 @@ export async function fetchGroups() {
 
 export async function fetchScheduleGroups() {
   const { data, error } = await supabase.rpc('crm_fetch_schedule_groups')
+  if (error) throw error
+  return (data || []).map(mapGroup)
+}
+
+export async function fetchMyAttendanceGroups() {
+  const { data, error } = await supabase.rpc('crm_fetch_my_attendance_groups')
   if (error) throw error
   return (data || []).map(mapGroup)
 }

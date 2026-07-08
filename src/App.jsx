@@ -533,11 +533,14 @@ export default function App() {
       const fetchAttendanceSubscriptions = isCurrentAdmin
         ? () => db.fetchSubs({ includeFinancial: true })
         : db.fetchMyAttendanceSubscriptions;
+      const fetchAttendanceGroupRows = isCurrentAdmin
+        ? () => null
+        : db.fetchMyAttendanceGroups;
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
-        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
+      const [st, gr, scheduleGr, attendanceGr, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
+        safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
@@ -550,9 +553,10 @@ export default function App() {
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
       const scheduleGroupRows = scheduleGr || [];
+      const attendanceGroupRows = attendanceGr || [];
       const allGroups = isCurrentAdmin
         ? baseGroups
-        : Array.from(new Map([...baseGroups, ...scheduleGroupRows].map((group) => [String(group.id), group])).values());
+        : Array.from(new Map([...baseGroups, ...scheduleGroupRows, ...attendanceGroupRows].map((group) => [String(group.id), group])).values());
       const allScheduleGroups = isCurrentAdmin
         ? allGroups
         : scheduleGroupRows;
@@ -563,8 +567,20 @@ export default function App() {
       const trainerGroupIdsForAttendance = new Set(currentTrainerGroupRows.map((row) => String(row.groupId)));
       const allowedGroups = isCurrentAdmin
         ? allGroups
-        : allGroups.filter((g) => trainerGroupIdsForAttendance.has(String(g.id)));
+        : (attendanceGroupRows.length
+          ? attendanceGroupRows
+          : allGroups.filter((g) => trainerGroupIdsForAttendance.has(String(g.id))));
       const allowedGroupIds = new Set(allowedGroups.map((g) => String(g.id)));
+      if (!isCurrentAdmin) {
+        console.info("[trainer visibility] loaded groups", {
+          trainerProfileId: currentTrainerId || null,
+          scheduleGroupRows: scheduleGroupRows.length,
+          attendanceGroupRows: attendanceGroupRows.length,
+          trainerGroupRows: currentTrainerGroupRows.length,
+          attendanceGroupIds: Array.from(allowedGroupIds),
+          attendanceGroupNames: allowedGroups.map((group) => group.name || group.id),
+        });
+      }
       const scopedSubs = isCurrentAdmin ? (su || []) : (su || []).filter((s) => allowedGroupIds.has(String(s.groupId)));
       const scopedAttn = isCurrentAdmin ? (at || []) : (at || []).filter((a) => allowedGroupIds.has(String(a.groupId)));
       const scopedStudentGrps = isCurrentAdmin ? (sg || []) : (sg || []).filter((row) => allowedGroupIds.has(String(row.groupId)));
@@ -770,9 +786,12 @@ export default function App() {
 
   const visibleGroups = useMemo(() => {
     if (!user) return [];
-    if (isAdmin) return activeGroups;
-    return activeGroups.filter(g => g.trainer_id === user.id);
-  }, [activeGroups, user, isAdmin]);
+    // For trainer users, groups state is already scoped to Attendance access via
+    // crm_fetch_my_attendance_groups()/trainer_groups in loadAllData. Do not
+    // re-filter by groups.trainer_id here, because substitutions can bind one
+    // group to multiple trainers through trainer_groups.
+    return activeGroups;
+  }, [activeGroups, user]);
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
