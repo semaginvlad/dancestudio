@@ -3,6 +3,7 @@ import * as db from "./db";
 import { supabase } from "./supabase";
 import Analytics from "./pages/Analytics";
 import {
+  APP_BUILD_LABEL,
   DEFAULT_GROUPS,
   DIRECTIONS,
   PLAN_TYPES,
@@ -2079,7 +2080,7 @@ export default function App() {
   };
 
   return (
-    <div data-theme-version={themeRenderTick} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
+    <div data-theme-version={themeRenderTick} data-build-label={APP_BUILD_LABEL} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
