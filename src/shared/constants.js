@@ -22,6 +22,8 @@ const theme = {
   bad: "#FF453A"
 };
 
+const APP_BUILD_LABEL = "pwa-update-test-1";
+
 const WEEKDAYS = ["НД", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
 const MONTHS = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -171,6 +173,7 @@ const applyThemeBindings = () => {
 applyThemeBindings();
 
 export {
+  APP_BUILD_LABEL,
   theme,
   WEEKDAYS,
   MONTHS,
