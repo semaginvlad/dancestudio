@@ -742,13 +742,14 @@ export default function TrainersNotificationsTab({
     setAdminSettingsLoading(true);
     setAdminSettingsStatus("");
     try {
-      const { data, error } = await supabase
-        .from("admin_notification_settings")
-        .select("*")
-        .eq("admin_user_id", currentUser.id)
-        .maybeSingle();
-      if (error) throw error;
-      const mapped = mapAdminSettingsRow(data || {});
+      const res = await authFetch("/api/trainer-notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "load_admin_notification_settings" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося завантажити налаштування");
+      const mapped = mapAdminSettingsRow(body?.settings || {});
       setAdminNotificationSettings(mapped);
       setAdminChatDraft(mapped.telegramChatId || "");
     } catch (error) {
@@ -782,13 +783,14 @@ export default function TrainersNotificationsTab({
   const persistAdminNotificationSettings = async ({ statusMessage = "Налаштування адмін-сповіщень збережено" } = {}) => {
     if (!currentUser?.id) throw new Error("Немає активного admin user у сесії");
     const payload = buildAdminNotificationPayload();
-    const { data, error } = await supabase
-      .from("admin_notification_settings")
-      .upsert(payload, { onConflict: "admin_user_id" })
-      .select("*")
-      .single();
-    if (error) throw error;
-    const mapped = mapAdminSettingsRow(data);
+    const res = await authFetch("/api/trainer-notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save_admin_notification_settings", payload }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося зберегти налаштування");
+    const mapped = mapAdminSettingsRow(body?.settings || {});
     setAdminNotificationSettings(mapped);
     setAdminChatDraft(mapped.telegramChatId || "");
     setAdminSettingsStatus(statusMessage);

@@ -154,6 +154,56 @@ const sendAdminNotificationTestMessage = async ({ chatId }) => {
   }
 };
 
+
+const normalizeAdminNotificationSettingsPayload = (body = {}, adminUser = {}) => {
+  const payload = body?.payload && typeof body.payload === "object" ? body.payload : body;
+  const cleanText = (value) => String(value || "").trim();
+  const cleanInt = (value, fallback, min, max) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.min(max, Math.max(min, Math.floor(numeric)));
+  };
+  return {
+    admin_user_id: adminUser.id,
+    admin_email: adminUser.email || cleanText(payload.admin_email || payload.adminEmail) || null,
+    telegram_chat_id: cleanText(payload.telegram_chat_id || payload.telegramChatId) || null,
+    enabled: !!payload.enabled,
+    send_time_local: cleanText(payload.send_time_local || payload.sendTimeLocal) || "08:00",
+    timezone: cleanText(payload.timezone) || "Europe/Kyiv",
+    include_today_trials: payload.include_today_trials ?? payload.includeTodayTrials ?? true,
+    include_expiring_subscriptions: payload.include_expiring_subscriptions ?? payload.includeExpiringSubscriptions ?? true,
+    include_inactive_students: payload.include_inactive_students ?? payload.includeInactiveStudents ?? true,
+    expiring_lessons_threshold: cleanInt(payload.expiring_lessons_threshold ?? payload.expiringLessonsThreshold, 2, 0, 50),
+    expiring_days_threshold: cleanInt(payload.expiring_days_threshold ?? payload.expiringDaysThreshold, 7, 0, 365),
+    inactive_days_threshold: cleanInt(payload.inactive_days_threshold ?? payload.inactiveDaysThreshold, 14, 1, 365),
+  };
+};
+
+const handleLoadAdminNotificationSettings = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const { data, error } = await supabase
+    .from("admin_notification_settings")
+    .select("*")
+    .eq("admin_user_id", req.adminUser.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: "settings_read_failed", details: String(error.message || error) });
+  return res.status(200).json({ ok: true, settings: data || null });
+};
+
+const handleSaveAdminNotificationSettings = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
+  const supabase = buildSupabase();
+  const payload = normalizeAdminNotificationSettingsPayload(req.body || {}, req.adminUser);
+  const { data, error } = await supabase
+    .from("admin_notification_settings")
+    .upsert(payload, { onConflict: "admin_user_id" })
+    .select("*")
+    .single();
+  if (error) return res.status(500).json({ error: "settings_save_failed", details: String(error.message || error) });
+  return res.status(200).json({ ok: true, settings: data });
+};
+
 const handleAdminNotificationTest = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
   const supabase = buildSupabase();
@@ -966,9 +1016,11 @@ export default async function handler(req, res) {
   try {
     const action = stripInvisibleChars(firstValue(req.body?.action) || "");
     const isAdminNotificationTest = req.method === "POST" && action === "admin_notification_test";
+    const isAdminNotificationSettingsAction = req.method === "POST" && (action === "load_admin_notification_settings" || action === "save_admin_notification_settings");
     const trainerAccessAdminOps = new Set(["create_auth_user_for_trainer", "disable_trainer_access", "enable_trainer_access", "reset_trainer_password"]);
     const adminOnlyOp = (
       isAdminNotificationTest
+      || isAdminNotificationSettingsAction
       || (req.method === "GET" && op === "readiness")
       || (["GET", "POST"].includes(req.method) && (op === "state" || op === "history"))
       || (["GET", "POST", "PATCH", "DELETE"].includes(req.method) && op === "schedule-rules")
@@ -980,6 +1032,8 @@ export default async function handler(req, res) {
       if (!admin.ok) return authError(res, admin);
       req.adminUser = admin.user;
 
+      if (action === "load_admin_notification_settings") return await handleLoadAdminNotificationSettings(req, res);
+      if (action === "save_admin_notification_settings") return await handleSaveAdminNotificationSettings(req, res);
       if (isAdminNotificationTest) return await handleAdminNotificationTest(req, res);
       if (op === "create_auth_user_for_trainer") return await handleCreateAuthUserForTrainer(req, res);
       if (op === "disable_trainer_access") return await handleDisableTrainerAccess(req, res);
