@@ -2169,6 +2169,7 @@ export default function App() {
             roomBookings={roomBookings}
             groupLessonOverrides={groupLessonOverrides}
             trainingLessonPlans={trainingLessonPlans}
+            currentUser={user}
             isAdmin={isAdmin}
             allowBookingMutations={!isAdmin}
             onAddBooking={addRoomBookingAction}
@@ -2179,7 +2180,6 @@ export default function App() {
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}
             onDeleteGroupLessonOverride={deleteGroupLessonOverrideAction}
             onUpsertTrainingLessonPlan={upsertTrainingLessonPlanAction}
-            currentUser={user}
             scheduleScale={safeScheduleScale}
           />
         )}

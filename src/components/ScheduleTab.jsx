@@ -471,8 +471,8 @@ export default function ScheduleTab({
     typeof window !== "undefined" && window.innerWidth < 900 ? "1" : "all",
     "ds_day_room_column_limit_v1",
   );
-  const [mobileFilterType, setMobileFilterType] = useStickyState("all", "ds_schedule_mobile_filter_type_v1");
-  const [mobileFilterValue, setMobileFilterValue] = useStickyState("", "ds_schedule_mobile_filter_value_v1");
+  const [mobileFilterType, setMobileFilterType] = useStickyState("all", "ds_schedule_mobile_filter_type_v2");
+  const [mobileFilterValue, setMobileFilterValue] = useStickyState("", "ds_schedule_mobile_filter_value_v2");
   const [showRoomsManager, setShowRoomsManager] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
@@ -810,6 +810,17 @@ export default function ScheduleTab({
     groupLessonOverrideMap,
   ]);
   const eventsByDay = useMemo(() => buildEventsByDayForDates(weekDays), [buildEventsByDayForDates, weekDays]);
+
+  useEffect(() => {
+    const finalGroupEventsCount = Array.from(eventsByDay.values()).reduce((total, items = []) => total + items.filter((event) => event?.kind === "group").length, 0);
+    console.info("[schedule visibility]", {
+      role: isAdmin ? "admin" : "trainer",
+      groupsPassed: safeGroups.length,
+      finalGroupEventsCount,
+      mobileFilterType,
+      trainerFilterApplied: isMobile && mobileFilterType === "trainer" && Boolean(mobileFilterValue),
+    });
+  }, [eventsByDay, isAdmin, isMobile, mobileFilterType, mobileFilterValue, safeGroups.length]);
 
   const getTariffPrice = (bookingType) =>
     tariffTypes.find((type) => type.id === bookingType)?.price || 0;
