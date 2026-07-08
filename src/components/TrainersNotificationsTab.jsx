@@ -24,6 +24,7 @@ export default function TrainersNotificationsTab({
   subs = [],
   attn = [],
   cancelled = [],
+  currentUser = null,
 }) {
   const DEBUG_TRAINER_MESSAGE = false;
   const [dialogs, setDialogs] = useState([]);
@@ -51,6 +52,25 @@ export default function TrainersNotificationsTab({
   const [selectedRecipientId, setSelectedRecipientId] = useState("");
   const [showMessageTemplate, setShowMessageTemplate] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState(null);
+  const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
+  const [adminSettingsSaving, setAdminSettingsSaving] = useState(false);
+  const [adminSettingsTesting, setAdminSettingsTesting] = useState(false);
+  const [adminSettingsStatus, setAdminSettingsStatus] = useState("");
+  const [adminNotificationSettings, setAdminNotificationSettings] = useState({
+    id: null,
+    adminUserId: "",
+    adminEmail: "",
+    telegramChatId: "",
+    enabled: false,
+    sendTimeLocal: "08:00",
+    timezone: "Europe/Kyiv",
+    includeTodayTrials: true,
+    includeExpiringSubscriptions: true,
+    includeInactiveStudents: true,
+    expiringLessonsThreshold: 2,
+    expiringDaysThreshold: 7,
+    inactiveDaysThreshold: 14,
+  });
   const emptyScheduleRuleDraft = {
     name: "",
     groupId: "",
@@ -691,6 +711,101 @@ export default function TrainersNotificationsTab({
     }
   };
 
+
+  const mapAdminSettingsRow = (row = {}) => ({
+    id: row.id || null,
+    adminUserId: row.admin_user_id || currentUser?.id || "",
+    adminEmail: row.admin_email || currentUser?.email || "",
+    telegramChatId: row.telegram_chat_id || "",
+    enabled: row.enabled === true,
+    sendTimeLocal: String(row.send_time_local || "08:00").slice(0, 5),
+    timezone: row.timezone || "Europe/Kyiv",
+    includeTodayTrials: row.include_today_trials !== false,
+    includeExpiringSubscriptions: row.include_expiring_subscriptions !== false,
+    includeInactiveStudents: row.include_inactive_students !== false,
+    expiringLessonsThreshold: Number.isFinite(Number(row.expiring_lessons_threshold)) ? Number(row.expiring_lessons_threshold) : 2,
+    expiringDaysThreshold: Number.isFinite(Number(row.expiring_days_threshold)) ? Number(row.expiring_days_threshold) : 7,
+    inactiveDaysThreshold: Number.isFinite(Number(row.inactive_days_threshold)) ? Number(row.inactive_days_threshold) : 14,
+  });
+
+  const loadAdminNotificationSettings = async () => {
+    if (!currentUser?.id) return;
+    setAdminSettingsLoading(true);
+    setAdminSettingsStatus("");
+    try {
+      const { data, error } = await supabase
+        .from("admin_notification_settings")
+        .select("*")
+        .eq("admin_user_id", currentUser.id)
+        .maybeSingle();
+      if (error) throw error;
+      setAdminNotificationSettings(mapAdminSettingsRow(data || {}));
+    } catch (error) {
+      setAdminSettingsStatus(`Не вдалося завантажити адмін-сповіщення: ${error?.message || error}`);
+    } finally {
+      setAdminSettingsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadAdminNotificationSettings(); }, [currentUser?.id]);
+
+  const patchAdminNotificationSettings = (patch) => {
+    setAdminNotificationSettings((prev) => ({ ...prev, ...patch }));
+  };
+
+  const saveAdminNotificationSettings = async (event) => {
+    event?.preventDefault?.();
+    if (!currentUser?.id) {
+      setAdminSettingsStatus("Немає активного admin user у сесії");
+      return;
+    }
+    setAdminSettingsSaving(true);
+    setAdminSettingsStatus("");
+    try {
+      const payload = {
+        admin_user_id: currentUser.id,
+        admin_email: currentUser.email || adminNotificationSettings.adminEmail || null,
+        telegram_chat_id: String(adminNotificationSettings.telegramChatId || "").trim() || null,
+        enabled: !!adminNotificationSettings.enabled,
+        send_time_local: adminNotificationSettings.sendTimeLocal || "08:00",
+        timezone: adminNotificationSettings.timezone || "Europe/Kyiv",
+        include_today_trials: !!adminNotificationSettings.includeTodayTrials,
+        include_expiring_subscriptions: !!adminNotificationSettings.includeExpiringSubscriptions,
+        include_inactive_students: !!adminNotificationSettings.includeInactiveStudents,
+        expiring_lessons_threshold: Number(adminNotificationSettings.expiringLessonsThreshold) || 2,
+        expiring_days_threshold: Number(adminNotificationSettings.expiringDaysThreshold) || 7,
+        inactive_days_threshold: Number(adminNotificationSettings.inactiveDaysThreshold) || 14,
+      };
+      const { data, error } = await supabase
+        .from("admin_notification_settings")
+        .upsert(payload, { onConflict: "admin_user_id" })
+        .select("*")
+        .single();
+      if (error) throw error;
+      setAdminNotificationSettings(mapAdminSettingsRow(data));
+      setAdminSettingsStatus("Налаштування адмін-сповіщень збережено");
+    } catch (error) {
+      setAdminSettingsStatus(`Не вдалося зберегти: ${error?.message || error}`);
+    } finally {
+      setAdminSettingsSaving(false);
+    }
+  };
+
+  const sendAdminNotificationTest = async () => {
+    setAdminSettingsTesting(true);
+    setAdminSettingsStatus("");
+    try {
+      const res = await authFetch("/api/admin-notification-test", { method: "POST", headers: { "Content-Type": "application/json" } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.details || body?.error || "Не вдалося надіслати тест");
+      setAdminSettingsStatus("Тестове повідомлення надіслано");
+    } catch (error) {
+      setAdminSettingsStatus(`Тест не надіслано: ${error?.message || error}`);
+    } finally {
+      setAdminSettingsTesting(false);
+    }
+  };
+
   const scheduleDayOptions = [
     { value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" }, { value: 4, label: "Чт" },
     { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 7, label: "Нд" },
@@ -930,6 +1045,42 @@ export default function TrainersNotificationsTab({
       </div>
 
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
+        <form onSubmit={saveAdminNotificationSettings} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 800, color: theme.textMain }}>Ранковий звіт адміністратора</div>
+              <div style={{ fontSize: 12, color: theme.textMuted }}>Керовані Telegram-сповіщення без hardcode chat id у коді. Default час: 08:00 Europe/Kyiv.</div>
+            </div>
+            <button type="button" onClick={loadAdminNotificationSettings} disabled={adminSettingsLoading} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{adminSettingsLoading ? "Оновлення…" : "Оновити"}</button>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontWeight: 700 }}>
+            <input type="checkbox" checked={!!adminNotificationSettings.enabled} onChange={(e) => patchAdminNotificationSettings({ enabled: e.target.checked })} />
+            Активний ранковий адмін-звіт
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Отримувач / admin email<input value={currentUser?.email || adminNotificationSettings.adminEmail || ""} readOnly style={fieldStyle} /></label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram chat id / identifier<input value={adminNotificationSettings.telegramChatId} onChange={(e) => patchAdminNotificationSettings({ telegramChatId: e.target.value })} placeholder="Напр. 123456789" style={fieldStyle} /></label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Час надсилання<input type="time" value={adminNotificationSettings.sendTimeLocal} onChange={(e) => patchAdminNotificationSettings({ sendTimeLocal: e.target.value })} style={fieldStyle} /></label>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[["includeTodayTrials", "пробні на сьогодні"], ["includeExpiringSubscriptions", "абонементи скоро закінчуються"], ["includeInactiveStudents", "учениці давно не ходили"]].map(([key, label]) => (
+              <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMain, background: theme.card, fontWeight: 700, fontSize: 12 }}>
+                <input type="checkbox" checked={!!adminNotificationSettings[key]} onChange={(e) => patchAdminNotificationSettings({ [key]: e.target.checked })} /> {label}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Занять до завершення<input type="number" min="0" max="50" value={adminNotificationSettings.expiringLessonsThreshold} onChange={(e) => patchAdminNotificationSettings({ expiringLessonsThreshold: e.target.value })} style={fieldStyle} /></label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Днів до завершення<input type="number" min="0" max="365" value={adminNotificationSettings.expiringDaysThreshold} onChange={(e) => patchAdminNotificationSettings({ expiringDaysThreshold: e.target.value })} style={fieldStyle} /></label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Давно не ходили, днів<input type="number" min="1" max="365" value={adminNotificationSettings.inactiveDaysThreshold} onChange={(e) => patchAdminNotificationSettings({ inactiveDaysThreshold: e.target.value })} style={fieldStyle} /></label>
+          </div>
+          {!!adminSettingsStatus && <div style={{ fontSize: 12, color: adminSettingsStatus.includes("Не вдалося") || adminSettingsStatus.includes("не надіслано") ? theme.danger : theme.success, fontWeight: 700 }}>{adminSettingsStatus}</div>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="submit" disabled={adminSettingsSaving} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>{adminSettingsSaving ? "Збереження…" : "Зберегти"}</button>
+            <button type="button" onClick={sendAdminNotificationTest} disabled={adminSettingsTesting || !adminNotificationSettings.telegramChatId} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "8px 12px", cursor: "pointer", fontWeight: 700, opacity: adminNotificationSettings.telegramChatId ? 1 : 0.55 }}>{adminSettingsTesting ? "Надсилання…" : "Тестове повідомлення"}</button>
+          </div>
+        </form>
+
         <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила автоматичних сповіщень</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
           <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
