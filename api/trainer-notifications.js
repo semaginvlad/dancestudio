@@ -916,7 +916,7 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
     }
 
     const dataLoads = [
-      ["groups", supabase.from("groups").select("id,name,direction_id,schedule,is_active,archived_at")],
+      ["groups", supabase.from("groups").select("id,name,direction_id,schedule,archived_at")],
       ["directions", supabase.from("directions").select("id,name")],
       ["trial_bookings", supabase.from("trial_bookings").select("id,group_id,name,phone,telegram,contact,trial_date,status,note").eq("trial_date", localDate)],
       ["student_groups", supabase.from("student_groups").select("student_id,group_id")],
@@ -935,7 +935,7 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
       continue;
     }
 
-    const activeGroups = (groupsRaw.data || []).filter((g) => g.is_active !== false && !g.archived_at);
+    const activeGroups = (groupsRaw.data || []).filter((g) => !g.archived_at);
     const slots = getTodayScheduleSlots(activeGroups, localDate);
     const directionsById = Object.fromEntries((directionsRaw.data || []).map((d) => [String(d.id), d]));
     const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
