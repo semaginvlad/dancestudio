@@ -908,19 +908,26 @@ const buildAdminDigest = ({ settings, localDate, slots, activeGroups, trials, st
         continue;
       }
       const rows = [];
-      const seenStudentIds = new Set();
-      const candidateIds = attendancePresence
+      const currentMemberIds = new Set((studentGroups || [])
+        .filter((sg) => String(sg.group_id || sg.groupId || "") === String(group.id))
+        .map((sg) => String(sg.student_id || sg.studentId || "").trim())
+        .filter(Boolean));
+      const priorAttendanceStudentIds = Array.from(new Set(attendancePresence
         .filter((a) => a.studentId && a.groupId === String(group.id) && a.date && a.date < localDate)
-        .map((a) => a.studentId)
-        .filter((studentId) => {
-          if (seenStudentIds.has(studentId)) return false;
-          seenStudentIds.add(studentId);
-          return true;
-        });
+        .map((a) => String(a.studentId))));
+      const candidateIds = priorAttendanceStudentIds.filter((studentId) => currentMemberIds.has(studentId));
+      const excludedFormerMembers = priorAttendanceStudentIds
+        .filter((studentId) => !currentMemberIds.has(studentId))
+        .map((studentId) => ({
+          studentId: String(studentId),
+          studentName: displayStudentName(studentsById[String(studentId)] || {}),
+          isCurrentGroupMember: false,
+        }));
+      if (excludedFormerMembers.length) groupDebug.excludedFormerMembers = excludedFormerMembers;
       for (const studentId of candidateIds) {
         const presentDates = lessonDates.filter((date) => attendancePresence.some((a) => a.studentId === String(studentId) && a.groupId === String(group.id) && a.date === date));
         const missed = presentDates.length === 0;
-        groupDebug.candidates.push({ studentId: String(studentId), studentName: displayStudentName(studentsById[String(studentId)] || {}), presentDates, missed });
+        groupDebug.candidates.push({ studentId: String(studentId), studentName: displayStudentName(studentsById[String(studentId)] || {}), isCurrentGroupMember: true, presentDates, missed });
         if (missed) rows.push(`- ${displayStudentName(studentsById[String(studentId)] || {})} — ${threshold} підряд (${lessonDates.map(formatDigestDateShort).join(", ")})`);
       }
       attendanceDebug.push(groupDebug);
