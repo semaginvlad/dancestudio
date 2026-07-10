@@ -823,7 +823,14 @@ const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, s
       if (lessonDates.length < threshold) continue;
       const members = (studentGroups || []).filter((r) => String(r.group_id) === String(group.id));
       for (const sg of members) {
-        const presentCount = (attendance || []).filter((a) => String(a.student_id || "") === String(sg.student_id) && String(a.group_id || "") === String(group.id) && lessonDates.includes(dateKey(a.date))).length;
+        const presentCount = (attendance || []).filter((a) => {
+          const directStudentId = String(a.student_id || a.studentId || "");
+          const sub = (subs || []).find((raw) => String(raw?.id || "") === String(a.sub_id || a.subId || ""));
+          const resolvedStudentId = directStudentId || String(sub?.student_id || sub?.studentId || "");
+          const directGroupId = String(a.group_id || a.groupId || "");
+          const resolvedGroupId = directGroupId || String(sub?.group_id || sub?.groupId || "");
+          return resolvedStudentId === String(sg.student_id) && resolvedGroupId === String(group.id) && lessonDates.includes(dateKey(a.date));
+        }).length;
         if (presentCount === 0) missedRows.push(`- ${displayStudentName(studentsById[String(sg.student_id)] || {})} — ${displayGroupName(group)} (${threshold} підряд)`);
       }
     }
@@ -850,8 +857,18 @@ const sendTelegramMessageViaCrmUser = async ({ chatId, message, context }) => {
   });
 };
 
+const getSupabaseFailureDiagnostics = (source, error) => ({
+  source,
+  table: source,
+  message: String(error?.message || error || ""),
+  code: error?.code || null,
+  details: error?.details || null,
+  hint: error?.hint || null,
+});
+
 const handleDispatchAdminDailyDigest = async (req, res) => {
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
+  try {
   const cron = requireCronSecret(req);
   if (!cron.ok) {
     logAdminDigestCronAuthFailure({ req, result: cron, op: "dispatch-admin-daily-digest" });
@@ -868,7 +885,15 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
     .from("admin_notification_settings")
     .select("id,admin_user_id,admin_email,telegram_chat_id,enabled,send_time_local,timezone,include_today_trials,include_expiring_subscriptions,include_inactive_students")
     .eq("enabled", true);
-  if (settingsError) return res.status(500).json({ error: "settings_read_failed", details: String(settingsError.message || settingsError) });
+  if (settingsError) {
+    const diagnostics = getSupabaseFailureDiagnostics("admin_notification_settings", settingsError);
+    console.error("[admin-daily-digest-data-load-failed]", diagnostics);
+    return res.status(500).json({
+      ok: false,
+      error: "settings_read_failed",
+      results: [{ status: "failed", reason: "data_load_failed", ...diagnostics }],
+    });
+  }
 
   const results = [];
   let sent = 0;
@@ -890,23 +915,27 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
       continue;
     }
 
-    const [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw] = await Promise.all([
-      supabase.from("groups").select("id,name,direction_id,schedule,is_active,archived_at"),
-      supabase.from("directions").select("id,name"),
-      supabase.from("trial_bookings").select("id,group_id,name,phone,telegram,contact,trial_date,status,note").eq("trial_date", localDate),
-      supabase.from("student_groups").select("student_id,group_id"),
-      supabase.from("students").select("id,name,first_name,last_name,phone,telegram"),
-      supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,activation_date,plan_type,total_trainings,used_trainings"),
-      supabase.from("attendance").select("id,student_id,group_id,sub_id,date,entry_type"),
-    ]);
-    const firstErr = [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw].find((r) => r.error);
-    if (firstErr?.error) {
+    const dataLoads = [
+      ["groups", supabase.from("groups").select("id,name,direction_id,schedule,archived_at")],
+      ["directions", supabase.from("directions").select("id,name")],
+      ["trial_bookings", supabase.from("trial_bookings").select("id,group_id,name,phone,telegram,contact,trial_date,status,note").eq("trial_date", localDate)],
+      ["student_groups", supabase.from("student_groups").select("student_id,group_id")],
+      ["students", supabase.from("students").select("id,name,first_name,last_name,phone,telegram")],
+      ["subscriptions", supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,activation_date,plan_type,total_trainings,used_trainings")],
+      ["attendance", supabase.from("attendance").select("id,student_id,group_id,sub_id,date,entry_type")],
+    ];
+    const [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw] = await Promise.all(dataLoads.map(([, query]) => query));
+    const loaded = [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw];
+    const firstErrIndex = loaded.findIndex((r) => r.error);
+    if (firstErrIndex >= 0) {
       failed += 1;
-      results.push({ settingsId: settings.id, status: "failed", reason: "data_load_failed", details: String(firstErr.error.message || firstErr.error) });
+      const diagnostics = getSupabaseFailureDiagnostics(dataLoads[firstErrIndex][0], loaded[firstErrIndex].error);
+      console.error("[admin-daily-digest-data-load-failed]", { settingsId: settings.id, ...diagnostics });
+      results.push({ settingsId: settings.id, status: "failed", reason: "data_load_failed", ...diagnostics });
       continue;
     }
 
-    const activeGroups = (groupsRaw.data || []).filter((g) => g.is_active !== false && !g.archived_at);
+    const activeGroups = (groupsRaw.data || []).filter((g) => !g.archived_at);
     const slots = getTodayScheduleSlots(activeGroups, localDate);
     const directionsById = Object.fromEntries((directionsRaw.data || []).map((d) => [String(d.id), d]));
     const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
@@ -929,6 +958,13 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
 
   const status = failed > 0 && sent === 0 ? 502 : 200;
   return res.status(status).json({ ok: failed === 0, dryRun, force, checked: (settingsRows || []).length, sent, skipped, failed, results });
+  } catch (error) {
+    console.error("[admin-daily-digest-unexpected-error]", {
+      message: String(error?.message || error),
+      name: error?.name || null,
+    });
+    return res.status(500).json({ error: "admin_daily_digest_unexpected_error" });
+  }
 };
 
 const handleDispatchScheduleRules = async (req, res) => {
