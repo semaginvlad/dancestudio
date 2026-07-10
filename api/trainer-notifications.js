@@ -55,6 +55,20 @@ const normalizeOp = (req) => {
   };
 };
 
+const getAuthorizationHeaderValue = (req) => String(req.headers?.authorization || req.headers?.Authorization || "").trim();
+
+const logAdminDigestCronAuthFailure = ({ req, result, op }) => {
+  const authorizationHeader = getAuthorizationHeaderValue(req);
+  console.warn("[admin-daily-digest-cron-auth-failed]", {
+    op,
+    status: result?.status || null,
+    error: result?.error || null,
+    hasAuthorizationHeader: !!authorizationHeader,
+    hasBearerPrefix: /^Bearer\s+/i.test(authorizationHeader),
+    cronSecretConfigured: !!process.env.CRON_SECRET,
+  });
+};
+
 const redactForLog = (value) => {
   if (Array.isArray(value)) return value.map((item) => redactForLog(item));
   if (!value || typeof value !== "object") return value;
@@ -839,7 +853,10 @@ const sendTelegramMessageViaCrmUser = async ({ chatId, message, context }) => {
 const handleDispatchAdminDailyDigest = async (req, res) => {
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed" });
   const cron = requireCronSecret(req);
-  if (!cron.ok) return authError(res, cron);
+  if (!cron.ok) {
+    logAdminDigestCronAuthFailure({ req, result: cron, op: "dispatch-admin-daily-digest" });
+    return authError(res, cron);
+  }
 
   const dryRun = isDryRunFlag(firstValue(req.query?.dryRun) ?? getUrlSearchParam(req, "dryRun") ?? firstValue(req.body?.dryRun));
   const force = isDryRunFlag(firstValue(req.query?.force) ?? getUrlSearchParam(req, "force") ?? firstValue(req.body?.force));
