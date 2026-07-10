@@ -783,7 +783,14 @@ const hasActiveSubscriptionOnDate = (subs = [], studentId, groupId, dateStr) => 
   return start <= dateStr && end >= dateStr;
 });
 
-const formatDigestBlock = (title, rows) => [title + ":", ...((rows || []).length ? rows : ["— немає"])].join("\n");
+const formatDigestBlock = (title, rows, options = {}) => {
+  const safeRows = rows || [];
+  const maxRows = Number(options.maxRows);
+  if (!safeRows.length) return [title + ":", "— немає"].join("\n");
+  const visibleRows = Number.isFinite(maxRows) && maxRows > 0 ? safeRows.slice(0, maxRows) : safeRows;
+  const hiddenCount = safeRows.length - visibleRows.length;
+  return [title + ":", ...visibleRows, ...(hiddenCount > 0 ? [`- ...і ще ${hiddenCount}`] : [])].join("\n");
+};
 
 const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, studentsById, subs, attendance, directionsById }) => {
   const groupIdsToday = new Set(slots.map(({ group }) => String(group.id)));
@@ -839,12 +846,42 @@ const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, s
   return [
     "Добрий ранок, SOROKA Admin 🌿",
     "",
-    formatDigestBlock("Пробні на сьогодні", trialRows),
+    formatDigestBlock("Пробні на сьогодні", trialRows, { maxRows: 15 }),
     "",
-    formatDigestBlock("Проблемні абонементи на сьогодні", problemRows),
+    formatDigestBlock("Проблемні абонементи на сьогодні", problemRows, { maxRows: 15 }),
     "",
-    formatDigestBlock("Пропуски підряд", missedRows),
+    formatDigestBlock("Пропуски підряд", missedRows, { maxRows: 15 }),
   ].join("\n");
+};
+
+const splitTelegramMessage = (message, maxChunkLength = 3500) => {
+  const text = String(message || "");
+  if (text.length <= maxChunkLength) return [text];
+  const chunks = [];
+  let current = "";
+  const pushCurrent = () => {
+    if (current) {
+      chunks.push(current);
+      current = "";
+    }
+  };
+  for (const line of text.split("\n")) {
+    let remaining = line;
+    while (remaining.length > maxChunkLength) {
+      pushCurrent();
+      chunks.push(remaining.slice(0, maxChunkLength));
+      remaining = remaining.slice(maxChunkLength);
+    }
+    const next = current ? `${current}\n${remaining}` : remaining;
+    if (next.length > maxChunkLength) {
+      pushCurrent();
+      current = remaining;
+    } else {
+      current = next;
+    }
+  }
+  pushCurrent();
+  return chunks.length ? chunks : [""];
 };
 
 const sendTelegramMessageViaCrmUser = async ({ chatId, message, context }) => {
@@ -853,7 +890,7 @@ const sendTelegramMessageViaCrmUser = async ({ chatId, message, context }) => {
   await withTelegramClient(async (client) => {
     const username = target.startsWith("@") ? target : undefined;
     const entity = await resolveTelegramPeer(client, { chatId: username ? undefined : target, username, context });
-    await client.sendMessage(entity, { message });
+    for (const chunk of splitTelegramMessage(message)) await client.sendMessage(entity, { message: chunk });
   });
 };
 
@@ -916,7 +953,7 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
     }
 
     const dataLoads = [
-      ["groups", supabase.from("groups").select("id,name,direction_id,schedule,is_active,archived_at")],
+      ["groups", supabase.from("groups").select("id,name,direction_id,schedule,archived_at")],
       ["directions", supabase.from("directions").select("id,name")],
       ["trial_bookings", supabase.from("trial_bookings").select("id,group_id,name,phone,telegram,contact,trial_date,status,note").eq("trial_date", localDate)],
       ["student_groups", supabase.from("student_groups").select("student_id,group_id")],
@@ -935,7 +972,7 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
       continue;
     }
 
-    const activeGroups = (groupsRaw.data || []).filter((g) => g.is_active !== false && !g.archived_at);
+    const activeGroups = (groupsRaw.data || []).filter((g) => !g.archived_at);
     const slots = getTodayScheduleSlots(activeGroups, localDate);
     const directionsById = Object.fromEntries((directionsRaw.data || []).map((d) => [String(d.id), d]));
     const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
