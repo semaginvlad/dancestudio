@@ -1,0 +1,7 @@
+Vercel production deploy trigger
+
+Purpose: force a fresh production deployment after PR #338 was merged into stable-current-working but Vercel did not create a production deployment automatically.
+
+Triggered at: 2026-07-10T15:55:00Z
+Branch: stable-current-working
+Production branch tracking confirmed in Vercel: stable-current-working
