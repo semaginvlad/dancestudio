@@ -792,9 +792,45 @@ const formatDigestBlock = (title, rows, options = {}) => {
   return [title + ":", ...visibleRows, ...(hiddenCount > 0 ? [`- ...і ще ${hiddenCount}`] : [])].join("\n");
 };
 
-const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, studentsById, subs, attendance, directionsById }) => {
-  const groupIdsToday = new Set(slots.map(({ group }) => String(group.id)));
+const formatGroupedDigestBlock = (title, sections) => {
+  const visibleSections = (sections || []).map((section) => ({
+    title: String(section?.title || "").trim(),
+    rows: (section?.rows || []).filter(Boolean),
+  })).filter((section) => section.title && section.rows.length);
+  if (!visibleSections.length) return [title + ":", "— немає"].join("\n");
+  return [title + ":", ...visibleSections.flatMap((section, index) => [
+    ...(index > 0 ? [""] : []),
+    `${section.title}:`,
+    ...section.rows,
+  ])].join("\n");
+};
+
+const formatDigestDateShort = (dateStr) => {
+  const key = dateKey(dateStr);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
+  return `${key.slice(8, 10)}.${key.slice(5, 7)}`;
+};
+
+const formatDigestGroupTitle = (group = {}, scheduleRow = {}) => {
+  const name = displayGroupName(group);
+  const time = getScheduleStartTime(scheduleRow);
+  return time ? `${name} ${time}` : name;
+};
+
+const getAttendanceStudentAndGroup = (attendanceRow = {}, subs = []) => {
+  const directStudentId = String(attendanceRow.student_id || attendanceRow.studentId || "").trim();
+  const directGroupId = String(attendanceRow.group_id || attendanceRow.groupId || "").trim();
+  if (directStudentId && directGroupId) return { studentId: directStudentId, groupId: directGroupId };
+  const sub = (subs || []).find((raw) => String(raw?.id || "") === String(attendanceRow.sub_id || attendanceRow.subId || ""));
+  return {
+    studentId: directStudentId || String(sub?.student_id || sub?.studentId || "").trim(),
+    groupId: directGroupId || String(sub?.group_id || sub?.groupId || "").trim(),
+  };
+};
+
+const buildAdminDigest = ({ settings, localDate, slots, activeGroups, trials, studentGroups, studentsById, subs, attendance, directionsById, cancelledTrainings }) => {
   const slotByGroupId = Object.fromEntries(slots.map(({ group, row }) => [String(group.id), { group, row }]));
+  const cancelledLessonKeys = new Set((cancelledTrainings || []).map((row) => `${String(row.group_id || row.groupId || "")}|${dateKey(row.date)}`));
   const trialRows = settings.include_today_trials ? (trials || []).filter((t) => String(t.trial_date || "") === localDate).map((t) => {
     const slot = slotByGroupId[String(t.group_id || "")];
     const group = slot?.group || {};
@@ -805,41 +841,43 @@ const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, s
     return `- ${t.name || "Без імені"}${group.id ? ` — ${displayGroupName(group)}` : ""}${dir ? ` / ${dir}` : ""}${time ? ` / ${time}` : ""}${phone ? ` / ${phone}` : ""} / статус: ${statusLabel}`;
   }) : [];
 
-  const problemRows = [];
+  const missingSubscriptionSections = [];
   if (settings.include_expiring_subscriptions) {
-    for (const sg of (studentGroups || []).filter((r) => groupIdsToday.has(String(r.group_id)))) {
-      if (hasActiveSubscriptionOnDate(subs, sg.student_id, sg.group_id, localDate)) continue;
-      const slot = slotByGroupId[String(sg.group_id)];
-      problemRows.push(`- ${displayStudentName(studentsById[String(sg.student_id)] || {})} — ${displayGroupName(slot?.group || { id: sg.group_id })}${getScheduleStartTime(slot?.row || {}) ? ` / ${getScheduleStartTime(slot.row)}` : ""}`);
+    for (const { group, row } of slots) {
+      const rows = (studentGroups || [])
+        .filter((sg) => String(sg.group_id) === String(group.id))
+        .filter((sg) => !hasActiveSubscriptionOnDate(subs, sg.student_id, sg.group_id, localDate))
+        .map((sg) => `- ${displayStudentName(studentsById[String(sg.student_id)] || {})}`);
+      if (rows.length) missingSubscriptionSections.push({ title: formatDigestGroupTitle(group, row), rows });
     }
   }
 
-  const missedRows = [];
+  const missedSections = [];
   if (settings.include_inactive_students) {
-    for (const { group } of slots) {
-      const scheduleDays = Array.from(new Set(parseScheduleRows(group.schedule).map((r) => parseScheduleWeekday(r.weekday ?? r.dayOfWeek ?? r.day ?? r.dow ?? r.weekDay)).filter((d) => d != null)));
+    for (const group of (activeGroups || [])) {
+      const scheduleRows = parseScheduleRows(group.schedule);
+      const scheduleDays = Array.from(new Set(scheduleRows.map((r) => parseScheduleWeekday(r.weekday ?? r.dayOfWeek ?? r.day ?? r.dow ?? r.weekDay)).filter((d) => d != null)));
       const threshold = scheduleDays.length >= 3 ? 3 : scheduleDays.length >= 2 ? 2 : null;
       if (!threshold) continue;
       const lessonDates = [];
       const cursor = new Date(`${localDate}T12:00:00`);
+      cursor.setDate(cursor.getDate() - 1);
       for (let i = 0; i < 45 && lessonDates.length < threshold; i += 1) {
         const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
-        if (scheduleDays.includes(cursor.getDay())) lessonDates.push(key);
+        if (key < localDate && scheduleDays.includes(cursor.getDay()) && !cancelledLessonKeys.has(`${String(group.id)}|${key}`)) lessonDates.push(key);
         cursor.setDate(cursor.getDate() - 1);
       }
       if (lessonDates.length < threshold) continue;
+      const rows = [];
       const members = (studentGroups || []).filter((r) => String(r.group_id) === String(group.id));
       for (const sg of members) {
-        const presentCount = (attendance || []).filter((a) => {
-          const directStudentId = String(a.student_id || a.studentId || "");
-          const sub = (subs || []).find((raw) => String(raw?.id || "") === String(a.sub_id || a.subId || ""));
-          const resolvedStudentId = directStudentId || String(sub?.student_id || sub?.studentId || "");
-          const directGroupId = String(a.group_id || a.groupId || "");
-          const resolvedGroupId = directGroupId || String(sub?.group_id || sub?.groupId || "");
-          return resolvedStudentId === String(sg.student_id) && resolvedGroupId === String(group.id) && lessonDates.includes(dateKey(a.date));
-        }).length;
-        if (presentCount === 0) missedRows.push(`- ${displayStudentName(studentsById[String(sg.student_id)] || {})} — ${displayGroupName(group)} (${threshold} підряд)`);
+        const wasPresent = (attendance || []).some((a) => {
+          const { studentId, groupId } = getAttendanceStudentAndGroup(a, subs);
+          return studentId === String(sg.student_id) && groupId === String(group.id) && lessonDates.includes(dateKey(a.date));
+        });
+        if (!wasPresent) rows.push(`- ${displayStudentName(studentsById[String(sg.student_id)] || {})} — ${threshold} підряд (${lessonDates.map(formatDigestDateShort).join(", ")})`);
       }
+      if (rows.length) missedSections.push({ title: formatDigestGroupTitle(group, scheduleRows[0] || {}), rows });
     }
   }
 
@@ -848,9 +886,9 @@ const buildAdminDigest = ({ settings, localDate, slots, trials, studentGroups, s
     "",
     formatDigestBlock("Пробні на сьогодні", trialRows, { maxRows: 15 }),
     "",
-    formatDigestBlock("Проблемні абонементи на сьогодні", problemRows, { maxRows: 15 }),
+    formatGroupedDigestBlock("Немає абонементів у", missingSubscriptionSections),
     "",
-    formatDigestBlock("Пропуски підряд", missedRows, { maxRows: 15 }),
+    formatGroupedDigestBlock("Пропуски підряд", missedSections),
   ].join("\n");
 };
 
@@ -960,9 +998,10 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
       ["students", supabase.from("students").select("id,name,first_name,last_name,phone,telegram")],
       ["subscriptions", supabase.from("subscriptions").select("id,student_id,group_id,start_date,end_date,activation_date,plan_type,total_trainings,used_trainings")],
       ["attendance", supabase.from("attendance").select("id,student_id,group_id,sub_id,date,entry_type")],
+      ["cancelled_trainings", supabase.from("cancelled_trainings").select("id,group_id,date")],
     ];
-    const [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw] = await Promise.all(dataLoads.map(([, query]) => query));
-    const loaded = [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw];
+    const [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, cancelledTrainingsRaw] = await Promise.all(dataLoads.map(([, query]) => query));
+    const loaded = [groupsRaw, directionsRaw, trialsRaw, studentGroupsRaw, studentsRaw, subsRaw, attendanceRaw, cancelledTrainingsRaw];
     const firstErrIndex = loaded.findIndex((r) => r.error);
     if (firstErrIndex >= 0) {
       failed += 1;
@@ -976,7 +1015,7 @@ const handleDispatchAdminDailyDigest = async (req, res) => {
     const slots = getTodayScheduleSlots(activeGroups, localDate);
     const directionsById = Object.fromEntries((directionsRaw.data || []).map((d) => [String(d.id), d]));
     const studentsById = Object.fromEntries((studentsRaw.data || []).map((s) => [String(s.id), s]));
-    const message = buildAdminDigest({ settings, localDate, slots, trials: trialsRaw.data || [], studentGroups: studentGroupsRaw.data || [], studentsById, subs: subsRaw.data || [], attendance: attendanceRaw.data || [], directionsById });
+    const message = buildAdminDigest({ settings, localDate, slots, activeGroups, trials: trialsRaw.data || [], studentGroups: studentGroupsRaw.data || [], studentsById, subs: subsRaw.data || [], attendance: attendanceRaw.data || [], directionsById, cancelledTrainings: cancelledTrainingsRaw.data || [] });
 
     if (dryRun) {
       results.push({ settingsId: settings.id, status: "dry-run", timezone, localDate, send_time_local: sendTime, telegram_chat_id: settings.telegram_chat_id, message });
