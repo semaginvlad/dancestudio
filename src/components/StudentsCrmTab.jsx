@@ -430,8 +430,8 @@ export default function StudentsCrmTab({
         gap: 14,
         alignItems: "start",
       }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{
+        <div className="student-trial-main" style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
+          <div className="student-trial-index" style={{
             width: 30,
             height: 30,
             borderRadius: 10,
@@ -444,22 +444,23 @@ export default function StudentsCrmTab({
             flex: "0 0 auto",
           }}>{index + 1}</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
-            <div style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
-            {booking.note ? <div style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
+            <div className="student-trial-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
+            <div className="student-trial-contact" style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
+            {booking.note ? <div className="student-trial-note" style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
-          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
-          <div style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
+          <div className="student-trial-meta-label" style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
+          <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
+          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
+          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr?.name || "Група не вказана"} <span style={{ color: theme.textMuted }}>• {booking.trialDate || "Дата не вказана"}</span></div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
+        <div className="student-trial-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
+          <div className="student-trial-status-row" style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
             <span style={{ display: "inline-flex", padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
-            {statusHint ? <div title={statusHint} style={{ color: theme.textLight, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{statusHint}</div> : null}
+            {statusHint ? <div className="student-trial-status-hint" title={statusHint} style={{ color: theme.textLight, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{statusHint}</div> : null}
           </div>
-          <label style={{ display: "grid", gap: 6, justifyItems: "end", width: "100%", color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
+          <label className="student-trial-status-label" style={{ display: "grid", gap: 6, justifyItems: "end", width: "100%", color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
               Змінити статус
               <select
                 value=""
@@ -479,7 +480,7 @@ export default function StudentsCrmTab({
                   ))}
               </select>
             </label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div className="student-trial-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => { setEditItem(booking); setModal("editTrialBooking"); }}>Редагувати</button>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => deleteTrialBooking(booking)}>Видалити</button>
           </div>
@@ -579,7 +580,23 @@ export default function StudentsCrmTab({
           .student-mobile-card .students-actions select { width: 100% !important; grid-column: 1 / -1; }
           .student-mobile-card .students-actions button { min-height: 44px !important; }
           .student-trial-card, .student-waitlist-card { grid-template-columns: 1fr !important; padding: 12px !important; gap: 12px !important; }
-          .student-trial-card button, .student-waitlist-card button { min-height: 42px !important; flex: 1 1 auto; }
+          .student-trial-card { padding: 9px 10px !important; gap: 7px !important; align-items: start !important; }
+          .student-trial-main { gap: 8px !important; }
+          .student-trial-index { width: 26px !important; height: 26px !important; border-radius: 9px !important; font-size: 12px !important; }
+          .student-trial-name { font-size: 15px !important; line-height: 1.12 !important; }
+          .student-trial-contact { margin-top: 2px !important; font-size: 12px !important; line-height: 1.2 !important; }
+          .student-trial-note { margin-top: 4px !important; line-height: 1.25 !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+          .student-trial-meta-label, .student-trial-group, .student-trial-date { display: none !important; }
+          .student-trial-mobile-meta { display: block !important; font-size: 12.5px !important; line-height: 1.25 !important; margin-top: 1px !important; }
+          .student-trial-controls { gap: 6px !important; align-items: stretch !important; }
+          .student-trial-status-row { display: flex !important; gap: 6px !important; justify-content: space-between !important; align-items: center !important; width: 100%; }
+          .student-trial-status-row span { padding: 4px 8px !important; font-size: 11.5px !important; }
+          .student-trial-status-hint { display: none !important; }
+          .student-trial-status-label { gap: 4px !important; font-size: 11px !important; justify-items: stretch !important; }
+          .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
+          .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
+          .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
+          .student-waitlist-card button { min-height: 42px !important; flex: 1 1 auto; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
