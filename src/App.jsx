@@ -145,6 +145,7 @@ export default function App() {
   const [filterToDate, setFilterToDate] = useStickyState("", "ds_filterToDate");
   const [filterDatePreset, setFilterDatePreset] = useStickyState("custom", "ds_filterDatePreset");
   const [filterAudit, setFilterAudit] = useStickyState("all", "ds_filterAudit");
+  const [paymentsFiltersOpen, setPaymentsFiltersOpen] = useState(false);
   const [adminGroupSearch, setAdminGroupSearch] = useStickyState("", "ds_adminGroupSearch");
   const [adminGroupArchiveFilter, setAdminGroupArchiveFilter] = useStickyState("active", "ds_adminGroupArchiveFilter");
   const [adminGroupTrainerFilter, setAdminGroupTrainerFilter] = useStickyState("all", "ds_adminGroupTrainerFilter");
@@ -1587,6 +1588,44 @@ export default function App() {
     return r.sort((a,b)=>({warning:0,active:1,expired:2}[a.status]??3)-({warning:0,active:1,expired:2}[b.status]??3));
   },[subsExt,filterPlanType,filterPaid,filterDir,filterGroup,filterStatus,filterPayMethod,filterTrainer,filterFromDate,filterToDate,searchQ,groups,studentMap,trainerGroups]);
 
+
+  const resetPaymentsFilters = () => {
+    setFilterPlanType("all");
+    setFilterPaid("all");
+    setFilterDir("all");
+    setFilterGroup("all");
+    setFilterTrainer("all");
+    setFilterPayMethod("all");
+    setFilterStatus("all");
+    setFilterDatePreset("custom");
+    setFilterFromDate("");
+    setFilterToDate("");
+    setFilterAudit("all");
+  };
+
+  const activePaymentsFilterCount = useMemo(() => [
+    filterPlanType !== "all",
+    filterPaid !== "all",
+    filterDir !== "all",
+    filterGroup !== "all",
+    filterTrainer !== "all",
+    filterPayMethod !== "all",
+    filterStatus !== "all",
+    filterDatePreset !== "custom" || !!filterFromDate || !!filterToDate,
+    filterAudit !== "all",
+  ].filter(Boolean).length, [filterPlanType, filterPaid, filterDir, filterGroup, filterTrainer, filterPayMethod, filterStatus, filterDatePreset, filterFromDate, filterToDate, filterAudit]);
+
+  const paymentsSummary = useMemo(() => {
+    const paidRows = filteredSubs.filter((s) => !!s.paid);
+    const unpaidRows = filteredSubs.filter((s) => !s.paid);
+    return {
+      count: filteredSubs.length,
+      paidTotal: paidRows.reduce((sum, s) => sum + Number(s.amount || 0), 0),
+      unpaidTotal: unpaidRows.reduce((sum, s) => sum + Number(s.amount || 0), 0),
+      activeCount: filteredSubs.filter((s) => s.status === "active").length,
+    };
+  }, [filteredSubs]);
+
   const paymentAnomalies = useMemo(() => {
     const anomalies = [];
     const byKey = {};
@@ -2457,105 +2496,138 @@ export default function App() {
         )}
 
         {/* === ОПЛАТИ === */}
-        {isAdmin && tab==="subs" && <div>
-          <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
+        {isAdmin && tab==="subs" && <div className="payments-tab">
+          <style>{`
+            .payments-mobile-header, .payments-summary-grid, .payments-mobile-toolbar, .payments-mobile-list { display: none; }
+            .payments-filter-shell select, .payments-filter-shell input { max-width: 100%; }
+            .payments-card-menu { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+            .payment-card { display: none; }
+            @media (max-width: 768px) {
+              main { padding-left: 10px !important; padding-right: 10px !important; overflow-x: hidden !important; }
+              .payments-tab { width: 100%; max-width: 100%; overflow-x: hidden; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+              .payments-mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+              .payments-mobile-title { min-width: 0; }
+              .payments-mobile-title h2 { margin: 0; font-size: 22px; line-height: 1.12; color: ${theme.secondary}; font-weight: 900; letter-spacing: -0.5px; }
+              .payments-mobile-title div { margin-top: 2px; font-size: 12px; color: ${theme.textMuted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+              .payments-add-btn { min-height: 44px !important; min-width: 44px; padding: 0 14px !important; border-radius: 14px !important; flex: 0 0 auto; }
+              .payments-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+              .payments-summary-card { border-radius: 16px; padding: 10px 11px; background: ${theme.card}; border: 1px solid ${theme.border}; box-shadow: 0 6px 18px rgba(168, 177, 206, 0.10); min-width: 0; }
+              .payments-summary-label { font-size: 10px; color: ${theme.textMuted}; font-weight: 800; text-transform: uppercase; letter-spacing: .35px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+              .payments-summary-value { margin-top: 3px; font-size: 18px; line-height: 1.15; color: ${theme.textMain}; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+              .payments-mobile-toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-bottom: 10px; }
+              .payments-mobile-search { min-width: 0 !important; width: 100% !important; height: 44px !important; padding: 0 12px !important; border-radius: 14px !important; }
+              .payments-filter-button, .payments-clear-button { min-height: 44px !important; padding: 0 12px !important; border-radius: 14px !important; position: relative; white-space: nowrap; }
+              .payments-filter-badge { position: absolute; top: -6px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: ${theme.danger}; color: #fff; font-size: 11px; font-weight: 900; border: 2px solid ${theme.card}; }
+              .payments-desktop-filters, .payments-desktop-table, .payments-desktop-table-inner { display: none !important; }
+              .payments-filter-shell { display: ${paymentsFiltersOpen ? "block" : "none"}; position: fixed; inset: 0; z-index: 900; background: rgba(31,31,31,.38); padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
+              .payments-filter-panel { position: absolute; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: min(82dvh, 720px); overflow: auto; -webkit-overflow-scrolling: touch; background: ${theme.card}; border: 1px solid ${theme.border}; border-radius: 22px 22px 16px 16px; padding: 14px; box-shadow: 0 24px 48px rgba(0,0,0,.22); }
+              .payments-filter-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+              .payments-filter-panel-head strong { font-size: 17px; color: ${theme.textMain}; }
+              .payments-filter-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+              .payments-filter-grid select, .payments-filter-grid input { width: 100% !important; min-width: 0 !important; height: 44px !important; border-radius: 14px !important; }
+              .payments-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+              .payments-filter-actions button { min-height: 44px !important; width: 100%; }
+              .payments-mobile-list { display: flex; flex-direction: column; gap: 10px; }
+              .payments-dir-card { background: ${theme.card}; border: 1px solid ${theme.border}; border-radius: 18px; overflow: hidden; box-shadow: 0 8px 22px rgba(168,177,206,.11); }
+              .payments-dir-toggle { padding: 12px 13px !important; min-height: 44px; }
+              .payments-dir-toggle-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px !important; }
+              .payments-dir-body { padding: 0 10px 10px; display: grid; gap: 8px; }
+              .payment-card { width: 100%; border: 1px solid ${theme.border}; background: ${theme.bg}; border-radius: 16px; padding: 11px; text-align: left; color: ${theme.textMain}; display: grid; gap: 7px; overflow: hidden; }
+              .payment-card-top, .payment-card-meta, .payment-card-bottom { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-width: 0; }
+              .payment-student { font-size: 15px; font-weight: 900; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+              .payment-amount { flex: 0 0 auto; font-size: 15px; font-weight: 900; color: ${theme.success}; white-space: nowrap; }
+              .payment-muted-row { min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; color: ${theme.textMuted}; font-size: 11px; font-weight: 650; line-height: 1.35; }
+              .payment-muted-row span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+              .payments-card-menu button { min-width: 38px; min-height: 38px; margin: 0 !important; border-radius: 12px; background: ${theme.card} !important; }
+              .payments-empty { padding: 28px 14px !important; border-radius: 18px; background: ${theme.card}; border: 1px solid ${theme.border}; }
+              .payments-issues { padding: 12px !important; border-radius: 18px !important; margin-bottom: 10px !important; }
+            }
+          `}</style>
+
+          <div className="payments-mobile-header">
+            <div className="payments-mobile-title"><h2>Оплати</h2><div>{paymentsSummary.count} записів · {paymentsSummary.paidTotal.toLocaleString()} ₴ оплачено</div></div>
+            <button type="button" className="payments-add-btn" style={btnP} onClick={()=>setModal("addSub")}>+ Оплата</button>
+          </div>
+
+          <div className="payments-summary-grid">
+            <div className="payments-summary-card"><div className="payments-summary-label">Оплачено</div><div className="payments-summary-value" style={{color: theme.success}}>{paymentsSummary.paidTotal.toLocaleString()} ₴</div></div>
+            <div className="payments-summary-card"><div className="payments-summary-label">Борги</div><div className="payments-summary-value" style={{color: theme.danger}}>{paymentsSummary.unpaidTotal.toLocaleString()} ₴</div></div>
+            <div className="payments-summary-card"><div className="payments-summary-label">Записів</div><div className="payments-summary-value">{paymentsSummary.count}</div></div>
+            <div className="payments-summary-card"><div className="payments-summary-label">Активні</div><div className="payments-summary-value">{paymentsSummary.activeCount}</div></div>
+          </div>
+
+          <div className="payments-mobile-toolbar">
+            <input className="payments-mobile-search" style={inputSt} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+            <button type="button" className="payments-clear-button" style={btnS} onClick={()=>setSearchQ("")} disabled={!searchQ}>Очистити</button>
+            <button type="button" className="payments-filter-button" style={btnS} onClick={()=>setPaymentsFiltersOpen(true)}>Фільтри{activePaymentsFilterCount > 0 && <span className="payments-filter-badge">{activePaymentsFilterCount}</span>}</button>
+          </div>
+
+          <div className="payments-filter-shell" onClick={()=>setPaymentsFiltersOpen(false)}>
+            <div className="payments-filter-panel" onClick={(e)=>e.stopPropagation()}>
+              <div className="payments-filter-panel-head"><strong>Фільтри оплат</strong><button type="button" style={{...btnS, minHeight: 38}} onClick={()=>setPaymentsFiltersOpen(false)}>✕</button></div>
+              <div className="payments-filter-grid">
+                <select style={inputSt} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
+                <select style={inputSt} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
+                <select style={inputSt} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
+                <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
+                <select style={inputSt} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
+                <select style={inputSt} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
+                <select style={inputSt} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
+                <select style={inputSt} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}><option value="custom">Власний діапазон</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option></select>
+                <input type="date" style={inputSt} value={filterFromDate} onChange={e=>{setFilterDatePreset("custom");setFilterFromDate(e.target.value)}} />
+                <input type="date" style={inputSt} value={filterToDate} onChange={e=>{setFilterDatePreset("custom");setFilterToDate(e.target.value)}} />
+                <select style={inputSt} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}><option value="all">Усі записи</option><option value="only_issues">Проблемні записи</option></select>
+              </div>
+              <div className="payments-filter-actions"><button type="button" style={btnS} onClick={resetPaymentsFilters}>Скинути</button><button type="button" style={btnP} onClick={()=>setPaymentsFiltersOpen(false)}>Показати</button></div>
+            </div>
+          </div>
+
+          <div className="payments-desktop-filters" style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
             <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
-            <select style={{...inputSt,width:"auto"}} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}>
-              <option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option>
-            </select>
-            <select style={{...inputSt,width:"auto"}} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}>
-              <option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option>
-            </select>
-            <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}>
-              <option value="all">Усі напрямки</option>
-              {directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
+            <select style={{...inputSt,width:"auto"}} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
+            <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
             <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
-            <select style={{...inputSt,width:"auto"}} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}>
-              <option value="all">Усі тренери</option>
-              {trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}
-            </select>
-            <select style={{...inputSt,width:"auto"}} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}>
-              <option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option>
-            </select>
-            <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
-              <option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option>
-            </select>
-            <select style={{...inputSt,width:"auto"}} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}>
-              <option value="custom">Власний діапазон</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option>
-            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
+            <select style={{...inputSt,width:"auto"}} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
+            <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
+            <select style={{...inputSt,width:"auto"}} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}><option value="custom">Власний діапазон</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option></select>
             <input type="date" style={{...inputSt,width:"auto"}} value={filterFromDate} onChange={e=>{setFilterDatePreset("custom");setFilterFromDate(e.target.value)}} />
             <input type="date" style={{...inputSt,width:"auto"}} value={filterToDate} onChange={e=>{setFilterDatePreset("custom");setFilterToDate(e.target.value)}} />
-            <select style={{...inputSt,width:"auto"}} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}>
-              <option value="all">Усі записи</option>
-              <option value="only_issues">Проблемні записи</option>
-            </select>
+            <select style={{...inputSt,width:"auto"}} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}><option value="all">Усі записи</option><option value="only_issues">Проблемні записи</option></select>
           </div>
           {filterAudit==="only_issues" && (
-            <div style={{background: theme.card, borderRadius: 20, padding: 16, marginBottom: 20, border: `1px solid ${theme.border}`}}>
+            <div className="payments-issues" style={{background: theme.card, borderRadius: 20, padding: 16, marginBottom: 20, border: `1px solid ${theme.border}`}}>
               <div style={{fontWeight: 700, color: theme.danger, marginBottom: 10}}>Проблемні записи ({paymentAnomalies.length})</div>
-              <div style={{display:"grid", gap:8, color: theme.textMuted}}>
-                {paymentAnomalies.map((a, i)=>{
-                  const first = a.rows?.[0] || {};
-                  const studentName = getDisplayName(studentMap[first.studentId]) || "—";
-                  const groupName = groupMap[first.groupId]?.name || "—";
-                  const dateLabel = String(first.activationDate || first.startDate || first.date || "").slice(0, 10) || "—";
-                  const humanLabel = anomalyLabelMap[a.type] || "Інша аномалія";
-                  const countLabel = (a.rows?.length || 0) > 1 ? ` · записів: ${a.rows.length}` : "";
-                  return <div key={`${a.type}_${i}`}>• {humanLabel} · {studentName} · {groupName} · {dateLabel}{countLabel}</div>;
-                })}
+              <div style={{display:"grid", gap:8, color: theme.textMuted, fontSize: 13}}>
+                {paymentAnomalies.map((a, i)=>{ const first = a.rows?.[0] || {}; const studentName = getDisplayName(studentMap[first.studentId]) || "—"; const groupName = groupMap[first.groupId]?.name || "—"; const dateLabel = String(first.activationDate || first.startDate || first.date || "").slice(0, 10) || "—"; const humanLabel = anomalyLabelMap[a.type] || "Інша аномалія"; const countLabel = (a.rows?.length || 0) > 1 ? ` · записів: ${a.rows.length}` : ""; return <div key={`${a.type}_${i}`}>• {humanLabel} · {studentName} · {groupName} · {dateLabel}{countLabel}</div>; })}
                 {!paymentAnomalies.length && <div>Аномалій не знайдено.</div>}
               </div>
             </div>
           )}
-          {filterAudit==="all" && (filteredSubs.length===0?<div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає оплат</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {filterAudit==="all" && (filteredSubs.length===0?<div className="payments-empty" style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>{activePaymentsFilterCount || searchQ ? "Нічого не знайдено за вибраними фільтрами" : "Оплат поки немає"}</div>:
+          <div className="payments-mobile-list" style={{display:"flex",flexDirection:"column",gap:20}}>
             {subsGroupedByDir.grouped.filter(d => filterDir === "all" || d.direction.id === filterDir).map(({direction, subs: dSubs}) => {
               const finalSubs = filterGroup !== "all" ? dSubs.filter(s => s.groupId === filterGroup) : dSubs;
               if (finalSubs.length === 0) return null;
               const isExpanded = expandedSubDirs[direction.id];
               return (
-                <div key={direction.id} style={{background: theme.card, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
-                  <button onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
-                    <div style={{fontSize:18,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({finalSubs.length})</span></div>
+                <div key={direction.id} className="payments-dir-card" style={{background: theme.card, borderRadius: 28, overflow: 'hidden', border: `1px solid ${theme.border}`}}>
+                  <button className="payments-dir-toggle" onClick={() => setExpandedSubDirs(p => ({...p, [direction.id]: !p[direction.id]}))} style={{width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'24px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left'}}>
+                    <div className="payments-dir-toggle-name" style={{fontSize:18,fontWeight:700,color:direction.color}}>{direction.name} <span style={{color:theme.textLight,fontSize:15,fontWeight:600, marginLeft: 8}}>({finalSubs.length})</span></div>
                     <div style={{color:theme.textLight, fontSize: 16}}>{isExpanded ? "▲" : "▼"}</div>
                   </button>
-                  {isExpanded && (
-                    <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}}>
-                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}>
-                        <thead>
-                          <tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}>
-                            <th style={{padding: "16px 14px", width: 40}}>#</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Група</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Термін</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th>
-                            <th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {finalSubs.map((sub, index) => {
-                            const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType;
-                            return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}>
-                              <td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td>
-                              <td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{getDisplayName(st)}</td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td>
-                              <td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td>
-                              <td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}>
-                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,marginRight:16}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button>
-                                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button>
-                              </td>
-                            </tr>
-                          })}
-                        </tbody>
-                      </table>
+                  {isExpanded && <div className="payments-dir-body">
+                    <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}} className="payments-desktop-table-inner">
+                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}><thead><tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}><th style={{padding: "16px 14px", width: 40}}>#</th><th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 14px", fontWeight: 700}}>Група</th><th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th><th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th><th style={{padding: "16px 14px", fontWeight: 700}}>Термін</th><th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th><th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th></tr></thead><tbody>{finalSubs.map((sub, index) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}><td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td><td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{getDisplayName(st)}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td><td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}><button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,marginRight:16}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button><button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></td></tr> })}</tbody></table>
                     </div>
-                  )}
+                    {finalSubs.map((sub) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <button type="button" key={`card_${sub.id}`} className="payment-card" onClick={()=>{setEditItem(sub);setModal("editSub")}}>
+                      <div className="payment-card-top"><div className="payment-student">{getDisplayName(st) || "—"}</div><div className="payment-amount">{Number(sub.amount || 0).toLocaleString()} ₴</div></div>
+                      <div className="payment-muted-row"><span>{fmt(sub.activationDate || sub.startDate)}</span><span>· {gr?.name || "Без групи"}</span><span>· {planLabel}</span></div>
+                      <div className="payment-muted-row"><span>{sub.payMethod === "card" ? "Картка" : sub.payMethod === "cash" ? "Готівка" : sub.payMethod === "transfer" ? "Переказ" : (sub.payMethod || "Метод не вказано")}</span><span>· {sub.usedTrainings}/{sub.totalTrainings} занять</span><span>· {fmt(sub.startDate)}—{fmt(sub.endDate)}</span></div>
+                      <div className="payment-card-bottom"><div style={{display:"flex", gap:6, flexWrap:"wrap", minWidth:0}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<Badge color={theme.danger}>Борг</Badge>}</div><div className="payments-card-menu" onClick={(e)=>e.stopPropagation()}><button type="button" aria-label="Редагувати оплату" style={{border:"none",cursor:"pointer",fontSize:16,color:theme.textMain}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>⋯</button><button type="button" aria-label="Видалити оплату" style={{border:"none",cursor:"pointer",fontSize:16,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></div></div>
+                    </button> })}
+                  </div>}
                 </div>
               );
             })}
@@ -2969,8 +3041,8 @@ export default function App() {
       
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв" variant={studentsMobileModalVariant}><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне" variant={studentsMobileModalVariant}><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
       <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне" variant={studentsMobileModalVariant}><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
