@@ -5,8 +5,9 @@ import { getDisplayName } from "../shared/utils";
 export function Modal({open, onClose, title, children, wide, variant}){
   if(!open) return null;
   const isStudentsMobile = variant === "students-mobile";
+  const isPaymentsMobile = variant === "payments-mobile";
   return(
-    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
       <style>{`
         @media (max-width: 768px) {
           .ds-modal-overlay--students-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
@@ -16,6 +17,14 @@ export function Modal({open, onClose, title, children, wide, variant}){
           .ds-modal-overlay--students-mobile .ds-modal-body { padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px)) !important; -webkit-overflow-scrolling: touch; }
           .ds-modal-overlay--students-mobile .student-form-grid, .ds-modal-overlay--students-mobile .student-form-actions { grid-template-columns: 1fr !important; flex-direction: column-reverse !important; align-items: stretch !important; }
           .ds-modal-overlay--students-mobile .student-form-actions button { min-height: 44px !important; width: 100%; }
+          .ds-modal-overlay--payments-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
+          .ds-modal-overlay--payments-mobile .ds-modal-panel { width: calc(100vw - 16px) !important; max-width: none !important; max-height: min(94dvh, calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 20px 20px 0 0 !important; }
+          .ds-modal-overlay--payments-mobile .ds-modal-header { padding: 14px 16px 12px !important; flex-shrink: 0; }
+          .ds-modal-overlay--payments-mobile .ds-modal-header h3 { font-size: 18px !important; }
+          .ds-modal-overlay--payments-mobile .ds-modal-body { padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px)) !important; -webkit-overflow-scrolling: touch; }
+          .ds-modal-overlay--payments-mobile form, .ds-modal-overlay--payments-mobile .sub-form-grid, .ds-modal-overlay--payments-mobile .sub-form-actions { grid-template-columns: 1fr !important; flex-direction: column-reverse !important; align-items: stretch !important; }
+          .ds-modal-overlay--payments-mobile input, .ds-modal-overlay--payments-mobile select, .ds-modal-overlay--payments-mobile textarea { width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+          .ds-modal-overlay--payments-mobile button { min-height: 44px; }
         }
       `}</style>
       <div className="ds-modal-panel" onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, width:wide?800:500, maxWidth:"100%", maxHeight:"min(90dvh, 90vh)", overflow:"hidden", boxShadow: "0 24px 48px rgba(0,0,0,0.1)", display:"flex", flexDirection:"column"}}>
