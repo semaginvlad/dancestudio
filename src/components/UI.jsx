@@ -2,16 +2,28 @@ import React, { useMemo, useState } from "react";
 import { theme, DIRECTIONS, inputSt } from "../shared/constants";
 import { getDisplayName } from "../shared/utils";
 
-export function Modal({open, onClose, title, children, wide}){
+export function Modal({open, onClose, title, children, wide, variant}){
   if(!open) return null;
+  const isStudentsMobile = variant === "students-mobile";
   return(
-    <div style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, width:wide?800:500, maxWidth:"100%", maxHeight:"90vh", overflow:"hidden", boxShadow: "0 24px 48px rgba(0,0,0,0.1)", display:"flex", flexDirection:"column"}}>
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"24px 32px 16px", borderBottom:`1px solid ${theme.border}`}}>
+    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+      <style>{`
+        @media (max-width: 768px) {
+          .ds-modal-overlay--students-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
+          .ds-modal-overlay--students-mobile .ds-modal-panel { width: calc(100vw - 16px) !important; max-width: none !important; max-height: min(92dvh, calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 20px 20px 0 0 !important; }
+          .ds-modal-overlay--students-mobile .ds-modal-header { padding: 14px 16px 12px !important; flex-shrink: 0; }
+          .ds-modal-overlay--students-mobile .ds-modal-header h3 { font-size: 18px !important; }
+          .ds-modal-overlay--students-mobile .ds-modal-body { padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px)) !important; -webkit-overflow-scrolling: touch; }
+          .ds-modal-overlay--students-mobile .student-form-grid, .ds-modal-overlay--students-mobile .student-form-actions { grid-template-columns: 1fr !important; flex-direction: column-reverse !important; align-items: stretch !important; }
+          .ds-modal-overlay--students-mobile .student-form-actions button { min-height: 44px !important; width: 100%; }
+        }
+      `}</style>
+      <div className="ds-modal-panel" onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, width:wide?800:500, maxWidth:"100%", maxHeight:"min(90dvh, 90vh)", overflow:"hidden", boxShadow: "0 24px 48px rgba(0,0,0,0.1)", display:"flex", flexDirection:"column"}}>
+        <div className="ds-modal-header" style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"24px 32px 16px", borderBottom:`1px solid ${theme.border}`}}>
           <h3 style={{margin:0, fontSize:22, color:theme.textMain, fontWeight:700}}>{title}</h3>
           <button type="button" onClick={onClose} style={{background:theme.input, borderRadius:"50%", width:40, height:40, border:"none", color:theme.textMuted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize: 18}}>✕</button>
         </div>
-        <div style={{overflowY:"auto", padding:"16px 32px calc(24px + env(safe-area-inset-bottom))"}}>
+        <div className="ds-modal-body" style={{overflowY:"auto", overflowX:"hidden", minHeight:0, padding:"16px 32px calc(24px + env(safe-area-inset-bottom))"}}>
           {children}
         </div>
       </div>

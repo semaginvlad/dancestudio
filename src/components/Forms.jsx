@@ -20,7 +20,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="student-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Field label="Прізвище *"><input style={inputSt} value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Петренко" /></Field>
         <Field label="Ім'я *"><input style={inputSt} value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Олена" /></Field>
       </div>
@@ -47,7 +47,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
       <Field label="Нотатки">
         <textarea style={{ ...inputSt, height: 'auto', padding: '16px 20px', minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} />
       </Field>
-      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
+      <div className="student-form-actions" style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
         <button type="button" style={{ ...btnP, opacity: (firstName.trim() || lastName.trim()) ? 1 : .4 }} onClick={() => {
           if (!firstName.trim() && !lastName.trim()) return;
