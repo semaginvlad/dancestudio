@@ -41,6 +41,7 @@ export default function StudentsCrmTab({
   getDisplayName,
 }) {
   const [selectedSummaryFilter, setSelectedSummaryFilter] = React.useState("all");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState(false);
 
   const activeWaitlist = waitlist.filter((w) => ["waiting", "contacted"].includes(String(w.status || "waiting")));
   const activeTrialBookingStatuses = new Set(["new", "contacted", "confirmed"]);
@@ -257,6 +258,13 @@ export default function StudentsCrmTab({
     }))
     .filter(({ students }) => students.length > 0);
   const visibleActiveStudentCount = visibleGroupedStudents.reduce((sum, item) => sum + item.students.length, 0);
+  const allVisibleStudentsCount = visibleActiveStudentCount + studentsByDirection.inactive.length;
+  const activeFilterCount = [stFilterDir !== "all", stFilterGroup !== "all", selectedSummaryFilter !== "all"].filter(Boolean).length;
+  const resetStudentFilters = () => {
+    setSelectedSummaryFilter("all");
+    setStFilterDir("all");
+    setStFilterGroup("all");
+  };
   const visibleArchiveStudents = studentsByDirection.inactive.filter((st) => (selectedSummaryFilter === "debt" ? debtStudentIds.has(String(st.id)) : true));
   const filterEmptyState = (
     <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>
@@ -308,7 +316,7 @@ export default function StudentsCrmTab({
   };
 
   const renderStudentActions = (st, isArchive) => (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+    <div className="students-actions" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
       {isArchive && (
         <>
           <select
@@ -335,6 +343,11 @@ export default function StudentsCrmTab({
     return (
       <div
         key={st.id}
+        className="student-mobile-card"
+        role="button"
+        tabIndex={0}
+        onClick={() => { setEditItem(st); setModal("editStudent"); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditItem(st); setModal("editStudent"); } }}
         style={{
           background: isArchive ? "rgba(148, 163, 184, 0.08)" : theme.bg,
           border: `1px solid ${theme.border}`,
@@ -368,16 +381,16 @@ export default function StudentsCrmTab({
           </div>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>{renderSubscriptionBadges(st)}</div>
-        {renderStudentActions(st, isArchive)}
+        <div onClick={(e) => e.stopPropagation()}>{renderStudentActions(st, isArchive)}</div>
       </div>
     );
   };
 
   const renderSectionHeader = (title, count, subtitle, accent = theme.secondary) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+    <div className="students-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
       <div>
-        <div style={{ color: theme.textMain, fontSize: 20, fontWeight: 900, letterSpacing: "-0.02em" }}>{title}</div>
-        {subtitle ? <div style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 4 }}>{subtitle}</div> : null}
+        <div className="students-section-title" style={{ color: theme.textMain, fontSize: 20, fontWeight: 900, letterSpacing: "-0.02em" }}>{title}</div>
+        {subtitle ? <div className="students-section-subtitle" style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 4 }}>{subtitle}</div> : null}
       </div>
       <span style={{
         display: "inline-flex",
@@ -407,7 +420,7 @@ export default function StudentsCrmTab({
         : "";
 
     return (
-      <div key={booking.id} style={{
+      <div key={booking.id} className="student-trial-card" style={{
         background: theme.card,
         border: `1px solid ${theme.border}`,
         borderRadius: 18,
@@ -417,8 +430,8 @@ export default function StudentsCrmTab({
         gap: 14,
         alignItems: "start",
       }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{
+        <div className="student-trial-main" style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
+          <div className="student-trial-index" style={{
             width: 30,
             height: 30,
             borderRadius: 10,
@@ -431,22 +444,23 @@ export default function StudentsCrmTab({
             flex: "0 0 auto",
           }}>{index + 1}</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
-            <div style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
-            {booking.note ? <div style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
+            <div className="student-trial-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
+            <div className="student-trial-contact" style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
+            {booking.note ? <div className="student-trial-note" style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
-          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
-          <div style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
+          <div className="student-trial-meta-label" style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
+          <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
+          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
+          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr?.name || "Група не вказана"} <span style={{ color: theme.textMuted }}>• {booking.trialDate || "Дата не вказана"}</span></div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
+        <div className="student-trial-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
+          <div className="student-trial-status-row" style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
             <span style={{ display: "inline-flex", padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
-            {statusHint ? <div title={statusHint} style={{ color: theme.textLight, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{statusHint}</div> : null}
+            {statusHint ? <div className="student-trial-status-hint" title={statusHint} style={{ color: theme.textLight, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{statusHint}</div> : null}
           </div>
-          <label style={{ display: "grid", gap: 6, justifyItems: "end", width: "100%", color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
+          <label className="student-trial-status-label" style={{ display: "grid", gap: 6, justifyItems: "end", width: "100%", color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
               Змінити статус
               <select
                 value=""
@@ -466,7 +480,7 @@ export default function StudentsCrmTab({
                   ))}
               </select>
             </label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div className="student-trial-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => { setEditItem(booking); setModal("editTrialBooking"); }}>Редагувати</button>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => deleteTrialBooking(booking)}>Видалити</button>
           </div>
@@ -484,7 +498,7 @@ export default function StudentsCrmTab({
     const status = w.status || "waiting";
 
     return (
-      <div key={w.id} style={{
+      <div key={w.id} className="student-waitlist-card" style={{
         background: theme.card,
         border: `1px solid ${theme.border}`,
         borderRadius: 18,
@@ -544,8 +558,81 @@ export default function StudentsCrmTab({
   }).filter(Boolean);
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: 12 }}>
+    <div className="students-crm-root" style={{ display: "grid", gap: 18, minWidth: 0, overflowX: "hidden" }}>
+      <style>{`
+        .students-crm-root, .students-crm-root * { box-sizing: border-box; }
+        .students-mobile-only { display: none; }
+        @media (max-width: 768px) {
+          .students-crm-root { gap: 12px !important; margin-left: -10px; margin-right: -10px; padding: 0 2px calc(24px + env(safe-area-inset-bottom, 0px)); }
+          .students-desktop-filters { display: none !important; }
+          .students-mobile-only { display: grid !important; }
+          .students-summary-grid { display: flex !important; gap: 8px !important; overflow-x: auto; padding: 2px 2px 8px; margin: 0 -2px; scrollbar-width: none; }
+          .students-summary-grid::-webkit-scrollbar { display: none; }
+          .students-summary-card { min-width: 132px !important; min-height: 78px !important; padding: 11px 12px !important; border-radius: 16px !important; }
+          .students-summary-card-value { font-size: 23px !important; }
+          .students-section { padding: 12px !important; border-radius: 20px !important; }
+          .students-section-header { margin-bottom: 10px !important; }
+          .students-section-title { font-size: 17px !important; }
+          .students-section-subtitle { font-size: 12px !important; }
+          .student-mobile-card { grid-template-columns: 1fr !important; gap: 10px !important; padding: 12px !important; border-radius: 16px !important; cursor: pointer; }
+          .student-mobile-card > div:first-child { flex-wrap: nowrap !important; }
+          .student-mobile-card .students-actions { justify-content: stretch !important; display: grid !important; grid-template-columns: 1fr auto !important; width: 100%; }
+          .student-mobile-card .students-actions select { width: 100% !important; grid-column: 1 / -1; }
+          .student-mobile-card .students-actions button { min-height: 44px !important; }
+          .student-trial-card, .student-waitlist-card { grid-template-columns: 1fr !important; padding: 12px !important; gap: 12px !important; }
+          .student-trial-card { padding: 9px 10px !important; gap: 7px !important; align-items: start !important; }
+          .student-trial-main { gap: 8px !important; }
+          .student-trial-index { width: 26px !important; height: 26px !important; border-radius: 9px !important; font-size: 12px !important; }
+          .student-trial-name { font-size: 15px !important; line-height: 1.12 !important; }
+          .student-trial-contact { margin-top: 2px !important; font-size: 12px !important; line-height: 1.2 !important; }
+          .student-trial-note { margin-top: 4px !important; line-height: 1.25 !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+          .student-trial-meta-label, .student-trial-group, .student-trial-date { display: none !important; }
+          .student-trial-mobile-meta { display: block !important; font-size: 12.5px !important; line-height: 1.25 !important; margin-top: 1px !important; }
+          .student-trial-controls { gap: 6px !important; align-items: stretch !important; }
+          .student-trial-status-row { display: flex !important; gap: 6px !important; justify-content: space-between !important; align-items: center !important; width: 100%; }
+          .student-trial-status-row span { padding: 4px 8px !important; font-size: 11.5px !important; }
+          .student-trial-status-hint { display: none !important; }
+          .student-trial-status-label { gap: 4px !important; font-size: 11px !important; justify-items: stretch !important; }
+          .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
+          .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
+          .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
+          .student-waitlist-card button { min-height: 42px !important; flex: 1 1 auto; }
+          .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
+          .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
+          .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
+          .students-mobile-filter-grid select, .students-mobile-filter-grid input { width: 100% !important; max-width: none !important; min-width: 0 !important; }
+        }
+      `}</style>
+      <div className="students-mobile-only" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 20, padding: 12, gap: 10, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.12)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, color: theme.textMain, fontSize: 22, lineHeight: 1.05, fontWeight: 950 }}>Учениці</h2>
+            <div style={{ marginTop: 4, color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>{allVisibleStudentsCount} профілів</div>
+          </div>
+          <button type="button" style={{ ...btnP, minHeight: 44, padding: "0 14px", boxShadow: "none", whiteSpace: "nowrap" }} onClick={() => setModal("addStudent")}>+ Учениця</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+          <div style={{ position: "relative", minWidth: 0 }}>
+            <input style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0, height: 44, paddingRight: searchQ ? 42 : inputSt.padding }} placeholder="Пошук учениці..." value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+            {searchQ ? <button type="button" aria-label="Очистити пошук" onClick={() => setSearchQ("")} style={{ position: "absolute", right: 5, top: 5, width: 34, height: 34, border: "none", borderRadius: 999, background: theme.input, color: theme.textMuted, fontWeight: 900 }}>×</button> : null}
+          </div>
+          <button type="button" style={{ ...btnS, minHeight: 44, padding: "0 12px", position: "relative" }} onClick={() => setMobileFiltersOpen(true)}>Фільтри{activeFilterCount ? <span style={{ marginLeft: 6, display: "inline-flex", minWidth: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 999, background: theme.primary, color: "#fff", fontSize: 11, fontWeight: 900 }}>{activeFilterCount}</span> : null}</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+          {summaryCards.slice(0, 4).map((card) => <button key={`quick_${card.filter}`} type="button" onClick={() => toggleSummaryFilter(card.filter)} style={{ border: `1px solid ${selectedSummaryFilter === card.filter ? card.color : theme.border}`, background: selectedSummaryFilter === card.filter ? `${card.color}18` : theme.input, color: selectedSummaryFilter === card.filter ? card.color : theme.textMuted, borderRadius: 999, padding: "8px 11px", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{card.label}</button>)}
+        </div>
+      </div>
+      {mobileFiltersOpen ? <div className="students-filter-backdrop students-mobile-only" onClick={() => setMobileFiltersOpen(false)} /> : null}
+      {mobileFiltersOpen ? <div className="students-filter-sheet students-mobile-only" style={{ background: theme.card, border: `1px solid ${theme.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderBottom: `1px solid ${theme.border}` }}><strong>Фільтри учениць</strong><button type="button" style={{ ...btnS, minHeight: 38, padding: "0 12px" }} onClick={() => setMobileFiltersOpen(false)}>Готово</button></div>
+        <div className="students-mobile-filter-grid">
+          <button type="button" style={{ ...btnS, minHeight: 42, background: selectedSummaryFilter === "all" ? theme.secondary : theme.bg, color: selectedSummaryFilter === "all" ? "#fff" : theme.textMain }} onClick={() => setSelectedSummaryFilter("all")}>Всі</button>
+          <select style={{ ...inputSt }} value={stFilterDir} onChange={e => { setStFilterDir(e.target.value); setStFilterGroup("all"); }}><option value="all">Усі напрямки</option>{directionsList.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+          <GroupSelect groups={groups} value={stFilterGroup} onChange={setStFilterGroup} filterDir={stFilterDir} allowAll={true} />
+          <button type="button" style={{ ...btnS, minHeight: 42, color: activeFilterCount ? theme.danger : theme.textMuted }} onClick={resetStudentFilters}>Скинути</button>
+        </div>
+      </div> : null}
+      <div className="students-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: 12 }}>
         {summaryCards.map((card) => {
           const isSelected = selectedSummaryFilter === card.filter;
           return (
@@ -554,6 +641,7 @@ export default function StudentsCrmTab({
               type="button"
               onClick={() => toggleSummaryFilter(card.filter)}
               aria-pressed={isSelected}
+              className="students-summary-card"
               style={{
                 background: `linear-gradient(135deg, ${theme.card}, ${theme.input})`,
                 border: `1px solid ${isSelected ? card.color : theme.border}`,
@@ -574,7 +662,7 @@ export default function StudentsCrmTab({
                 <span style={{ width: 9, height: 9, borderRadius: 99, background: card.color, boxShadow: `0 0 0 4px ${card.color}18` }} />
               </div>
               <div>
-                <div style={{ color: theme.textMain, fontSize: 28, lineHeight: 1, fontWeight: 950 }}>{card.value}</div>
+                <div className="students-summary-card-value" style={{ color: theme.textMain, fontSize: 28, lineHeight: 1, fontWeight: 950 }}>{card.value}</div>
                 <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 650, marginTop: 7, lineHeight: 1.25 }}>{card.hint}</div>
               </div>
             </button>
@@ -582,7 +670,7 @@ export default function StudentsCrmTab({
         })}
       </div>
 
-      <div style={{
+      <div className="students-desktop-filters" style={{
         display: "flex",
         gap: 12,
         flexWrap: "wrap",
@@ -619,7 +707,7 @@ export default function StudentsCrmTab({
 
       <div style={{ display: "grid", gap: 18 }}>
         {shouldShowActiveSection && (
-          <section style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+          <section className="students-section" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Активні учениці", visibleActiveStudentCount, "Учениці згруповані за напрямками", theme.secondary)}
             {visibleGroupedStudents.length > 0 ? (
               <div style={{ display: "grid", gap: 12 }}>
@@ -649,7 +737,7 @@ export default function StudentsCrmTab({
         )}
 
         {shouldShowTrialSection && (
-          <section style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+          <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Записи на пробне без автоматичного створення учениці або абонемента", theme.primary || "#2563eb")}
             {activeTrialBookings.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -662,7 +750,7 @@ export default function StudentsCrmTab({
         )}
 
         {shouldShowTrialSection && (
-          <section style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+          <section className="students-section" style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             <details>
               <summary style={{ cursor: "pointer", listStyle: "none" }}>
                 {renderSectionHeader("Історія пробних", trialBookingsHistory.length, "Завершені та закриті записи на пробне", theme.textMuted)}
@@ -679,7 +767,7 @@ export default function StudentsCrmTab({
         )}
 
         {shouldShowReserveSection && (
-          <section style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+          <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Резерв / потенційні", activeWaitlist.length, "Активні заявки зі статусом waiting або contacted", theme.warning || "#f59e0b")}
             {reserveGroupHints.length > 0 && (
               <div style={{ marginBottom: 14 }}>
@@ -704,7 +792,7 @@ export default function StudentsCrmTab({
         )}
 
         {shouldShowArchiveSection && (
-          <section style={{ background: theme.archive, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
+          <section className="students-section" style={{ background: theme.archive, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Архів / неактивні", visibleArchiveStudents.length, "Окрема зона для відновлення або редагування профілів", theme.textMuted)}
             {visibleArchiveStudents.length > 0 ? (
               <div style={{ background: theme.card, borderRadius: 20, overflow: "hidden", border: `1px solid ${theme.border}` }}>

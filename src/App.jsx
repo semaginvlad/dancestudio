@@ -2079,6 +2079,8 @@ export default function App() {
     }
   };
 
+  const studentsMobileModalVariant = tab === "students" ? "students-mobile" : undefined;
+
   return (
     <div data-theme-version={themeRenderTick} data-build-label={APP_BUILD_LABEL} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -2720,7 +2722,7 @@ export default function App() {
           </div>
         </div>
       </Modal>
-      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця"><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
+      <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
@@ -2965,13 +2967,13 @@ export default function App() {
         )}
       </Modal>
       
-      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль"><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
+      <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
       {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
       {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв"><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне"><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
-      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне"><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв" variant={studentsMobileModalVariant}><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне" variant={studentsMobileModalVariant}><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
+      <Modal open={modal==="editTrialBooking"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис на пробне" variant={studentsMobileModalVariant}><TrialBookingForm initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={updateTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
     </div>
   );
 }
