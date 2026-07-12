@@ -65,6 +65,19 @@ const TrendLine = ({ rows = [], title, color, deltaLabel }) => {
 
 const RankList = ({ title, rows = [], unit = "" }) => <div className="dashboard-card dashboard-list-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>{title}</b><div style={{ display: "grid", gap: 7, marginTop: 8 }}>{rows.length ? rows.map((r, i) => <div className="dashboard-compact-row" key={`${title}_${r.id || r.name}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{i + 1}. {r.name}</span><b>{(r.value || 0).toLocaleString()}{unit}</b></div>) : <div style={{color:theme.textLight}}>Немає даних за період</div>}</div></div>;
 
+const MobileAccordionCard = ({ title, summary, children, open, onToggle }) => (
+  <div className="dashboard-mobile-accordion" style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+    <button type="button" className="dashboard-mobile-accordion-head" onClick={onToggle}>
+      <span>
+        <b>{title}</b>
+        <small>{summary}</small>
+      </span>
+      <span className={`dashboard-mobile-chevron${open ? " dashboard-mobile-chevron--open" : ""}`}>⌄</span>
+    </button>
+    {open && <div className="dashboard-mobile-accordion-body">{children}</div>}
+  </div>
+);
+
 export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
   const [mode, setMode] = useState("this_month");
@@ -72,6 +85,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const [to, setTo] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
   const [targets, setTargets] = useStickyState({ revenueTarget: 120000, attendanceTarget: 500, activeStudentsTarget: 140, recruitmentTarget: 40 }, "ds_dashboard_targets_v2");
   const [financeOverrides, setFinanceOverrides] = useStickyState({ operationalExpenses: 0, ownerSalaryVlad: 0, ownerSalaryKostia: 0, otherExpenses: 0 }, "ds_dashboard_finance_overrides_v1");
+  const [mobileSignalOpen, setMobileSignalOpen] = useState({ works: false, weak: false, risk: false });
 
   const period = useMemo(() => {
     if (mode === "custom") return { start: from, end: to };
@@ -176,7 +190,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   return <div className="dashboard-tab" style={{ display: "grid", gap: 14 }}>
     <style>{`
       .dashboard-tab, .dashboard-tab * { box-sizing: border-box; min-width: 0; }
-      .dashboard-mobile-header { display: none; }
+      .dashboard-mobile-header, .dashboard-signals-mobile { display: none; }
       .dashboard-chart-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .dashboard-chart-card svg { min-width: 0; display: block; }
       .dashboard-compact-row { gap: 10px; align-items: center; }
@@ -191,18 +205,35 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
         .dashboard-period-card input { min-height: 44px; width: 100%; flex: 1 1 140px; }
         .dashboard-period-label { width: 100%; margin-left: 0 !important; }
         .dashboard-targets-grid { order: 2; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
-        .dashboard-target-card { grid-template-columns: 1fr !important; align-content: start; min-height: 148px; gap: 6px !important; padding: 10px !important; }
-        .dashboard-ring { justify-items: start !important; }
-        .dashboard-ring svg { width: 54px; height: 54px; }
-        .dashboard-target-card input { width: 100% !important; min-height: 38px; }
-        .dashboard-alerts-grid { order: 3; grid-template-columns: 1fr !important; gap: 8px !important; }
-        .dashboard-alert-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; padding: 10px !important; }
-        .dashboard-alert-card > div:nth-child(2) { font-size: 22px !important; grid-row: span 2; }
-        .dashboard-alert-chip { justify-self: start; }
+        .dashboard-target-card { grid-template-columns: 1fr !important; align-content: start; min-height: 108px; gap: 3px !important; padding: 7px !important; }
+        .dashboard-ring { justify-items: start !important; gap: 1px !important; }
+        .dashboard-ring svg { width: 42px; height: 42px; }
+        .dashboard-ring div { font-size: 9.5px !important; line-height: 1.05; }
+        .dashboard-target-title { font-size: 10.5px !important; line-height: 1.1; }
+        .dashboard-target-value { font-size: 20px !important; line-height: 1.05; margin-top: 1px; }
+        .dashboard-target-plan { font-size: 10.5px !important; line-height: 1.15; }
+        .dashboard-target-delta { font-size: 9.5px !important; line-height: 1.15; }
+        .dashboard-target-card input { width: 100% !important; min-height: 34px; height: 34px; margin-top: 3px !important; padding: 4px 8px; }
+        .dashboard-alerts-grid { order: 3; grid-template-columns: 1fr !important; gap: 0 !important; overflow: hidden; border: 1px solid ${theme.border}; border-radius: 18px; background: ${theme.card}; }
+        .dashboard-alert-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title value" "desc chip"; gap: 2px 10px; align-items: center; min-height: 68px; padding: 9px 11px !important; border: 0 !important; border-bottom: 1px solid ${theme.border} !important; border-radius: 0 !important; box-shadow: none !important; }
+        .dashboard-alert-card:last-child { border-bottom: 0 !important; }
+        .dashboard-alert-title { grid-area: title; font-size: 12px !important; line-height: 1.15; font-weight: 800; color: ${theme.textMain} !important; }
+        .dashboard-alert-value { grid-area: value; font-size: 21px !important; line-height: 1; justify-self: end; }
+        .dashboard-alert-desc { grid-area: desc; font-size: 10.5px !important; line-height: 1.2; }
+        .dashboard-alert-chip { grid-area: chip; justify-self: end; padding: 2px 7px !important; font-size: 10px !important; line-height: 1.1; }
         .dashboard-finance-card { order: 4; padding: 12px !important; }
         .dashboard-finance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
         .dashboard-finance-grid input { width: 100%; min-height: 40px; }
-        .dashboard-signals-grid { order: 5; grid-template-columns: 1fr !important; gap: 8px !important; }
+        .dashboard-signals-grid { display: none !important; }
+        .dashboard-signals-mobile { display: grid; order: 5; gap: 8px; }
+        .dashboard-mobile-accordion { padding: 0 !important; overflow: hidden; }
+        .dashboard-mobile-accordion-head { width: 100%; min-height: 58px; border: 0; background: transparent; color: ${theme.textMain}; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; }
+        .dashboard-mobile-accordion-head span:first-child { display: grid; gap: 2px; }
+        .dashboard-mobile-accordion-head small { color: ${theme.textMuted}; font-size: 11px; line-height: 1.2; }
+        .dashboard-mobile-chevron { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 999px; background: rgba(168, 177, 206, 0.14); color: ${theme.textMuted}; transition: transform 0.16s ease; flex: 0 0 auto; }
+        .dashboard-mobile-chevron--open { transform: rotate(180deg); }
+        .dashboard-mobile-accordion-body { padding: 0 12px 12px; }
+        .dashboard-mobile-accordion-body ul { margin: 8px 0 0 18px; padding: 0; }
         .dashboard-trends-grid { order: 6; grid-template-columns: 1fr !important; gap: 8px !important; }
         .dashboard-ranks-grid, .dashboard-average-grid { order: 7; grid-template-columns: 1fr !important; gap: 8px !important; }
         .dashboard-ai-section { order: 8; }
@@ -269,7 +300,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
       <div className="dashboard-period-label" style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Період: {fmtShort(period.start)}–{fmtShort(period.end)} · Порівняння: попередній такий самий період</div>
     </div>
 
-    <div className="dashboard-targets-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>{targetCards.map((c) => { const key = c.key === "active" ? "activeStudents" : c.key === "recruit" ? "recruitment" : c.key; const pc = c.target > 0 ? Math.round((c.actual / c.target) * 100) : 0; return <div className="dashboard-target-card dashboard-card" key={c.key} style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gridTemplateColumns: "auto 1fr", gap: 10 }}><Ring value={pc} label={rank(pc)} /><div><div style={{ fontSize: 12, color: theme.textMuted }}>{c.label}</div><div style={{ fontSize: 24, fontWeight: 800 }}>{c.actual.toLocaleString()}{c.unit}</div><div style={{ fontSize: 12, color: theme.textLight }}>План: {Number(c.target || 0).toLocaleString()}{c.unit}</div><div style={{ fontSize: 11, color: theme.textLight }}>{c.cmp}</div><input type="number" value={targets[`${key}Target`] || 0} onChange={(e) => setTargets((p) => ({ ...p, [`${key}Target`]: Number(e.target.value || 0) }))} style={{ marginTop: 6, width: 150 }} /></div></div>; })}</div>
+    <div className="dashboard-targets-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>{targetCards.map((c) => { const key = c.key === "active" ? "activeStudents" : c.key === "recruit" ? "recruitment" : c.key; const pc = c.target > 0 ? Math.round((c.actual / c.target) * 100) : 0; return <div className="dashboard-target-card dashboard-card" key={c.key} style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gridTemplateColumns: "auto 1fr", gap: 10 }}><Ring value={pc} label={rank(pc)} /><div><div className="dashboard-target-title" style={{ fontSize: 12, color: theme.textMuted }}>{c.label}</div><div className="dashboard-target-value" style={{ fontSize: 24, fontWeight: 800 }}>{c.actual.toLocaleString()}{c.unit}</div><div className="dashboard-target-plan" style={{ fontSize: 12, color: theme.textLight }}>План: {Number(c.target || 0).toLocaleString()}{c.unit}</div><div className="dashboard-target-delta" style={{ fontSize: 11, color: theme.textLight }}>{c.cmp}</div><input type="number" value={targets[`${key}Target`] || 0} onChange={(e) => setTargets((p) => ({ ...p, [`${key}Target`]: Number(e.target.value || 0) }))} style={{ marginTop: 6, width: 150 }} /></div></div>; })}</div>
 
     <div className="dashboard-trends-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
       <TrendLine title="Тренд виручки" rows={curr.revenueTrend} color={theme.success} deltaLabel={cmpLabel(curr.revenue, prevData.revenue)} />
@@ -293,8 +324,20 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
       <div className="dashboard-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Групи під ризиком</b><div style={{ display: "grid", gap: 6, marginTop: 8 }}>{health.slice(-5).map((h) => <div key={h.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{h.name}</span><b style={{ color: h.value < 45 ? theme.danger : h.value < 70 ? theme.warning : theme.success }}>{h.value} · {h.bucket}</b></div>)}</div></div>
     </div>
 
+    <div className="dashboard-signals-mobile">
+      <MobileAccordionCard title="Що працює" summary={`${works.slice(0, 5).length || 0} пунктів`} open={mobileSignalOpen.works} onToggle={() => setMobileSignalOpen((p) => ({ ...p, works: !p.works }))}>
+        <ul>{works.slice(0, 5).length ? works.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає достатньо даних</li>}</ul>
+      </MobileAccordionCard>
+      <MobileAccordionCard title="Що просідає" summary={`${weak.slice(0, 5).length || 0} сигналів`} open={mobileSignalOpen.weak} onToggle={() => setMobileSignalOpen((p) => ({ ...p, weak: !p.weak }))}>
+        <ul>{weak.slice(0, 5).length ? weak.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає критичних просідань</li>}</ul>
+      </MobileAccordionCard>
+      <MobileAccordionCard title="Групи під ризиком" summary={`${health.slice(-5).length || 0} груп`} open={mobileSignalOpen.risk} onToggle={() => setMobileSignalOpen((p) => ({ ...p, risk: !p.risk }))}>
+        <div style={{ display: "grid", gap: 6, marginTop: 8 }}>{health.slice(-5).map((h) => <div key={h.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{h.name}</span><b style={{ color: h.value < 45 ? theme.danger : h.value < 70 ? theme.warning : theme.success }}>{h.value} · {h.bucket}</b></div>)}</div>
+      </MobileAccordionCard>
+    </div>
+
     <div className="dashboard-alerts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 10 }}>
-      {[{ t: "Ending soon", v: endingSoon, d: "абонементи до 7 днів" }, { t: "No active payment", v: noActivePayment, d: "актуальні учениці без активної оплати" }, { t: "Low attendance groups", v: lowAttendanceGroups, d: "avg<4, held>=2" }, { t: "Reserve demand", v: reserveDemand, d: "групи з очікуванням" }, { t: "Potential dead groups", v: deadGroups, d: "без відвідувань у періоді" }].map((r) => <div className="dashboard-alert-card" key={r.t} style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}><div style={{ fontSize: 11, color: theme.textMuted }}>{r.t}</div><div style={{ fontSize: 24, fontWeight: 800 }}>{r.v}</div><div style={{ fontSize: 11, color: theme.textLight }}>{r.d}</div><span className="dashboard-alert-chip" style={{ borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 800, background: r.v > 0 ? "rgba(239, 68, 68, 0.12)" : "rgba(34, 197, 94, 0.12)", color: r.v > 0 ? theme.danger : theme.success }}>{r.v > 0 ? "увага" : "ok"}</span></div>)}
+      {[{ t: "Ending soon", v: endingSoon, d: "абонементи до 7 днів" }, { t: "No active payment", v: noActivePayment, d: "актуальні учениці без активної оплати" }, { t: "Low attendance groups", v: lowAttendanceGroups, d: "avg<4, held>=2" }, { t: "Reserve demand", v: reserveDemand, d: "групи з очікуванням" }, { t: "Potential dead groups", v: deadGroups, d: "без відвідувань у періоді" }].map((r) => <div className="dashboard-alert-card" key={r.t} style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}><div className="dashboard-alert-title" style={{ fontSize: 11, color: theme.textMuted }}>{r.t}</div><div className="dashboard-alert-value" style={{ fontSize: 24, fontWeight: 800 }}>{r.v}</div><div className="dashboard-alert-desc" style={{ fontSize: 11, color: theme.textLight }}>{r.d}</div><span className="dashboard-alert-chip" style={{ borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 800, background: r.v > 0 ? "rgba(239, 68, 68, 0.12)" : "rgba(34, 197, 94, 0.12)", color: r.v > 0 ? theme.danger : theme.success }}>{r.v > 0 ? "увага" : "ok"}</span></div>)}
     </div>
   </div>;
 }
