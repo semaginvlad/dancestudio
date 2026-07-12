@@ -2331,12 +2331,24 @@ export default function App() {
                 .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
                 .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
                 .admin-group-actions button, .admin-finance-card button { min-height: 44px; padding: 8px !important; font-size: 12px !important; }
-                .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 8px !important; margin-bottom: 10px !important; }
-                .admin-finance-summary > div, .admin-finance-card { padding: 12px !important; border-radius: 16px !important; }
-                .admin-finance-summary div[style*="font-size: 42"] { font-size: 24px !important; }
-                .admin-finance-list { gap: 10px !important; }
-                .admin-finance-card { gap: 12px !important; }
-                .admin-finance-card-header, .admin-finance-card-footer { display: grid !important; grid-template-columns: 1fr !important; text-align: left !important; }
+                .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; margin-bottom: 8px !important; }
+                .admin-finance-summary > div { padding: 9px 10px !important; border-radius: 14px !important; min-width: 0; }
+                .admin-finance-summary div[style*="font-size: 13"] { font-size: 10px !important; letter-spacing: .25px !important; line-height: 1.15 !important; }
+                .admin-finance-summary div[style*="font-size: 42"] { font-size: 21px !important; margin-top: 3px !important; line-height: 1.1 !important; overflow-wrap: anywhere; }
+                .admin-finance-list { gap: 8px !important; }
+                .admin-finance-card { padding: 10px !important; border-radius: 15px !important; gap: 9px !important; }
+                .admin-finance-card-header, .admin-finance-card-footer { display: grid !important; grid-template-columns: 1fr !important; text-align: left !important; gap: 8px !important; }
+                .admin-finance-title-row { gap: 6px !important; margin-bottom: 3px !important; }
+                .admin-finance-title { font-size: 15px !important; line-height: 1.15 !important; overflow-wrap: anywhere; }
+                .admin-finance-direction-badge { font-size: 10px !important; padding: 3px 7px !important; }
+                .admin-finance-meta { font-size: 11px !important; line-height: 1.2 !important; }
+                .admin-finance-total { text-align: left !important; }
+                .admin-finance-total-label { font-size: 10px !important; }
+                .admin-finance-total-value { font-size: 22px !important; margin-top: 2px !important; }
+                .admin-finance-progress { height: 6px !important; }
+                .admin-finance-split { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px !important; width: 100%; }
+                .admin-finance-split-card { padding: 8px !important; border: 1px solid ${theme.border}; border-radius: 12px; background: ${theme.input}; min-width: 0; }
+                .admin-finance-split-card div:last-child { font-size: 16px !important; margin-top: 3px !important; }
               }
             `}</style>
             <div className="admin-mobile-select-nav">
@@ -2763,17 +2775,17 @@ export default function App() {
                   return (
                     <div key={sp.group.id} className="admin-finance-card" style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
                       <div className="admin-finance-card-header" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
-                        <div><div style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8}}><span style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></div><div style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
-                        <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
+                        <div><div className="admin-finance-title-row" style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap"}}><span className="admin-finance-title" style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><span className="admin-finance-direction-badge"><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></span></div><div className="admin-finance-meta" style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
+                        <div className="admin-finance-total" style={{textAlign: "right"}}><div className="admin-finance-total-label" style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div className="admin-finance-total-value" style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
                       </div>
-                      <div style={{height: 12, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>
+                      <div className="admin-finance-progress" style={{height: 12, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>
                         <div style={{width: `${trainerPct}%`, background: theme.primary}}></div>
                         <div style={{width: `${studioPct}%`, background: theme.success}}></div>
                       </div>
                       <div className="admin-finance-card-footer" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16}}>
-                        <div style={{display: "flex", gap: 40}}>
-                          <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Тренер ({trainerPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.primary, marginTop: 6}}>{sp.trainer.toLocaleString()} ₴</div></div>
-                          <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Студія ({studioPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.success, marginTop: 6}}>{sp.studio.toLocaleString()} ₴</div></div>
+                        <div className="admin-finance-split" style={{display: "flex", gap: 40}}>
+                          <div className="admin-finance-split-card"><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Тренер ({trainerPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.primary, marginTop: 6}}>{sp.trainer.toLocaleString()} ₴</div></div>
+                          <div className="admin-finance-split-card"><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Студія ({studioPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.success, marginTop: 6}}>{sp.studio.toLocaleString()} ₴</div></div>
                         </div>
                         <button style={{...btnS, padding: "12px 24px", background: theme.input}} onClick={() => setFinanceDetailItem(sp)}>🧾 Детальний звіт</button>
                       </div>
