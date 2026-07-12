@@ -1390,7 +1390,7 @@ export default function TrainersTab({
   };
 
   return (
-    <div
+    <div className="admin-trainers-tab"
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(260px, 300px) minmax(0, 1fr)",
@@ -1405,7 +1405,19 @@ export default function TrainersTab({
         borderRadius: 16,
       }}
     >
-      <aside style={{ ...card(), padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .admin-trainers-tab { grid-template-columns: 1fr !important; gap: 10px !important; padding: 0 !important; overflow: visible !important; background: transparent !important; }
+          .admin-trainers-sidebar { position: static !important; width: 100% !important; max-width: 100% !important; padding: 12px !important; border-radius: 16px !important; }
+          .admin-trainers-sidebar input, .admin-trainers-sidebar select, .admin-trainers-sidebar textarea { width: 100% !important; min-width: 0 !important; min-height: 44px; }
+          .admin-trainers-sidebar button, .admin-trainers-sidebar a { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+          .admin-trainers-content > div { border-radius: 16px !important; padding: 12px !important; }
+          .admin-trainers-content [style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 8px !important; }
+          .admin-trainers-content [style*="font-size: 24"] { font-size: 20px !important; }
+        }
+      `}</style>
+      <aside className="admin-trainers-sidebar" style={{ ...card(), padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
           <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>Додати тренера</button>
@@ -1499,7 +1511,7 @@ export default function TrainersTab({
         )}
       </aside>
 
-      <section style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
+      <section className="admin-trainers-content" style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
         <div style={{ ...card(), padding: 16, background: isDark ? "linear-gradient(180deg,#171d27 0%,#141922 100%)" : theme.panel }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
