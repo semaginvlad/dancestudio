@@ -286,20 +286,24 @@ export default function TrainersTab({
     });
   };
   const [detailState, setDetailState] = useState({ type: "overview", title: "Огляд", payload: null });
+  const [mobileListOpen, setMobileListOpen] = useState(true);
+  const [detailExpanded, setDetailExpanded] = useState(false);
 
   const isTrainerArchived = (t) => !!t?.archivedAt || t?.isActive === false;
+  const safeTrainers = useMemo(() => (Array.isArray(trainers) ? trainers : []).filter(Boolean), [trainers]);
+
   const filteredTrainers = useMemo(() => {
-    const q = trainerSearch.trim().toLowerCase();
-    return trainers.filter((t) => {
+    const q = String(trainerSearch || "").trim().toLowerCase();
+    return safeTrainers.filter((t) => {
       const archived = isTrainerArchived(t);
       if (trainerArchiveFilter === "active" && archived) return false;
       if (trainerArchiveFilter === "archived" && !archived) return false;
       if (!q) return true;
       return [getTrainerDisplayName(t), t.email, t.phone, t.telegram, t.id].some((v) => String(v || "").toLowerCase().includes(q));
     });
-  }, [trainerArchiveFilter, trainerSearch, trainers]);
+  }, [safeTrainers, trainerArchiveFilter, trainerSearch]);
 
-  const selectedTrainer = useMemo(() => trainers.find((t) => t.id === selectedTrainerId) || null, [trainers, selectedTrainerId]);
+  const selectedTrainer = useMemo(() => safeTrainers.find((t) => String(t.id) === String(selectedTrainerId)) || null, [safeTrainers, selectedTrainerId]);
 
   const normalizeInstagramHandle = (raw = "") => {
     const value = String(raw || "").trim();
@@ -314,33 +318,33 @@ export default function TrainersTab({
 
   const getTrainerDisplayName = (t) => {
     if (!t) return "Без імені";
-    const name = [t.firstName || "", t.lastName || ""].filter(Boolean).join(" ").trim();
-    return name || t.name || "Без імені";
+    const name = [t.firstName || t.first_name || "", t.lastName || t.last_name || ""].filter(Boolean).join(" ").trim();
+    return name || t.name || t.fullName || t.full_name || "Без імені";
   };
 
   useEffect(() => {
-    const selectedExists = trainers.some((t) => String(t.id) === String(selectedTrainerId));
-    if (!isCreateMode && (!selectedTrainerId || !selectedExists) && trainers[0]?.id) {
-      setSelectedTrainerId(trainers[0].id);
+    const selectedExists = safeTrainers.some((t) => String(t.id) === String(selectedTrainerId));
+    if (!isCreateMode && (!selectedTrainerId || !selectedExists) && safeTrainers[0]?.id) {
+      setSelectedTrainerId(safeTrainers[0].id);
       setDraft({
-        firstName: trainers[0].firstName || "",
-        lastName: trainers[0].lastName || "",
-        email: trainers[0].email || "",
-        phone: trainers[0].phone || "",
-        telegram: trainers[0].telegram || "",
-        instagramHandle: trainers[0].instagramHandle || "",
-        notes: trainers[0].notes || "",
-        isActive: trainers[0].isActive !== false,
+        firstName: safeTrainers[0].firstName || "",
+        lastName: safeTrainers[0].lastName || "",
+        email: safeTrainers[0].email || "",
+        phone: safeTrainers[0].phone || "",
+        telegram: safeTrainers[0].telegram || "",
+        instagramHandle: safeTrainers[0].instagramHandle || "",
+        notes: safeTrainers[0].notes || "",
+        isActive: safeTrainers[0].isActive !== false,
       });
     }
-  }, [isCreateMode, selectedTrainerId, setSelectedTrainerId, trainers]);
+  }, [isCreateMode, safeTrainers, selectedTrainerId, setSelectedTrainerId]);
 
   useEffect(() => {
     setDetailState({ type: "overview", title: "Огляд", payload: null });
   }, [selectedTrainerId, periodDate]);
 
   const trainerGroupIds = useMemo(
-    () => trainerGroups.filter((tg) => tg.trainerId === selectedTrainerId).map((tg) => tg.groupId),
+    () => trainerGroups.filter((tg) => String(tg.trainerId) === String(selectedTrainerId)).map((tg) => tg.groupId),
     [trainerGroups, selectedTrainerId],
   );
 
@@ -1407,41 +1411,80 @@ export default function TrainersTab({
     >
 
       <style>{`
+        .admin-trainers-mobile-toggle, .admin-trainers-back-list, .admin-trainers-detail-toggle { display: none; }
         @media (max-width: 768px) {
-          .admin-trainers-tab { grid-template-columns: 1fr !important; gap: 10px !important; padding: 0 !important; overflow: visible !important; background: transparent !important; }
-          .admin-trainers-sidebar { position: static !important; width: 100% !important; max-width: 100% !important; padding: 12px !important; border-radius: 16px !important; }
-          .admin-trainers-sidebar input, .admin-trainers-sidebar select, .admin-trainers-sidebar textarea { width: 100% !important; min-width: 0 !important; min-height: 44px; }
-          .admin-trainers-sidebar button, .admin-trainers-sidebar a { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
-          .admin-trainers-content > div { border-radius: 16px !important; padding: 12px !important; }
-          .admin-trainers-content [style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 8px !important; }
-          .admin-trainers-content [style*="font-size: 24"] { font-size: 20px !important; }
+          .admin-trainers-tab { grid-template-columns: 1fr !important; gap: 8px !important; padding: 0 !important; overflow: visible !important; background: transparent !important; }
+          .admin-trainers-sidebar { position: static !important; width: 100% !important; max-width: 100% !important; padding: 10px !important; border-radius: 16px !important; gap: 7px !important; }
+          .admin-trainers-sidebar input:not([type="checkbox"]), .admin-trainers-sidebar select, .admin-trainers-sidebar textarea { width: 100% !important; min-width: 0 !important; min-height: 40px !important; padding: 7px 9px !important; font-size: 14px !important; border-radius: 10px !important; }
+          .admin-trainers-sidebar textarea { min-height: 72px !important; }
+          .admin-trainers-sidebar button, .admin-trainers-sidebar a { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+          .admin-trainers-mobile-toggle, .admin-trainers-back-list { display: inline-flex; border: 1px solid ${theme.border}; border-radius: 10px; background: ${theme.panelSoft}; color: ${theme.text}; padding: 0 10px; font-size: 12px; font-weight: 800; }
+          .admin-trainers-new-btn { padding: 0 10px !important; font-size: 12px !important; }
+          .admin-trainers-list-panel { display: none !important; }
+          .admin-trainers-filter-panel.is-open { display: grid !important; }
+          .admin-trainers-list-scroll.is-open { display: flex !important; max-height: 172px !important; -webkit-overflow-scrolling: touch; }
+          .admin-trainer-list-item { min-height: 42px !important; padding: 7px 9px !important; border-radius: 11px !important; }
+          .admin-trainer-name { display: block; font-size: 13px; line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .admin-trainer-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+          .admin-trainer-badge { display: inline-flex; align-items: center; min-height: 18px; border-radius: 999px; padding: 1px 7px; background: ${theme.good}20; color: ${theme.good}; font-size: 10px; font-weight: 900; line-height: 1; }
+          .admin-trainer-badge.danger { background: ${theme.bad}20; color: ${theme.bad}; }
+          .admin-trainers-empty { padding: 9px; border: 1px dashed ${theme.border}; border-radius: 10px; color: ${theme.textSoft}; font-size: 12px; text-align: center; }
+          .admin-trainers-profile-panel, .admin-trainers-groups-panel, .admin-trainers-quick-actions { padding-top: 8px !important; }
+          .admin-trainers-profile-form { gap: 6px !important; }
+          .admin-trainers-profile-form label { min-height: 34px !important; }
+          .admin-trainers-form-actions { gap: 6px !important; }
+          .admin-trainers-quick-actions { gap: 5px !important; }
+          .admin-trainers-quick-actions button, .admin-trainers-quick-actions a, .admin-trainers-quick-actions span { padding: 5px 8px !important; min-height: 34px !important; font-size: 11px !important; }
+          .admin-trainers-groups-panel [style*="max-height: 260"] { max-height: 178px !important; }
+          .admin-trainers-content { gap: 8px !important; }
+          .admin-trainers-content > div, .admin-trainers-content > button { border-radius: 14px !important; padding: 10px !important; }
+          .admin-trainers-month-card { padding: 10px !important; }
+          .admin-trainers-month-card > div { gap: 8px !important; }
+          .admin-trainers-month-card [style*="font-size: 24"] { font-size: 19px !important; }
+          .admin-trainers-month-card [style*="min-width: 180"] { min-width: 126px !important; padding: 7px 8px !important; }
+          .admin-trainers-detail-toggle { display: inline-flex; border: 1px solid ${theme.border}; border-radius: 8px; background: ${theme.panelSoft}; color: ${theme.textSoft}; padding: 4px 7px; font-size: 11px; font-weight: 800; }
+          .admin-trainers-detail-card:not(.is-expanded) .admin-trainers-detail-body { display: none !important; }
+          .admin-trainers-kpi-grid, .admin-trainers-compact-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; }
+          .admin-trainers-kpi-grid button, .admin-trainers-compact-grid button, .admin-trainers-analysis-grid button, .admin-trainers-insights-card button { padding: 8px !important; min-height: 74px !important; align-self: start !important; }
+          .admin-trainers-kpi-grid [style*="font-size: 28"] { font-size: 21px !important; }
+          .admin-trainers-compact-grid [style*="font-size: 26"], .admin-trainers-compact-grid [style*="font-size: 24"] { font-size: 19px !important; }
+          .admin-trainers-analysis-grid { grid-template-columns: 1fr !important; gap: 8px !important; align-items: start !important; }
+          .admin-trainers-analysis-grid > button, .admin-trainers-analysis-grid > div { align-self: start; }
+          .admin-trainers-insights-card > div:last-child { grid-template-columns: 1fr !important; gap: 6px !important; }
+          .admin-trainers-insights-card button { display: grid !important; grid-template-columns: minmax(0,1fr) auto; column-gap: 8px; text-align: left; }
+          .admin-trainers-insights-card button div:nth-child(2) { grid-row: 1 / span 2; grid-column: 2; margin-top: 0 !important; font-size: 17px !important; }
+          .admin-trainers-communication-card { max-height: 46px; overflow: hidden; }
+          .admin-trainers-content [style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; }
+          .admin-trainers-content [style*="font-size: 24"] { font-size: 19px !important; }
+          .admin-trainers-content [style*="height: 90"] { height: 58px !important; }
         }
       `}</style>
       <aside className="admin-trainers-sidebar" style={{ ...card(), padding: 12, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 10, height: "fit-content" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
-          <button type="button" onClick={beginCreate} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>Додати тренера</button>
+          <button type="button" className="admin-trainers-mobile-toggle" onClick={() => setMobileListOpen((v) => !v)}>{mobileListOpen ? "Сховати" : "Список"}</button><div style={{ fontWeight: 800, color: theme.text }}>Тренери</div>
+          <button type="button" className="admin-trainers-new-btn" onClick={() => { setMobileListOpen(false); beginCreate(); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "6px 9px", cursor: "pointer" }}>Додати тренера</button>
         </div>
 
-        <div style={{ display: "grid", gap: 6 }}>
-          <input value={trainerSearch} onChange={(e) => setTrainerSearch(e.target.value)} placeholder="Пошук тренера" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }} />
-          <select value={trainerArchiveFilter} onChange={(e) => setTrainerArchiveFilter(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }}>
+        <div className={`admin-trainers-filter-panel admin-trainers-list-panel ${mobileListOpen ? "is-open" : ""}`} style={{ display: "grid", gap: 6 }}>
+          <input className="admin-trainers-search" value={trainerSearch} onChange={(e) => setTrainerSearch(e.target.value)} placeholder="Пошук тренера" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }} />
+          <select className="admin-trainers-filter" value={trainerArchiveFilter} onChange={(e) => setTrainerArchiveFilter(e.target.value)} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.panelSoft, color: theme.text }}>
             <option value="active">Активні</option><option value="archived">Архівні</option><option value="all">Усі</option>
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflow: "auto", paddingRight: 2 }}>
+        <div className={`admin-trainers-list-scroll admin-trainers-list-panel ${mobileListOpen ? "is-open" : ""}`} style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflow: "auto", paddingRight: 2 }}>
           {filteredTrainers.map((t) => (
-            <button key={t.id} type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); }} style={{ textAlign: "left", border: `1px solid ${selectedTrainerId === t.id && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: selectedTrainerId === t.id && !isCreateMode ? `${theme.primary}33` : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
-              <div style={{ fontWeight: 700 }}>{getTrainerDisplayName(t)}</div>
-              <div style={{ fontSize: 11, color: !isTrainerArchived(t) ? theme.good : theme.textSoft }}>{isTrainerArchived(t) ? "Архівний" : "Активний"}{t.authUserId ? " · має доступ" : ""}{t.accessDisabledAt ? " · доступ закрито" : ""}</div>
+            <button key={t.id || getTrainerDisplayName(t)} className="admin-trainer-list-item" type="button" onClick={() => { setIsCreateMode(false); setSelectedTrainerId(t.id); setMobileListOpen(false); }} style={{ textAlign: "left", border: `1px solid ${String(selectedTrainerId) === String(t.id) && !isCreateMode ? theme.primary : theme.border}`, borderRadius: 12, background: String(selectedTrainerId) === String(t.id) && !isCreateMode ? `${theme.primary}33` : theme.panel, color: theme.text, padding: "9px 10px", cursor: "pointer" }}>
+              <div className="admin-trainer-name" style={{ fontWeight: 700 }}>{getTrainerDisplayName(t)}</div>
+              <div className="admin-trainer-badges"><span className="admin-trainer-badge">{isTrainerArchived(t) ? "Архівний" : "Активний"}</span>{t.authUserId ? <span className="admin-trainer-badge">має доступ</span> : null}{t.accessDisabledAt ? <span className="admin-trainer-badge danger">доступ закрито</span> : null}</div>
             </button>
           ))}
+          {!filteredTrainers.length && <div className="admin-trainers-empty">Тренерів не знайдено</div>}
         </div>
 
-        <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>{isCreateMode ? "Новий тренер" : "Профіль"}</div>
-          <div style={{ display: "grid", gap: 8 }}>
+        <div className="admin-trainers-profile-panel" style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}><div style={{ fontWeight: 700 }}>{isCreateMode ? "Новий тренер" : "Профіль"}</div><button type="button" className="admin-trainers-back-list" onClick={() => setMobileListOpen(true)}>До списку</button></div>
+          <div className="admin-trainers-profile-form" style={{ display: "grid", gap: 8 }}>
             <input value={draft.firstName} onChange={(e) => setDraft((p) => ({ ...p, firstName: e.target.value }))} placeholder="Ім'я" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.lastName} onChange={(e) => setDraft((p) => ({ ...p, lastName: e.target.value }))} placeholder="Прізвище" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
             <input value={draft.email} onChange={(e) => setDraft((p) => ({ ...p, email: e.target.value }))} placeholder="Email" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />
@@ -1456,7 +1499,7 @@ export default function TrainersTab({
             </label>}
             {isCreateMode && draft.createAccess && <input value={draft.password} onChange={(e) => setDraft((p) => ({ ...p, password: e.target.value }))} placeholder="Тимчасовий пароль" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", background: theme.panelSoft, color: theme.text }} />}
             <textarea value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Нотатки" style={{ border: `1px solid ${theme.border}`, borderRadius: 10, padding: "9px 10px", resize: "vertical", background: theme.panelSoft, color: theme.text }} />
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="admin-trainers-form-actions" style={{ display: "flex", gap: 8 }}>
               <button type="button" disabled={saving} onClick={saveTrainer} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "9px 14px", cursor: "pointer", fontWeight: 700, flex: 1 }}>{saving ? "Збереження..." : "Зберегти"}</button>
               {!isCreateMode && selectedTrainer && <button type="button" onClick={beginEdit} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.panelSoft, color: theme.text, padding: "9px 12px", cursor: "pointer" }}>Редагувати</button>}
             </div>
@@ -1465,7 +1508,7 @@ export default function TrainersTab({
 
         {selectedTrainer && !isCreateMode && (
           <>
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="admin-trainers-quick-actions" style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
               {selectedTrainer.telegram && <a href={`https://t.me/${String(selectedTrainer.telegram).replace(/^@/, "")}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.secondary, fontSize: 12, fontWeight: 700 }}>Telegram</a>}
               {selectedTrainer.instagramHandle && <a href={`https://instagram.com/${normalizeInstagramHandle(selectedTrainer.instagramHandle)}`} target="_blank" rel="noreferrer" style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", textDecoration: "none", color: theme.primary, fontSize: 12, fontWeight: 700 }}>Instagram</a>}
               {selectedTrainer.email && <span style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", color: theme.textSoft, fontSize: 12, fontWeight: 700 }}>{selectedTrainer.email}</span>}
@@ -1476,7 +1519,7 @@ export default function TrainersTab({
               {selectedTrainer.authUserId && <button type="button" onClick={() => toggleAccess(selectedTrainer)} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", background: theme.panelSoft, color: selectedTrainer.accessDisabledAt ? theme.good : theme.bad, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{selectedTrainer.accessDisabledAt ? "Відкрити доступ" : "Закрити доступ"}</button>}
             </div>
 
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+            <div className="admin-trainers-groups-panel" style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700 }}>Групи тренера</div>
@@ -1512,7 +1555,7 @@ export default function TrainersTab({
       </aside>
 
       <section className="admin-trainers-content" style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-        <div style={{ ...card(), padding: 16, background: isDark ? "linear-gradient(180deg,#171d27 0%,#141922 100%)" : theme.panel }}>
+        <div className="admin-trainers-month-card" style={{ ...card(), padding: 16, background: isDark ? "linear-gradient(180deg,#171d27 0%,#141922 100%)" : theme.panel }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <div>
               <div style={{ fontSize: 24, fontWeight: 800 }}>{isCreateMode ? "Новий тренер" : getTrainerDisplayName(selectedTrainer)}</div>
@@ -1529,17 +1572,17 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card(), padding: 10, background: theme.panel, borderColor: theme.border }}>
+        <div className={`admin-trainers-detail-card ${detailExpanded ? "is-expanded" : ""}`} style={{ ...card(), padding: 10, background: theme.panel, borderColor: theme.border }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: theme.textSoft, letterSpacing: 0.2 }}>Деталізація</div>
-            <button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.panelSoft, color: theme.textSoft, padding: "4px 7px", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>Скинути</button>
+            <button type="button" className="admin-trainers-detail-toggle" onClick={() => setDetailExpanded((v) => !v)}>{detailExpanded ? "Згорнути" : "Деталі"}</button><button type="button" onClick={() => setDetailState({ type: "overview", title: "Огляд", payload: null })} style={{ border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.panelSoft, color: theme.textSoft, padding: "4px 7px", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>Скинути</button>
           </div>
           <div style={{ fontSize: 11, color: theme.textSoft }}>{detailState.title}</div>
           <div style={{ fontSize: 10, color: "#7f93b2", marginTop: 3, lineHeight: 1.3 }}>
             Поточний період: {range.start} → {range.end}<br />
             Попередній період: {rangePrev.start} → {rangePrev.end}
           </div>
-          <div
+          <div className="admin-trainers-detail-body"
             style={
               detailState.type === "overview"
                 ? { marginTop: 6, padding: "4px 2px 0" }
@@ -1550,7 +1593,7 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           {trainerKpis.map((k) => (
             <button
               key={k.id}
@@ -1619,7 +1662,7 @@ export default function TrainersTab({
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-compact-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <ProgressRing
             value={Math.round(foundationCurrent.metrics.trialToPaidConversion || 0)}
             label="Пробне → абонемент"
@@ -1709,7 +1752,7 @@ export default function TrainersTab({
           />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-compact-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(180px, 1fr))", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Дохід тренера по групах", payload: { kind: "revenueByGroup", rows: revenueAnalytics.perGroupRows } })}
@@ -1793,7 +1836,7 @@ export default function TrainersTab({
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-analysis-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({
@@ -1837,7 +1880,7 @@ export default function TrainersTab({
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-analysis-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({ type: "chart", title: "Стекова структура по групах", payload: { kind: "groupBars", rows: groupCards.map((g) => ({ groupId: g.groupId, groupName: g.groupName, trial: g.trialCount, single: g.singleCount, paid: g.paidCount })) } })}
@@ -1877,7 +1920,7 @@ export default function TrainersTab({
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-analysis-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <button
             type="button"
             onClick={() => setDetailState({ type: "heatmap", title: "Теплокарта відвідуваності (дні тижня)", payload: { cells: foundationCurrent.domains.attendance.heatmap } })}
@@ -1913,7 +1956,7 @@ export default function TrainersTab({
           </div>
         </div>
 
-        <div style={{ ...card(), padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
+        <div className="admin-trainers-insights-card" style={{ ...card(), padding: 12, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Інсайти / Ризики / Дії</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(180px,1fr))", gap: 8, minWidth: 0, maxWidth: "100%", width: "100%", boxSizing: "border-box" }}>
             {insights.map((ins) => (
@@ -1929,7 +1972,7 @@ export default function TrainersTab({
         <button
           type="button"
           onClick={() => setDetailState({ type: "communication", title: "Аналітика комунікацій", payload: foundationCurrent.domains.integrations })}
-          style={{ ...tile() }}
+          className="admin-trainers-communication-card" style={{ ...tile() }}
         >
           <div style={{ fontWeight: 800, marginBottom: 4 }}>Блок комунікацій (foundation)</div>
           <div style={{ fontSize: 12, color: theme.textSoft }}>Telegram / Instagram / AI інтеграції підготовлені на рівні foundation.</div>
