@@ -178,6 +178,8 @@ export default function App() {
   const [groupMergeDraft, setGroupMergeDraft] = useState(null);
   const [groupMergeBusy, setGroupMergeBusy] = useState(false);
   const [groupMergeOperations, setGroupMergeOperations] = useState([]);
+  const [adminGroupFiltersOpen, setAdminGroupFiltersOpen] = useState(false);
+  const [adminFinanceFiltersOpen, setAdminFinanceFiltersOpen] = useState(false);
   const [themeMode, setThemeMode] = useStickyState("dark", "ds_themeMode");
   const [attendanceScale, setAttendanceScale] = useStickyState(100, "ds_attendance_scale_v1");
   const [scheduleScale, setScheduleScale] = useStickyState(100, "ds_schedule_scale_v1");
@@ -2305,8 +2307,58 @@ export default function App() {
           />
         )}
         {isAdmin && tab==="admin" && (
-          <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
-            <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+          <div className="admin-mobile-shell" style={{ display: "grid", gap: 12, minWidth: 0 }}>
+            <style>{`
+              .admin-mobile-select-nav, .admin-mobile-header, .admin-mobile-filter-toggle, .admin-mobile-reset { display: none; }
+              .admin-mobile-shell, .admin-mobile-shell * { box-sizing: border-box; }
+              @media (max-width: 768px) {
+                main { overflow-x: hidden !important; }
+                .admin-mobile-shell { width: 100%; max-width: 100%; overflow-x: hidden; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+                .admin-desktop-tabs { display: none !important; }
+                .admin-mobile-select-nav { display: grid; gap: 6px; position: sticky; top: 0; z-index: 35; background: ${theme.bg}; padding: 6px 0 8px; }
+                .admin-mobile-select-nav select { width: 100%; min-height: 44px; border-radius: 14px; border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMain}; padding: 0 12px; font-weight: 900; font-size: 14px; }
+                .admin-mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0 4px; }
+                .admin-mobile-header h2 { margin: 0; color: ${theme.secondary}; font-size: 21px; line-height: 1.12; letter-spacing: -0.3px; }
+                .admin-mobile-header p { margin: 2px 0 0; color: ${theme.textMuted}; font-size: 12px; }
+                .admin-mobile-filter-toggle, .admin-mobile-reset { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 14px; border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMain}; padding: 0 12px; font-weight: 800; position: relative; }
+                .admin-mobile-badge { position: absolute; top: -7px; right: -6px; min-width: 20px; height: 20px; border-radius: 999px; background: ${theme.danger}; color: #fff; border: 2px solid ${theme.card}; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+                .admin-group-filter-card, .admin-finance-filter-card { display: none !important; }
+                .admin-group-filter-card.is-open, .admin-finance-filter-card.is-open { display: grid !important; position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 950; max-height: min(78dvh, 680px); overflow: auto; padding: 14px !important; border-radius: 22px 22px 16px 16px !important; box-shadow: 0 24px 48px rgba(0,0,0,.24); }
+                .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; min-width: 0 !important; }
+                .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 44px !important; }
+                .admin-group-card { padding: 12px !important; border-radius: 16px !important; }
+                .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 8px !important; }
+                .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
+                .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
+                .admin-group-actions button, .admin-finance-card button { min-height: 44px; padding: 8px !important; font-size: 12px !important; }
+                .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; margin-bottom: 8px !important; }
+                .admin-finance-summary > div { padding: 10px !important; border-radius: 14px !important; }
+                .admin-finance-summary div[style*="font-size: 42"] { font-size: 21px !important; margin-top: 3px !important; }
+                .admin-finance-summary div[style*="font-size:13"] { font-size: 10px !important; }
+                .admin-finance-list { gap: 8px !important; }
+                .admin-finance-card { gap: 8px !important; padding: 10px !important; border-radius: 14px !important; }
+                .admin-finance-card-header, .admin-finance-card-footer { display: grid !important; grid-template-columns: 1fr !important; gap: 7px !important; text-align: left !important; }
+                .admin-finance-card-header > div:first-child > div:first-child { display: grid !important; grid-template-columns: minmax(0,1fr) auto; gap: 6px !important; align-items: center !important; margin-bottom: 3px !important; }
+                .admin-finance-card-header span[style*="font-size: 20"] { font-size: 15px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .admin-finance-card-header span[style*="padding: 6px 12px"] { padding: 3px 7px !important; font-size: 10px !important; }
+                .admin-finance-card-header [style*="font-size: 14"] { font-size: 11px !important; }
+                .admin-finance-card-header [style*="font-size: 28"] { font-size: 20px !important; margin-top: 1px !important; }
+                .admin-finance-card [style*="height: 12"] { height: 6px !important; }
+                .admin-finance-card-footer > div:first-child { display: grid !important; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px !important; }
+                .admin-finance-card-footer [style*="font-size:20"] { font-size: 16px !important; margin-top: 2px !important; }
+                .admin-finance-card button { min-height: 40px !important; width: 100%; padding: 0 10px !important; font-size: 12px !important; }
+              }
+            `}</style>
+            <div className="admin-mobile-select-nav">
+              <select value={`${adminTab}:${adminTab === "analytics" ? trainersSubtab : adminTab}`} onChange={(e) => { const [main, sub] = e.target.value.split(":"); setAdminTab(main); if (main === "analytics") setTrainersSubtab(sub); }}>
+                <option value="analytics:trainers">Аналітика · Тренери</option>
+                <option value="analytics:groups">Аналітика · Групи</option>
+                <option value="analytics:notifications">Аналітика · Автоматизація</option>
+                <option value="finance:finance">Фінанси</option>
+                <option value="pro:pro">Про-аналітика</option>
+              </select>
+            </div>
+            <div className="admin-desktop-tabs" style={{ overflowX: "auto", maxWidth: "100%" }}>
               <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, minWidth: "max-content" }}>
               <button type="button" onClick={() => setAdminTab("analytics")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "analytics" ? theme.primary : "transparent", color: adminTab === "analytics" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Аналітика</button>
               <button type="button" onClick={() => setAdminTab("finance")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "finance" ? theme.primary : "transparent", color: adminTab === "finance" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Фінанси</button>
@@ -2314,7 +2366,7 @@ export default function App() {
               </div>
             </div>
             {adminTab === "analytics" && (
-            <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+            <div className="admin-desktop-tabs" style={{ overflowX: "auto", maxWidth: "100%" }}>
               <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, minWidth: "max-content" }}>
               <button type="button" onClick={() => setTrainersSubtab("trainers")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "trainers" ? theme.primary : "transparent", color: trainersSubtab === "trainers" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Тренери</button>
               <button type="button" onClick={() => setTrainersSubtab("groups")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: trainersSubtab === "groups" ? theme.primary : "transparent", color: trainersSubtab === "groups" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Групи</button>
@@ -2340,9 +2392,11 @@ export default function App() {
                 themeMode={themeMode}
               />
             ) : trainersSubtab === "groups" ? (
-              <div style={{ display: "grid", gap: 12 }}>
-                <div style={{ ...cardSt, padding: 14, display: "grid", gap: 10 }}>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+                <div className="admin-mobile-header"><div><h2>Групи</h2><p>Керування групами та привʼязками тренерів</p></div><button type="button" className="admin-mobile-filter-toggle" onClick={() => setAdminGroupFiltersOpen(true)}>Фільтри{[adminGroupSearch, adminGroupArchiveFilter !== "active", adminGroupTrainerFilter !== "all"].filter(Boolean).length ? <span className="admin-mobile-badge">{[adminGroupSearch, adminGroupArchiveFilter !== "active", adminGroupTrainerFilter !== "all"].filter(Boolean).length}</span> : null}</button></div>
+                {adminGroupFiltersOpen && <button type="button" aria-label="Закрити фільтри" onClick={() => setAdminGroupFiltersOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 940, background: "rgba(31,31,31,.38)", border: "none" }} />}
+                <div className={`admin-group-filter-card ${adminGroupFiltersOpen ? "is-open" : ""}`} style={{ ...cardSt, padding: 14, display: "grid", gap: 10 }}>
+                  <div className="admin-group-filter-row" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                     <input style={{ ...inputSt, minWidth: 220, flex: "1 1 260px" }} placeholder="Пошук: назва, напрямок, тренер, розклад" value={adminGroupSearch} onChange={(e) => setAdminGroupSearch(e.target.value)} />
                     <select style={{ ...inputSt, width: 180 }} value={adminGroupArchiveFilter} onChange={(e) => setAdminGroupArchiveFilter(e.target.value)}>
                       <option value="active">Активні</option>
@@ -2354,7 +2408,7 @@ export default function App() {
                       {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
                     </select>
                   </div>
-                  <div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div><button type="button" className="admin-mobile-reset" onClick={() => { setAdminGroupSearch(""); setAdminGroupArchiveFilter("active"); setAdminGroupTrainerFilter("all"); }}>Скинути</button></div>
                 </div>
                 <details style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
                   <summary style={{ cursor: "pointer", fontWeight: 900, color: theme.textMain }}>Історія обʼєднань ({groupMergeOperations.length})</summary>
@@ -2405,11 +2459,11 @@ export default function App() {
                         const scheduleText = formatGroupSchedule(g.schedule) || "—";
                         const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
                         return (
-                          <div key={g.id} style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
+                          <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                              <div style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
+                              <div className="admin-group-main" style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
                               <div>
-                                <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
+                                <div className="admin-group-title" style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
                                 <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
                               </div>
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -2421,7 +2475,7 @@ export default function App() {
                               </div>
                               <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
                             </div>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <div className="admin-group-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
                               <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
                               <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
@@ -2694,13 +2748,15 @@ export default function App() {
           });
 
           return (
-            <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
+            <div style={{ minWidth: 0 }}>
+              <div className="admin-mobile-header"><div><h2>Фінанси</h2><p>Доходи, борги та деталізація по групах</p></div><button type="button" className="admin-mobile-filter-toggle" onClick={() => setAdminFinanceFiltersOpen(true)}>Фільтри{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length ? <span className="admin-mobile-badge">{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length}</span> : null}</button></div>
+              <div className="admin-finance-summary" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
                 <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.success,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Загалом оплачено</div><div style={{fontSize:42,fontWeight:800,color:theme.success, marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div></div>
                 <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.danger,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Борги учениць</div><div style={{fontSize:42,fontWeight:800,color:theme.danger, marginTop: 8}}>{analytics.unpaid.toLocaleString()} ₴</div></div>
               </div>
-              <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
-                <div style={{flex: 1, display: "flex", gap: 12, minWidth: 300, flexWrap: "wrap"}}>
+              {adminFinanceFiltersOpen && <button type="button" aria-label="Закрити фільтри" onClick={() => setAdminFinanceFiltersOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 940, background: "rgba(31,31,31,.38)", border: "none" }} />}
+              <div className={`admin-finance-filter-card ${adminFinanceFiltersOpen ? "is-open" : ""}`} style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
+                <div className="admin-finance-filter-row" style={{flex: 1, display: "flex", gap: 12, minWidth: 300, flexWrap: "wrap"}}>
                   <select style={{...inputSt, width: "auto"}} value={finFilterDir} onChange={e=>{setFinFilterDir(e.target.value); setFinFilterGroup("all");}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
                   <GroupSelect groups={groups} value={finFilterGroup} onChange={setFinFilterGroup} filterDir={finFilterDir} allowAll={true} />
                 </div>
@@ -2711,12 +2767,12 @@ export default function App() {
               </div>
               <h3 style={{color:theme.secondary,fontSize:20,marginBottom:20, fontWeight: 800}}>Деталізація по групах ({finData.length})</h3>
               {finData.length === 0 ? <div style={{color:theme.textLight,padding:60,textAlign:"center", fontSize: 16, fontWeight: 600}}>За цими фільтрами немає оплат</div> :
-              <div style={{display:"flex",flexDirection:"column",gap:24}}>
+              <div className="admin-finance-list" style={{display:"flex",flexDirection:"column",gap:24}}>
                 {finData.map(sp => {
                   const dir = dirMap[sp.group.directionId]; const trainerPct = sp.group.trainerPct; const studioPct = 100 - trainerPct;
                   return (
-                    <div key={sp.group.id} style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
-                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
+                    <div key={sp.group.id} className="admin-finance-card" style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
+                      <div className="admin-finance-card-header" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
                         <div><div style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8}}><span style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></div><div style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
                         <div style={{textAlign: "right"}}><div style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
                       </div>
@@ -2724,7 +2780,7 @@ export default function App() {
                         <div style={{width: `${trainerPct}%`, background: theme.primary}}></div>
                         <div style={{width: `${studioPct}%`, background: theme.success}}></div>
                       </div>
-                      <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16}}>
+                      <div className="admin-finance-card-footer" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16}}>
                         <div style={{display: "flex", gap: 40}}>
                           <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Тренер ({trainerPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.primary, marginTop: 6}}>{sp.trainer.toLocaleString()} ₴</div></div>
                           <div><div style={{fontSize:12,color:theme.textMuted, fontWeight: 700}}>Студія ({studioPct}%)</div><div style={{fontSize:20,fontWeight:800,color:theme.success, marginTop: 6}}>{sp.studio.toLocaleString()} ₴</div></div>
@@ -2746,7 +2802,7 @@ export default function App() {
 
       {/* МОДАЛКИ */}
       
-      <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide>
+      <Modal open={!!financeDetailItem} onClose={()=>setFinanceDetailItem(null)} title={`Зарплата: ${financeDetailItem?.group?.name}`} wide variant="admin-mobile">
         {financeDetailItem && (
           <div>
             <div style={{display: "flex", justifyContent: "space-between", background: theme.input, padding: "20px 24px", borderRadius: 20, marginBottom: 24}}>
@@ -2760,7 +2816,7 @@ export default function App() {
           </div>
         )}
       </Modal>
-      <Modal open={modal==="manageDirections"} onClose={()=>setModal(null)} title="Керування напрямками" wide>
+      <Modal open={modal==="manageDirections"} onClose={()=>setModal(null)} title="Керування напрямками" wide variant="admin-mobile">
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ ...cardSt, padding: 16, display: "grid", gap: 10 }}>
             <div style={{ fontWeight: 700, color: theme.secondary }}>Створити новий напрямок</div>
@@ -2795,7 +2851,7 @@ export default function App() {
         </div>
       </Modal>
       <Modal open={modal==="addStudent"} onClose={()=>setModal(null)} title="Нова учениця" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>setModal(null)} onDone={createStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
-      <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група">
+      <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група" variant="admin-mobile">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
             <input style={inputSt} value={newGroupDraft.name} onChange={(e) => setNewGroupDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Напр. Beginners 19:00" />
@@ -2854,7 +2910,7 @@ export default function App() {
         </div>
       </Modal>
 
-      <Modal open={!!groupMergeDraft} onClose={() => !groupMergeBusy && setGroupMergeDraft(null)} title="Обʼєднати групи" wide>
+      <Modal open={!!groupMergeDraft} onClose={() => !groupMergeBusy && setGroupMergeDraft(null)} title="Обʼєднати групи" wide variant="admin-mobile">
         {groupMergeDraft && groupMergeSummary && (
           <div style={{ display: "grid", gap: 14 }}>
             <div style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
@@ -2986,7 +3042,7 @@ export default function App() {
         />
       )}
 
-      <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу">
+      <Modal open={!!groupEditDraft} onClose={() => setGroupEditDraft(null)} title="Редагувати групу" variant="admin-mobile">
         {groupEditDraft && (
           <div style={{ display: "grid", gap: 12 }}>
             <Field label="Назва групи">
