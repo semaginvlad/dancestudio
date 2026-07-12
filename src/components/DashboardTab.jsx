@@ -52,7 +52,7 @@ const getPrevPeriod = (start, end) => {
 
 const Ring = ({ value, label }) => {
   const r = 32; const c = 2 * Math.PI * r; const cl = Math.max(0, Math.min(140, value));
-  return <div style={{ display: "grid", justifyItems: "center", gap: 4 }}><svg width="78" height="78" viewBox="0 0 78 78"><circle cx="39" cy="39" r={r} fill="none" stroke={theme.border} strokeWidth="8" /><circle cx="39" cy="39" r={r} fill="none" stroke={ringColor(value)} strokeWidth="8" strokeLinecap="round" transform="rotate(-90 39 39)" strokeDasharray={`${(cl / 100) * c} ${c}`} /><text x="39" y="43" textAnchor="middle" style={{ fill: theme.textMain, fontWeight: 800, fontSize: 13 }}>{value}%</text></svg><div style={{ fontSize: 11, color: theme.textMuted }}>{label}</div></div>;
+  return <div className="dashboard-ring" style={{ display: "grid", justifyItems: "center", gap: 4 }}><svg width="78" height="78" viewBox="0 0 78 78"><circle cx="39" cy="39" r={r} fill="none" stroke={theme.border} strokeWidth="8" /><circle cx="39" cy="39" r={r} fill="none" stroke={ringColor(value)} strokeWidth="8" strokeLinecap="round" transform="rotate(-90 39 39)" strokeDasharray={`${(cl / 100) * c} ${c}`} /><text x="39" y="43" textAnchor="middle" style={{ fill: theme.textMain, fontWeight: 800, fontSize: 13 }}>{value}%</text></svg><div style={{ fontSize: 11, color: theme.textMuted }}>{label}</div></div>;
 };
 
 const TrendLine = ({ rows = [], title, color, deltaLabel }) => {
@@ -60,10 +60,23 @@ const TrendLine = ({ rows = [], title, color, deltaLabel }) => {
   const w = 420; const h = 180; const p = 26; const max = Math.max(1, ...rows.map((r) => r.value || 0)); const min = Math.min(...rows.map((r) => r.value || 0));
   const step = (w - p * 2) / (rows.length - 1); const points = rows.map((r, i) => `${p + i * step},${h - p - ((r.value || 0) / max) * (h - p * 2)}`).join(" ");
   const first = rows[0]; const mid = rows[Math.floor(rows.length / 2)]; const last = rows.at(-1);
-  return <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><b>{title}</b><div style={{ color: theme.textMuted, fontWeight: 700 }}>{deltaLabel}</div></div><svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}><line x1={p} y1={h - p} x2={w - p} y2={h - p} stroke={theme.border} /><line x1={p} y1={p} x2={p} y2={h - p} stroke={theme.border} /><polyline fill="none" stroke={color} strokeWidth="3" points={points} /><text x={p} y={h - 6} fontSize="10" fill={theme.textLight}>{fmtShort(first.day)}</text><text x={w / 2} y={h - 6} fontSize="10" fill={theme.textLight} textAnchor="middle">{fmtShort(mid.day)}</text><text x={w - p} y={h - 6} fontSize="10" fill={theme.textLight} textAnchor="end">{fmtShort(last.day)}</text><text x={p - 4} y={p + 4} fontSize="10" fill={theme.textLight} textAnchor="end">max {max}</text><text x={p - 4} y={h - p} fontSize="10" fill={theme.textLight} textAnchor="end">min {min}</text><text x={w - p} y={p + 4} fontSize="10" fill={theme.textMain} textAnchor="end">last {last.value}</text></svg></div>;
+  return <div className="dashboard-card dashboard-chart-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><b>{title}</b><div style={{ color: theme.textMuted, fontWeight: 700 }}>{deltaLabel}</div></div><div className="dashboard-chart-scroll"><svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}><line x1={p} y1={h - p} x2={w - p} y2={h - p} stroke={theme.border} /><line x1={p} y1={p} x2={p} y2={h - p} stroke={theme.border} /><polyline fill="none" stroke={color} strokeWidth="3" points={points} /><text x={p} y={h - 6} fontSize="10" fill={theme.textLight}>{fmtShort(first.day)}</text><text x={w / 2} y={h - 6} fontSize="10" fill={theme.textLight} textAnchor="middle">{fmtShort(mid.day)}</text><text x={w - p} y={h - 6} fontSize="10" fill={theme.textLight} textAnchor="end">{fmtShort(last.day)}</text><text x={p - 4} y={p + 4} fontSize="10" fill={theme.textLight} textAnchor="end">max {max}</text><text x={p - 4} y={h - p} fontSize="10" fill={theme.textLight} textAnchor="end">min {min}</text><text x={w - p} y={p + 4} fontSize="10" fill={theme.textMain} textAnchor="end">last {last.value}</text></svg></div></div>;
 };
 
-const RankList = ({ title, rows = [], unit = "" }) => <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>{title}</b><div style={{ display: "grid", gap: 7, marginTop: 8 }}>{rows.length ? rows.map((r, i) => <div key={`${title}_${r.id || r.name}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{i + 1}. {r.name}</span><b>{(r.value || 0).toLocaleString()}{unit}</b></div>) : <div style={{color:theme.textLight}}>Немає даних за період</div>}</div></div>;
+const RankList = ({ title, rows = [], unit = "" }) => <div className="dashboard-card dashboard-list-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>{title}</b><div style={{ display: "grid", gap: 7, marginTop: 8 }}>{rows.length ? rows.map((r, i) => <div className="dashboard-compact-row" key={`${title}_${r.id || r.name}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{i + 1}. {r.name}</span><b>{(r.value || 0).toLocaleString()}{unit}</b></div>) : <div style={{color:theme.textLight}}>Немає даних за період</div>}</div></div>;
+
+const MobileAccordionCard = ({ title, summary, children, open, onToggle }) => (
+  <div className="dashboard-mobile-accordion" style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+    <button type="button" className="dashboard-mobile-accordion-head" onClick={onToggle}>
+      <span>
+        <b>{title}</b>
+        <small>{summary}</small>
+      </span>
+      <span className={`dashboard-mobile-chevron${open ? " dashboard-mobile-chevron--open" : ""}`}>⌄</span>
+    </button>
+    {open && <div className="dashboard-mobile-accordion-body">{children}</div>}
+  </div>
+);
 
 export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
@@ -72,6 +85,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const [to, setTo] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
   const [targets, setTargets] = useStickyState({ revenueTarget: 120000, attendanceTarget: 500, activeStudentsTarget: 140, recruitmentTarget: 40 }, "ds_dashboard_targets_v2");
   const [financeOverrides, setFinanceOverrides] = useStickyState({ operationalExpenses: 0, ownerSalaryVlad: 0, ownerSalaryKostia: 0, otherExpenses: 0 }, "ds_dashboard_finance_overrides_v1");
+  const [mobileSignalOpen, setMobileSignalOpen] = useState({ works: false, weak: false, risk: false });
 
   const period = useMemo(() => {
     if (mode === "custom") return { start: from, end: to };
@@ -173,8 +187,67 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
     { key: "recruit", label: "Набір / оплати", actual: curr.payments, target: targets.recruitmentTarget, unit: "", cmp: cmpLabel(curr.payments, prevData.payments) },
   ];
 
-  return <div style={{ display: "grid", gap: 14 }}>
-    {isAdmin && (
+  return <div className="dashboard-tab" style={{ display: "grid", gap: 14 }}>
+    <style>{`
+      .dashboard-tab, .dashboard-tab * { box-sizing: border-box; min-width: 0; }
+      .dashboard-mobile-header, .dashboard-signals-mobile { display: none; }
+      .dashboard-chart-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .dashboard-chart-card svg { min-width: 0; display: block; }
+      .dashboard-compact-row { gap: 10px; align-items: center; }
+      .dashboard-compact-row span { overflow: hidden; text-overflow: ellipsis; }
+      @media (max-width: 768px) {
+        .dashboard-tab { gap: 10px !important; width: 100%; max-width: 100%; overflow-x: hidden; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+        .dashboard-mobile-header { display: grid; gap: 8px; position: sticky; top: 0; z-index: 5; margin: -4px -2px 0; padding: max(8px, env(safe-area-inset-top, 0px)) 2px 8px; background: ${theme.bg}; }
+        .dashboard-mobile-title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .dashboard-mobile-title-row h2 { margin: 0; font-size: 22px; line-height: 1.1; }
+        .dashboard-period-card { order: 1; padding: 10px !important; gap: 8px !important; overflow: hidden; }
+        .dashboard-period-card button { min-height: 44px; flex: 1 1 calc(33.333% - 8px); padding: 8px 10px !important; }
+        .dashboard-period-card input { min-height: 44px; width: 100%; flex: 1 1 140px; }
+        .dashboard-period-label { width: 100%; margin-left: 0 !important; }
+        .dashboard-targets-grid { order: 2; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+        .dashboard-target-card { grid-template-columns: 1fr !important; align-content: start; min-height: 108px; gap: 3px !important; padding: 7px !important; }
+        .dashboard-ring { justify-items: start !important; gap: 1px !important; }
+        .dashboard-ring svg { width: 42px; height: 42px; }
+        .dashboard-ring div { font-size: 9.5px !important; line-height: 1.05; }
+        .dashboard-target-title { font-size: 10.5px !important; line-height: 1.1; }
+        .dashboard-target-value { font-size: 20px !important; line-height: 1.05; margin-top: 1px; }
+        .dashboard-target-plan { font-size: 10.5px !important; line-height: 1.15; }
+        .dashboard-target-delta { font-size: 9.5px !important; line-height: 1.15; }
+        .dashboard-target-card input { width: 100% !important; min-height: 34px; height: 34px; margin-top: 3px !important; padding: 4px 8px; }
+        .dashboard-alerts-grid { order: 3; grid-template-columns: 1fr !important; gap: 0 !important; overflow: hidden; border: 1px solid ${theme.border}; border-radius: 18px; background: ${theme.card}; }
+        .dashboard-alert-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title value" "desc chip"; gap: 2px 10px; align-items: center; min-height: 68px; padding: 9px 11px !important; border: 0 !important; border-bottom: 1px solid ${theme.border} !important; border-radius: 0 !important; box-shadow: none !important; }
+        .dashboard-alert-card:last-child { border-bottom: 0 !important; }
+        .dashboard-alert-title { grid-area: title; font-size: 12px !important; line-height: 1.15; font-weight: 800; color: ${theme.textMain} !important; }
+        .dashboard-alert-value { grid-area: value; font-size: 21px !important; line-height: 1; justify-self: end; }
+        .dashboard-alert-desc { grid-area: desc; font-size: 10.5px !important; line-height: 1.2; }
+        .dashboard-alert-chip { grid-area: chip; justify-self: end; padding: 2px 7px !important; font-size: 10px !important; line-height: 1.1; }
+        .dashboard-finance-card { order: 4; padding: 12px !important; }
+        .dashboard-finance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        .dashboard-finance-grid input { width: 100%; min-height: 40px; }
+        .dashboard-signals-grid { display: none !important; }
+        .dashboard-signals-mobile { display: grid; order: 5; gap: 8px; }
+        .dashboard-mobile-accordion { padding: 0 !important; overflow: hidden; }
+        .dashboard-mobile-accordion-head { width: 100%; min-height: 58px; border: 0; background: transparent; color: ${theme.textMain}; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; }
+        .dashboard-mobile-accordion-head span:first-child { display: grid; gap: 2px; }
+        .dashboard-mobile-accordion-head small { color: ${theme.textMuted}; font-size: 11px; line-height: 1.2; }
+        .dashboard-mobile-chevron { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 999px; background: rgba(168, 177, 206, 0.14); color: ${theme.textMuted}; transition: transform 0.16s ease; flex: 0 0 auto; }
+        .dashboard-mobile-chevron--open { transform: rotate(180deg); }
+        .dashboard-mobile-accordion-body { padding: 0 12px 12px; }
+        .dashboard-mobile-accordion-body ul { margin: 8px 0 0 18px; padding: 0; }
+        .dashboard-trends-grid { order: 6; grid-template-columns: 1fr !important; gap: 8px !important; }
+        .dashboard-ranks-grid, .dashboard-average-grid { order: 7; grid-template-columns: 1fr !important; gap: 8px !important; }
+        .dashboard-ai-section { order: 8; }
+        .dashboard-card { padding: 12px !important; }
+        .dashboard-chart-card { max-width: 100%; }
+        .dashboard-chart-scroll svg { min-width: 320px; height: 150px; }
+        .dashboard-list-card { overflow: hidden; }
+        .dashboard-compact-row { padding: 7px 0; border-bottom: 1px solid ${theme.border}; }
+      }
+    `}</style>
+    <div className="dashboard-mobile-header">
+      <div className="dashboard-mobile-title-row"><h2>Dashboard</h2><span style={{ fontSize: 12, color: theme.textLight }}>{fmtShort(period.start)}–{fmtShort(period.end)}</span></div>
+    </div>
+    <div className="dashboard-ai-section">{isAdmin && (
       <GlobalAIAssistant
         isAdmin={isAdmin}
         students={students}
@@ -206,10 +279,10 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
           groups,
         }}
       />
-    )}
-    <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
+    )}</div>
+    <div className="dashboard-finance-card dashboard-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
       <b>Фінансова картина студії</b>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginTop: 8 }}>
+      <div className="dashboard-finance-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginTop: 8 }}>
         <div><div style={{fontSize:12,color:theme.textMuted}}>Брутто дохід</div><div style={{fontWeight:800}}>{grossRevenue.toLocaleString()} ₴</div></div>
         <div><div style={{fontSize:12,color:theme.textMuted}}>ЗП тренерів</div><div style={{fontWeight:800}}>{trainerSalaryTotal.toLocaleString()} ₴</div></div>
         <div><div style={{fontSize:12,color:theme.textMuted}}>Операційні витрати</div><input type="number" value={financeOverrides.operationalExpenses} onChange={(e)=>setFinanceOverrides((p)=>({...p,operationalExpenses:Number(e.target.value||0)}))} /></div>
@@ -219,40 +292,52 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
         <div><div style={{fontSize:12,color:theme.textMuted}}>Нетто прибуток</div><div style={{fontWeight:800,color:netProfit>=0?theme.success:theme.danger}}>{netProfit.toLocaleString()} ₴</div></div>
       </div>
     </div>
-    <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div className="dashboard-period-card" style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
       <button onClick={() => setMode("this_month")} style={{ ...cardSt, padding: "8px 12px", background: mode === "this_month" ? theme.primary : theme.card, color: mode === "this_month" ? "#fff" : theme.textMain }}>Цей місяць</button>
       <button onClick={() => setMode("last_month")} style={{ ...cardSt, padding: "8px 12px", background: mode === "last_month" ? theme.primary : theme.card, color: mode === "last_month" ? "#fff" : theme.textMain }}>Минулий місяць</button>
       <button onClick={() => setMode("custom")} style={{ ...cardSt, padding: "8px 12px", background: mode === "custom" ? theme.primary : theme.card, color: mode === "custom" ? "#fff" : theme.textMain }}>Custom</button>
       {mode === "custom" && <><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></>}
-      <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Період: {fmtShort(period.start)}–{fmtShort(period.end)} · Порівняння: попередній такий самий період</div>
+      <div className="dashboard-period-label" style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Період: {fmtShort(period.start)}–{fmtShort(period.end)} · Порівняння: попередній такий самий період</div>
     </div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>{targetCards.map((c) => { const key = c.key === "active" ? "activeStudents" : c.key === "recruit" ? "recruitment" : c.key; const pc = c.target > 0 ? Math.round((c.actual / c.target) * 100) : 0; return <div key={c.key} style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gridTemplateColumns: "auto 1fr", gap: 10 }}><Ring value={pc} label={rank(pc)} /><div><div style={{ fontSize: 12, color: theme.textMuted }}>{c.label}</div><div style={{ fontSize: 24, fontWeight: 800 }}>{c.actual.toLocaleString()}{c.unit}</div><div style={{ fontSize: 12, color: theme.textLight }}>План: {Number(c.target || 0).toLocaleString()}{c.unit}</div><div style={{ fontSize: 11, color: theme.textLight }}>{c.cmp}</div><input type="number" value={targets[`${key}Target`] || 0} onChange={(e) => setTargets((p) => ({ ...p, [`${key}Target`]: Number(e.target.value || 0) }))} style={{ marginTop: 6, width: 150 }} /></div></div>; })}</div>
+    <div className="dashboard-targets-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12 }}>{targetCards.map((c) => { const key = c.key === "active" ? "activeStudents" : c.key === "recruit" ? "recruitment" : c.key; const pc = c.target > 0 ? Math.round((c.actual / c.target) * 100) : 0; return <div className="dashboard-target-card dashboard-card" key={c.key} style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gridTemplateColumns: "auto 1fr", gap: 10 }}><Ring value={pc} label={rank(pc)} /><div><div className="dashboard-target-title" style={{ fontSize: 12, color: theme.textMuted }}>{c.label}</div><div className="dashboard-target-value" style={{ fontSize: 24, fontWeight: 800 }}>{c.actual.toLocaleString()}{c.unit}</div><div className="dashboard-target-plan" style={{ fontSize: 12, color: theme.textLight }}>План: {Number(c.target || 0).toLocaleString()}{c.unit}</div><div className="dashboard-target-delta" style={{ fontSize: 11, color: theme.textLight }}>{c.cmp}</div><input type="number" value={targets[`${key}Target`] || 0} onChange={(e) => setTargets((p) => ({ ...p, [`${key}Target`]: Number(e.target.value || 0) }))} style={{ marginTop: 6, width: 150 }} /></div></div>; })}</div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+    <div className="dashboard-trends-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
       <TrendLine title="Тренд виручки" rows={curr.revenueTrend} color={theme.success} deltaLabel={cmpLabel(curr.revenue, prevData.revenue)} />
       <TrendLine title="Тренд відвідуваності" rows={curr.attendanceTrend} color={theme.primary} deltaLabel={cmpLabel(curr.attendance, prevData.attendance)} />
     </div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
+    <div className="dashboard-ranks-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
       <RankList title="Топ 5 груп за виручкою" rows={curr.byGroupRevenue.filter((x) => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)} unit="₴" />
       <RankList title="Топ 5 груп за відвідуваністю" rows={curr.byGroupAttendance.filter((x) => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)} />
       <RankList title="Топ 5 напрямків за виручкою" rows={curr.byDirRevenue.filter((x) => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)} unit="₴" />
     </div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+    <div className="dashboard-average-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
       <RankList title="Топ 5 груп за сер. відвідуваністю" rows={curr.byGroupAttendance.filter((g) => g.held >= 2).map((g) => ({ id: g.id, name: g.name, value: Number((g.value / g.held).toFixed(2)) })).sort((a, b) => b.value - a.value).slice(0, 5)} />
       <RankList title="Bottom 5 (сер. відвідуваність, held>=2)" rows={curr.byGroupAttendance.filter((g) => g.held >= 2).map((g) => ({ id: g.id, name: g.name, value: Number((g.value / g.held).toFixed(2)) })).sort((a, b) => a.value - b.value).slice(0, 5)} />
     </div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Що працює</b><ul>{works.slice(0, 5).length ? works.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає достатньо даних</li>}</ul></div>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Що просідає</b><ul>{weak.slice(0, 5).length ? weak.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає критичних просідань</li>}</ul></div>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Групи під ризиком</b><div style={{ display: "grid", gap: 6, marginTop: 8 }}>{health.slice(-5).map((h) => <div key={h.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{h.name}</span><b style={{ color: h.value < 45 ? theme.danger : h.value < 70 ? theme.warning : theme.success }}>{h.value} · {h.bucket}</b></div>)}</div></div>
+    <div className="dashboard-signals-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      <div className="dashboard-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Що працює</b><ul>{works.slice(0, 5).length ? works.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає достатньо даних</li>}</ul></div>
+      <div className="dashboard-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Що просідає</b><ul>{weak.slice(0, 5).length ? weak.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає критичних просідань</li>}</ul></div>
+      <div className="dashboard-card" style={{ ...cardSt, border: `1px solid ${theme.border}` }}><b>Групи під ризиком</b><div style={{ display: "grid", gap: 6, marginTop: 8 }}>{health.slice(-5).map((h) => <div key={h.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{h.name}</span><b style={{ color: h.value < 45 ? theme.danger : h.value < 70 ? theme.warning : theme.success }}>{h.value} · {h.bucket}</b></div>)}</div></div>
     </div>
 
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 10 }}>
-      {[{ t: "Ending soon", v: endingSoon, d: "абонементи до 7 днів" }, { t: "No active payment", v: noActivePayment, d: "актуальні учениці без активної оплати" }, { t: "Low attendance groups", v: lowAttendanceGroups, d: "avg<4, held>=2" }, { t: "Reserve demand", v: reserveDemand, d: "групи з очікуванням" }, { t: "Potential dead groups", v: deadGroups, d: "без відвідувань у періоді" }].map((r) => <div key={r.t} style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}><div style={{ fontSize: 11, color: theme.textMuted }}>{r.t}</div><div style={{ fontSize: 24, fontWeight: 800 }}>{r.v}</div><div style={{ fontSize: 11, color: theme.textLight }}>{r.d}</div></div>)}
+    <div className="dashboard-signals-mobile">
+      <MobileAccordionCard title="Що працює" summary={`${works.slice(0, 5).length || 0} пунктів`} open={mobileSignalOpen.works} onToggle={() => setMobileSignalOpen((p) => ({ ...p, works: !p.works }))}>
+        <ul>{works.slice(0, 5).length ? works.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає достатньо даних</li>}</ul>
+      </MobileAccordionCard>
+      <MobileAccordionCard title="Що просідає" summary={`${weak.slice(0, 5).length || 0} сигналів`} open={mobileSignalOpen.weak} onToggle={() => setMobileSignalOpen((p) => ({ ...p, weak: !p.weak }))}>
+        <ul>{weak.slice(0, 5).length ? weak.slice(0, 5).map((x, i) => <li key={i}>{x}</li>) : <li>немає критичних просідань</li>}</ul>
+      </MobileAccordionCard>
+      <MobileAccordionCard title="Групи під ризиком" summary={`${health.slice(-5).length || 0} груп`} open={mobileSignalOpen.risk} onToggle={() => setMobileSignalOpen((p) => ({ ...p, risk: !p.risk }))}>
+        <div style={{ display: "grid", gap: 6, marginTop: 8 }}>{health.slice(-5).map((h) => <div key={h.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>{h.name}</span><b style={{ color: h.value < 45 ? theme.danger : h.value < 70 ? theme.warning : theme.success }}>{h.value} · {h.bucket}</b></div>)}</div>
+      </MobileAccordionCard>
+    </div>
+
+    <div className="dashboard-alerts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 10 }}>
+      {[{ t: "Ending soon", v: endingSoon, d: "абонементи до 7 днів" }, { t: "No active payment", v: noActivePayment, d: "актуальні учениці без активної оплати" }, { t: "Low attendance groups", v: lowAttendanceGroups, d: "avg<4, held>=2" }, { t: "Reserve demand", v: reserveDemand, d: "групи з очікуванням" }, { t: "Potential dead groups", v: deadGroups, d: "без відвідувань у періоді" }].map((r) => <div className="dashboard-alert-card" key={r.t} style={{ ...cardSt, border: `1px solid ${theme.border}`, padding: 12 }}><div className="dashboard-alert-title" style={{ fontSize: 11, color: theme.textMuted }}>{r.t}</div><div className="dashboard-alert-value" style={{ fontSize: 24, fontWeight: 800 }}>{r.v}</div><div className="dashboard-alert-desc" style={{ fontSize: 11, color: theme.textLight }}>{r.d}</div><span className="dashboard-alert-chip" style={{ borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 800, background: r.v > 0 ? "rgba(239, 68, 68, 0.12)" : "rgba(34, 197, 94, 0.12)", color: r.v > 0 ? theme.danger : theme.success }}>{r.v > 0 ? "увага" : "ok"}</span></div>)}
     </div>
   </div>;
 }
