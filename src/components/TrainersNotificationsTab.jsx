@@ -1071,69 +1071,118 @@ export default function TrainersNotificationsTab({
         .trainer-reminders-layout { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 12px; min-width: 0; max-width: 100%; }
         .trainer-reminders-panel, .trainer-reminders-recipients { min-width: 0; max-width: 100%; }
         @media (max-width: 768px) {
-          .automation-mobile-shell { width: 100%; }
-          .automation-subtabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; padding: 4px; }
-          .automation-subtabs button { min-height: 38px; padding: 0 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-          .admin-report-card { padding: 10px !important; border-radius: 14px !important; gap: 10px !important; }
-          .admin-report-form { padding: 10px !important; gap: 10px !important; }
-          .admin-report-header { align-items: flex-start !important; }
-          .admin-report-refresh, .admin-report-actions button, .trainer-reminders-panel button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12px !important; }
-          .admin-report-toggle { min-height: 40px; padding: 8px 10px; border: 1px solid ${theme.border}; border-radius: 12px; background: ${theme.card}; justify-content: space-between; }
-          .admin-report-grid { grid-template-columns: 1fr; }
-          .admin-report-grid input, .admin-report-grid select, .admin-report-chat-input input, .admin-report-chat-input select, .trainer-reminders-panel input, .trainer-reminders-panel select, .trainer-reminders-panel textarea { min-height: 40px !important; padding: 7px 10px !important; }
-          .admin-report-checks { display: grid !important; grid-template-columns: 1fr; gap: 6px !important; }
-          .admin-report-checks label { border-radius: 12px !important; padding: 7px 9px !important; }
-          .trainer-reminders-layout { grid-template-columns: 1fr; overflow-x: hidden; }
-          .trainer-reminders-recipients, .trainer-reminders-panel { width: 100%; padding: 10px !important; border-radius: 14px !important; }
-          .trainer-recipient-card { padding: 7px 9px !important; border-radius: 9px !important; }
-          .trainer-recipient-name { font-size: 13px !important; line-height: 1.2; overflow-wrap: anywhere; }
-          .trainer-recipient-badges { margin-top: 5px !important; gap: 4px !important; }
-          .trainer-rule-grid { grid-template-columns: 1fr !important; }
+          .automation-mobile-shell { width: 100%; gap: 12px !important; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+          .automation-subtabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; padding: 3px; border-color: ${theme.border}99; background: ${theme.input}; box-shadow: inset 0 0 0 1px rgba(255,255,255,.02); }
+          .automation-subtabs button { min-height: 40px; padding: 0 7px; font-size: 11.5px; line-height: 1.15; white-space: normal; overflow: visible; text-overflow: clip; }
+          .automation-subtabs button[aria-selected="true"] { box-shadow: 0 6px 14px rgba(0,0,0,.10); }
+          .admin-report-card, .trainer-reminders-recipients, .trainer-reminders-panel { width: 100%; border: 0 !important; background: ${theme.card} !important; box-shadow: 0 10px 28px rgba(0,0,0,.08); }
+          .admin-report-card { padding: 12px !important; border-radius: 18px !important; gap: 12px !important; }
+          .admin-report-form { border: 0 !important; background: transparent !important; padding: 0 !important; gap: 12px !important; }
+          .admin-report-header { align-items: flex-start !important; gap: 10px !important; }
+          .admin-report-header > div { min-width: 0; flex: 1 1 190px; }
+          .admin-report-section { background: ${theme.input}; border-radius: 16px; padding: 10px; display: grid; gap: 8px; }
+          .admin-report-section-title, .trainer-section-title { color: ${theme.textMain}; font-size: 12px; font-weight: 900; letter-spacing: .02em; text-transform: uppercase; }
+          .admin-report-refresh, .admin-report-actions button, .trainer-reminders-panel button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12px !important; border-radius: 12px !important; }
+          .admin-report-toggle { min-height: 42px; padding: 0; border: 0 !important; background: transparent !important; justify-content: space-between; }
+          .admin-report-grid { grid-template-columns: 1fr; gap: 8px; }
+          .admin-report-field { min-width: 0; }
+          .admin-report-field span, .trainer-field-label { font-size: 11px; color: ${theme.textMuted}; font-weight: 800; }
+          .admin-report-grid input, .admin-report-grid select, .admin-report-chat-input input, .admin-report-chat-input select, .trainer-reminders-panel input, .trainer-reminders-panel select, .trainer-reminders-panel textarea { min-height: 40px !important; padding: 7px 10px !important; border-color: ${theme.border}AA !important; border-radius: 12px !important; }
+          .admin-report-chat-button { min-height: 36px !important; justify-self: start; }
+          .admin-report-checks { display: grid !important; gap: 0 !important; }
+          .admin-report-option { min-height: 42px; border: 0 !important; border-radius: 0 !important; padding: 8px 0 !important; background: transparent !important; justify-content: space-between; }
+          .admin-report-option + .admin-report-option { border-top: 1px solid ${theme.border}88 !important; }
+          .admin-report-accordion { border-top: 1px solid ${theme.border}88; padding-top: 8px; }
+          .admin-report-accordion summary, .admin-report-soon summary, .trainer-form-details summary, .rule-actions-details summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+          .admin-report-accordion summary::-webkit-details-marker, .admin-report-soon summary::-webkit-details-marker, .trainer-form-details summary::-webkit-details-marker, .rule-actions-details summary::-webkit-details-marker { display: none; }
+          .admin-report-accordion summary::after, .admin-report-soon summary::after, .trainer-form-details summary::after, .rule-actions-details summary::after { content: "⌄"; color: ${theme.textMuted}; font-size: 13px; }
+          .admin-report-accordion[open] summary::after, .admin-report-soon[open] summary::after, .trainer-form-details[open] summary::after, .rule-actions-details[open] summary::after { content: "⌃"; }
+          .admin-report-actions { display: grid !important; grid-template-columns: 1fr; gap: 8px !important; }
+          .trainer-reminders-layout { grid-template-columns: 1fr; overflow-x: hidden; gap: 12px; }
+          .trainer-reminders-recipients, .trainer-reminders-panel { padding: 10px !important; border-radius: 18px !important; }
+          .trainer-reminders-recipients { gap: 7px !important; }
+          .trainer-recipient-header, .selected-recipient-mobile { border: 0 !important; background: transparent !important; padding: 0 !important; }
+          .trainer-recipient-card { position: relative; min-height: 58px; padding: 8px 10px 8px 12px !important; border-radius: 14px !important; border-color: ${theme.border}AA !important; background: ${theme.input} !important; }
+          .trainer-recipient-card.is-selected { border-color: ${theme.primary}AA !important; background: ${theme.primary}12 !important; }
+          .trainer-recipient-card.is-selected::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 8px 8px 0; background: ${theme.primary}; }
+          .trainer-recipient-name { font-size: 14px !important; line-height: 1.2; overflow-wrap: anywhere; }
+          .trainer-recipient-badges { margin-top: 5px !important; gap: 5px !important; }
+          .trainer-recipient-badges span, .rule-status-chip, .rule-content-chip { padding: 2px 6px !important; font-size: 10.5px !important; border-radius: 999px !important; }
+          .trainer-rule-card { border: 0 !important; border-radius: 16px !important; padding: 10px !important; background: ${theme.input} !important; gap: 7px !important; }
+          .trainer-rule-card-header { display: grid !important; grid-template-columns: auto 1fr auto; gap: 8px !important; align-items: center !important; }
+          .trainer-rule-icon { width: 26px; height: 26px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: ${theme.primary}18; color: ${theme.primary}; font-size: 13px; }
+          .trainer-rule-title { min-width: 0; font-size: 14px !important; line-height: 1.2; overflow-wrap: anywhere; }
+          .trainer-rule-meta { display: grid !important; grid-template-columns: 1fr; gap: 3px !important; color: ${theme.textMuted}; font-size: 12px; line-height: 1.25; }
+          .trainer-rule-meta strong { color: ${theme.textMain}; font-weight: 800; }
+          .trainer-rule-description { font-size: 11.5px !important; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+          .trainer-rule-includes { gap: 5px !important; }
+          .trainer-rule-actions { display: grid !important; grid-template-columns: 1fr; gap: 6px !important; }
+          .trainer-form-details { border: 0 !important; background: ${theme.input}; border-radius: 16px; padding: 10px; }
+          .trainer-form-details[open] { display: grid; gap: 9px; }
+          .trainer-rule-grid { grid-template-columns: 1fr !important; gap: 7px !important; }
+          .trainer-chip-row { gap: 6px !important; }
+          .trainer-chip-row button { min-height: 34px !important; padding: 5px 9px !important; }
         }
-        @media (min-width: 390px) and (max-width: 768px) { .admin-report-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .admin-report-grid .wide { grid-column: 1 / -1; } }
+        @media (min-width: 390px) and (max-width: 768px) { .admin-report-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .admin-report-chat-input { grid-column: 1 / -1; } .admin-report-actions { grid-template-columns: repeat(2,minmax(0,1fr)); } }
       `}</style>
       <div className="automation-subtabs">
-        <button type="button" onClick={() => setAutomationSubtab("admin")} style={{ background: automationSubtab === "admin" ? theme.primary : "transparent", color: automationSubtab === "admin" ? "#fff" : theme.textMuted }}>Адмін-звіт</button>
-        <button type="button" onClick={() => setAutomationSubtab("trainers")} style={{ background: automationSubtab === "trainers" ? theme.primary : "transparent", color: automationSubtab === "trainers" ? "#fff" : theme.textMuted }}>Тренерські нагадування</button>
+        <button type="button" aria-selected={automationSubtab === "admin"} onClick={() => setAutomationSubtab("admin")} style={{ background: automationSubtab === "admin" ? theme.primary : "transparent", color: automationSubtab === "admin" ? "#fff" : theme.textMuted }}>Адмін-звіт</button>
+        <button type="button" aria-selected={automationSubtab === "trainers"} onClick={() => setAutomationSubtab("trainers")} style={{ background: automationSubtab === "trainers" ? theme.primary : "transparent", color: automationSubtab === "trainers" ? "#fff" : theme.textMuted }}>Тренерські нагадування</button>
       </div>
 
       {automationSubtab === "admin" ? (
         <div className="admin-report-card" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
-          <div style={{ width: "fit-content", border: `1px solid ${theme.primary}55`, borderRadius: 999, background: `${theme.primary}18`, color: theme.primary, padding: "5px 10px", fontSize: 12, fontWeight: 900 }}>Адміністратор</div>
         <form className="admin-report-form" onSubmit={saveAdminNotificationSettings} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 12 }}>
           <div className="admin-report-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontWeight: 800, color: theme.textMain }}>Ранковий звіт адміністратора</div>
-              <div style={{ fontSize: 12, color: theme.textMuted }}>Керовані Telegram-сповіщення без hardcode chat id у коді. Default час: 08:00 Europe/Kyiv.</div>
+              <div style={{ width: "fit-content", border: `1px solid ${theme.primary}33`, borderRadius: 999, background: `${theme.primary}12`, color: theme.primary, padding: "3px 8px", fontSize: 11, fontWeight: 900, marginBottom: 6 }}>Адміністратор</div>
+              <div style={{ fontWeight: 900, color: theme.textMain, fontSize: 18, lineHeight: 1.15 }}>Ранковий звіт адміністратора</div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 3 }}>Керовані Telegram-сповіщення без hardcode chat id у коді. Default час: 08:00 Europe/Kyiv.</div>
             </div>
             <button className="admin-report-refresh" type="button" onClick={loadAdminNotificationSettings} disabled={adminSettingsLoading} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{adminSettingsLoading ? "Оновлення…" : "Оновити"}</button>
           </div>
-          <label className="admin-report-toggle" style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontWeight: 700 }}>
-            <input type="checkbox" checked={!!adminNotificationSettings.enabled} onChange={(e) => patchAdminNotificationSettings({ enabled: e.target.checked })} />
-            Активний ранковий адмін-звіт
-          </label>
-          <div className="admin-report-grid">
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Отримувач / admin email<input value={currentUser?.email || adminNotificationSettings.adminEmail || ""} readOnly style={fieldStyle} /></label>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram-чат адміністратора<select value={adminChatDraft} onChange={(e) => { const value = e.target.value; setAdminChatDraft(value); if (value) patchAdminNotificationSettings({ telegramChatId: value }); }} style={fieldStyle}><option value="">Вибрати з чатів CRM…</option>{adminChatOptions.map((chat) => <option key={chat.id} value={chat.id}>{chat.title}{chat.username ? ` · ${chat.username}` : ""} · {chat.id}</option>)}</select><button type="button" onClick={() => adminChatDraft && patchAdminNotificationSettings({ telegramChatId: adminChatDraft })} disabled={!adminChatDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "7px 10px", cursor: adminChatDraft ? "pointer" : "default", fontWeight: 700, opacity: adminChatDraft ? 1 : 0.55 }}>Підставити вибраний чат</button></label>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Час надсилання<input type="time" value={adminNotificationSettings.sendTimeLocal} onChange={(e) => patchAdminNotificationSettings({ sendTimeLocal: e.target.value })} style={fieldStyle} /></label>
+          <div className="admin-report-section">
+            <label className="admin-report-toggle" style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontWeight: 800 }}>
+              <span>Ранковий звіт</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: adminNotificationSettings.enabled ? theme.success : theme.textMuted, fontSize: 12, fontWeight: 900 }}>
+                <input type="checkbox" checked={!!adminNotificationSettings.enabled} onChange={(e) => patchAdminNotificationSettings({ enabled: e.target.checked })} />
+                {adminNotificationSettings.enabled ? "увімкнено" : "вимкнено"}
+              </span>
+            </label>
           </div>
-          <label className="admin-report-chat-input wide" style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Telegram dialog / chat identifier<input value={adminNotificationSettings.telegramChatId} onChange={(e) => patchAdminNotificationSettings({ telegramChatId: e.target.value })} placeholder="Напр. dialog id із CRM або @username" style={fieldStyle} /><span style={{ color: theme.textMuted, fontWeight: 600 }}>Беріть із вкладки Повідомлення / CRM, не з BotFather. Тест надсилається через робочий Telegram-профіль CRM.</span></label>
-          <div className="admin-report-checks" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <section className="admin-report-section">
+            <div className="admin-report-section-title">Доставка</div>
+            <div className="admin-report-grid">
+              <label className="admin-report-field" style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}><span>Отримувач / admin email</span><input value={currentUser?.email || adminNotificationSettings.adminEmail || ""} readOnly style={fieldStyle} /></label>
+              <label className="admin-report-field" style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}><span>Telegram-чат</span><select value={adminChatDraft} onChange={(e) => { const value = e.target.value; setAdminChatDraft(value); if (value) patchAdminNotificationSettings({ telegramChatId: value }); }} style={fieldStyle}><option value="">Вибрати з чатів CRM…</option>{adminChatOptions.map((chat) => <option key={chat.id} value={chat.id}>{chat.title}{chat.username ? ` · ${chat.username}` : ""} · {chat.id}</option>)}</select><button className="admin-report-chat-button" type="button" onClick={() => adminChatDraft && patchAdminNotificationSettings({ telegramChatId: adminChatDraft })} disabled={!adminChatDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "7px 10px", cursor: adminChatDraft ? "pointer" : "default", fontWeight: 700, opacity: adminChatDraft ? 1 : 0.55 }}>Підставити чат</button></label>
+              <label className="admin-report-field" style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}><span>Час</span><input type="time" value={adminNotificationSettings.sendTimeLocal} onChange={(e) => patchAdminNotificationSettings({ sendTimeLocal: e.target.value })} style={fieldStyle} /></label>
+              <label className="admin-report-chat-input admin-report-field" style={{ display: "grid", gap: 5, fontSize: 12, color: theme.textMuted, fontWeight: 700 }}><span>Telegram dialog / chat identifier</span><input value={adminNotificationSettings.telegramChatId} onChange={(e) => patchAdminNotificationSettings({ telegramChatId: e.target.value })} placeholder="Напр. dialog id із CRM або @username" style={fieldStyle} /><span style={{ color: theme.textMuted, fontWeight: 600 }}>Беріть із вкладки Повідомлення / CRM, не з BotFather. Тест надсилається через робочий Telegram-профіль CRM.</span></label>
+            </div>
+          </section>
+          <section className="admin-report-section">
+            <div className="admin-report-section-title">Що надсилати</div>
+            <div className="admin-report-checks" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {[["includeTodayTrials", "Пробні на сьогодні"], ["includeExpiringSubscriptions", "Проблемні абонементи на сьогодні"], ["includeInactiveStudents", "Пропуски підряд"]].map(([key, label]) => (
-              <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMain, background: theme.card, fontWeight: 700, fontSize: 12 }}>
-                <input type="checkbox" checked={!!adminNotificationSettings[key]} onChange={(e) => patchAdminNotificationSettings({ [key]: e.target.checked })} /> {label}
+              <label className="admin-report-option" key={key} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMain, background: theme.card, fontWeight: 700, fontSize: 12 }}>
+                <span>{label}</span><input type="checkbox" checked={!!adminNotificationSettings[key]} onChange={(e) => patchAdminNotificationSettings({ [key]: e.target.checked })} />
               </label>
             ))}
-          </div>
-          <details style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 4 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 800, color: theme.textMain }}>Що входить у звіт</summary>
-            <div>• Пробні на сьогодні: майбутній digest по всіх групах із групою / напрямком / часом / телефоном, якщо є.</div>
-            <div>• Проблемні абонементи на сьогодні: майбутня перевірка тільки груп сьогодні, без змін subscriptions logic.</div>
-            <div>• Пропуски підряд: майбутній розрахунок по заняттях групи, без змін attendance rows logic.</div>
-          </details>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {["Інше правило 1", "Інше правило 2"].map((label) => <span key={label} style={{ border: `1px dashed ${theme.border}`, borderRadius: 999, padding: "7px 11px", color: theme.textMuted, background: theme.card, fontWeight: 700, fontSize: 12 }}>{label} · coming soon</span>)}
-          </div>
+            </div>
+            <details className="admin-report-accordion" style={{ fontSize: 12, color: theme.textMuted, display: "grid", gap: 4 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 800, color: theme.textMain }}>Що входить у звіт</summary>
+              <div style={{ display: "grid", gap: 4, paddingTop: 8 }}>
+                <div>• Пробні на сьогодні: майбутній digest по всіх групах із групою / напрямком / часом / телефоном, якщо є.</div>
+                <div>• Проблемні абонементи на сьогодні: майбутня перевірка тільки груп сьогодні, без змін subscriptions logic.</div>
+                <div>• Пропуски підряд: майбутній розрахунок по заняттях групи, без змін attendance rows logic.</div>
+              </div>
+            </details>
+            <details className="admin-report-soon" style={{ fontSize: 12, color: theme.textMuted }}>
+              <summary style={{ fontWeight: 800 }}>Майбутні правила</summary>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 8 }}>
+                {["Інше правило 1", "Інше правило 2"].map((label) => <span key={label} style={{ border: `1px dashed ${theme.border}`, borderRadius: 999, padding: "5px 8px", color: theme.textMuted, background: theme.card, fontWeight: 700, fontSize: 11 }}>{label} · coming soon</span>)}
+              </div>
+            </details>
+          </section>
           {!!adminSettingsStatus && <div style={{ fontSize: 12, color: adminSettingsStatus.includes("Не вдалося") || adminSettingsStatus.includes("не надіслано") ? theme.danger : theme.success, fontWeight: 700 }}>{adminSettingsStatus}</div>}
           <div className="admin-report-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="submit" disabled={adminSettingsSaving} style={{ border: "none", borderRadius: 10, background: theme.primary, color: "#fff", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>{adminSettingsSaving ? "Збереження…" : "Зберегти"}</button>
@@ -1145,15 +1194,15 @@ export default function TrainersNotificationsTab({
         </div>
       ) : (
         <div className="trainer-reminders-layout">
-      <div className="trainer-reminders-recipients" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><div style={{ fontWeight: 800, color: theme.textMain }}>Отримувачі сповіщень</div><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: theme.textMuted, fontWeight: 700 }}><input type="checkbox" checked={showArchivedRecipients} onChange={(e) => setShowArchivedRecipients(e.target.checked)} /> Архівні</label></div>
+      <div id="trainer-reminders-recipients" className="trainer-reminders-recipients" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 10, display: "grid", gap: 8, height: "fit-content" }}>
+        <div className="trainer-recipient-header" style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><div style={{ fontWeight: 900, color: theme.textMain, fontSize: 16 }}>Отримувачі</div><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: theme.textMuted, fontWeight: 800 }}><input type="checkbox" checked={showArchivedRecipients} onChange={(e) => setShowArchivedRecipients(e.target.checked)} /> Архівні</label></div>
         {!notificationRecipients.length && <div style={{ color: theme.textMuted, fontSize: 12 }}>Немає отримувачів.</div>}
         {notificationRecipients.map((d) => (
           <button
             key={d.id}
             type="button"
             onClick={() => setSelectedRecipientId(d.id)}
-            className="trainer-recipient-card"
+            className={`trainer-recipient-card ${selectedRecipient?.id === d.id ? "is-selected" : ""}`}
             style={{
               textAlign: "left",
               border: `1px solid ${selectedRecipient?.id === d.id ? theme.primary : theme.border}`,
@@ -1175,13 +1224,24 @@ export default function TrainersNotificationsTab({
       </div>
 
       <div className="trainer-reminders-panel" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 12, display: "grid", gap: 12 }}>
-        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, color: theme.textMain }}>Правила автоматичних сповіщень</div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
-          <div style={{ fontSize: 12, color: theme.textMuted, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: "8px 10px", background: theme.card }}>
-            Правила визначають, коли і кому надсилати нагадування. Дані для пробних і оплат мають братися з актуальної бази перед відправкою. Нагадування про відмітки може бути простим текстом.
+        {!!selectedRecipient && (
+          <div className="selected-recipient-mobile" style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 10, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: theme.textMuted, fontWeight: 800 }}>Обраний отримувач</div>
+              <div style={{ color: theme.textMain, fontWeight: 900, overflowWrap: "anywhere" }}>{selectedRecipient.title || selectedRecipient.id}</div>
+            </div>
+            <a href="#trainer-reminders-recipients" style={{ color: theme.primary, fontSize: 12, fontWeight: 800, textDecoration: "none", whiteSpace: "nowrap" }}>Змінити</a>
           </div>
-          <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8 }}>
-            <input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Назва правила" style={fieldStyle} />
+        )}
+        <div style={{ border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input, padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}><div><div style={{ fontWeight: 900, color: theme.textMain, fontSize: 16 }}>Автоматизації</div><div style={{ fontSize: 12, color: theme.textMuted }}>Правила нагадувань для обраного отримувача</div></div><button type="button" onClick={loadScheduleRules} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Оновити</button></div>
+          <details className="trainer-form-details" open={!visibleScheduleRules.length || !!editingRuleId} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: theme.card, padding: 10 }}>
+            <summary><span className="trainer-section-title">{editingRuleId ? "Редагувати правило" : "Нове правило"}</span><span style={{ color: theme.primary, fontSize: 12, fontWeight: 800 }}>{editingRuleId ? "Відкрито" : "Створити правило"}</span></summary>
+            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 8 }}>
+              Правила визначають, коли і кому надсилати нагадування. Дані для пробних і оплат мають братися з актуальної бази перед відправкою.
+            </div>
+          <form onSubmit={saveScheduleRule} style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            <label style={{ display: "grid", gap: 5 }}><span className="trainer-field-label">Назва</span><input value={scheduleRuleDraft.name} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Назва правила" style={fieldStyle} /></label>
             <div className="trainer-rule-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
               
               <select value={scheduleRuleDraft.groupId} onChange={(e) => setScheduleRuleDraft((p) => {
@@ -1194,7 +1254,7 @@ export default function TrainersNotificationsTab({
               </div>
               <select value={scheduleRuleDraft.channel} onChange={(e) => setScheduleRuleDraft((p) => ({ ...p, channel: e.target.value }))} style={fieldStyle}><option value="push">Push</option><option value="telegram">Telegram</option><option value="both">Push + Telegram</option></select>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
+            <div className="trainer-chip-row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{scheduleDayOptions.map((d) => {
               const active = scheduleRuleDraft.daysOfWeek.includes(d.value);
               return <button key={d.value} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, daysOfWeek: active ? p.daysOfWeek.filter((x) => x !== d.value) : [...p.daysOfWeek, d.value] }))} style={{ border: `1px solid ${active ? (isLightTheme ? "#2563EB" : theme.primary) : (isLightTheme ? "#CBD5E1" : theme.border)}`, borderRadius: 999, background: active ? (isLightTheme ? "#DBEAFE" : `${theme.primary}22`) : (isLightTheme ? "#FFFFFF" : theme.input), color: active ? (isLightTheme ? "#1E3A8A" : "#BBD7FF") : (isLightTheme ? "#374151" : theme.textMuted), padding: "7px 11px", fontWeight: active && isLightTheme ? 800 : 700, cursor: "pointer" }}>{d.label}</button>;
             })}</div>
@@ -1205,7 +1265,7 @@ export default function TrainersNotificationsTab({
                   У цього отримувача не привʼязано Push акаунт. Перевірте канал або привʼяжіть акаунт.
                 </div>
               )}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="trainer-chip-row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[["enabled", "увімкнено"], ["includeTrial", "пробні"], ["includePaymentIssues", "оплати"], ["includeAttendanceReminder", "нагадати відмітити"]].map(([k, label]) => {
                   const active = !!scheduleRuleDraft[k];
                   return <button key={k} type="button" onClick={() => setScheduleRuleDraft((p) => ({ ...p, [k]: !p[k] }))} style={{ border: `1px solid ${active ? (isLightTheme ? "#2563EB" : theme.primary) : (isLightTheme ? "#CBD5E1" : theme.border)}`, borderRadius: 999, background: active ? (isLightTheme ? "#BFDBFE" : `${theme.primary}22`) : (isLightTheme ? "#FFFFFF" : theme.input), color: active ? (isLightTheme ? "#1E3A8A" : "#D7E6FF") : (isLightTheme ? "#374151" : theme.textMuted), padding: "7px 11px", fontWeight: active && isLightTheme ? 800 : 700, cursor: "pointer" }}>{label}</button>;
@@ -1235,41 +1295,46 @@ export default function TrainersNotificationsTab({
               <button type="button" onClick={resetScheduleRuleDraft} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>Очистити</button>
             </div>
           </form>
+          </details>
           {scheduleRulesLoading && <div style={{ fontSize: 12, color: theme.textMuted }}>Завантаження…</div>}
           {!!scheduleRulesError && <div style={{ fontSize: 12, color: theme.danger }}>{scheduleRulesError}</div>}
           <div style={{ display: "grid", gap: 8 }}>
             {visibleScheduleRules.map((rule) => {
               const includeItems = includeItemsFromRule(rule);
               return (
-                <div key={rule.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <div style={{ fontWeight: 800, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
-                    <span style={{ ...badgeBase, ...((rule.enabled !== false) ? badgeTone.statusEnabled : badgeTone.statusDisabled) }}>
-                      {rule.enabled !== false ? "увімкнено" : "вимкнено"}
+                <div key={rule.id} className="trainer-rule-card" style={{ border: `1px solid ${theme.border}`, borderRadius: 12, padding: 10, background: theme.card, display: "grid", gap: 8 }}>
+                  <div className="trainer-rule-card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span className="trainer-rule-icon">✉</span>
+                    <div className="trainer-rule-title" style={{ fontWeight: 900, color: theme.textMain }}>{rule.name || `Rule #${rule.id}`}</div>
+                    <span className="rule-status-chip" style={{ ...badgeBase, ...((rule.enabled !== false) ? badgeTone.statusEnabled : badgeTone.statusDisabled) }}>
+                      {rule.enabled !== false ? "Увімкнено" : "Вимкнено"}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ ...badgeBase, ...badgeTone.group }}>Група: {groupDisplayFromId(rule.group_id, rule.group_name)}</span>
-                    <span style={{ ...badgeBase, ...badgeTone.recipient }}>Отримувач: {rule.trainer_display || rule.trainer_email || rule.trainer_name || trainerDisplayFromId(rule.trainer_id)}</span>
-                    <span style={{ ...badgeBase, ...((String(rule.channel || "").toLowerCase() === "telegram") ? badgeTone.channelTelegram : (String(rule.channel || "").toLowerCase() === "both" ? badgeTone.channelBoth : badgeTone.channelPush)) }}>Канал: {channelLabel(rule.channel)}</span>
-                    <span style={{ ...badgeBase, ...badgeTone.time }}>Час: {rule.send_time_local || "—"}</span>
-                    <span style={{ ...badgeBase, ...badgeTone.days }}>Дні: {(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"}</span>
+                  <div className="trainer-rule-meta" style={{ display: "grid", gap: 4 }}>
+                    <div><strong>{groupDisplayFromId(rule.group_id, rule.group_name)}</strong></div>
+                    <div>{rule.trainer_display || rule.trainer_email || rule.trainer_name || trainerDisplayFromId(rule.trainer_id)} · {channelLabel(rule.channel)}</div>
+                    <div>{(rule.days_of_week || []).map((d) => weekdayLabelByValue[Number(d)] || d).join(", ") || "—"} · {rule.send_time_local || "—"}</div>
                   </div>
-                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                  <div className="trainer-rule-description" style={{ fontSize: 12, color: theme.textMuted }}>
                     Це правило автоматично формує повідомлення перед відправкою для обраної групи у вказаний час.
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <div className="trainer-rule-includes" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: theme.textMuted, fontWeight: 700 }}>Включає:</span>
-                    {rule?.include_trial_bookings !== false && <span style={{ ...badgeBase, ...badgeTone.includeTrial }}>пробні</span>}
-                    {rule?.include_unpaid_students !== false && <span style={{ ...badgeBase, ...badgeTone.includePayments }}>оплати</span>}
-                    {rule?.include_attendance_reminder !== false && <span style={{ ...badgeBase, ...badgeTone.includeAttendance }}>відвідування</span>}
-                    {!includeItems.length && <span style={{ ...badgeBase, ...badgeTone.days }}>нічого не включено</span>}
+                    {rule?.include_trial_bookings !== false && <span className="rule-content-chip" style={{ ...badgeBase, ...badgeTone.includeTrial }}>пробні</span>}
+                    {rule?.include_unpaid_students !== false && <span className="rule-content-chip" style={{ ...badgeBase, ...badgeTone.includePayments }}>оплати</span>}
+                    {rule?.include_attendance_reminder !== false && <span className="rule-content-chip" style={{ ...badgeBase, ...badgeTone.includeAttendance }}>відвідування</span>}
+                    {!includeItems.length && <span className="rule-content-chip" style={{ ...badgeBase, ...badgeTone.days }}>нічого не включено</span>}
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.input, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Редагувати</button>
-                    <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: `1px solid ${rule.enabled !== false ? (isLightTheme ? "#F59E0B" : "transparent") : (isLightTheme ? "#22C55E" : "transparent")}`, borderRadius: 10, background: rule.enabled !== false ? (isLightTheme ? "#FDE68A" : "#6E5337") : (isLightTheme ? "#BBF7D0" : "#2C6A47"), color: isLightTheme ? "#111827" : "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
-                    <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${isLightTheme ? "#60A5FA" : "#425A80"}`, borderRadius: 10, background: isLightTheme ? "#DBEAFE" : "#2B3E5B", color: isLightTheme ? "#1E3A8A" : "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
-                                      <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await authFetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
+                  <div className="trainer-rule-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => { setEditingRuleId(rule.id); setScheduleRuleDraft(mapRuleToDraft(rule)); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 800, fontSize: 12 }}>Редагувати</button>
+                    <details className="rule-actions-details" style={{ minWidth: 0 }}>
+                      <summary style={{ border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.card, color: theme.textMain, padding: "7px 12px", cursor: "pointer", fontWeight: 800, fontSize: 12 }}>⋯ Дії</summary>
+                      <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                        <button type="button" onClick={() => toggleScheduleRule(rule)} style={{ border: `1px solid ${rule.enabled !== false ? (isLightTheme ? "#F59E0B" : "transparent") : (isLightTheme ? "#22C55E" : "transparent")}`, borderRadius: 10, background: rule.enabled !== false ? (isLightTheme ? "#FDE68A" : "#6E5337") : (isLightTheme ? "#BBF7D0" : "#2C6A47"), color: isLightTheme ? "#111827" : "#fff", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{rule.enabled !== false ? "Вимкнути" : "Увімкнути"}</button>
+                        <button type="button" onClick={() => setPreviewRuleId(rule.id)} style={{ border: `1px solid ${isLightTheme ? "#60A5FA" : "#425A80"}`, borderRadius: 10, background: isLightTheme ? "#DBEAFE" : "#2B3E5B", color: isLightTheme ? "#1E3A8A" : "#D5E4FF", padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Попередній перегляд</button>
+                        <button type="button" onClick={async () => { if (!window.confirm("Видалити це правило сповіщення?")) return; const res = await authFetch("/api/trainer-notifications?op=schedule-rules", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rule.id }) }); if (res.ok) { await loadScheduleRules(); if (String(previewRuleId||"")===String(rule.id)) setPreviewRuleId(null); } }} style={{ border: `1px solid ${theme.danger}`, borderRadius: 10, background: `${theme.danger}18`, color: theme.danger, padding: "7px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Видалити</button>
+                      </div>
+                    </details>
                   </div>
                 </div>
               );
