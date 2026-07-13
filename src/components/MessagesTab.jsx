@@ -1777,7 +1777,7 @@ export default function MessagesTab({
         .messages-row-status { color: ${theme.textMuted}; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         @media (max-width: 760px) {
           .messages-tab-shell, .messages-tab-shell * { box-sizing: border-box; min-width: 0; max-width: 100%; }
-          .messages-tab-shell { display: flex !important; flex-direction: column !important; width: 100% !important; height: calc(100dvh - 64px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: hidden !important; background: ${theme.card} !important; }
+          .messages-tab-shell { display: flex !important; flex-direction: column !important; width: 100% !important; height: 100% !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: hidden !important; background: ${theme.card} !important; }
           .messages-filter-rail { display: none !important; }
           .messages-chat-list-panel, .messages-dialog-panel { width: 100% !important; max-width: none !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: 0 !important; background: ${theme.card} !important; }
           .messages-mobile-list .messages-dialog-panel { display: none !important; }

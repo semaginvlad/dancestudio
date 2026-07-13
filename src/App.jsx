@@ -2123,7 +2123,7 @@ export default function App() {
   const studentsMobileModalVariant = tab === "students" ? "students-mobile" : undefined;
 
   return (
-    <div data-theme-version={themeRenderTick} data-build-label={APP_BUILD_LABEL} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
+    <div className={tab === "messages" ? "app-messages-active" : undefined} data-theme-version={themeRenderTick} data-build-label={APP_BUILD_LABEL} style={{minHeight:"100dvh", background:theme.bg, color:theme.textMain, fontFamily:"'Poppins',sans-serif", paddingBottom: "max(100px, env(safe-area-inset-bottom))"}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
       <style>{`
         @media (max-width: 768px) {
@@ -2141,6 +2141,8 @@ export default function App() {
           .mobile-more-wrap { display: block !important; }
           .bottom-form { flex-direction: column !important; align-items: stretch !important; }
           .bottom-form input { width: 100% !important; }
+          .app-messages-active { padding-bottom: 0 !important; overflow-x: hidden; }
+          .app-main-messages { width: 100% !important; max-width: none !important; height: calc(100dvh - 148px); padding-left: 0 !important; padding-right: 0 !important; overflow: hidden !important; min-height: 0; }
           .split-container { flex-direction: column !important; }
           .split-left, .split-right {
              flex: 1 1 auto !important;
@@ -2239,7 +2241,7 @@ export default function App() {
         </div>
       </nav>
 
-      <main style={{maxWidth:1200, margin:"0 auto", padding:"0 24px"}}>
+      <main className={tab === "messages" ? "app-main-messages" : undefined} style={{maxWidth:1200, margin:"0 auto", padding:"0 24px"}}>
         {isAdmin && tab==="dashboard" && (
           <DashboardTab
             subs={subs}
