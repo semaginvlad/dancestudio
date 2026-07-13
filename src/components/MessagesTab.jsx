@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
@@ -80,6 +80,138 @@ const crmStatusTone = (status) => {
   return { bg: "rgba(160,170,190,0.18)", border: "#8F9BB2", text: "#8F9BB2" };
 };
 
+
+const TelegramDialogRow = React.memo(function TelegramDialogRow({
+  dialog,
+  active,
+  linkPanelOpen,
+  linkDraftId,
+  linkSearch,
+  linkSaving,
+  students,
+  onOpen,
+  onToggleLink,
+  onLinkSearchChange,
+  onSelectLinkStudent,
+  onSaveLink,
+  onClearLink,
+}) {
+  const tone = crmStatusTone(dialog.contact?.pipelineStatus || "");
+  const statusLabel = PIPELINE_LABELS_UA[dialog.contact?.pipelineStatus] || "";
+  const crmSummaryText = dialog.linkedStudent
+    ? `CRM: ${getDisplayName(dialog.linkedStudent)}${statusLabel ? ` · ${statusLabel}` : ""}`
+    : "CRM: не прив'язано";
+  const chatInitials = getInitials(dialog.title || dialog.username || "?");
+  const linkSearchQuery = String(linkSearch || "").trim().toLowerCase();
+  const linkStudentOptions = students
+    .filter((st) => {
+      if (!linkSearchQuery) return true;
+      return String(getDisplayName(st) || "").toLowerCase().includes(linkSearchQuery);
+    })
+    .slice(0, 6);
+
+  return (
+    <div
+      className={`messages-chat-row ${active ? "is-active" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(dialog.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(dialog.id);
+        }
+      }}
+      style={{
+        textAlign: "left",
+        padding: "12px 13px",
+        borderRadius: 16,
+        border: `1px solid ${active ? tone.border : theme.border}`,
+        background: active ? tone.bg : theme.input,
+        cursor: "pointer",
+        boxShadow: active ? "0 10px 24px rgba(100, 120, 160, 0.24)" : "0 4px 14px rgba(0, 0, 0, 0.24)",
+      }}
+    >
+      <div className="messages-avatar messages-chat-row-avatar" aria-hidden="true">{chatInitials}</div>
+      <div className="messages-chat-row-content">
+        <div className="messages-chat-row-top">
+          <div className="messages-chat-row-title">{dialog.title}</div>
+          <div className="messages-chat-row-time">{formatChatTime(dialog.lastMessageDate)}</div>
+        </div>
+        <div className="messages-chat-row-preview">{dialog.lastMessageText || dialog.username || "Порожній діалог"}</div>
+        <div className="messages-chat-row-crm" title={crmSummaryText}>
+          <span className="messages-chat-row-crm-text">{dialog.linkedStudent ? `CRM: ${getDisplayName(dialog.linkedStudent)}` : "CRM: не прив'язано"}</span>
+          {statusLabel && <span className="messages-chat-row-status">{statusLabel}</span>}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="messages-chat-row-link"
+        onClick={(event) => onToggleLink(event, dialog)}
+        aria-label={dialog.linkedStudent ? "Змінити привʼязку учениці" : "Привʼязати ученицю"}
+      >
+        🔗
+      </button>
+
+      {linkPanelOpen && (
+        <div className="messages-inline-link-panel" style={{ marginTop: 8, padding: 8, borderRadius: 12, border: `1px solid ${theme.border}`, background: theme.card }}>
+          <input
+            value={linkSearch || ""}
+            onChange={(e) => onLinkSearchChange(dialog.id, e.target.value)}
+            placeholder="Пошук учениці..."
+            style={{ width: "100%", borderRadius: 10, border: `1px solid ${theme.border}`, padding: "7px 8px", marginBottom: 7, background: theme.input, color: theme.textMain, fontSize: 12 }}
+          />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 96, overflow: "auto", marginBottom: 8 }}>
+            {linkStudentOptions.map((st) => {
+              const selected = (linkDraftId || "") === st.id;
+              return (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onSelectLinkStudent(dialog.id, st.id);
+                  }}
+                  style={{ border: `1px solid ${selected ? theme.primary : theme.border}`, borderRadius: 999, background: selected ? `${theme.primary}22` : theme.input, color: selected ? theme.primary : theme.textMain, fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
+                >
+                  {getDisplayName(st)}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSaveLink(dialog.id);
+              }}
+              disabled={linkSaving}
+              style={{ border: `1px solid ${theme.primary}`, borderRadius: 9, background: `${theme.primary}22`, color: theme.primary, padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+            >
+              Прив'язати
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClearLink(dialog.id);
+              }}
+              disabled={linkSaving}
+              style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.input, color: theme.textMuted, padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
+            >
+              Відв'язати
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export default function MessagesTab({
   students = [],
   trainers = [],
@@ -149,6 +281,8 @@ export default function MessagesTab({
   const chatListScrollRef = useRef(null);
   const lastOpenedChatRef = useRef("");
   const wasNearBottomRef = useRef(true);
+  const deferredSearchQ = useDeferredValue(searchQ);
+  const normalizedSearchQ = useMemo(() => String(deferredSearchQ || "").trim().toLowerCase(), [deferredSearchQ]);
 
   const membershipByStudent = useMemo(
     () =>
@@ -318,8 +452,8 @@ export default function MessagesTab({
         };
       })
       .filter((d) => {
-        if (!searchQ.trim()) return true;
-        const q = searchQ.trim().toLowerCase();
+        if (!normalizedSearchQ) return true;
+        const q = normalizedSearchQ;
         const linkedName = d.linkedStudent ? String(getDisplayName(d.linkedStudent) || "").toLowerCase() : "";
         return (
           String(d.title || "").toLowerCase().includes(q) ||
@@ -328,7 +462,7 @@ export default function MessagesTab({
         );
       })
       .sort((a, b) => b.lastTs - a.lastTs);
-  }, [dialogs, membershipByStudent, metaByChat, telegramRailFilter, searchQ, studentMap, trainerMapByTelegram]);
+  }, [dialogs, membershipByStudent, metaByChat, normalizedSearchQ, studentMap, trainerMapByTelegram]);
 
   const instagramContacts = useMemo(() => {
     const waitlistStudents = new Set((waitlist || []).map((w) => String(w.studentId || "")));
@@ -393,12 +527,12 @@ export default function MessagesTab({
     });
     return rows
       .filter((c) => {
-        const q = searchQ.trim().toLowerCase();
+        const q = normalizedSearchQ;
         if (!q) return true;
         return [c.name, c.phone, c.telegram, c.instagram].map((value) => String(value || "")).join(" ").toLowerCase().includes(q);
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [instagramCrmOverrides, membershipByStudent, searchQ, students, trainers, waitlist]);
+  }, [instagramCrmOverrides, membershipByStudent, normalizedSearchQ, students, trainers, waitlist]);
   const matchesTelegramRailFilter = (dialog) => {
     if (!dialog) return false;
     if (telegramRailFilter === "all") return true;
@@ -440,12 +574,12 @@ export default function MessagesTab({
     [instagramContacts, instagramRailFilter]
   );
   const filteredInstagramThreads = useMemo(() => {
-    const q = searchQ.trim().toLowerCase();
+    const q = normalizedSearchQ;
     return (instagramThreads || []).filter((row) => {
       if (!q) return true;
       return [row?.title, row?.participantUsername, row?.preview, row?.threadId].map((value) => String(value || "")).join(" ").toLowerCase().includes(q);
     });
-  }, [instagramThreads, searchQ]);
+  }, [instagramThreads, normalizedSearchQ]);
   const telegramFilterOptions = useMemo(() => {
     const countFor = (id) => enrichedDialogs.filter((d) => {
       if (id === "all") return true;
@@ -812,6 +946,37 @@ export default function MessagesTab({
     }
   };
 
+  const handleOpenDialogRow = useCallback((dialogId) => {
+    openTelegramDialog(dialogId);
+  }, [onSelectStudent]);
+
+  const handleToggleLinkPanel = useCallback((event, dialog) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const panel = linkUiByChat[dialog.id];
+    if (panel?.open) {
+      setLinkUiByChat((prev) => ({ ...prev, [dialog.id]: { ...(prev[dialog.id] || {}), open: false } }));
+      return;
+    }
+    openLinkPanel(dialog.id, dialog.linkedStudent?.id || metaByChat[dialog.id]?.student_id || "");
+  }, [linkUiByChat, metaByChat]);
+
+  const handleLinkSearchChange = useCallback((chatId, value) => {
+    setLinkSearchByChat((prev) => ({ ...prev, [chatId]: value }));
+  }, []);
+
+  const handleSelectLinkStudent = useCallback((chatId, studentId) => {
+    setLinkUiByChat((prev) => ({ ...prev, [chatId]: { ...(prev[chatId] || {}), draftId: studentId } }));
+  }, []);
+
+  const handleSaveLinkById = useCallback((chatId) => {
+    handleSaveLink(chatId);
+  }, [linkUiByChat]);
+
+  const handleClearLinkById = useCallback((chatId) => {
+    handleClearLink(chatId);
+  }, []);
+
   const refreshMessages = async (chatId) => {
     if (!chatId) return;
     const res = await authFetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`);
@@ -906,7 +1071,7 @@ export default function MessagesTab({
           <span className="messages-unread-count">{activeChannel === "telegram" ? filteredTelegramDialogs.length : filteredInstagramThreads.length} чатів</span>
           {activeChannel === "telegram" && <button type="button" className="messages-filter-button" onClick={() => setShowMobileFilterSheet(true)} aria-label="Фільтр чатів">Фільтр</button>}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div className="messages-channel-switch" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <button
             type="button"
             onClick={() => setActiveChannel("telegram")}
@@ -922,7 +1087,7 @@ export default function MessagesTab({
             Інстаграм
           </button>
         </div>
-        <div className="messages-search-wrap"><input
+        <div className="messages-search-wrap"><span className="messages-search-icon" aria-hidden="true">⌕</span><input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
           placeholder={activeChannel === "telegram" ? "Пошук: чат, @username, учениця" : "Пошук: контакт, телефон, @telegram, instagram"}
@@ -933,133 +1098,24 @@ export default function MessagesTab({
         {dialogsError && <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{dialogsError}</div>}
 
         <div ref={chatListScrollRef} className="messages-chat-list" style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minHeight: 0, overflow: "auto", paddingRight: 2 }}>
-          {activeChannel === "telegram" && filteredTelegramDialogs.map((dlg) => {
-            const active = activeDialog?.id === dlg.id;
-            const chatInitials = getInitials(dlg.title || dlg.username || "?");
-            const tone = crmStatusTone(dlg.contact?.pipelineStatus || "");
-            const statusLabel = PIPELINE_LABELS_UA[dlg.contact?.pipelineStatus] || "";
-            const crmSummaryText = dlg.linkedStudent
-              ? `CRM: ${getDisplayName(dlg.linkedStudent)}${statusLabel ? ` · ${statusLabel}` : ""}`
-              : "CRM: не прив'язано";
-            const toggleLinkPanel = (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const panel = linkUiByChat[dlg.id];
-              if (panel?.open) {
-                setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), open: false } }));
-                return;
-              }
-              openLinkPanel(dlg.id, dlg.linkedStudent?.id || metaByChat[dlg.id]?.student_id || "");
-            };
-            return (
-              <div
-                key={dlg.id}
-                className={`messages-chat-row ${active ? "is-active" : ""}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => openTelegramDialog(dlg.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    openTelegramDialog(dlg.id);
-                  }
-                }}
-                style={{
-                  textAlign: "left",
-                  padding: "12px 13px",
-                  borderRadius: 16,
-                  border: `1px solid ${active ? tone.border : theme.border}`,
-                  background: active ? tone.bg : theme.input,
-                  cursor: "pointer",
-                  boxShadow: active ? "0 10px 24px rgba(100, 120, 160, 0.24)" : "0 4px 14px rgba(0, 0, 0, 0.24)",
-                }}
-              >
-                <div className="messages-avatar messages-chat-row-avatar" aria-hidden="true">{chatInitials}</div>
-                <div className="messages-chat-row-content">
-                  <div className="messages-chat-row-top">
-                    <div className="messages-chat-row-title">{dlg.title}</div>
-                    <div className="messages-chat-row-time">{formatChatTime(dlg.lastMessageDate)}</div>
-                  </div>
-                  <div className="messages-chat-row-preview">{dlg.lastMessageText || dlg.username || "Порожній діалог"}</div>
-                  <div className="messages-chat-row-crm" title={crmSummaryText}>
-                    <span className="messages-chat-row-crm-text">{dlg.linkedStudent ? `CRM: ${getDisplayName(dlg.linkedStudent)}` : "CRM: не прив'язано"}</span>
-                    {statusLabel && <span className="messages-chat-row-status">{statusLabel}</span>}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="messages-chat-row-link"
-                  onClick={toggleLinkPanel}
-                  aria-label={dlg.linkedStudent ? "Змінити привʼязку учениці" : "Привʼязати ученицю"}
-                >
-                  🔗
-                </button>
-
-                {linkUiByChat[dlg.id]?.open && (
-                  <div className="messages-inline-link-panel" style={{ marginTop: 8, padding: 8, borderRadius: 12, border: `1px solid ${theme.border}`, background: theme.card }}>
-                    <input
-                      value={linkSearchByChat[dlg.id] || ""}
-                      onChange={(e) => setLinkSearchByChat((prev) => ({ ...prev, [dlg.id]: e.target.value }))}
-                      placeholder="Пошук учениці..."
-                      style={{ width: "100%", borderRadius: 10, border: `1px solid ${theme.border}`, padding: "7px 8px", marginBottom: 7, background: theme.input, color: theme.textMain, fontSize: 12 }}
-                    />
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 96, overflow: "auto", marginBottom: 8 }}>
-                      {students
-                        .filter((st) => {
-                          const q = String(linkSearchByChat[dlg.id] || "").trim().toLowerCase();
-                          if (!q) return true;
-                          return String(getDisplayName(st) || "").toLowerCase().includes(q);
-                        })
-                        .slice(0, 6)
-                        .map((st) => {
-                          const selected = (linkUiByChat[dlg.id]?.draftId || "") === st.id;
-                          return (
-                            <button
-                              key={st.id}
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), draftId: st.id } }));
-                              }}
-                              style={{ border: `1px solid ${selected ? theme.primary : theme.border}`, borderRadius: 999, background: selected ? `${theme.primary}22` : theme.input, color: selected ? theme.primary : theme.textMain, fontSize: 11, padding: "4px 8px", cursor: "pointer" }}
-                            >
-                              {getDisplayName(st)}
-                            </button>
-                          );
-                        })}
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleSaveLink(dlg.id);
-                        }}
-                        disabled={linkSavingChatId === dlg.id}
-                        style={{ border: `1px solid ${theme.primary}`, borderRadius: 9, background: `${theme.primary}22`, color: theme.primary, padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
-                      >
-                        Прив'язати
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleClearLink(dlg.id);
-                        }}
-                        disabled={linkSavingChatId === dlg.id}
-                        style={{ border: `1px solid ${theme.border}`, borderRadius: 9, background: theme.input, color: theme.textMuted, padding: "5px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}
-                      >
-                        Відв'язати
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {activeChannel === "telegram" && filteredTelegramDialogs.map((dlg) => (
+            <TelegramDialogRow
+              key={dlg.id}
+              dialog={dlg}
+              active={activeDialog?.id === dlg.id}
+              linkPanelOpen={!!linkUiByChat[dlg.id]?.open}
+              linkDraftId={linkUiByChat[dlg.id]?.draftId || ""}
+              linkSearch={linkSearchByChat[dlg.id] || ""}
+              linkSaving={linkSavingChatId === dlg.id}
+              students={students}
+              onOpen={handleOpenDialogRow}
+              onToggleLink={handleToggleLinkPanel}
+              onLinkSearchChange={handleLinkSearchChange}
+              onSelectLinkStudent={handleSelectLinkStudent}
+              onSaveLink={handleSaveLinkById}
+              onClearLink={handleClearLinkById}
+            />
+          ))}
           {activeChannel === "instagram" && filteredInstagramThreads.map((thread) => {
             const active = activeInstagramThread?.id === thread.id;
             return (
@@ -1721,23 +1777,31 @@ export default function MessagesTab({
         .messages-row-status { color: ${theme.textMuted}; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         @media (max-width: 760px) {
           .messages-tab-shell, .messages-tab-shell * { box-sizing: border-box; min-width: 0; max-width: 100%; }
-          .messages-tab-shell { display: flex !important; flex-direction: column !important; height: calc(100dvh - 86px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border-radius: 0 !important; overflow: hidden !important; background: ${theme.card} !important; }
+          .messages-tab-shell { display: flex !important; flex-direction: column !important; width: 100% !important; height: calc(100dvh - 64px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: hidden !important; background: ${theme.card} !important; }
           .messages-filter-rail { display: none !important; }
-          .messages-chat-list-panel, .messages-dialog-panel { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)) !important; }
+          .messages-chat-list-panel, .messages-dialog-panel { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom)) !important; background: ${theme.card} !important; }
           .messages-mobile-list .messages-dialog-panel { display: none !important; }
           .messages-mobile-dialog .messages-chat-list-panel { display: none !important; }
-          .messages-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 44px; background: ${theme.card}; margin-bottom: 8px !important; }
-          .messages-chat-list { gap: 0 !important; padding-right: 0 !important; -webkit-overflow-scrolling: touch; }
-          .messages-chat-row { display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 36px !important; column-gap: 10px !important; align-items: start !important; width: 100% !important; min-height: 86px !important; height: auto !important; border-width: 0 0 1px 0 !important; border-color: ${theme.border} !important; border-radius: 0 !important; box-shadow: none !important; padding: 10px 4px !important; background: transparent !important; overflow: visible !important; }
+          .messages-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 40px; border: 0 !important; background: ${theme.input} !important; padding: 0 11px; }
+          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 42px; background: ${theme.card}; margin-bottom: 6px !important; padding: 0 !important; }
+          .messages-unread-count { font-size: 11px; }
+          .messages-active-filter { font-size: 11px; }
+          .messages-channel-switch { height: 42px; gap: 6px !important; margin-bottom: 8px !important; padding: 2px; border-radius: 14px; background: ${theme.input}; }
+          .messages-channel-switch button { border: 0 !important; border-radius: 12px !important; padding: 0 8px !important; min-height: 38px; box-shadow: none !important; }
+          .messages-search-wrap { margin-bottom: 8px; }
+          .messages-search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-58%); color: ${theme.textMuted}; font-size: 17px; pointer-events: none; }
+          .messages-search-wrap input { min-height: 44px !important; margin-bottom: 0 !important; padding: 9px 38px 9px 34px !important; border: 0 !important; border-radius: 14px !important; background: ${theme.input} !important; box-shadow: none !important; }
+          .messages-chat-list { flex: 1 !important; min-height: 0 !important; gap: 0 !important; padding-right: 0 !important; padding-bottom: max(12px, env(safe-area-inset-bottom)) !important; overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+          .messages-chat-row { display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 40px !important; column-gap: 9px !important; align-items: start !important; width: 100% !important; min-height: 84px !important; height: auto !important; border-width: 0 0 1px 0 !important; border-color: rgba(142,142,147,.18) !important; border-radius: 0 !important; box-shadow: none !important; padding: 9px 4px !important; background: transparent !important; overflow: visible !important; }
           .messages-chat-row-avatar { grid-column: 1; grid-row: 1 / span 3; width: 42px !important; height: 42px !important; }
           .messages-chat-row-content { grid-column: 2; min-width: 0; display: grid; gap: 4px; align-self: start; }
-          .messages-chat-row-link { grid-column: 3; grid-row: 1 / span 3; align-self: center; width: 36px !important; height: 36px !important; }
+          .messages-chat-row-link { grid-column: 3; grid-row: 1 / span 3; align-self: center; width: 40px !important; height: 40px !important; border: 0 !important; background: ${theme.input} !important; font-size: 17px; opacity: .9; }
+          .messages-chat-row-link:active { transform: scale(.96); background: ${theme.primary}18 !important; }
           .messages-chat-row-title { font-size: 14px; }
           .messages-chat-row-preview { font-size: 12px; }
           .messages-chat-row-crm { max-width: 100%; }
           .messages-inline-link-panel { display: none !important; }
-          .messages-chat-row.is-active { background: ${theme.primary}12 !important; }
+          .messages-chat-row.is-active { background: ${theme.primary}10 !important; }
           .messages-dialog-panel { display: flex !important; flex-direction: column !important; overflow: hidden !important; }
           .messages-dialog-title { display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 58px; margin: calc(-10px - env(safe-area-inset-top)) -12px 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: ${theme.card}; border-bottom: 1px solid ${theme.border}; }
           .messages-back-button, .messages-details-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: ${theme.textMain}; font-size: 22px; cursor: pointer; flex: 0 0 auto; }
