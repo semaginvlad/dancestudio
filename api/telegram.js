@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { Api } from "telegram";
 import { getPeerTitle, normalizePeerId, resolveTelegramPeer, withTelegramClient } from "../server/telegram-user-client.js";
 import { ADMIN_LOG_CHAT_ID, reportTrainerDigestFailureToAdmin, sendTrainerDigestWithAdminLog } from "../server/trainer-digest-send.js";
 import { authError, requireAdminUser } from "./_auth.js";
@@ -11,6 +12,52 @@ const buildSupabase = () => {
 };
 
 const getOp = (req) => String(req.query?.op || req.body?.op || "").trim();
+
+const toTelegramErrorMessage = (error) => {
+  const raw = String(error?.errorMessage || error?.message || error || "Telegram request failed");
+  const upper = raw.toUpperCase();
+  if (upper.includes("FLOOD_WAIT")) return "Telegram flood wait: спробуйте пізніше.";
+  if (upper.includes("REACTION_INVALID") || upper.includes("REACTION_EMPTY")) return "Ця реакція недоступна для повідомлення.";
+  if (upper.includes("CHAT_FORBIDDEN") || upper.includes("USER_BANNED") || upper.includes("CHAT_WRITE_FORBIDDEN")) return "Немає дозволу змінювати реакції в цьому чаті.";
+  if (upper.includes("MSG_ID_INVALID") || upper.includes("MESSAGE_ID_INVALID")) return "Некоректний messageId або повідомлення недоступне.";
+  if (upper.includes("PEER_ID_INVALID") || upper.includes("CHANNEL_INVALID") || upper.includes("CHAT_ID_INVALID")) return "Некоректний chatId або Telegram peer недоступний.";
+  if (upper.includes("AUTH_KEY") || upper.includes("SESSION") || upper.includes("AUTH")) return "Помилка Telegram session. Перевірте підключення Telegram.";
+  return raw;
+};
+
+const normalizeTelegramReaction = (reaction) => {
+  if (!reaction) return null;
+  if (reaction.className === "ReactionEmoji" && reaction.emoticon) return reaction.emoticon;
+  return null;
+};
+
+const normalizeMessageReactions = (message) => {
+  const results = message?.reactions?.results || [];
+  return results
+    .map((item) => {
+      const emoji = normalizeTelegramReaction(item?.reaction);
+      if (!emoji) return null;
+      return {
+        emoji,
+        count: Number(item?.count || 0),
+        chosen: item?.chosenOrder !== undefined && item?.chosenOrder !== null,
+      };
+    })
+    .filter(Boolean);
+};
+
+const normalizeTelegramMessage = (m) => ({
+  id: String(m.id),
+  text: m.message || "",
+  date: m.date ? new Date(m.date * 1000).toISOString() : null,
+  out: Boolean(m.out),
+  reactions: normalizeMessageReactions(m),
+});
+
+const parseMessageId = (value) => {
+  const messageId = Number(value);
+  return Number.isInteger(messageId) && messageId > 0 ? messageId : null;
+};
 
 const handleListDialogs = async (res) => {
   const dialogs = await withTelegramClient(async (client) => {
@@ -45,14 +92,45 @@ const handleChatMessages = async (req, res) => {
   const messages = await withTelegramClient(async (client) => {
     const entity = await resolveTelegramPeer(client, { chatId, context: "telegram-chat-messages" });
     const rows = await client.getMessages(entity, { limit });
-    return (rows || []).map((m) => ({
-      id: String(m.id),
-      text: m.message || "",
-      date: m.date ? new Date(m.date * 1000).toISOString() : null,
-      out: Boolean(m.out),
-    }));
+    return (rows || []).map(normalizeTelegramMessage);
   });
   return res.status(200).json({ success: true, messages });
+};
+
+const handleSetReaction = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const { chatId, messageId: rawMessageId } = req.body || {};
+  const emoji = String(req.body?.emoji || "").trim();
+  const messageId = parseMessageId(rawMessageId);
+  if (!chatId) return res.status(400).json({ error: "chatId is required" });
+  if (!messageId) return res.status(400).json({ error: "messageId must be a positive integer" });
+
+  try {
+    const result = await withTelegramClient(async (client) => {
+      const entity = await resolveTelegramPeer(client, { chatId, context: "telegram-set-reaction" });
+      const reaction = emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [];
+      await client.invoke(new Api.messages.SendReaction({
+        peer: entity,
+        msgId: messageId,
+        reaction,
+        addToRecent: true,
+      }));
+
+      const refreshed = await client.getMessages(entity, { ids: [messageId] });
+      const message = Array.isArray(refreshed) ? refreshed[0] : refreshed;
+      return {
+        messageId: String(messageId),
+        reactions: message ? normalizeMessageReactions(message) : [],
+      };
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("telegram setReaction error:", String(error?.message || error));
+    return res.status(400).json({
+      error: "Telegram reaction failed",
+      details: toTelegramErrorMessage(error),
+    });
+  }
 };
 
 const handleChatMeta = async (req, res) => {
@@ -258,9 +336,10 @@ export default async function handler(req, res) {
     if (req.method === "GET" && (op === "listDialogs" || op === "list-dialogs")) return await handleListDialogs(res);
     if (req.method === "GET" && (op === "chatMessages" || op === "chat-messages")) return await handleChatMessages(req, res);
     if ((req.method === "GET" || req.method === "POST") && (op === "chatMeta" || op === "chat-meta")) return await handleChatMeta(req, res);
+    if (req.method === "POST" && (op === "setReaction" || op === "set-reaction")) return await handleSetReaction(req, res);
     if (req.method === "POST" && (op === "sendTest" || op === "send-test")) return await handleSendTest(req, res);
     if (req.method === "POST" && (op === "sendTrainerDigest" || op === "send-trainer-digest")) return await handleSendTrainerDigest(req, res);
-    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["calendar", "linkStudent", "listDialogs", "chatMessages", "chatMeta", "sendTest", "sendTrainerDigest"] });
+    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["calendar", "linkStudent", "listDialogs", "chatMessages", "chatMeta", "setReaction", "sendTest", "sendTrainerDigest"] });
   } catch (error) {
     console.error("telegram consolidated handler error:", String(error?.message || error));
     return res.status(500).json({

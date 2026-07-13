@@ -81,6 +81,115 @@ const crmStatusTone = (status) => {
 };
 
 
+const SAFE_TELEGRAM_REACTIONS = ["❤️", "👍", "🔥", "🎉", "😍", "😂"];
+const LONG_PRESS_MS = 500;
+
+
+const applyChosenReaction = (reactions = [], emoji = "") => {
+  let hadChosenTarget = false;
+  const next = (reactions || [])
+    .map((r) => {
+      const wasChosen = !!r.chosen;
+      if (wasChosen && r.emoji === emoji) hadChosenTarget = true;
+      return {
+        ...r,
+        count: wasChosen && r.emoji !== emoji ? Math.max(0, Number(r.count || 0) - 1) : Number(r.count || 0),
+        chosen: false,
+      };
+    })
+    .filter((r) => r.count > 0 || r.emoji === emoji);
+  if (!emoji) return next.filter((r) => r.count > 0);
+  const existing = next.find((r) => r.emoji === emoji);
+  if (existing) {
+    existing.count = Math.max(1, Number(existing.count || 0) + (hadChosenTarget ? 0 : 1));
+    existing.chosen = true;
+  } else {
+    next.push({ emoji, count: 1, chosen: true });
+  }
+  return next;
+};
+
+const removeChosenReaction = (reactions = []) => (reactions || [])
+  .map((r) => ({ ...r, count: r.chosen ? Math.max(0, Number(r.count || 0) - 1) : Number(r.count || 0), chosen: false }))
+  .filter((r) => r.count > 0);
+
+const isInteractiveReactionTarget = (target) => !!target?.closest?.('a, button, input, textarea, select, [data-reaction-chip="true"], [data-message-action="true"]');
+
+const MessageBubble = React.memo(function MessageBubble({ message, chatId, onReact, onOpenPicker }) {
+  const pointerRef = useRef({ x: 0, y: 0, timer: null, longPressed: false });
+  const tapRef = useRef({ time: 0, x: 0, y: 0 });
+  const reactions = message.reactions || [];
+
+  const clearLongPress = useCallback(() => {
+    if (pointerRef.current.timer) window.clearTimeout(pointerRef.current.timer);
+    pointerRef.current.timer = null;
+  }, []);
+
+  const handlePointerDown = useCallback((event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    if (isInteractiveReactionTarget(event.target)) return;
+    pointerRef.current = { x: event.clientX, y: event.clientY, timer: null, longPressed: false };
+    pointerRef.current.timer = window.setTimeout(() => {
+      pointerRef.current.longPressed = true;
+      if (navigator?.vibrate) navigator.vibrate(12);
+      onOpenPicker(message, { x: event.clientX, y: event.clientY });
+    }, LONG_PRESS_MS);
+  }, [message, onOpenPicker]);
+
+  const handlePointerMove = useCallback((event) => {
+    const start = pointerRef.current;
+    if (Math.abs(event.clientX - start.x) > 10 || Math.abs(event.clientY - start.y) > 10) clearLongPress();
+  }, [clearLongPress]);
+
+  const handlePointerUp = useCallback((event) => {
+    clearLongPress();
+    if (pointerRef.current.longPressed || isInteractiveReactionTarget(event.target)) return;
+    const now = Date.now();
+    const last = tapRef.current;
+    const closeTap = now - last.time < 290 && Math.abs(event.clientX - last.x) < 24 && Math.abs(event.clientY - last.y) < 24;
+    tapRef.current = { time: now, x: event.clientX, y: event.clientY };
+    if (!closeTap) return;
+    event.preventDefault();
+    const heartChosen = (message.reactions || []).some((r) => r.emoji === "❤️" && r.chosen);
+    if (!heartChosen) onReact(message, "❤️");
+  }, [clearLongPress, message, onReact]);
+
+  return (
+    <div className={`messages-message-row ${message.out ? "is-out" : "is-in"}`} style={{ marginBottom: reactions.length ? 10 : 8, textAlign: message.out ? "right" : "left" }}>
+      <div className="messages-message-stack">
+        <div
+          className="messages-bubble"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={clearLongPress}
+          onContextMenu={(event) => { event.preventDefault(); onOpenPicker(message, { x: event.clientX, y: event.clientY }); }}
+          style={{ display: "inline-block", background: message.out ? `${theme.secondary}22` : theme.input, borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: `1px solid ${theme.border}` }}
+        >
+          <div style={{ fontSize: 13, color: theme.textMain, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{message.text || "—"}</div>
+          <div className="messages-bubble-time">{formatChatTime(message.date)}</div>
+        </div>
+        {!!reactions.length && (
+          <div className="messages-reaction-chips" aria-label="Реакції Telegram">
+            {reactions.map((reaction) => (
+              <button
+                key={`${chatId}:${message.id}:${reaction.emoji}`}
+                type="button"
+                data-reaction-chip="true"
+                className={`messages-reaction-chip ${reaction.chosen ? "is-chosen" : ""}`}
+                onClick={() => onReact(message, reaction.chosen ? "" : reaction.emoji)}
+                aria-label={`${reaction.chosen ? "Видалити" : "Поставити"} реакцію ${reaction.emoji}`}
+              >
+                <span>{reaction.emoji}</span><span>{reaction.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const TelegramDialogRow = React.memo(function TelegramDialogRow({
   dialog,
   active,
@@ -258,6 +367,8 @@ export default function MessagesTab({
   const [dialogs, setDialogs] = useState([]);
   const [dialogsError, setDialogsError] = useState("");
   const [messagesByChat, setMessagesByChat] = useState({});
+  const [reactionPicker, setReactionPicker] = useState(null);
+  const [reactionError, setReactionError] = useState("");
   const [metaByChat, setMetaByChat] = useState({});
   const [contactTypeDraft, setContactTypeDraft] = useState("other");
   const [crmStageDraft, setCrmStageDraft] = useState("");
@@ -977,6 +1088,42 @@ export default function MessagesTab({
     handleClearLink(chatId);
   }, []);
 
+  const handleSetReaction = useCallback(async (message, emoji) => {
+    const chatId = activeDialog?.id;
+    const messageId = message?.id;
+    if (!chatId || !messageId || String(messageId).startsWith("local_")) return;
+    const previous = messagesByChat[chatId] || [];
+    const optimisticReactions = emoji ? applyChosenReaction(message.reactions || [], emoji) : removeChosenReaction(message.reactions || []);
+    setReactionError("");
+    setReactionPicker(null);
+    setMessagesByChat((prev) => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map((item) => String(item.id) === String(messageId) ? { ...item, reactions: optimisticReactions } : item),
+    }));
+    try {
+      const res = await authFetch("/api/telegram?op=setReaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, messageId, emoji: emoji || null }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося змінити реакцію");
+      setMessagesByChat((prev) => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).map((item) => String(item.id) === String(messageId) ? { ...item, reactions: payload.reactions || [] } : item),
+      }));
+    } catch (error) {
+      setMessagesByChat((prev) => ({ ...prev, [chatId]: previous }));
+      setReactionError(String(error?.message || error));
+      window.setTimeout(() => setReactionError(""), 4200);
+    }
+  }, [activeDialog?.id, messagesByChat]);
+
+  const openReactionPicker = useCallback((message, point) => {
+    if (!message?.id || String(message.id).startsWith("local_")) return;
+    setReactionPicker({ messageId: message.id, x: point?.x || 0, y: point?.y || 0 });
+  }, []);
+
   const refreshMessages = async (chatId) => {
     if (!chatId) return;
     const res = await authFetch(`/api/telegram?op=chatMessages&chatId=${encodeURIComponent(chatId)}&limit=40`);
@@ -1589,12 +1736,12 @@ export default function MessagesTab({
                 return (
                   <React.Fragment key={m.id}>
                     {day && day !== previousDay && <div className="messages-date-separator"><span>{day}</span></div>}
-                    <div className={`messages-message-row ${m.out ? "is-out" : "is-in"}`} style={{ marginBottom: 8, textAlign: m.out ? "right" : "left" }}>
-                      <div className="messages-bubble" style={{ display: "inline-block", background: m.out ? `${theme.secondary}22` : theme.input, borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: `1px solid ${theme.border}` }}>
-                        <div style={{ fontSize: 13, color: theme.textMain, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text || "—"}</div>
-                        <div className="messages-bubble-time">{formatChatTime(m.date)}</div>
-                      </div>
-                    </div>
+                    <MessageBubble
+                      message={m}
+                      chatId={activeDialog.id}
+                      onReact={handleSetReaction}
+                      onOpenPicker={openReactionPicker}
+                    />
                   </React.Fragment>
                 );
               })}
@@ -1638,6 +1785,23 @@ export default function MessagesTab({
         )}
       </div>
 
+
+      {!!reactionError && <div className="messages-reaction-error" role="status">{reactionError}</div>}
+
+      {reactionPicker && activeDialog && (
+        <div className="messages-reaction-picker-layer" role="presentation">
+          <button type="button" className="messages-reaction-picker-backdrop" aria-label="Закрити реакції" onClick={() => setReactionPicker(null)} />
+          <div className="messages-reaction-picker" role="dialog" aria-label="Вибір реакції" style={{ left: `min(max(${reactionPicker.x - 120}px, 10px), calc(100vw - 250px))`, top: `min(max(${reactionPicker.y - 58}px, 10px), calc(100dvh - 78px))` }}>
+            {SAFE_TELEGRAM_REACTIONS.map((emoji) => {
+              const msg = (messagesByChat[activeDialog.id] || []).find((item) => String(item.id) === String(reactionPicker.messageId));
+              const chosen = (msg?.reactions || []).some((r) => r.emoji === emoji && r.chosen);
+              return (
+                <button key={emoji} type="button" className={`messages-reaction-picker-option ${chosen ? "is-chosen" : ""}`} onClick={() => handleSetReaction(msg, chosen ? "" : emoji)}>{emoji}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {showMobileFilterSheet && (
         <div className="messages-mobile-sheet-layer" role="presentation">
@@ -1764,6 +1928,18 @@ export default function MessagesTab({
         .messages-message-row.is-in { justify-content: flex-start; }
         .messages-bubble { overflow-wrap: anywhere; word-break: break-word; }
         .messages-bubble-time { margin-top: 4px; font-size: 10px; color: ${theme.textMuted}; text-align: right; }
+        .messages-message-stack { display: inline-flex; flex-direction: column; align-items: flex-start; max-width: 84%; }
+        .messages-message-row.is-out .messages-message-stack { align-items: flex-end; }
+        .messages-message-row .messages-bubble { max-width: 100% !important; touch-action: pan-y; user-select: text; }
+        .messages-reaction-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-width: 100%; }
+        .messages-reaction-chip { min-height: 32px; min-width: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 0; border-radius: 999px; padding: 3px 8px; background: rgba(142,142,147,.14); color: ${theme.textMuted}; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .messages-reaction-chip.is-chosen { background: ${theme.primary}20; color: ${theme.primary}; }
+        .messages-reaction-picker-layer { position: fixed; inset: 0; z-index: 95; pointer-events: none; }
+        .messages-reaction-picker-backdrop { position: absolute; inset: 0; border: 0; background: transparent; pointer-events: auto; }
+        .messages-reaction-picker { position: absolute; display: flex; gap: 4px; padding: 7px; border: 1px solid ${theme.border}; border-radius: 999px; background: ${theme.card}; box-shadow: 0 18px 38px rgba(0,0,0,.25); pointer-events: auto; padding-bottom: max(7px, env(safe-area-inset-bottom)); }
+        .messages-reaction-picker-option { width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent; font-size: 20px; cursor: pointer; }
+        .messages-reaction-picker-option.is-chosen { background: ${theme.primary}20; }
+        .messages-reaction-error { position: fixed; left: 50%; bottom: calc(82px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 96; max-width: min(520px, calc(100vw - 28px)); padding: 9px 12px; border-radius: 999px; background: ${theme.danger}; color: #fff; font-size: 12px; font-weight: 800; box-shadow: 0 14px 30px rgba(0,0,0,.28); }
         .messages-date-separator { display: block; width: fit-content; margin: 12px auto; pointer-events: none; }
         .messages-date-separator span { border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMuted}; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; }
         .messages-scroll-down { position: sticky; bottom: 8px; margin-left: auto; display: block; border: 1px solid ${theme.border}; border-radius: 999px; padding: 7px 11px; background: ${theme.card}; color: ${theme.textMain}; font-weight: 800; box-shadow: 0 10px 24px rgba(0,0,0,.22); cursor: pointer; }
@@ -1815,7 +1991,8 @@ export default function MessagesTab({
           .messages-trainer-banner > div:nth-child(2) { display: none; }
           .messages-trainer-banner button { margin-top: 0 !important; white-space: nowrap; }
           .messages-thread { width: 100% !important; flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 10px 10px 14px !important; scroll-padding-bottom: 72px; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
-          .messages-bubble { width: fit-content !important; max-width: 82% !important; border-radius: 18px !important; padding: 8px 11px !important; text-align: left !important; overflow-wrap: anywhere; }
+          .messages-message-stack { max-width: 82% !important; }
+          .messages-bubble { width: fit-content !important; max-width: 100% !important; border-radius: 18px !important; padding: 8px 11px !important; text-align: left !important; overflow-wrap: anywhere; }
           .messages-bubble-time { display: block; margin-top: 5px; }
           .messages-message-row.is-out .messages-bubble { border-bottom-right-radius: 6px !important; }
           .messages-message-row.is-in .messages-bubble { border-bottom-left-radius: 6px !important; }
