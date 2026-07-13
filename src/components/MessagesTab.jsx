@@ -1779,20 +1779,20 @@ export default function MessagesTab({
           .messages-tab-shell, .messages-tab-shell * { box-sizing: border-box; min-width: 0; max-width: 100%; }
           .messages-tab-shell { display: flex !important; flex-direction: column !important; width: 100% !important; height: calc(100dvh - 64px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; overflow: hidden !important; background: ${theme.card} !important; }
           .messages-filter-rail { display: none !important; }
-          .messages-chat-list-panel, .messages-dialog-panel { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom)) !important; background: ${theme.card} !important; }
+          .messages-chat-list-panel, .messages-dialog-panel { width: 100% !important; max-width: none !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: 0 !important; background: ${theme.card} !important; }
           .messages-mobile-list .messages-dialog-panel { display: none !important; }
           .messages-mobile-dialog .messages-chat-list-panel { display: none !important; }
           .messages-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 40px; border: 0 !important; background: ${theme.input} !important; padding: 0 11px; }
-          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 42px; background: ${theme.card}; margin-bottom: 6px !important; padding: 0 !important; }
+          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 42px; background: ${theme.card}; margin: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 12px 6px !important; }
           .messages-unread-count { font-size: 11px; }
           .messages-active-filter { font-size: 11px; }
-          .messages-channel-switch { height: 42px; gap: 6px !important; margin-bottom: 8px !important; padding: 2px; border-radius: 14px; background: ${theme.input}; }
+          .messages-channel-switch { height: 42px; gap: 6px !important; margin: 0 10px 8px !important; padding: 2px; border-radius: 14px; background: ${theme.input}; }
           .messages-channel-switch button { border: 0 !important; border-radius: 12px !important; padding: 0 8px !important; min-height: 38px; box-shadow: none !important; }
-          .messages-search-wrap { margin-bottom: 8px; }
+          .messages-search-wrap { margin: 0 10px 8px; }
           .messages-search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-58%); color: ${theme.textMuted}; font-size: 17px; pointer-events: none; }
           .messages-search-wrap input { min-height: 44px !important; margin-bottom: 0 !important; padding: 9px 38px 9px 34px !important; border: 0 !important; border-radius: 14px !important; background: ${theme.input} !important; box-shadow: none !important; }
-          .messages-chat-list { flex: 1 !important; min-height: 0 !important; gap: 0 !important; padding-right: 0 !important; padding-bottom: max(12px, env(safe-area-inset-bottom)) !important; overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
-          .messages-chat-row { display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 40px !important; column-gap: 9px !important; align-items: start !important; width: 100% !important; min-height: 84px !important; height: auto !important; border-width: 0 0 1px 0 !important; border-color: rgba(142,142,147,.18) !important; border-radius: 0 !important; box-shadow: none !important; padding: 9px 4px !important; background: transparent !important; overflow: visible !important; }
+          .messages-chat-list { width: 100% !important; flex: 1 !important; min-height: 0 !important; gap: 0 !important; padding: 0 0 max(12px, env(safe-area-inset-bottom)) !important; overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+          .messages-chat-row { display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 40px !important; column-gap: 9px !important; align-items: start !important; width: 100% !important; min-height: 84px !important; height: auto !important; border-width: 0 0 1px 0 !important; border-color: rgba(142,142,147,.18) !important; border-radius: 0 !important; box-shadow: none !important; padding: 9px 12px !important; background: transparent !important; overflow: visible !important; }
           .messages-chat-row-avatar { grid-column: 1; grid-row: 1 / span 3; width: 42px !important; height: 42px !important; }
           .messages-chat-row-content { grid-column: 2; min-width: 0; display: grid; gap: 4px; align-self: start; }
           .messages-chat-row-link { grid-column: 3; grid-row: 1 / span 3; align-self: center; width: 40px !important; height: 40px !important; border: 0 !important; background: ${theme.input} !important; font-size: 17px; opacity: .9; }
@@ -1803,26 +1803,26 @@ export default function MessagesTab({
           .messages-inline-link-panel { display: none !important; }
           .messages-chat-row.is-active { background: ${theme.primary}10 !important; }
           .messages-dialog-panel { display: flex !important; flex-direction: column !important; overflow: hidden !important; }
-          .messages-dialog-title { display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 58px; margin: calc(-10px - env(safe-area-inset-top)) -12px 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: ${theme.card}; border-bottom: 1px solid ${theme.border}; }
+          .messages-dialog-title { width: 100% !important; display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 60px; margin: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 12px 8px !important; border-radius: 0 !important; box-shadow: none !important; background: ${theme.card}; border-bottom: 1px solid rgba(142,142,147,.2); }
           .messages-back-button, .messages-details-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: ${theme.textMain}; font-size: 22px; cursor: pointer; flex: 0 0 auto; }
           .messages-dialog-avatar { width: 36px; height: 36px; }
           .messages-dialog-subtitle { display: block; }
           .messages-desktop-subtitle { display: none; }
           .messages-detail-card, .messages-notes-grid { display: none !important; }
           .messages-show-details .messages-detail-card, .messages-show-details .messages-notes-grid { display: grid !important; flex-shrink: 0; max-height: 30dvh; overflow: auto; }
-          .messages-trainer-banner { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; max-height: 72px; overflow: hidden; padding: 8px 10px !important; border: 0 !important; border-radius: 14px !important; flex-shrink: 0; }
+          .messages-trainer-banner { width: 100% !important; display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; max-height: 60px; overflow: hidden; margin: 0 !important; padding: 8px 12px !important; border: 0 !important; border-bottom: 1px solid rgba(142,142,147,.16) !important; border-radius: 0 !important; background: ${theme.input} !important; flex-shrink: 0; }
           .messages-trainer-banner div { min-width: 0; }
           .messages-trainer-banner > div:nth-child(2) { display: none; }
           .messages-trainer-banner button { margin-top: 0 !important; white-space: nowrap; }
-          .messages-thread { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; border-top: 0 !important; margin: 0 -12px 0 !important; padding: 12px 12px 16px !important; scroll-padding-bottom: 72px; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
+          .messages-thread { width: 100% !important; flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 10px 10px 14px !important; scroll-padding-bottom: 72px; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
           .messages-bubble { width: fit-content !important; max-width: 82% !important; border-radius: 18px !important; padding: 8px 11px !important; text-align: left !important; overflow-wrap: anywhere; }
           .messages-bubble-time { display: block; margin-top: 5px; }
           .messages-message-row.is-out .messages-bubble { border-bottom-right-radius: 6px !important; }
           .messages-message-row.is-in .messages-bubble { border-bottom-left-radius: 6px !important; }
-          .messages-composer { flex-shrink: 0; margin: 0 -12px calc(-10px - env(safe-area-inset-bottom)) !important; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)) !important; background: ${theme.card}; border-top: 1px solid ${theme.border} !important; }
+          .messages-composer { width: 100% !important; flex-shrink: 0; margin: 0 !important; padding: 8px 10px max(8px, env(safe-area-inset-bottom)) !important; border-radius: 0 !important; box-shadow: none !important; background: ${theme.card}; border-top: 1px solid rgba(142,142,147,.22) !important; }
           .messages-composer > div:last-child { display: grid !important; grid-template-columns: 1fr 44px !important; gap: 8px !important; }
           .messages-composer > div:first-child { display: none; }
-          .messages-composer textarea { min-height: 42px !important; max-height: 120px !important; }
+          .messages-composer textarea { min-height: 42px !important; max-height: 120px !important; border-radius: 20px !important; border: 1px solid rgba(142,142,147,.22) !important; background: ${theme.input} !important; }
           .messages-composer button { width: 44px !important; height: 44px !important; padding: 0 !important; border-radius: 50% !important; flex-shrink: 0; }
           .messages-composer button:disabled { opacity: 0.45; box-shadow: none !important; cursor: default !important; }
           .messages-mobile-sheet-layer { display: block; position: fixed; inset: 0; z-index: 90; overflow: hidden; }
