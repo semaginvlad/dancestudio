@@ -1783,7 +1783,7 @@ export default function MessagesTab({
           .messages-mobile-list .messages-dialog-panel { display: none !important; }
           .messages-mobile-dialog .messages-chat-list-panel { display: none !important; }
           .messages-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 40px; border: 0 !important; background: ${theme.input} !important; padding: 0 11px; }
-          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 42px; background: ${theme.card}; margin: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 12px 6px !important; }
+          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 42px; background: ${theme.card}; margin: 0 !important; padding: 10px 12px 6px !important; }
           .messages-unread-count { font-size: 11px; }
           .messages-active-filter { font-size: 11px; }
           .messages-channel-switch { height: 42px; gap: 6px !important; margin: 0 10px 8px !important; padding: 2px; border-radius: 14px; background: ${theme.input}; }
@@ -1803,7 +1803,7 @@ export default function MessagesTab({
           .messages-inline-link-panel { display: none !important; }
           .messages-chat-row.is-active { background: ${theme.primary}10 !important; }
           .messages-dialog-panel { display: flex !important; flex-direction: column !important; overflow: hidden !important; }
-          .messages-dialog-title { width: 100% !important; display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 60px; margin: 0 !important; padding: calc(8px + env(safe-area-inset-top)) 12px 8px !important; border-radius: 0 !important; box-shadow: none !important; background: ${theme.card}; border-bottom: 1px solid rgba(142,142,147,.2); }
+          .messages-dialog-title { width: 100% !important; display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 60px; margin: 0 !important; padding: 10px 12px 8px !important; border-radius: 0 !important; box-shadow: none !important; background: ${theme.card}; border-bottom: 1px solid rgba(142,142,147,.2); }
           .messages-back-button, .messages-details-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: ${theme.textMain}; font-size: 22px; cursor: pointer; flex: 0 0 auto; }
           .messages-dialog-avatar { width: 36px; height: 36px; }
           .messages-dialog-subtitle { display: block; }
