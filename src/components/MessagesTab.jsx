@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { DIRECTIONS, theme } from "../shared/constants";
 import { getDisplayName, getSubStatus } from "../shared/utils";
@@ -26,6 +26,39 @@ const parseIsoDateSafe = (value) => {
   const ts = new Date(value).getTime();
   return Number.isNaN(ts) ? 0 : ts;
 };
+
+const formatChatTime = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay) return date.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === yesterday.toDateString()) return "Вчора";
+  return date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
+};
+
+const formatMessageDay = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === now.toDateString()) return "Сьогодні";
+  if (date.toDateString() === yesterday.toDateString()) return "Вчора";
+  return date.toLocaleDateString("uk-UA", { day: "2-digit", month: "long", year: "numeric" });
+};
+
+const getInitials = (value = "") => String(value || "?")
+  .trim()
+  .split(/\s+/)
+  .slice(0, 2)
+  .map((part) => part[0] || "")
+  .join("")
+  .toUpperCase() || "?";
 
 const PIPELINE_LABELS_UA = {
   new: "Нова",
@@ -108,6 +141,13 @@ export default function MessagesTab({
   const [followUpAtDraft, setFollowUpAtDraft] = useState("");
   const [followUpReasonDraft, setFollowUpReasonDraft] = useState("");
   const [followUpStateDraft, setFollowUpStateDraft] = useState("pending");
+  const [mobilePane, setMobilePane] = useState("list");
+  const [showMobileDetails, setShowMobileDetails] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const messagesScrollRef = useRef(null);
+  const chatListScrollRef = useRef(null);
+  const lastOpenedChatRef = useRef("");
+  const wasNearBottomRef = useRef(true);
 
   const membershipByStudent = useMemo(
     () =>
@@ -279,10 +319,10 @@ export default function MessagesTab({
       .filter((d) => {
         if (!searchQ.trim()) return true;
         const q = searchQ.trim().toLowerCase();
-        const linkedName = d.linkedStudent ? getDisplayName(d.linkedStudent).toLowerCase() : "";
+        const linkedName = d.linkedStudent ? String(getDisplayName(d.linkedStudent) || "").toLowerCase() : "";
         return (
-          (d.title || "").toLowerCase().includes(q) ||
-          (d.username || "").toLowerCase().includes(q) ||
+          String(d.title || "").toLowerCase().includes(q) ||
+          String(d.username || "").toLowerCase().includes(q) ||
           linkedName.includes(q)
         );
       })
@@ -354,7 +394,7 @@ export default function MessagesTab({
       .filter((c) => {
         const q = searchQ.trim().toLowerCase();
         if (!q) return true;
-        return [c.name, c.phone, c.telegram, c.instagram].join(" ").toLowerCase().includes(q);
+        return [c.name, c.phone, c.telegram, c.instagram].map((value) => String(value || "")).join(" ").toLowerCase().includes(q);
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [instagramCrmOverrides, membershipByStudent, searchQ, students, trainers, waitlist]);
@@ -402,7 +442,7 @@ export default function MessagesTab({
     const q = searchQ.trim().toLowerCase();
     return (instagramThreads || []).filter((row) => {
       if (!q) return true;
-      return [row?.title, row?.participantUsername, row?.preview, row?.threadId].join(" ").toLowerCase().includes(q);
+      return [row?.title, row?.participantUsername, row?.preview, row?.threadId].map((value) => String(value || "")).join(" ").toLowerCase().includes(q);
     });
   }, [instagramThreads, searchQ]);
   const instagramConnectionReadiness = useMemo(() => {
@@ -474,6 +514,37 @@ export default function MessagesTab({
   const activeInstagramContact = filteredInstagramContacts.find((c) => c.id === instagramSelectedId) || filteredInstagramContacts[0] || null;
   const activeInstagramThread = filteredInstagramThreads.find((t) => t.id === instagramSelectedId) || filteredInstagramThreads[0] || null;
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (mobilePane !== "dialog") return;
+    const onPopState = () => setMobilePane("list");
+    window.history.pushState({ messagesMobilePane: "dialog" }, "");
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [mobilePane]);
+
+  const openTelegramDialog = (dialogId) => {
+    onSelectStudent?.(dialogId);
+    setDraft("");
+    setMobilePane("dialog");
+  };
+
+  const scrollMessagesToBottom = useCallback((behavior = "auto") => {
+    const node = messagesScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
+    setShowScrollDown(false);
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const node = messagesScrollRef.current;
+    if (!node) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    const nearBottom = distance < 120;
+    wasNearBottomRef.current = nearBottom;
+    setShowScrollDown(!nearBottom);
+  }, []);
+
   const crmSummary = useMemo(() => {
     const st = activeDialog?.linkedStudent;
     if (!st) return null;
@@ -536,6 +607,17 @@ export default function MessagesTab({
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
   }, [activeDialog?.id, messagesByChat]);
+
+  useEffect(() => {
+    if (!activeDialog?.id) return;
+    const isNewChat = lastOpenedChatRef.current !== activeDialog.id;
+    if (isNewChat) {
+      lastOpenedChatRef.current = activeDialog.id;
+      requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+      return;
+    }
+    if (wasNearBottomRef.current) requestAnimationFrame(() => scrollMessagesToBottom("smooth"));
+  }, [activeDialog?.id, orderedMessages.length, scrollMessagesToBottom]);
 
   const templateText =
     activeDialog?.linkedStudent?.messageTemplate ||
@@ -713,6 +795,7 @@ export default function MessagesTab({
 
   return (
     <div
+      className={`messages-tab-shell messages-mobile-${mobilePane} ${showMobileDetails ? "messages-show-details" : ""}`}
       style={{
         display: "grid",
         gridTemplateColumns: "160px 340px minmax(620px,1fr)",
@@ -727,7 +810,7 @@ export default function MessagesTab({
         minHeight: 620,
       }}
     >
-      <div style={{ ...shellCard, padding: 12, background: theme.card, borderColor: theme.border }}>
+      <div className="messages-filter-rail" style={{ ...shellCard, padding: 12, background: theme.card, borderColor: theme.border }}>
         <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700, marginBottom: 10, color: theme.textMuted }}>
           {activeChannel === "telegram" ? "Операційні фільтри" : "CRM-фільтри"}
         </div>
@@ -791,8 +874,8 @@ export default function MessagesTab({
         </div>
       </div>
 
-      <div style={{ ...shellCard, padding: 14, display: "flex", flexDirection: "column", background: theme.card, minHeight: 0, height: "100%" }}>
-        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, color: theme.textMain, letterSpacing: "-0.01em" }}>Повідомлення / CRM</div>
+      <div className="messages-chat-list-panel" style={{ ...shellCard, padding: 14, display: "flex", flexDirection: "column", background: theme.card, minHeight: 0, height: "100%" }}>
+        <div className="messages-list-header" style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, color: theme.textMain, letterSpacing: "-0.01em" }}><span>Повідомлення</span><span className="messages-unread-count">{filteredTelegramDialogs.length} чатів</span></div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <button
             type="button"
@@ -809,21 +892,25 @@ export default function MessagesTab({
             Інстаграм
           </button>
         </div>
-        <input
+        <div className="messages-search-wrap"><input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
           placeholder={activeChannel === "telegram" ? "Пошук: чат, @username, учениця" : "Пошук: контакт, телефон, @telegram, instagram"}
-          style={{ marginBottom: 10, border: `1px solid ${theme.border}`, borderRadius: 12, padding: "9px 11px", background: theme.input, color: theme.textMain, fontSize: 13 }}
+          style={{ marginBottom: 10, border: `1px solid ${theme.border}`, borderRadius: 12, padding: "9px 36px 9px 11px", background: theme.input, color: theme.textMain, fontSize: 16, width: "100%" }}
         />
+        {searchQ && <button type="button" className="messages-search-clear" aria-label="Очистити пошук" onClick={() => setSearchQ("")}>×</button>}
+        </div>
         {dialogsError && <div style={{ color: theme.danger, fontSize: 12, marginBottom: 8 }}>{dialogsError}</div>}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minHeight: 0, overflow: "auto", paddingRight: 2 }}>
+        <div ref={chatListScrollRef} className="messages-chat-list" style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1, minHeight: 0, overflow: "auto", paddingRight: 2 }}>
           {activeChannel === "telegram" && filteredTelegramDialogs.map((dlg) => {
             const active = activeDialog?.id === dlg.id;
+            const chatInitials = getInitials(dlg.title || dlg.username || "?");
             const tone = crmStatusTone(dlg.contact?.pipelineStatus || "");
             return (
               <div
                 key={dlg.id}
+                className={`messages-chat-row ${active ? "is-active" : ""}`}
                 style={{
                   textAlign: "left",
                   padding: "12px 13px",
@@ -836,21 +923,19 @@ export default function MessagesTab({
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    onSelectStudent?.(dlg.id);
-                    setDraft("");
-                  }}
+                  onClick={() => openTelegramDialog(dlg.id)}
                   style={{ border: "none", background: "transparent", width: "100%", padding: 0, textAlign: "left", cursor: "pointer" }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <div className="messages-chat-row-main">
+                    <div className="messages-avatar" aria-hidden="true">{chatInitials}</div><div className="messages-chat-copy"><div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                     <div style={{ color: theme.textMain, fontSize: 14, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dlg.title}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      <div style={{ color: theme.textMuted, fontSize: 11, fontWeight: 600 }}>{dlg.lastMessageDate?.slice(0, 10) || "—"}</div>
+                      <div style={{ color: theme.textMuted, fontSize: 11, fontWeight: 600 }}>{formatChatTime(dlg.lastMessageDate)}</div>
                     </div>
                   </div>
                   <div style={{ color: theme.textMuted, fontSize: 12, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {dlg.lastMessageText || dlg.username || "Порожній діалог"}
-                  </div>
+                  </div></div></div>
                 </button>
                 <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, minHeight: 18 }}>
                   <span style={{ fontSize: 11, color: theme.textMuted }}>CRM:</span>
@@ -973,11 +1058,17 @@ export default function MessagesTab({
         </div>
       </div>
 
-      <div style={{ ...shellCard, padding: 18, display: "flex", flexDirection: "column", minHeight: 0, height: "100%", background: theme.card, borderColor: theme.border }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: theme.textMain, marginBottom: 4, letterSpacing: "-0.02em" }}>
-          {activeChannel === "telegram"
-            ? (activeDialog ? `Чат Телеграм: ${activeDialog.title}` : "Оберіть діалог")
-            : (activeInstagramThread ? `Instagram thread: ${activeInstagramThread.title || activeInstagramThread.participantUsername || activeInstagramThread.threadId}` : "Оберіть Instagram thread")}
+      <div className="messages-dialog-panel" style={{ ...shellCard, padding: 18, display: "flex", flexDirection: "column", minHeight: 0, height: "100%", background: theme.card, borderColor: theme.border }}>
+        <div className="messages-dialog-title" style={{ fontSize: 20, fontWeight: 800, color: theme.textMain, marginBottom: 4, letterSpacing: "-0.02em" }}>
+          <button type="button" className="messages-back-button" onClick={() => setMobilePane("list")} aria-label="Повернутися до списку чатів">←</button>
+          {activeChannel === "telegram" && activeDialog && <div className="messages-avatar messages-dialog-avatar" aria-hidden="true">{getInitials(activeDialog.title || activeDialog.username || "?")}</div>}
+          <div className="messages-dialog-heading">
+            <div className="messages-dialog-name">{activeChannel === "telegram"
+              ? (activeDialog ? activeDialog.title : "Оберіть діалог")
+              : (activeInstagramThread ? (activeInstagramThread.title || activeInstagramThread.participantUsername || activeInstagramThread.threadId) : "Оберіть Instagram thread")}</div>
+            <div className="messages-dialog-subtitle">{activeChannel === "telegram" ? (activeDialog?.username || (activeDialog ? `чат_id: ${activeDialog.id}` : "")) : "Instagram"}</div>
+          </div>
+          {activeChannel === "telegram" && activeDialog && <button type="button" className="messages-details-button" onClick={() => setShowMobileDetails((v) => !v)} aria-label="Деталі чату">⋯</button>}
         </div>
 
         {activeChannel === "instagram" && (
@@ -1301,11 +1392,11 @@ export default function MessagesTab({
 
         {activeChannel === "telegram" && activeDialog && (
           <>
-            <div style={{ color: theme.textMuted, fontSize: 12, marginBottom: 12, fontWeight: 600 }}>
+            <div className="messages-desktop-subtitle" style={{ color: theme.textMuted, fontSize: 12, marginBottom: 12, fontWeight: 600 }}>
               {activeDialog.username || `чат_id: ${activeDialog.id}`}
             </div>
 
-            <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
+            <div className="messages-detail-card" style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontWeight: 800, color: theme.textMain, fontSize: 13, letterSpacing: "0.01em" }}>Операційний контекст</div>
                 <div style={{ color: activeDialog.linkedStudent ? theme.success : theme.textMuted, fontSize: 11, fontWeight: 700 }}>
@@ -1333,7 +1424,7 @@ export default function MessagesTab({
               )}
             </div>
 
-            <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
+            <div className="messages-detail-card" style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input }}>
               <div style={{ fontWeight: 800, color: theme.textMain, marginBottom: 8, fontSize: 13 }}>Операційний профіль чату</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, border: `1px solid ${theme.border}`, borderRadius: 999, padding: "2px 8px", background: theme.card, color: theme.textMuted }}>
@@ -1345,7 +1436,7 @@ export default function MessagesTab({
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 10, marginBottom: 10 }}>
+            <div className="messages-detail-card messages-notes-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 10, marginBottom: 10 }}>
               <div style={{ padding: 10, border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.input, minHeight: 0 }}>
                 <div style={{ fontWeight: 800, color: theme.textMain, marginBottom: 6, fontSize: 13 }}>Внутрішня нотатка</div>
                 <textarea
@@ -1399,20 +1490,29 @@ export default function MessagesTab({
               </div>
             )}
 
-            <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
-              {orderedMessages.map((m) => (
-                <div key={m.id} style={{ marginBottom: 8, textAlign: m.out ? "right" : "left" }}>
-                  <div style={{ display: "inline-block", background: m.out ? `${theme.secondary}22` : theme.input, borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: `1px solid ${theme.border}` }}>
-                    <div style={{ fontSize: 13, color: theme.textMain, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text || "—"}</div>
-                  </div>
-                </div>
-              ))}
+            <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="messages-thread" style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10, marginTop: 4, marginBottom: 12 }}>
+              {orderedMessages.map((m, index) => {
+                const day = formatMessageDay(m.date);
+                const previousDay = formatMessageDay(orderedMessages[index - 1]?.date);
+                return (
+                  <React.Fragment key={m.id}>
+                    {day && day !== previousDay && <div className="messages-date-separator"><span>{day}</span></div>}
+                    <div className={`messages-message-row ${m.out ? "is-out" : "is-in"}`} style={{ marginBottom: 8, textAlign: m.out ? "right" : "left" }}>
+                      <div className="messages-bubble" style={{ display: "inline-block", background: m.out ? `${theme.secondary}22` : theme.input, borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: `1px solid ${theme.border}` }}>
+                        <div style={{ fontSize: 13, color: theme.textMain, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text || "—"}</div>
+                        <div className="messages-bubble-time">{formatChatTime(m.date)}</div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              {showScrollDown && <button type="button" className="messages-scroll-down" onClick={() => scrollMessagesToBottom("smooth")}>Вниз ↓</button>}
             </div>
 
-            <div style={{ marginTop: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+            <div className="messages-composer" style={{ marginTop: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 800, color: theme.textMain, letterSpacing: "0.01em" }}>Повідомлення</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
-                <textarea value={resolvedDraft} onChange={(e) => setDraft(e.target.value)} rows={4} style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 14, padding: 12, resize: "vertical", fontSize: 13, background: theme.input, color: theme.textMain }} />
+                <textarea value={resolvedDraft} onChange={(e) => setDraft(e.target.value)} rows={1} placeholder="Повідомлення" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 14, padding: 12, resize: "none", fontSize: 16, lineHeight: 1.35, maxHeight: 132, overflow: "auto", background: theme.input, color: theme.textMain }} />
                 <button
                   type="button"
                   onClick={async () => {
@@ -1436,13 +1536,65 @@ export default function MessagesTab({
                   }}
                   style={{ border: "none", borderRadius: 14, background: "linear-gradient(180deg, #ff6a58 0%, #e74734 100%)", color: "#fff", padding: "11px 18px", cursor: "pointer", fontWeight: 800, boxShadow: "0 12px 24px rgba(255, 89, 66, 0.38)", height: 44 }}
                 >
-                  Надіслати
+                  <span className="messages-send-label">Надіслати</span><span className="messages-send-icon" aria-hidden="true">➤</span>
                 </button>
               </div>
             </div>
           </>
         )}
       </div>
+
+      <style>{`
+        .messages-back-button, .messages-details-button, .messages-send-icon { display: none; }
+        .messages-search-wrap { position: relative; }
+        .messages-search-clear { position: absolute; right: 8px; top: 6px; width: 30px; height: 30px; border: 0; border-radius: 999px; background: rgba(142, 142, 147, 0.18); color: ${theme.textMuted}; font-size: 20px; cursor: pointer; }
+        .messages-list-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .messages-unread-count { font-size: 12px; color: ${theme.textMuted}; font-weight: 700; }
+        .messages-chat-row-main { display: flex; gap: 10px; min-width: 0; }
+        .messages-avatar { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; background: linear-gradient(135deg, ${theme.primary}33, ${theme.secondary}33); color: ${theme.textMain}; font-weight: 800; font-size: 13px; }
+        .messages-chat-copy { min-width: 0; flex: 1; }
+        .messages-dialog-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .messages-dialog-heading { min-width: 0; flex: 1; }
+        .messages-dialog-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .messages-dialog-subtitle { display: none; font-size: 12px; color: ${theme.textMuted}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .messages-thread { position: relative; overscroll-behavior: contain; }
+        .messages-message-row { display: flex; }
+        .messages-message-row.is-out { justify-content: flex-end; }
+        .messages-message-row.is-in { justify-content: flex-start; }
+        .messages-bubble { overflow-wrap: anywhere; word-break: break-word; }
+        .messages-bubble-time { margin-top: 4px; font-size: 10px; color: ${theme.textMuted}; text-align: right; }
+        .messages-date-separator { position: sticky; top: 6px; z-index: 1; display: flex; justify-content: center; margin: 10px 0; pointer-events: none; }
+        .messages-date-separator span { border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMuted}; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; }
+        .messages-scroll-down { position: sticky; bottom: 8px; margin-left: auto; display: block; border: 1px solid ${theme.border}; border-radius: 999px; padding: 7px 11px; background: ${theme.card}; color: ${theme.textMain}; font-weight: 800; box-shadow: 0 10px 24px rgba(0,0,0,.22); cursor: pointer; }
+        @media (max-width: 760px) {
+          .messages-tab-shell { display: flex !important; flex-direction: column !important; height: calc(100dvh - 86px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border-radius: 0 !important; overflow: hidden !important; background: ${theme.card} !important; }
+          .messages-filter-rail { display: none !important; }
+          .messages-chat-list-panel, .messages-dialog-panel { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)) !important; }
+          .messages-mobile-list .messages-dialog-panel { display: none !important; }
+          .messages-mobile-dialog .messages-chat-list-panel { display: none !important; }
+          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 44px; background: ${theme.card}; }
+          .messages-chat-list { gap: 0 !important; padding-right: 0 !important; -webkit-overflow-scrolling: touch; }
+          .messages-chat-row { min-height: 68px; border-width: 0 0 1px 0 !important; border-radius: 0 !important; box-shadow: none !important; padding: 10px 2px !important; background: transparent !important; }
+          .messages-chat-row.is-active { background: ${theme.primary}12 !important; }
+          .messages-dialog-title { position: sticky; top: 0; z-index: 4; min-height: 54px; margin: calc(-10px - env(safe-area-inset-top)) -12px 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: ${theme.card}; border-bottom: 1px solid ${theme.border}; }
+          .messages-back-button, .messages-details-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: ${theme.textMain}; font-size: 22px; cursor: pointer; flex: 0 0 auto; }
+          .messages-dialog-avatar { width: 36px; height: 36px; }
+          .messages-dialog-subtitle { display: block; }
+          .messages-desktop-subtitle { display: none; }
+          .messages-detail-card, .messages-notes-grid { display: none !important; }
+          .messages-show-details .messages-detail-card, .messages-show-details .messages-notes-grid { display: grid !important; flex-shrink: 0; max-height: 30dvh; overflow: auto; }
+          .messages-thread { flex: 1 !important; border-top: 0 !important; margin: 0 -12px 0 !important; padding: 12px 12px 8px !important; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
+          .messages-bubble { max-width: 82% !important; border-radius: 18px !important; padding: 8px 11px !important; }
+          .messages-message-row.is-out .messages-bubble { border-bottom-right-radius: 6px !important; }
+          .messages-message-row.is-in .messages-bubble { border-bottom-left-radius: 6px !important; }
+          .messages-composer { flex-shrink: 0; margin: 0 -12px calc(-10px - env(safe-area-inset-bottom)) !important; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)) !important; background: ${theme.card}; border-top: 1px solid ${theme.border} !important; }
+          .messages-composer > div:last-child { display: grid !important; grid-template-columns: 1fr 44px !important; gap: 8px !important; }
+          .messages-composer textarea { min-height: 42px !important; max-height: 128px !important; }
+          .messages-composer button { width: 44px !important; height: 44px !important; padding: 0 !important; border-radius: 50% !important; }
+          .messages-send-label { display: none; }
+          .messages-send-icon { display: inline; }
+        }
+      `}</style>
     </div>
   );
 }
