@@ -144,6 +144,7 @@ export default function MessagesTab({
   const [mobilePane, setMobilePane] = useState("list");
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [showMobileFilterSheet, setShowMobileFilterSheet] = useState(false);
   const messagesScrollRef = useRef(null);
   const chatListScrollRef = useRef(null);
   const lastOpenedChatRef = useRef("");
@@ -445,6 +446,31 @@ export default function MessagesTab({
       return [row?.title, row?.participantUsername, row?.preview, row?.threadId].map((value) => String(value || "")).join(" ").toLowerCase().includes(q);
     });
   }, [instagramThreads, searchQ]);
+  const telegramFilterOptions = useMemo(() => {
+    const countFor = (id) => enrichedDialogs.filter((d) => {
+      if (id === "all") return true;
+      if (id === "trainers") return d.trainer;
+      if (id === "groups") return (d.linkedGroupIds || []).length > 0;
+      if (id === "unlinked") return !d.linkedStudent;
+      if (id.startsWith("group:")) return (d.linkedGroupIds || []).includes(id.replace("group:", ""));
+      return true;
+    }).length;
+    return [
+      { id: "all", label: "Усі чати", count: countFor("all") },
+      { id: "trainers", label: "Тренери", count: countFor("trainers") },
+      { id: "groups", label: "Групи", count: countFor("groups") },
+      { id: "unlinked", label: "Непривʼязані / сервісні", count: countFor("unlinked") },
+      ...groups.map((g) => {
+        const id = `group:${g.id}`;
+        return { id, label: g.name, count: countFor(id) };
+      }),
+    ];
+  }, [enrichedDialogs, groups]);
+
+  const activeTelegramFilterLabel = telegramFilterOptions.find((item) => item.id === telegramRailFilter)?.label || "Усі чати";
+  const mobileLinkChatId = Object.entries(linkUiByChat).find(([, panel]) => panel?.open)?.[0] || "";
+  const mobileLinkDialog = enrichedDialogs.find((dlg) => dlg.id === mobileLinkChatId) || null;
+
   const instagramConnectionReadiness = useMemo(() => {
     const status = instagramConnectionStatus || {};
     return {
@@ -875,7 +901,11 @@ export default function MessagesTab({
       </div>
 
       <div className="messages-chat-list-panel" style={{ ...shellCard, padding: 14, display: "flex", flexDirection: "column", background: theme.card, minHeight: 0, height: "100%" }}>
-        <div className="messages-list-header" style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, color: theme.textMain, letterSpacing: "-0.01em" }}><span>Повідомлення</span><span className="messages-unread-count">{filteredTelegramDialogs.length} чатів</span></div>
+        <div className="messages-list-header" style={{ fontSize: 17, fontWeight: 800, marginBottom: 10, color: theme.textMain, letterSpacing: "-0.01em" }}>
+          <div className="messages-list-title-block"><span>Повідомлення</span><span className="messages-active-filter" title={activeTelegramFilterLabel}>{activeChannel === "telegram" ? activeTelegramFilterLabel : "Instagram"}</span></div>
+          <span className="messages-unread-count">{activeChannel === "telegram" ? filteredTelegramDialogs.length : filteredInstagramThreads.length} чатів</span>
+          {activeChannel === "telegram" && <button type="button" className="messages-filter-button" onClick={() => setShowMobileFilterSheet(true)} aria-label="Фільтр чатів">Фільтр</button>}
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <button
             type="button"
@@ -949,7 +979,9 @@ export default function MessagesTab({
                   )}
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       const panel = linkUiByChat[dlg.id];
                       if (panel?.open) {
                         setLinkUiByChat((prev) => ({ ...prev, [dlg.id]: { ...(prev[dlg.id] || {}), open: false } }));
@@ -964,7 +996,7 @@ export default function MessagesTab({
                 </div>
 
                 {linkUiByChat[dlg.id]?.open && (
-                  <div style={{ marginTop: 8, padding: 8, borderRadius: 12, border: `1px solid ${theme.border}`, background: theme.card }}>
+                  <div className="messages-inline-link-panel" style={{ marginTop: 8, padding: 8, borderRadius: 12, border: `1px solid ${theme.border}`, background: theme.card }}>
                     <input
                       value={linkSearchByChat[dlg.id] || ""}
                       onChange={(e) => setLinkSearchByChat((prev) => ({ ...prev, [dlg.id]: e.target.value }))}
@@ -1475,7 +1507,7 @@ export default function MessagesTab({
             </div>
 
             {activeDialog.trainer && (
-              <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
+              <div className="messages-trainer-banner" style={{ marginBottom: 10, padding: 10, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.input }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
                   <div style={{ fontWeight: 800, color: theme.secondary, fontSize: 12, letterSpacing: "0.02em" }}>Контакт тренера</div>
                 </div>
@@ -1515,7 +1547,9 @@ export default function MessagesTab({
                 <textarea value={resolvedDraft} onChange={(e) => setDraft(e.target.value)} rows={1} placeholder="Повідомлення" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 14, padding: 12, resize: "none", fontSize: 16, lineHeight: 1.35, maxHeight: 132, overflow: "auto", background: theme.input, color: theme.textMain }} />
                 <button
                   type="button"
+                  disabled={!resolvedDraft.trim()}
                   onClick={async () => {
+                    if (!resolvedDraft.trim()) return;
                     const optimisticMsg = {
                       id: `local_${Date.now()}`,
                       text: resolvedDraft,
@@ -1544,13 +1578,106 @@ export default function MessagesTab({
         )}
       </div>
 
+
+      {showMobileFilterSheet && (
+        <div className="messages-mobile-sheet-layer" role="presentation">
+          <button type="button" className="messages-mobile-sheet-backdrop" aria-label="Закрити фільтр чатів" onClick={() => setShowMobileFilterSheet(false)} />
+          <div className="messages-mobile-sheet" role="dialog" aria-modal="true" aria-label="Фільтр чатів">
+            <div className="messages-mobile-sheet-header">
+              <div>
+                <div className="messages-mobile-sheet-title">Фільтр чатів</div>
+                <div className="messages-mobile-sheet-subtitle">Поточний: {activeTelegramFilterLabel}</div>
+              </div>
+              <button type="button" className="messages-mobile-sheet-close" onClick={() => setShowMobileFilterSheet(false)} aria-label="Закрити">×</button>
+            </div>
+            <div className="messages-mobile-sheet-list">
+              {telegramFilterOptions.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`messages-mobile-sheet-option ${telegramRailFilter === item.id ? "is-active" : ""}`}
+                  onClick={() => {
+                    setTelegramRailFilter(item.id);
+                    setShowMobileFilterSheet(false);
+                  }}
+                >
+                  <span>{item.label}</span>
+                  <span>{item.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mobileLinkChatId && mobileLinkDialog && (
+        <div className="messages-mobile-sheet-layer messages-link-sheet-layer" role="presentation">
+          <button
+            type="button"
+            className="messages-mobile-sheet-backdrop"
+            aria-label="Закрити привʼязку учениці"
+            onClick={() => setLinkUiByChat((prev) => ({ ...prev, [mobileLinkChatId]: { ...(prev[mobileLinkChatId] || {}), open: false } }))}
+          />
+          <div className="messages-mobile-sheet" role="dialog" aria-modal="true" aria-label="Привʼязати ученицю">
+            <div className="messages-mobile-sheet-header">
+              <div>
+                <div className="messages-mobile-sheet-title">Привʼязати ученицю</div>
+                <div className="messages-mobile-sheet-subtitle">{mobileLinkDialog.title || mobileLinkDialog.username || mobileLinkChatId}</div>
+              </div>
+              <button
+                type="button"
+                className="messages-mobile-sheet-close"
+                onClick={() => setLinkUiByChat((prev) => ({ ...prev, [mobileLinkChatId]: { ...(prev[mobileLinkChatId] || {}), open: false } }))}
+                aria-label="Закрити"
+              >×</button>
+            </div>
+            <input
+              value={linkSearchByChat[mobileLinkChatId] || ""}
+              onChange={(e) => setLinkSearchByChat((prev) => ({ ...prev, [mobileLinkChatId]: e.target.value }))}
+              placeholder="Пошук учениці..."
+              className="messages-link-search-input"
+            />
+            <div className="messages-link-results">
+              {students
+                .filter((st) => {
+                  const q = String(linkSearchByChat[mobileLinkChatId] || "").trim().toLowerCase();
+                  if (!q) return true;
+                  return String(getDisplayName(st) || "").toLowerCase().includes(q);
+                })
+                .slice(0, 30)
+                .map((st) => {
+                  const selected = (linkUiByChat[mobileLinkChatId]?.draftId || "") === st.id;
+                  return (
+                    <button
+                      key={st.id}
+                      type="button"
+                      className={`messages-link-result ${selected ? "is-active" : ""}`}
+                      onClick={() => setLinkUiByChat((prev) => ({ ...prev, [mobileLinkChatId]: { ...(prev[mobileLinkChatId] || {}), draftId: st.id } }))}
+                    >
+                      <span>{getDisplayName(st)}</span>
+                      <span>{selected ? "✓" : ""}</span>
+                    </button>
+                  );
+                })}
+            </div>
+            <div className="messages-link-actions">
+              <button type="button" onClick={() => handleSaveLink(mobileLinkChatId)} disabled={linkSavingChatId === mobileLinkChatId}>Прив'язати</button>
+              <button type="button" onClick={() => handleClearLink(mobileLinkChatId)} disabled={linkSavingChatId === mobileLinkChatId}>Відв'язати</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .messages-back-button, .messages-details-button, .messages-send-icon { display: none; }
         .messages-search-wrap { position: relative; }
         .messages-search-clear { position: absolute; right: 8px; top: 6px; width: 30px; height: 30px; border: 0; border-radius: 999px; background: rgba(142, 142, 147, 0.18); color: ${theme.textMuted}; font-size: 20px; cursor: pointer; }
-        .messages-list-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .messages-list-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+        .messages-list-title-block { min-width: 0; display: grid; gap: 2px; }
+        .messages-active-filter { font-size: 11px; color: ${theme.textMuted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+        .messages-filter-button { display: none; border: 1px solid ${theme.border}; border-radius: 999px; background: ${theme.input}; color: ${theme.textMain}; min-height: 34px; padding: 0 10px; font-weight: 800; cursor: pointer; }
         .messages-unread-count { font-size: 12px; color: ${theme.textMuted}; font-weight: 700; }
-        .messages-chat-row-main { display: flex; gap: 10px; min-width: 0; }
+        .messages-chat-row-main { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; min-width: 0; align-items: start; }
         .messages-avatar { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; background: linear-gradient(135deg, ${theme.primary}33, ${theme.secondary}33); color: ${theme.textMain}; font-weight: 800; font-size: 13px; }
         .messages-chat-copy { min-width: 0; flex: 1; }
         .messages-dialog-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -1563,34 +1690,73 @@ export default function MessagesTab({
         .messages-message-row.is-in { justify-content: flex-start; }
         .messages-bubble { overflow-wrap: anywhere; word-break: break-word; }
         .messages-bubble-time { margin-top: 4px; font-size: 10px; color: ${theme.textMuted}; text-align: right; }
-        .messages-date-separator { position: sticky; top: 6px; z-index: 1; display: flex; justify-content: center; margin: 10px 0; pointer-events: none; }
+        .messages-date-separator { display: block; width: fit-content; margin: 12px auto; pointer-events: none; }
         .messages-date-separator span { border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMuted}; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; }
         .messages-scroll-down { position: sticky; bottom: 8px; margin-left: auto; display: block; border: 1px solid ${theme.border}; border-radius: 999px; padding: 7px 11px; background: ${theme.card}; color: ${theme.textMain}; font-weight: 800; box-shadow: 0 10px 24px rgba(0,0,0,.22); cursor: pointer; }
+
+        .messages-mobile-sheet-layer { display: none; }
+        .messages-link-row { min-width: 0; display: flex; align-items: center; gap: 6px; }
+        .messages-row-side { display: grid; justify-items: end; gap: 6px; min-width: 44px; }
+        .messages-row-time { color: ${theme.textMuted}; font-size: 11px; font-weight: 700; white-space: nowrap; }
+        .messages-row-link { width: 34px; height: 34px; border: 1px solid ${theme.border}; border-radius: 999px; background: ${theme.card}; color: ${theme.secondary}; cursor: pointer; }
+        .messages-row-meta { color: ${theme.textMuted}; font-size: 11px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .messages-row-status { color: ${theme.textMuted}; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         @media (max-width: 760px) {
+          .messages-tab-shell, .messages-tab-shell * { box-sizing: border-box; min-width: 0; max-width: 100%; }
           .messages-tab-shell { display: flex !important; flex-direction: column !important; height: calc(100dvh - 86px) !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border-radius: 0 !important; overflow: hidden !important; background: ${theme.card} !important; }
           .messages-filter-rail { display: none !important; }
           .messages-chat-list-panel, .messages-dialog-panel { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)) !important; }
           .messages-mobile-list .messages-dialog-panel { display: none !important; }
           .messages-mobile-dialog .messages-chat-list-panel { display: none !important; }
-          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 44px; background: ${theme.card}; }
+          .messages-filter-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+          .messages-list-header { position: sticky; top: 0; z-index: 3; min-height: 44px; background: ${theme.card}; margin-bottom: 8px !important; }
           .messages-chat-list { gap: 0 !important; padding-right: 0 !important; -webkit-overflow-scrolling: touch; }
-          .messages-chat-row { min-height: 68px; border-width: 0 0 1px 0 !important; border-radius: 0 !important; box-shadow: none !important; padding: 10px 2px !important; background: transparent !important; }
+          .messages-chat-row { min-height: 68px; height: auto !important; border-width: 0 0 1px 0 !important; border-color: ${theme.border} !important; border-radius: 0 !important; box-shadow: none !important; padding: 10px 2px !important; background: transparent !important; }
+          .messages-chat-row-main { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
+          .messages-chat-copy { overflow: hidden; }
+          .messages-inline-link-panel { display: none !important; }
+          .messages-chat-row > div:not(.messages-inline-link-panel) { margin-left: 50px !important; display: grid !important; grid-template-columns: minmax(0, 1fr) 38px !important; gap: 8px !important; align-items: center !important; min-height: 34px !important; }
+          .messages-chat-row > div:not(.messages-inline-link-panel) span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .messages-chat-row > div:not(.messages-inline-link-panel) button { margin-left: 0 !important; width: 34px; height: 34px; padding: 0 !important; border-radius: 999px !important; }
           .messages-chat-row.is-active { background: ${theme.primary}12 !important; }
-          .messages-dialog-title { position: sticky; top: 0; z-index: 4; min-height: 54px; margin: calc(-10px - env(safe-area-inset-top)) -12px 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: ${theme.card}; border-bottom: 1px solid ${theme.border}; }
+          .messages-dialog-panel { display: flex !important; flex-direction: column !important; overflow: hidden !important; }
+          .messages-dialog-title { display: grid !important; grid-template-columns: auto auto minmax(0, 1fr) auto; position: sticky; top: 0; z-index: 4; min-height: 58px; margin: calc(-10px - env(safe-area-inset-top)) -12px 0 !important; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; background: ${theme.card}; border-bottom: 1px solid ${theme.border}; }
           .messages-back-button, .messages-details-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: ${theme.textMain}; font-size: 22px; cursor: pointer; flex: 0 0 auto; }
           .messages-dialog-avatar { width: 36px; height: 36px; }
           .messages-dialog-subtitle { display: block; }
           .messages-desktop-subtitle { display: none; }
           .messages-detail-card, .messages-notes-grid { display: none !important; }
           .messages-show-details .messages-detail-card, .messages-show-details .messages-notes-grid { display: grid !important; flex-shrink: 0; max-height: 30dvh; overflow: auto; }
-          .messages-thread { flex: 1 !important; border-top: 0 !important; margin: 0 -12px 0 !important; padding: 12px 12px 8px !important; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
-          .messages-bubble { max-width: 82% !important; border-radius: 18px !important; padding: 8px 11px !important; }
+          .messages-trainer-banner { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; max-height: 72px; overflow: hidden; padding: 8px 10px !important; border: 0 !important; border-radius: 14px !important; flex-shrink: 0; }
+          .messages-trainer-banner div { min-width: 0; }
+          .messages-trainer-banner > div:nth-child(2) { display: none; }
+          .messages-trainer-banner button { margin-top: 0 !important; white-space: nowrap; }
+          .messages-thread { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; border-top: 0 !important; margin: 0 -12px 0 !important; padding: 12px 12px 16px !important; scroll-padding-bottom: 72px; -webkit-overflow-scrolling: touch; background: ${isDark ? '#0b0d12' : '#f6f7fb'}; }
+          .messages-bubble { width: fit-content !important; max-width: 82% !important; border-radius: 18px !important; padding: 8px 11px !important; text-align: left !important; overflow-wrap: anywhere; }
+          .messages-bubble-time { display: block; margin-top: 5px; }
           .messages-message-row.is-out .messages-bubble { border-bottom-right-radius: 6px !important; }
           .messages-message-row.is-in .messages-bubble { border-bottom-left-radius: 6px !important; }
           .messages-composer { flex-shrink: 0; margin: 0 -12px calc(-10px - env(safe-area-inset-bottom)) !important; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)) !important; background: ${theme.card}; border-top: 1px solid ${theme.border} !important; }
           .messages-composer > div:last-child { display: grid !important; grid-template-columns: 1fr 44px !important; gap: 8px !important; }
-          .messages-composer textarea { min-height: 42px !important; max-height: 128px !important; }
-          .messages-composer button { width: 44px !important; height: 44px !important; padding: 0 !important; border-radius: 50% !important; }
+          .messages-composer > div:first-child { display: none; }
+          .messages-composer textarea { min-height: 42px !important; max-height: 120px !important; }
+          .messages-composer button { width: 44px !important; height: 44px !important; padding: 0 !important; border-radius: 50% !important; flex-shrink: 0; }
+          .messages-composer button:disabled { opacity: 0.45; box-shadow: none !important; cursor: default !important; }
+          .messages-mobile-sheet-layer { display: block; position: fixed; inset: 0; z-index: 90; overflow: hidden; }
+          .messages-mobile-sheet-backdrop { position: absolute; inset: 0; border: 0; background: rgba(0,0,0,.38); width: 100%; height: 100%; }
+          .messages-mobile-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: min(78dvh, 620px); display: flex; flex-direction: column; gap: 10px; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; background: ${theme.card}; border-top: 1px solid ${theme.border}; box-shadow: 0 -18px 44px rgba(0,0,0,.28); overflow: hidden; }
+          .messages-mobile-sheet-header { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 10px; align-items: center; }
+          .messages-mobile-sheet-title { color: ${theme.textMain}; font-size: 16px; font-weight: 900; }
+          .messages-mobile-sheet-subtitle { color: ${theme.textMuted}; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .messages-mobile-sheet-close { width: 44px; height: 44px; border: 0; border-radius: 999px; background: ${theme.input}; color: ${theme.textMain}; font-size: 24px; }
+          .messages-mobile-sheet-list, .messages-link-results { display: grid; gap: 4px; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 2px; }
+          .messages-mobile-sheet-option, .messages-link-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 42px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; color: ${theme.textMain}; font-weight: 800; text-align: left; }
+          .messages-mobile-sheet-option span:first-child, .messages-link-result span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .messages-mobile-sheet-option span:last-child { color: ${theme.textMuted}; font-size: 12px; }
+          .messages-mobile-sheet-option.is-active, .messages-link-result.is-active { background: ${theme.primary}18; color: ${theme.primary}; }
+          .messages-link-search-input { min-height: 42px; border: 1px solid ${theme.border}; border-radius: 14px; background: ${theme.input}; color: ${theme.textMain}; font-size: 16px; padding: 9px 11px; }
+          .messages-link-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+          .messages-link-actions button { min-height: 42px; border: 1px solid ${theme.border}; border-radius: 12px; background: ${theme.input}; color: ${theme.textMain}; font-weight: 900; }
           .messages-send-label { display: none; }
           .messages-send-icon { display: inline; }
         }
