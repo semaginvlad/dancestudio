@@ -18,7 +18,9 @@ const toTelegramErrorMessage = (error) => {
   const upper = raw.toUpperCase();
   if (upper.includes("FLOOD_WAIT")) return "Telegram flood wait: спробуйте пізніше.";
   if (upper.includes("REACTION_INVALID") || upper.includes("REACTION_EMPTY")) return "Ця реакція недоступна для повідомлення.";
-  if (upper.includes("CHAT_FORBIDDEN") || upper.includes("USER_BANNED") || upper.includes("CHAT_WRITE_FORBIDDEN")) return "Немає дозволу змінювати реакції в цьому чаті.";
+  if (upper.includes("CHAT_FORBIDDEN") || upper.includes("USER_BANNED") || upper.includes("CHAT_WRITE_FORBIDDEN") || upper.includes("USER_IS_BLOCKED")) return "Немає дозволу виконати дію в цьому чаті.";
+  if (upper.includes("CHAT_SEND_PLAIN_FORBIDDEN") || upper.includes("USER_PRIVACY_RESTRICTED") || upper.includes("FORBIDDEN")) return "Telegram заборонив надсилання або пересилання в цьому чаті.";
+  if (upper.includes("CHAT_FORWARDS_RESTRICTED") || upper.includes("MESSAGE_AUTHOR_REQUIRED")) return "Автор або чат заборонив пересилання цього повідомлення.";
   if (upper.includes("MSG_ID_INVALID") || upper.includes("MESSAGE_ID_INVALID")) return "Некоректний messageId або повідомлення недоступне.";
   if (upper.includes("PEER_ID_INVALID") || upper.includes("CHANNEL_INVALID") || upper.includes("CHAT_ID_INVALID")) return "Некоректний chatId або Telegram peer недоступний.";
   if (upper.includes("AUTH_KEY") || upper.includes("SESSION") || upper.includes("AUTH")) return "Помилка Telegram session. Перевірте підключення Telegram.";
@@ -46,13 +48,46 @@ const normalizeMessageReactions = (message) => {
     .filter(Boolean);
 };
 
-const normalizeTelegramMessage = (m) => ({
-  id: String(m.id),
-  text: m.message || "",
-  date: m.date ? new Date(m.date * 1000).toISOString() : null,
-  out: Boolean(m.out),
-  reactions: normalizeMessageReactions(m),
-});
+const describeTelegramMessage = (message) => {
+  if (!message) return "Повідомлення недоступне";
+  const text = String(message.message || "").trim();
+  if (text) return text;
+  if (message.media) return "Медіа повідомлення";
+  if (message.action) return "Сервісне повідомлення";
+  return "Повідомлення без тексту";
+};
+
+const peerIdToString = (peer) => {
+  const raw = peer?.userId ?? peer?.chatId ?? peer?.channelId ?? peer?.id;
+  return raw === undefined || raw === null ? null : String(raw);
+};
+
+const normalizeForwardedFrom = (fwdFrom) => {
+  if (!fwdFrom) return null;
+  return {
+    title: fwdFrom.fromName || fwdFrom.savedFromName || fwdFrom.postAuthor || null,
+    senderId: peerIdToString(fwdFrom.fromId || fwdFrom.savedFromId || fwdFrom.savedFromPeer),
+    date: fwdFrom.date ? new Date(fwdFrom.date * 1000).toISOString() : null,
+  };
+};
+
+const normalizeTelegramMessage = (m, repliesById = new Map()) => {
+  const replyMessageId = m?.replyTo?.replyToMsgId ? String(m.replyTo.replyToMsgId) : null;
+  const replyMessage = replyMessageId ? repliesById.get(replyMessageId) : null;
+  return {
+    id: String(m.id),
+    text: m.message || "",
+    date: m.date ? new Date(m.date * 1000).toISOString() : null,
+    out: Boolean(m.out),
+    reactions: normalizeMessageReactions(m),
+    replyTo: replyMessageId ? {
+      messageId: replyMessageId,
+      text: replyMessage ? describeTelegramMessage(replyMessage) : "Повідомлення недоступне",
+      out: replyMessage ? Boolean(replyMessage.out) : null,
+    } : null,
+    forwardedFrom: normalizeForwardedFrom(m?.fwdFrom),
+  };
+};
 
 const parseMessageId = (value) => {
   const messageId = Number(value);
@@ -92,7 +127,17 @@ const handleChatMessages = async (req, res) => {
   const messages = await withTelegramClient(async (client) => {
     const entity = await resolveTelegramPeer(client, { chatId, context: "telegram-chat-messages" });
     const rows = await client.getMessages(entity, { limit });
-    return (rows || []).map(normalizeTelegramMessage);
+    const rowsById = new Map((rows || []).map((m) => [String(m.id), m]));
+    const missingReplyIds = Array.from(new Set((rows || [])
+      .map((m) => m?.replyTo?.replyToMsgId)
+      .filter((id) => id && !rowsById.has(String(id)))
+      .map(Number)));
+    const repliesById = new Map(rowsById);
+    if (missingReplyIds.length) {
+      const fetched = await client.getMessages(entity, { ids: missingReplyIds });
+      (Array.isArray(fetched) ? fetched : [fetched]).filter(Boolean).forEach((m) => repliesById.set(String(m.id), m));
+    }
+    return (rows || []).map((message) => normalizeTelegramMessage(message, repliesById));
   });
   return res.status(200).json({ success: true, messages });
 };
@@ -261,14 +306,55 @@ const handleCalendar = async (_req, res) => {
 };
 
 const handleSendTest = async (req, res) => {
-  const { chatId, username, message } = req.body || {};
+  const { chatId, username } = req.body || {};
+  const message = String(req.body?.message ?? req.body?.text ?? "").trim();
+  const replyToMsgId = req.body?.replyToMsgId === undefined || req.body?.replyToMsgId === null || req.body?.replyToMsgId === "" ? null : parseMessageId(req.body.replyToMsgId);
   const peer = chatId || username;
   if (!peer || !message) return res.status(400).json({ error: "chatId|username and message are required" });
-  await withTelegramClient(async (client) => {
-    const entity = await resolveTelegramPeer(client, { chatId, username, context: "send-test-telegram" });
-    await client.sendMessage(entity, { message });
-  });
-  return res.status(200).json({ success: true });
+  if (req.body?.replyToMsgId && !replyToMsgId) return res.status(400).json({ error: "replyToMsgId must be a positive integer" });
+  try {
+    const sent = await withTelegramClient(async (client) => {
+      const entity = await resolveTelegramPeer(client, { chatId, username, context: "send-test-telegram" });
+      if (replyToMsgId) {
+        const target = await client.getMessages(entity, { ids: [replyToMsgId] });
+        const targetMessage = Array.isArray(target) ? target[0] : target;
+        if (!targetMessage?.id) throw new Error("MESSAGE_ID_INVALID");
+      }
+      return await client.sendMessage(entity, { message, replyTo: replyToMsgId || undefined });
+    });
+    return res.status(200).json({ success: true, message: sent ? normalizeTelegramMessage(sent) : null });
+  } catch (error) {
+    console.error("telegram send message error:", String(error?.message || error));
+    return res.status(400).json({ error: "Telegram send failed", details: toTelegramErrorMessage(error) });
+  }
+};
+
+const handleForwardMessage = async (req, res) => {
+  const { sourceChatId, targetChatId } = req.body || {};
+  const messageId = parseMessageId(req.body?.messageId);
+  if (!sourceChatId) return res.status(400).json({ error: "sourceChatId is required" });
+  if (!targetChatId) return res.status(400).json({ error: "targetChatId is required" });
+  if (!messageId) return res.status(400).json({ error: "messageId must be a positive integer" });
+  try {
+    const result = await withTelegramClient(async (client) => {
+      const sourcePeer = await resolveTelegramPeer(client, { chatId: sourceChatId, context: "telegram-forward-source" });
+      const targetPeer = await resolveTelegramPeer(client, { chatId: targetChatId, context: "telegram-forward-target" });
+      const sourceMessage = await client.getMessages(sourcePeer, { ids: [messageId] });
+      const existing = Array.isArray(sourceMessage) ? sourceMessage[0] : sourceMessage;
+      if (!existing?.id) throw new Error("MESSAGE_ID_INVALID");
+      const forwarded = await client.invoke(new Api.messages.ForwardMessages({
+        fromPeer: sourcePeer,
+        id: [messageId],
+        randomId: [BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000))],
+        toPeer: targetPeer,
+      }));
+      return { updates: forwarded?.className || "Updates" };
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("telegram forwardMessage error:", String(error?.message || error));
+    return res.status(400).json({ error: "Telegram forward failed", details: toTelegramErrorMessage(error) });
+  }
 };
 
 const handleSendTrainerDigest = async (req, res) => {
@@ -337,9 +423,10 @@ export default async function handler(req, res) {
     if (req.method === "GET" && (op === "chatMessages" || op === "chat-messages")) return await handleChatMessages(req, res);
     if ((req.method === "GET" || req.method === "POST") && (op === "chatMeta" || op === "chat-meta")) return await handleChatMeta(req, res);
     if (req.method === "POST" && (op === "setReaction" || op === "set-reaction")) return await handleSetReaction(req, res);
-    if (req.method === "POST" && (op === "sendTest" || op === "send-test")) return await handleSendTest(req, res);
+    if (req.method === "POST" && (op === "sendTest" || op === "send-test" || op === "sendMessage" || op === "send-message")) return await handleSendTest(req, res);
+    if (req.method === "POST" && (op === "forwardMessage" || op === "forward-message")) return await handleForwardMessage(req, res);
     if (req.method === "POST" && (op === "sendTrainerDigest" || op === "send-trainer-digest")) return await handleSendTrainerDigest(req, res);
-    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["calendar", "linkStudent", "listDialogs", "chatMessages", "chatMeta", "setReaction", "sendTest", "sendTrainerDigest"] });
+    return res.status(400).json({ error: "Unknown telegram op", allowedOps: ["calendar", "linkStudent", "listDialogs", "chatMessages", "chatMeta", "setReaction", "sendTest", "sendMessage", "forwardMessage", "sendTrainerDigest"] });
   } catch (error) {
     console.error("telegram consolidated handler error:", String(error?.message || error));
     return res.status(500).json({

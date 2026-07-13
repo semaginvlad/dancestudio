@@ -117,8 +117,11 @@ const removeChosenReaction = (reactions = []) => (reactions || [])
   .filter((r) => r.count > 0);
 
 const isInteractiveReactionTarget = (target) => !!target?.closest?.('a, button, input, textarea, select, [data-reaction-chip="true"], [data-message-action="true"], [data-no-reaction-gesture]');
+const getMessagePreviewText = (message) => String(message?.text || message?.replyTo?.text || (message?.forwardedFrom ? "Переслане повідомлення" : "Повідомлення без тексту")).trim() || "Повідомлення без тексту";
+const getMessageAuthorLabel = (message) => message?.out ? "Ви" : "Співрозмовник";
+const safeSearchText = (value) => String(value || "").normalize("NFKC").toLowerCase();
 
-const MessageBubble = React.memo(function MessageBubble({ message, chatId, onReact, onOpenPicker }) {
+const MessageBubble = React.memo(function MessageBubble({ message, chatId, onReact, onOpenPicker, onQuoteTap, highlighted }) {
   const pointerRef = useRef({ x: 0, y: 0, timer: null, longPressed: false });
   const tapRef = useRef({ time: 0, x: 0, y: 0 });
   const suppressNextTapRef = useRef(false);
@@ -168,7 +171,7 @@ const MessageBubble = React.memo(function MessageBubble({ message, chatId, onRea
   }, [clearLongPress, message, onReact]);
 
   return (
-    <div className={`messages-message-row ${message.out ? "is-out" : "is-in"}`} style={{ marginBottom: reactions.length ? 10 : 8, textAlign: message.out ? "right" : "left" }}>
+    <div id={`telegram-message-${chatId}-${message.id}`} className={`messages-message-row ${message.out ? "is-out" : "is-in"} ${highlighted ? "is-highlighted" : ""}`} style={{ marginBottom: reactions.length ? 10 : 8, textAlign: message.out ? "right" : "left" }}>
       <div className="messages-message-stack">
         <div
           className={`messages-bubble messages-reaction-gesture ${pressed ? "is-pressed" : ""}`}
@@ -179,6 +182,24 @@ const MessageBubble = React.memo(function MessageBubble({ message, chatId, onRea
           onContextMenu={(event) => { event.preventDefault(); if (!isInteractiveReactionTarget(event.target)) onOpenPicker(message, { x: event.clientX, y: event.clientY }); }}
           style={{ display: "inline-block", background: message.out ? `${theme.secondary}22` : theme.input, borderRadius: 14, padding: "7px 11px", maxWidth: "84%", border: `1px solid ${theme.border}` }}
         >
+          {message.forwardedFrom && (
+            <div className="messages-forward-label" title={message.forwardedFrom.title || "Переслане повідомлення"}>
+              Переслано{message.forwardedFrom.title ? ` від ${message.forwardedFrom.title}` : " повідомлення"}
+            </div>
+          )}
+          {message.replyTo && (
+            <button
+              type="button"
+              className="messages-reply-quote"
+              data-no-reaction-gesture="true"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); onQuoteTap?.(message.replyTo.messageId); }}
+              aria-label="Перейти до оригінального повідомлення"
+            >
+              <span className="messages-reply-author">{message.replyTo.out === null ? "Повідомлення" : getMessageAuthorLabel(message.replyTo)}</span>
+              <span className="messages-reply-text">{message.replyTo.text || "Повідомлення недоступне"}</span>
+            </button>
+          )}
           <div style={{ fontSize: 13, color: theme.textMain, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{message.text || "—"}</div>
           <div className="messages-bubble-time">{formatChatTime(message.date)}</div>
         </div>
@@ -384,6 +405,13 @@ export default function MessagesTab({
   const [reactionPicker, setReactionPicker] = useState(null);
   const [reactionError, setReactionError] = useState("");
   const [copyFeedback, setCopyFeedback] = useState("");
+  const [replyDraft, setReplyDraft] = useState(null);
+  const [forwardSheet, setForwardSheet] = useState(null);
+  const [forwardSearch, setForwardSearch] = useState("");
+  const [forwardTargetId, setForwardTargetId] = useState("");
+  const [forwardStatus, setForwardStatus] = useState({ loading: false, error: "" });
+  const [highlightedMessageId, setHighlightedMessageId] = useState("");
+  const composerRef = useRef(null);
   const [metaByChat, setMetaByChat] = useState({});
   const [contactTypeDraft, setContactTypeDraft] = useState("other");
   const [crmStageDraft, setCrmStageDraft] = useState("");
@@ -911,6 +939,14 @@ export default function MessagesTab({
     metaByChat[activeDialog?.id || ""]?.custom_template ||
     "";
   const resolvedDraft = draft || templateText || "";
+  const activeMessagesById = useMemo(() => new Map(orderedMessages.map((m) => [String(m.id), m])), [orderedMessages]);
+  const forwardDialogRows = useMemo(() => {
+    const q = safeSearchText(forwardSearch).trim();
+    return dialogs.filter((d) => {
+      if (!q) return true;
+      return safeSearchText(`${d.title || ""} ${d.username || ""}`).includes(q);
+    });
+  }, [dialogs, forwardSearch]);
 
   const saveMeta = async (chatId, patch) => {
     if (!chatId) return null;
@@ -1141,6 +1177,58 @@ export default function MessagesTab({
     if (!message?.id || String(message.id).startsWith("local_")) return;
     setReactionPicker({ messageId: message.id, x: point?.x || 0, y: point?.y || 0, selectedEmoji: "" });
   }, []);
+
+  const handleReplyAction = useCallback((message) => {
+    if (!message?.id) return;
+    setReactionPicker(null);
+    setReplyDraft({
+      messageId: String(message.id),
+      text: getMessagePreviewText(message),
+      out: Boolean(message.out),
+    });
+    setCopyFeedback("Відповідь обрана");
+    window.setTimeout(() => setCopyFeedback(""), 1400);
+    requestAnimationFrame(() => composerRef.current?.focus?.());
+  }, []);
+
+  const openForwardSheet = useCallback((message) => {
+    if (!message?.id || String(message.id).startsWith("local_")) return;
+    setReactionPicker(null);
+    setForwardSheet({ sourceChatId: activeDialog?.id || "", message });
+    setForwardSearch("");
+    setForwardTargetId(activeDialog?.id || "");
+    setForwardStatus({ loading: false, error: "" });
+  }, [activeDialog?.id]);
+
+  const scrollToOriginalMessage = useCallback((messageId) => {
+    if (!activeDialog?.id || !messageId || !activeMessagesById.has(String(messageId))) return;
+    const node = document.getElementById(`telegram-message-${activeDialog.id}-${messageId}`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(String(messageId));
+    window.setTimeout(() => setHighlightedMessageId(""), 1400);
+  }, [activeDialog?.id, activeMessagesById]);
+
+  const submitForward = useCallback(async () => {
+    if (!forwardSheet?.message?.id || !forwardSheet?.sourceChatId || !forwardTargetId) return;
+    setForwardStatus({ loading: true, error: "" });
+    try {
+      const res = await authFetch("/api/telegram?op=forwardMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceChatId: forwardSheet.sourceChatId, targetChatId: forwardTargetId, messageId: forwardSheet.message.id }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося переслати повідомлення");
+      if (forwardTargetId === activeDialog?.id) await refreshMessages(activeDialog.id);
+      setForwardSheet(null);
+      setForwardStatus({ loading: false, error: "" });
+      setCopyFeedback("Повідомлення переслано");
+      window.setTimeout(() => setCopyFeedback(""), 1800);
+    } catch (error) {
+      setForwardStatus({ loading: false, error: String(error?.message || error) });
+    }
+  }, [activeDialog?.id, forwardSheet, forwardTargetId]);
 
   const copyMessageText = useCallback(async (text) => {
     const value = String(text || "");
@@ -1794,6 +1882,8 @@ export default function MessagesTab({
                       chatId={activeDialog.id}
                       onReact={handleSetReaction}
                       onOpenPicker={openReactionPicker}
+                      onQuoteTap={scrollToOriginalMessage}
+                      highlighted={String(highlightedMessageId) === String(m.id)}
                     />
                   </React.Fragment>
                 );
@@ -1803,30 +1893,55 @@ export default function MessagesTab({
 
             <div className="messages-composer" style={{ marginTop: "auto", borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 800, color: theme.textMain, letterSpacing: "0.01em" }}>Повідомлення</div>
+              {replyDraft && (
+                <div className="messages-composer-reply" data-no-reaction-gesture="true">
+                  <div className="messages-composer-reply-body">
+                    <div className="messages-reply-author">Відповідь · {getMessageAuthorLabel(replyDraft)}</div>
+                    <div className="messages-reply-text">{replyDraft.text}</div>
+                  </div>
+                  <button type="button" aria-label="Скасувати відповідь" onClick={() => setReplyDraft(null)}>×</button>
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
-                <textarea value={resolvedDraft} onChange={(e) => setDraft(e.target.value)} rows={1} placeholder="Повідомлення" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 14, padding: 12, resize: "none", fontSize: 16, lineHeight: 1.35, maxHeight: 132, overflow: "auto", background: theme.input, color: theme.textMain }} />
+                <textarea ref={composerRef} value={resolvedDraft} onChange={(e) => setDraft(e.target.value)} rows={1} placeholder="Повідомлення" style={{ width: "100%", border: `1px solid ${theme.border}`, borderRadius: 14, padding: 12, resize: "none", fontSize: 16, lineHeight: 1.35, maxHeight: 132, overflow: "auto", background: theme.input, color: theme.textMain }} />
                 <button
                   type="button"
                   disabled={!resolvedDraft.trim()}
                   onClick={async () => {
                     if (!resolvedDraft.trim()) return;
+                    const replyForSend = replyDraft;
                     const optimisticMsg = {
                       id: `local_${Date.now()}`,
                       text: resolvedDraft,
                       out: true,
                       date: new Date().toISOString(),
+                      replyTo: replyForSend ? { messageId: replyForSend.messageId, text: replyForSend.text, out: replyForSend.out } : null,
+                      reactions: [],
                     };
                     setMessagesByChat((prev) => ({
                       ...prev,
                       [activeDialog.id]: [...(prev[activeDialog.id] || []), optimisticMsg],
                     }));
 
-                    await authFetch("/api/telegram?op=sendTest", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ chatId: activeDialog.id, message: resolvedDraft }),
-                    });
-                    await refreshMessages(activeDialog.id);
+                    try {
+                      const res = await authFetch("/api/telegram?op=sendTest", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ chatId: activeDialog.id, message: resolvedDraft, replyToMsgId: replyForSend?.messageId || undefined }),
+                      });
+                      const payload = await res.json();
+                      if (!res.ok) throw new Error(payload?.details || payload?.error || "Не вдалося надіслати повідомлення");
+                      setDraft("");
+                      setReplyDraft(null);
+                      await refreshMessages(activeDialog.id);
+                    } catch (error) {
+                      setReactionError(String(error?.message || error));
+                      window.setTimeout(() => setReactionError(""), 4200);
+                      setMessagesByChat((prev) => ({
+                        ...prev,
+                        [activeDialog.id]: (prev[activeDialog.id] || []).filter((item) => item.id !== optimisticMsg.id),
+                      }));
+                    }
                   }}
                   style={{ border: "none", borderRadius: 14, background: "linear-gradient(180deg, #ff6a58 0%, #e74734 100%)", color: "#fff", padding: "11px 18px", cursor: "pointer", fontWeight: 800, boxShadow: "0 12px 24px rgba(255, 89, 66, 0.38)", height: 44 }}
                 >
@@ -1865,10 +1980,51 @@ export default function MessagesTab({
             </div>
             {(() => {
               const msg = (messagesByChat[activeDialog.id] || []).find((item) => String(item.id) === String(reactionPicker.messageId));
-              return msg?.text ? (
-                <button type="button" className="messages-reaction-copy" aria-label="Скопіювати текст повідомлення" onClick={() => copyMessageText(msg.text)}>Копіювати</button>
-              ) : null;
+              if (!msg) return null;
+              return (
+                <div className="messages-action-list">
+                  <button type="button" className="messages-reaction-copy" data-message-action="true" onClick={() => handleReplyAction(msg)}>Відповісти</button>
+                  <button type="button" className="messages-reaction-copy" data-message-action="true" onClick={() => openForwardSheet(msg)}>Переслати</button>
+                  {msg.text ? <button type="button" className="messages-reaction-copy" data-message-action="true" aria-label="Скопіювати текст повідомлення" onClick={() => copyMessageText(msg.text)}>Копіювати</button> : null}
+                </div>
+              );
             })()}
+          </div>
+        </div>
+      )}
+
+
+      {forwardSheet && (
+        <div className="messages-forward-sheet-layer" role="presentation">
+          <button type="button" className="messages-mobile-sheet-backdrop" aria-label="Закрити пересилання" onClick={() => setForwardSheet(null)} />
+          <div className="messages-forward-sheet" role="dialog" aria-modal="true" aria-label="Переслати повідомлення">
+            <div className="messages-mobile-sheet-header">
+              <div>
+                <div className="messages-mobile-sheet-title">Переслати повідомлення</div>
+                <div className="messages-mobile-sheet-subtitle">Оберіть один Telegram чат</div>
+              </div>
+              <button type="button" className="messages-mobile-sheet-close" onClick={() => setForwardSheet(null)} aria-label="Закрити">×</button>
+            </div>
+            <div className="messages-forward-preview">{getMessagePreviewText(forwardSheet.message)}</div>
+            <input className="messages-forward-search" value={forwardSearch} onChange={(e) => setForwardSearch(e.target.value)} placeholder="Пошук чату" />
+            <div className="messages-forward-list">
+              {dialogsError && <div className="messages-forward-state">{dialogsError}</div>}
+              {!dialogsError && !dialogs.length && <div className="messages-forward-state">Чати ще завантажуються…</div>}
+              {!dialogsError && dialogs.length > 0 && !forwardDialogRows.length && <div className="messages-forward-state">Нічого не знайдено</div>}
+              {forwardDialogRows.map((dialog) => (
+                <button key={dialog.id} type="button" className={`messages-forward-row ${forwardTargetId === dialog.id ? "is-selected" : ""}`} onClick={() => setForwardTargetId(dialog.id)}>
+                  <span className="messages-forward-avatar">{String(dialog.title || "?").trim().slice(0, 1).toUpperCase()}</span>
+                  <span className="messages-forward-main">
+                    <span className="messages-forward-title">{dialog.title || "Без назви"}</span>
+                    <span className="messages-forward-subtitle">{dialog.username || dialog.lastMessageText || "Telegram dialog"}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            {forwardStatus.error && <div className="messages-forward-error">{forwardStatus.error}</div>}
+            <button type="button" className="messages-forward-submit" disabled={!forwardTargetId || forwardStatus.loading} onClick={submitForward}>
+              {forwardStatus.loading ? "Пересилаємо…" : "Переслати"}
+            </button>
           </div>
         </div>
       )}
@@ -1993,6 +2149,30 @@ export default function MessagesTab({
         .messages-dialog-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .messages-dialog-subtitle { display: none; font-size: 12px; color: ${theme.textMuted}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .messages-thread { position: relative; overscroll-behavior: contain; }
+        .messages-forward-label { max-width: 220px; margin-bottom: 4px; color: ${theme.primary}; font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .messages-reply-quote, .messages-composer-reply { display: grid; grid-template-columns: 3px minmax(0,1fr); gap: 7px; width: 100%; margin-bottom: 6px; padding: 6px 8px; border: 0; border-radius: 10px; background: rgba(142,142,147,.12); color: ${theme.textMain}; text-align: left; cursor: pointer; }
+        .messages-reply-quote:before, .messages-composer-reply:before { content: ""; width: 3px; border-radius: 999px; background: ${theme.primary}; }
+        .messages-reply-author { display: block; font-size: 11px; font-weight: 900; color: ${theme.primary}; }
+        .messages-reply-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; color: ${theme.textMuted}; line-height: 1.3; }
+        .messages-composer-reply { grid-template-columns: 3px minmax(0,1fr) 28px; align-items: center; cursor: default; }
+        .messages-composer-reply button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(142,142,147,.18); color: ${theme.textMain}; font-size: 18px; cursor: pointer; }
+        .messages-message-row.is-highlighted .messages-bubble { box-shadow: 0 0 0 3px ${theme.primary}55; }
+        .messages-action-list { display: grid; gap: 5px; }
+        .messages-forward-sheet-layer { position: fixed; inset: 0; z-index: 120; display: grid; place-items: end center; }
+        .messages-forward-sheet { width: min(520px, calc(100vw - 20px)); max-height: min(680px, calc(100dvh - 30px)); display: flex; flex-direction: column; gap: 10px; padding: 14px; padding-bottom: max(14px, env(safe-area-inset-bottom)); border: 1px solid ${theme.border}; border-radius: 22px 22px 0 0; background: ${theme.card}; box-shadow: 0 -22px 60px rgba(0,0,0,.34); z-index: 1; }
+        .messages-forward-preview { padding: 9px 10px; border-left: 3px solid ${theme.primary}; border-radius: 12px; background: rgba(142,142,147,.12); color: ${theme.textMain}; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .messages-forward-search { border: 1px solid ${theme.border}; border-radius: 14px; padding: 11px 12px; background: ${theme.input}; color: ${theme.textMain}; font-size: 15px; }
+        .messages-forward-list { min-height: 160px; overflow: auto; display: grid; gap: 5px; -webkit-overflow-scrolling: touch; }
+        .messages-forward-row { display: grid; grid-template-columns: 38px minmax(0,1fr); gap: 10px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: ${theme.textMain}; text-align: left; cursor: pointer; }
+        .messages-forward-row.is-selected { border-color: ${theme.primary}; background: ${theme.primary}16; }
+        .messages-forward-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: ${theme.primary}22; color: ${theme.primary}; font-weight: 900; }
+        .messages-forward-main { min-width: 0; display: grid; gap: 2px; }
+        .messages-forward-title, .messages-forward-subtitle { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .messages-forward-title { font-weight: 800; font-size: 13px; }
+        .messages-forward-subtitle, .messages-forward-state { color: ${theme.textMuted}; font-size: 12px; }
+        .messages-forward-error { color: ${theme.danger}; font-size: 12px; }
+        .messages-forward-submit { min-height: 42px; border: 0; border-radius: 14px; background: linear-gradient(180deg, #ff6a58 0%, #e74734 100%); color: #fff; font-weight: 900; cursor: pointer; }
+        .messages-forward-submit:disabled { opacity: .55; cursor: default; }
         .messages-message-row { display: flex; }
         .messages-message-row.is-out { justify-content: flex-end; }
         .messages-message-row.is-in { justify-content: flex-start; }
