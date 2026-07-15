@@ -492,7 +492,7 @@ export default function StudentsCrmTab({
   const renderWaitlistCard = (w, index) => {
     const st = studentMap[w.studentId];
     const gr = groupMap[w.groupId];
-    if (!gr) return null;
+    const direction = directionsList.find((d) => String(d.id) === String(w.directionId || gr?.directionId || ""));
     const displayName = st ? getDisplayName(st) : (w.name || "Новий контакт");
     const displayContact = w.contact || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
     const status = w.status || "waiting";
@@ -528,13 +528,14 @@ export default function StudentsCrmTab({
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Група</div>
-          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr.name}</div>
+          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>{gr ? "Група" : "Напрямок"}</div>
+          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || direction?.name || "Без конкретної групи"}</div>
+          {gr && direction ? <div style={{ color: theme.textMuted, fontSize: 12, fontWeight: 750, marginTop: 4 }}>{direction.name}</div> : null}
           <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button>
+          {gr ? <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
           <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
         </div>
       </div>

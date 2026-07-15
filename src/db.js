@@ -1560,6 +1560,7 @@ const mapWaitlist = (w) => ({
   id: w.id,
   studentId: w.studentId ?? null,
   groupId: w.groupId ?? "",
+  directionId: w.directionId ?? w.direction_id ?? null,
   dateAdded: w.dateAdded ?? null,
   name: w.name || "",
   contact: w.contact || "",
@@ -1577,7 +1578,8 @@ export async function fetchWaitlist() {
 export async function insertWaitlist(item) {
   const payload = {
     studentId: item.studentId || null,
-    groupId: item.groupId,
+    directionId: item.directionId || null,
+    groupId: item.groupId || null,
     dateAdded: item.dateAdded || new Date().toISOString().slice(0, 10),
     name: item.name || null,
     contact: item.contact || null,
@@ -1592,6 +1594,7 @@ export async function insertWaitlist(item) {
 export async function updateWaitlist(id, patch = {}) {
   const payload = {};
   if (Object.prototype.hasOwnProperty.call(patch, "studentId")) payload.studentId = patch.studentId || null;
+  if (Object.prototype.hasOwnProperty.call(patch, "directionId")) payload.directionId = patch.directionId || null;
   if (Object.prototype.hasOwnProperty.call(patch, "groupId")) payload.groupId = patch.groupId || null;
   if (Object.prototype.hasOwnProperty.call(patch, "dateAdded")) payload.dateAdded = patch.dateAdded || null;
   if (Object.prototype.hasOwnProperty.call(patch, "name")) payload.name = patch.name || null;
