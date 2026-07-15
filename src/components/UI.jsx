@@ -7,9 +7,10 @@ export function Modal({open, onClose, title, children, wide, variant}){
   const isStudentsMobile = variant === "students-mobile";
   const isTrialBookingMobile = variant === "trial-booking-mobile";
   const isPaymentsMobile = variant === "payments-mobile";
+  const isWaitlistMobile = variant === "waitlist-mobile";
   const isAdminMobile = variant === "admin-mobile";
   return(
-    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isTrialBookingMobile ? " ds-modal-overlay--trial-booking-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isTrialBookingMobile ? " ds-modal-overlay--trial-booking-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isWaitlistMobile ? " ds-modal-overlay--waitlist-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
       <style>{`
         @media (max-width: 768px) {
           .ds-modal-overlay--trial-booking-mobile { align-items: flex-end !important; padding: max(10px, env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
@@ -36,6 +37,25 @@ export function Modal({open, onClose, title, children, wide, variant}){
           .ds-modal-overlay--students-mobile .ds-modal-body { padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px)) !important; -webkit-overflow-scrolling: touch; }
           .ds-modal-overlay--students-mobile .student-form-grid, .ds-modal-overlay--students-mobile .student-form-actions { grid-template-columns: 1fr !important; flex-direction: column-reverse !important; align-items: stretch !important; }
           .ds-modal-overlay--students-mobile .student-form-actions button { min-height: 44px !important; width: 100%; }
+
+          .ds-modal-overlay--waitlist-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
+          .ds-modal-overlay--waitlist-mobile .ds-modal-panel { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; max-height: min(88dvh, calc(100dvh - 18px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 16px 16px 0 0 !important; }
+          .ds-modal-overlay--waitlist-mobile .ds-modal-header { padding: 10px 14px 8px !important; flex-shrink: 0; }
+          .ds-modal-overlay--waitlist-mobile .ds-modal-header h3 { font-size: 17px !important; line-height: 1.15 !important; letter-spacing: -0.15px !important; }
+          .ds-modal-overlay--waitlist-mobile .ds-modal-header button { width: 40px !important; height: 40px !important; min-width: 40px !important; min-height: 40px !important; font-size: 15px !important; }
+          .ds-modal-overlay--waitlist-mobile .ds-modal-body { padding: 10px 12px 0 !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scroll-padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+          .ds-modal-overlay--waitlist-mobile .waitlist-form { min-width: 0; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-form > div { min-width: 0; margin-bottom: 10px !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-form label { margin-bottom: 5px !important; font-size: 11px !important; line-height: 1.2 !important; letter-spacing: 0.35px !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-segmented { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px !important; padding: 3px; border: 1px solid ${theme.border}; border-radius: 14px; background: ${theme.input}; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-segmented button { width: 100%; min-width: 0; min-height: 42px !important; height: 42px !important; padding: 0 8px !important; border-radius: 11px !important; box-shadow: none !important; font-size: 13px !important; line-height: 1.1 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-segmented button[aria-pressed="true"] { background: ${theme.primary} !important; color: #fff !important; opacity: 1 !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-segmented button[aria-pressed="false"] { background: ${theme.card} !important; color: ${theme.textMuted} !important; opacity: 1 !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-form input, .ds-modal-overlay--waitlist-mobile .waitlist-form select, .ds-modal-overlay--waitlist-mobile .waitlist-form textarea, .ds-modal-overlay--waitlist-mobile .waitlist-form [style*="cursor: pointer"] { width: 100% !important; min-width: 0 !important; max-width: 100% !important; height: 46px !important; min-height: 46px !important; padding: 0 12px !important; border-radius: 13px !important; font-size: 14px !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-form textarea { height: 82px !important; min-height: 76px !important; padding: 10px 12px !important; resize: vertical; line-height: 1.35 !important; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-actions { position: sticky; bottom: 0; margin: 2px -12px 0 !important; padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important; background: ${theme.card}; border-top: 1px solid ${theme.border}; display: grid !important; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 8px !important; z-index: 2; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-actions button { min-width: 0; min-height: 46px !important; height: 46px !important; padding: 0 10px !important; border-radius: 13px !important; line-height: 1.15 !important; white-space: nowrap; }
+          .ds-modal-overlay--waitlist-mobile .waitlist-actions button[aria-disabled="true"] { opacity: 0.58 !important; color: rgba(255,255,255,0.92) !important; }
           .ds-modal-overlay--payments-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
           .ds-modal-overlay--payments-mobile .ds-modal-panel { width: calc(100vw - 16px) !important; max-width: none !important; max-height: min(94dvh, calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 20px 20px 0 0 !important; }
           .ds-modal-overlay--payments-mobile .ds-modal-header { padding: 14px 16px 12px !important; flex-shrink: 0; }
