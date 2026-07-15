@@ -601,6 +601,8 @@ export default function StudentsCrmTab({
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
           .students-mobile-filter-grid select, .students-mobile-filter-grid input { width: 100% !important; max-width: none !important; min-width: 0 !important; }
+          .students-mobile-primary-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; width: 100%; }
+          .students-mobile-primary-actions button { min-width: 0; min-height: 46px !important; padding: 0 12px !important; white-space: normal !important; line-height: 1.15 !important; overflow-wrap: anywhere; }
         }
       `}</style>
       <div className="students-mobile-only" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 20, padding: 12, gap: 10, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.12)" }}>
@@ -610,6 +612,10 @@ export default function StudentsCrmTab({
             <div style={{ marginTop: 4, color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>{allVisibleStudentsCount} профілів</div>
           </div>
           <button type="button" style={{ ...btnP, minHeight: 44, padding: "0 14px", boxShadow: "none", whiteSpace: "nowrap" }} onClick={() => setModal("addStudent")}>+ Учениця</button>
+        </div>
+        <div className="students-mobile-primary-actions">
+          <button type="button" style={{ ...btnP, background: theme.primary, boxShadow: "none" }} onClick={() => setModal("addTrialBooking")}>+ Запис на пробне</button>
+          <button type="button" style={{ ...btnP, background: theme.warning, boxShadow: "none" }} onClick={() => setModal("addWaitlist")}>+ В резерв</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
           <div style={{ position: "relative", minWidth: 0 }}>
