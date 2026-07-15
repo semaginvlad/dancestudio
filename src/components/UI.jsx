@@ -5,12 +5,30 @@ import { getDisplayName } from "../shared/utils";
 export function Modal({open, onClose, title, children, wide, variant}){
   if(!open) return null;
   const isStudentsMobile = variant === "students-mobile";
+  const isTrialBookingMobile = variant === "trial-booking-mobile";
   const isPaymentsMobile = variant === "payments-mobile";
   const isAdminMobile = variant === "admin-mobile";
   return(
-    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isTrialBookingMobile ? " ds-modal-overlay--trial-booking-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
       <style>{`
         @media (max-width: 768px) {
+          .ds-modal-overlay--trial-booking-mobile { align-items: flex-end !important; padding: max(10px, env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
+          .ds-modal-overlay--trial-booking-mobile .ds-modal-panel { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; max-height: min(88dvh, calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 18px 18px 0 0 !important; }
+          .ds-modal-overlay--trial-booking-mobile .ds-modal-header { padding: 11px 14px 9px !important; flex-shrink: 0; }
+          .ds-modal-overlay--trial-booking-mobile .ds-modal-header h3 { font-size: 17px !important; line-height: 1.15 !important; }
+          .ds-modal-overlay--trial-booking-mobile .ds-modal-header button { width: 38px !important; height: 38px !important; font-size: 16px !important; }
+          .ds-modal-overlay--trial-booking-mobile .ds-modal-body { padding: 10px 12px 0 !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form { display: grid; gap: 0; min-width: 0; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form > div { min-width: 0; margin-bottom: 10px !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form label { margin-bottom: 5px !important; font-size: 11px !important; letter-spacing: 0.35px !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form input, .ds-modal-overlay--trial-booking-mobile .trial-booking-form select, .ds-modal-overlay--trial-booking-mobile .trial-booking-form textarea, .ds-modal-overlay--trial-booking-mobile .trial-booking-form [style*="cursor: pointer"] { width: 100% !important; min-width: 0 !important; max-width: 100% !important; height: 42px !important; min-height: 42px !important; padding: 0 12px !important; font-size: 14px !important; border-radius: 13px !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form textarea { height: auto !important; min-height: 54px !important; padding: 10px 12px !important; resize: vertical; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-form-row { grid-template-columns: 1fr !important; gap: 0 !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-mode-actions { gap: 6px !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-mode-actions button { min-height: 40px !important; padding: 0 10px !important; flex: 1 1 130px; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-help { font-size: 11px !important; line-height: 1.3 !important; margin-top: 0 !important; margin-bottom: 8px !important; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-actions { position: sticky; bottom: 0; margin: 0 -12px !important; padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important; background: ${theme.card}; border-top: 1px solid ${theme.border}; display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px !important; z-index: 2; }
+          .ds-modal-overlay--trial-booking-mobile .trial-booking-actions button { min-width: 0; min-height: 46px !important; padding: 0 10px !important; white-space: normal; line-height: 1.15; }
           .ds-modal-overlay--students-mobile { align-items: flex-end !important; padding: max(8px, env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
           .ds-modal-overlay--students-mobile .ds-modal-panel { width: calc(100vw - 16px) !important; max-width: none !important; max-height: min(92dvh, calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))) !important; border-radius: 20px 20px 0 0 !important; }
           .ds-modal-overlay--students-mobile .ds-modal-header { padding: 14px 16px 12px !important; flex-shrink: 0; }
