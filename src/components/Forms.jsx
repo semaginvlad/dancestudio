@@ -374,19 +374,27 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
   );
 }
 
-export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps }) {
+export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, directionsList = DIRECTIONS }) {
   const [mode, setMode] = useState("existing");
   const [studentId, setStudentId] = useState("");
+  const [directionId, setDirectionId] = useState("");
   const [groupId, setGroupId] = useState("");
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [note, setNote] = useState("");
+  const filteredGroups = directionId ? groups.filter((g) => String(g.directionId) === String(directionId)) : [];
+  const handleDirectionChange = (nextDirectionId) => {
+    setDirectionId(nextDirectionId);
+    const selectedGroup = groups.find((g) => String(g.id) === String(groupId));
+    if (selectedGroup && String(selectedGroup.directionId) !== String(nextDirectionId)) setGroupId("");
+  };
+  const canSubmit = (mode === "existing" ? studentId : name.trim()) && directionId;
   return (
-    <div>
+    <div className="waitlist-form">
       <Field label="Тип контакту">
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
-          <button type="button" style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+        <div className="waitlist-segmented" style={{ display: "flex", gap: 8 }}>
+          <button type="button" aria-pressed={mode === "existing"} style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
+          <button type="button" aria-pressed={mode === "new"} style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
         </div>
       </Field>
       {mode === "existing" ? (
@@ -397,12 +405,23 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps }
           <Field label="Контакт / Instagram"><input style={inputSt} value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
         </>
       )}
-      <Field label="В яку групу чекає? *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="Напрямок *">
+        <select style={{ ...inputSt, cursor: "pointer" }} value={directionId} onChange={(e) => handleDirectionChange(e.target.value)}>
+          <option value="">Оберіть напрямок...</option>
+          {directionsList.map((direction) => <option key={direction.id} value={direction.id}>{direction.name}</option>)}
+        </select>
+      </Field>
+      <Field label="В яку групу чекає?">
+        <select style={{ ...inputSt, cursor: "pointer" }} value={groupId} onChange={(e) => setGroupId(e.target.value)} disabled={!directionId}>
+          <option value="">{directionId ? "Будь-яка група цього напрямку" : "Спочатку оберіть напрямок"}</option>
+          {filteredGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </select>
+      </Field>
       <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+      <div className="waitlist-actions" style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-        <button type="button" style={{ ...btnP, background: theme.warning, opacity: ((mode === "existing" ? studentId : name.trim()) && groupId) ? 1 : .4 }} onClick={() => {
-          if ((mode === "existing" ? studentId : name.trim()) && groupId) onDone({ studentId: mode === "existing" ? studentId : null, groupId, dateAdded: today(), name: name.trim(), contact: contact.trim(), note: note.trim(), status: "waiting" })
+        <button type="button" style={{ ...btnP, background: theme.warning, opacity: canSubmit ? 1 : .4 }} aria-disabled={!canSubmit} onClick={() => {
+          if (canSubmit) onDone({ studentId: mode === "existing" ? studentId : null, directionId, groupId: groupId || null, dateAdded: today(), name: name.trim(), contact: contact.trim(), note: note.trim(), status: "waiting" })
         }}>
           Додати в резерв
         </button>

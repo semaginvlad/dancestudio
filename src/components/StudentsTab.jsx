@@ -110,13 +110,13 @@ export default function StudentsTab({
           </div>
           <div style={{padding:'0 24px 24px 24px', display:'flex', flexDirection:'column', gap:12}}>
             {waitlist.map((w, i) => {
-              const st = studentMap[w.studentId]; const gr = groupMap[w.groupId];
-              if(!st || !gr) return null;
+              const st = studentMap[w.studentId]; const gr = groupMap[w.groupId]; const dir = DIRECTIONS.find((d) => String(d.id) === String(w.directionId || gr?.directionId || ""));
+              if(!st && !w.name) return null;
               return (
                 <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center", background: "#fff", padding: "20px", borderRadius: 20}}>
                   <div style={{display: "flex", gap: 16, alignItems: "center"}}>
                     <div style={{color: theme.textLight, fontSize: 16, fontWeight: 700}}>{i + 1}.</div>
-                    <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{getDisplayName(st)}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr.name}</strong></div></div>
+                    <div><div style={{color:theme.textMain,fontWeight:700,fontSize:16}}>{st ? getDisplayName(st) : w.name}</div><div style={{color:theme.textMuted,fontSize:14, marginTop: 6, fontWeight: 500}}>Хоче в: <strong style={{color:theme.secondary}}>{gr?.name || dir?.name || "будь-яку групу"}</strong></div></div>
                   </div>
                   <button
                     style={{...btnS,padding:"10px 16px",fontSize:14,color:theme.danger, background: theme.input}}
