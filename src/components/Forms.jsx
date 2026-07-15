@@ -316,9 +316,9 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
   }, [displayName, mode, name, selectedStudent]);
 
   return (
-    <div>
+    <div className="trial-booking-form">
       <Field label="Тип запису">
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="trial-booking-mode-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
           <button type="button" style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
         </div>
@@ -331,25 +331,25 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
       )}
 
       <Field label="Ім'я *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} placeholder={mode === "existing" ? displayName || "Ім'я для запису" : "Олена"} /></Field>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="trial-booking-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Field label="Телефон"><input style={inputSt} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+380..." /></Field>
         <Field label="Telegram"><input style={inputSt} value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="@username" /></Field>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="trial-booking-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Field label="Instagram"><input style={inputSt} value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="@instagram" /></Field>
         <Field label="Інший контакт"><input style={inputSt} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="будь-який контакт" /></Field>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div className="trial-booking-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
         <Field label="Дата пробного *"><input type="date" style={inputSt} value={trialDate} onChange={(e) => setTrialDate(e.target.value)} /></Field>
       </div>
       <Field label="Джерело"><input style={inputSt} value={source} onChange={(e) => setSource(e.target.value)} placeholder="Instagram, Telegram, рекомендація..." /></Field>
       <Field label="Нотатка"><textarea style={{ ...inputSt, height: "auto", padding: "16px 20px", minHeight: 70, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-      <div style={{ color: theme.textLight, fontSize: 12, lineHeight: 1.45, marginTop: 8 }}>
+      <div className="trial-booking-help" style={{ color: theme.textLight, fontSize: 12, lineHeight: 1.45, marginTop: 8 }}>
         Новий контакт створює тільки запис на пробне: без учениці, student_groups, attendance або абонемента.
       </div>
-      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
+      <div className="trial-booking-actions" style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
         <button type="button" style={{ ...btnP, opacity: isReady ? 1 : .4 }} onClick={() => {
           if (!isReady) return;
