@@ -42,6 +42,10 @@ export default function StudentsCrmTab({
 }) {
   const [selectedSummaryFilter, setSelectedSummaryFilter] = React.useState("all");
   const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState(false);
+  const [reserveSearch, setReserveSearch] = React.useState("");
+  const [reserveFilterDir, setReserveFilterDir] = React.useState("all");
+  const [reserveFilterGroup, setReserveFilterGroup] = React.useState("all");
+  const [collapsedReserveDirs, setCollapsedReserveDirs] = React.useState({});
 
   const activeWaitlist = waitlist.filter((w) => ["waiting", "contacted"].includes(String(w.status || "waiting")));
   const activeTrialBookingStatuses = new Set(["new", "contacted", "confirmed"]);
@@ -271,6 +275,66 @@ export default function StudentsCrmTab({
       Немає записів за цим фільтром.
     </div>
   );
+  const normalizeReserveText = (value) => String(value || "").trim().toLowerCase();
+  const getWaitlistGroup = (w) => groupMap[w.groupId] || null;
+  const getWaitlistDirectionId = (w) => String(w.directionId || getWaitlistGroup(w)?.directionId || "");
+  const getWaitlistDirection = (w) => {
+    const directionId = getWaitlistDirectionId(w);
+    return directionsList.find((d) => String(d.id) === directionId) || dirMap[directionId] || (directionId ? { id: directionId, name: directionId, color: theme.warning || "#f59e0b" } : { id: "__no_direction__", name: "Без напрямку", color: theme.textMuted });
+  };
+  const getWaitlistDisplayName = (w) => {
+    const st = studentMap[w.studentId];
+    return st ? getDisplayName(st) : (w.name || "Новий контакт");
+  };
+  const getWaitlistDisplayContact = (w) => {
+    const st = studentMap[w.studentId];
+    return w.contact || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
+  };
+  const formatWaitlistDate = (w) => {
+    const raw = w.dateAdded || w.createdAt || w.created_at;
+    if (!raw) return "Дата не вказана";
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? String(raw).slice(0, 10) : date.toLocaleDateString("uk-UA");
+  };
+  const reserveDirections = directionsList.filter((direction) => (
+    activeWaitlist.some((w) => getWaitlistDirectionId(w) === String(direction.id))
+    || groups.some((g) => String(g.directionId) === String(direction.id))
+  ));
+  const reserveGroups = groups.filter((group) => reserveFilterDir === "all" || String(group.directionId) === String(reserveFilterDir));
+  const reserveFilterCount = [reserveSearch.trim(), reserveFilterDir !== "all", reserveFilterGroup !== "all"].filter(Boolean).length;
+  const resetReserveFilters = () => {
+    setReserveSearch("");
+    setReserveFilterDir("all");
+    setReserveFilterGroup("all");
+  };
+  const visibleWaitlist = activeWaitlist.filter((w) => {
+    const group = getWaitlistGroup(w);
+    const direction = getWaitlistDirection(w);
+    const directionId = getWaitlistDirectionId(w);
+    if (reserveFilterDir !== "all" && directionId !== String(reserveFilterDir)) return false;
+    if (reserveFilterGroup !== "all" && String(w.groupId || "") !== String(reserveFilterGroup)) return false;
+    const query = normalizeReserveText(reserveSearch);
+    if (!query) return true;
+    return [
+      getWaitlistDisplayName(w),
+      getWaitlistDisplayContact(w),
+      group?.name,
+      direction?.name,
+      w.note,
+      w.status,
+    ].some((value) => normalizeReserveText(value).includes(query));
+  });
+  const groupedWaitlist = reserveDirections
+    .map((direction) => ({
+      direction,
+      entries: visibleWaitlist.filter((w) => getWaitlistDirectionId(w) === String(direction.id)),
+    }))
+    .filter(({ entries }) => entries.length > 0);
+  const unassignedWaitlist = visibleWaitlist.filter((w) => !getWaitlistDirectionId(w));
+  if (unassignedWaitlist.length) {
+    groupedWaitlist.push({ direction: { id: "__no_direction__", name: "Без напрямку", color: theme.textMuted }, entries: unassignedWaitlist });
+  }
+
 
   const getStatusChips = (st) => {
     const active = getActiveSubscriptions(st.id);
@@ -489,54 +553,77 @@ export default function StudentsCrmTab({
     );
   };
 
+  const renderReserveFilters = () => (
+    <div className="reserve-filters" style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.4fr) minmax(170px, .8fr) minmax(190px, .9fr) auto", gap: 10, alignItems: "center", marginBottom: 14 }}>
+      <input
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        value={reserveSearch}
+        onChange={(e) => setReserveSearch(e.target.value)}
+        placeholder="Пошук у резерві: ім’я, контакт, група, напрямок..."
+      />
+      <select
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        value={reserveFilterDir}
+        onChange={(e) => { setReserveFilterDir(e.target.value); setReserveFilterGroup("all"); }}
+      >
+        <option value="all">Усі напрямки</option>
+        {reserveDirections.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <select
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        value={reserveFilterGroup}
+        onChange={(e) => setReserveFilterGroup(e.target.value)}
+      >
+        <option value="all">Усі групи</option>
+        {reserveGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+      </select>
+      <button type="button" style={{ ...btnS, minHeight: 42, padding: "0 13px", color: reserveFilterCount ? theme.danger : theme.textMuted }} onClick={resetReserveFilters}>Скинути фільтри</button>
+    </div>
+  );
+
   const renderWaitlistCard = (w, index) => {
-    const st = studentMap[w.studentId];
-    const gr = groupMap[w.groupId];
-    const direction = directionsList.find((d) => String(d.id) === String(w.directionId || gr?.directionId || ""));
-    const displayName = st ? getDisplayName(st) : (w.name || "Новий контакт");
-    const displayContact = w.contact || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
+    const gr = getWaitlistGroup(w);
+    const direction = getWaitlistDirection(w);
+    const displayName = getWaitlistDisplayName(w);
+    const displayContact = getWaitlistDisplayContact(w);
     const status = w.status || "waiting";
+    const statusLabel = status === "waiting" ? "Очікує" : status === "contacted" ? "Написали" : status;
 
     return (
       <div key={w.id} className="student-waitlist-card" style={{
         background: theme.card,
         border: `1px solid ${theme.border}`,
-        borderRadius: 18,
-        padding: 16,
+        borderRadius: 16,
+        padding: "12px 14px",
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-        gap: 14,
+        gridTemplateColumns: "minmax(210px, 1.25fr) minmax(180px, 1fr) minmax(105px, .55fr) minmax(220px, 1.15fr)",
+        gap: 12,
         alignItems: "center",
       }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{
-            width: 30,
-            height: 30,
-            borderRadius: 10,
-            display: "grid",
-            placeItems: "center",
-            background: theme.input,
-            color: theme.warning,
-            fontSize: 13,
-            fontWeight: 900,
-            flex: "0 0 auto",
-          }}>{index + 1}</div>
+        <div className="student-waitlist-main" style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
+          <div className="student-waitlist-index" style={{ width: 28, height: 28, borderRadius: 9, display: "grid", placeItems: "center", background: theme.input, color: theme.warning, fontSize: 12, fontWeight: 900, flex: "0 0 auto" }}>{index + 1}</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
-            <div style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
-            {w.note ? <div style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {w.note}</div> : null}
+            <div className="student-waitlist-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 15, lineHeight: 1.15 }}>{displayName}</div>
+            <div className="student-waitlist-contact" style={{ color: theme.textMuted, fontSize: 12.5, fontWeight: 650, marginTop: 4, overflowWrap: "anywhere" }}>{displayContact}</div>
+            <div className="student-waitlist-mobile-date" style={{ display: "none", color: theme.textLight, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{formatWaitlistDate(w)}</div>
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>{gr ? "Група" : "Напрямок"}</div>
-          <div style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || direction?.name || "Без конкретної групи"}</div>
-          {gr && direction ? <div style={{ color: theme.textMuted, fontSize: 12, fontWeight: 750, marginTop: 4 }}>{direction.name}</div> : null}
-          <span style={{ display: "inline-flex", marginTop: 8, padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
+          <div className="student-waitlist-label" style={{ color: theme.textLight, fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Група</div>
+          <div className="student-waitlist-group" style={{ color: gr ? theme.secondary : theme.textMuted, fontWeight: 850, fontSize: 13.5, marginTop: 4 }}>{gr?.name || "Будь-яка група цього напрямку"}</div>
+          <div className="student-waitlist-direction-inline" style={{ color: direction?.color || theme.warning, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{direction?.name || "Без напрямку"}</div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
-          {gr ? <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
+        <div className="student-waitlist-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 12.5 }}>{formatWaitlistDate(w)}</div>
+        <div className="student-waitlist-side" style={{ display: "grid", gap: 8, justifyItems: "end", minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+            <span style={{ display: "inline-flex", padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{statusLabel}</span>
+            {w.note ? <span className="student-waitlist-note" title={w.note} style={{ color: theme.textLight, fontSize: 12, lineHeight: 1.3, textAlign: "right", maxWidth: 260 }}>Нотатка: {w.note}</span> : null}
+          </div>
+          <div className="student-waitlist-actions" style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
+            {gr ? <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
+            <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
+          </div>
         </div>
       </div>
     );
@@ -597,7 +684,22 @@ export default function StudentsCrmTab({
           .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
           .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
           .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
-          .student-waitlist-card button { min-height: 42px !important; flex: 1 1 auto; }
+          .reserve-filters { grid-template-columns: 1fr !important; gap: 8px !important; margin-bottom: 10px !important; }
+          .reserve-filters button, .reserve-filters select, .reserve-filters input { min-height: 42px !important; }
+          .student-waitlist-card button { min-height: 40px !important; flex: 1 1 auto; }
+          .student-waitlist-card { align-items: start !important; }
+          .student-waitlist-index { width: 26px !important; height: 26px !important; }
+          .student-waitlist-name { font-size: 14.5px !important; }
+          .student-waitlist-contact { font-size: 12px !important; margin-top: 2px !important; }
+          .student-waitlist-date { display: none !important; }
+          .student-waitlist-mobile-date { display: block !important; }
+          .student-waitlist-label { display: none !important; }
+          .student-waitlist-group, .student-waitlist-direction-inline { font-size: 12.5px !important; margin-top: 1px !important; }
+          .student-waitlist-side { justify-items: stretch !important; }
+          .student-waitlist-side > div { justify-content: space-between !important; }
+          .student-waitlist-note { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left !important; max-width: none !important; flex: 1 1 150px; }
+          .student-waitlist-actions { justify-content: stretch !important; width: 100%; gap: 6px !important; }
+          .student-waitlist-actions button { padding: 7px 9px !important; font-size: 12px !important; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
@@ -789,9 +891,37 @@ export default function StudentsCrmTab({
               </div>
             )}
             {activeWaitlist.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {activeWaitlist.map((w, i) => renderWaitlistCard(w, i))}
-              </div>
+              <>
+                {renderReserveFilters()}
+                {groupedWaitlist.length > 0 ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {groupedWaitlist.map(({ direction, entries }) => {
+                      const isCollapsed = Boolean(collapsedReserveDirs[direction.id]);
+                      return (
+                        <div key={`reserve_dir_${direction.id}`} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 18, overflow: "hidden" }}>
+                          <button
+                            type="button"
+                            onClick={() => setCollapsedReserveDirs((prev) => ({ ...prev, [direction.id]: !prev[direction.id] }))}
+                            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
+                          >
+                            <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0, flexWrap: "wrap" }}>
+                              <span style={{ width: 9, height: 9, borderRadius: 99, background: direction.color || theme.warning }} />
+                              <span style={{ color: theme.textMain, fontSize: 16, fontWeight: 900 }}>{direction.name}</span>
+                              <span style={{ borderRadius: 999, padding: "4px 9px", background: `${direction.color || theme.warning}18`, color: direction.color || theme.warning, fontSize: 12, fontWeight: 900 }}>{entries.length}</span>
+                            </span>
+                            <span style={{ color: theme.textLight, fontSize: 15, fontWeight: 900 }}>{isCollapsed ? "▼" : "▲"}</span>
+                          </button>
+                          {!isCollapsed && (
+                            <div style={{ padding: "0 10px 10px", display: "grid", gap: 8 }}>
+                              {entries.map((w, i) => renderWaitlistCard(w, i))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : filterEmptyState}
+              </>
             ) : (selectedSummaryFilter === "reserve" ? filterEmptyState : (
               <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>Активного резерву поки немає.</div>
             ))}
