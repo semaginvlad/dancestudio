@@ -496,6 +496,8 @@ export default function StudentsCrmTab({
     const displayName = st ? getDisplayName(st) : (w.name || "Новий контакт");
     const displayContact = w.contact || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
     const status = w.status || "waiting";
+    const rawAddedDate = w.dateAdded || w.createdAt || w.created_at;
+    const displayDate = rawAddedDate ? String(rawAddedDate).slice(0, 10) : "";
 
     return (
       <div key={w.id} className="student-waitlist-card" style={{
@@ -527,12 +529,16 @@ export default function StudentsCrmTab({
             <div className="student-waitlist-contact" style={{ color: theme.textMuted, fontSize: 12.5, fontWeight: 650, marginTop: 3, overflowWrap: "anywhere" }}>{displayContact}</div>
             {w.note ? <div className="student-waitlist-note" style={{ color: theme.textLight, fontSize: 12, marginTop: 5, lineHeight: 1.25, overflowWrap: "anywhere" }}>Нотатка: {w.note}</div> : null}
           </div>
+          <div className="student-waitlist-mobile-meta" style={{ display: "none" }}>
+            {displayDate ? <span className="student-waitlist-date">{displayDate}</span> : null}
+            <span className="student-waitlist-status" style={{ display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, lineHeight: 1, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
+          </div>
         </div>
-        <div style={{ minWidth: 0 }}>
+        <div className="student-waitlist-info" style={{ minWidth: 0 }}>
           <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>{gr ? "Група" : "Напрямок"}</div>
           <div className="student-waitlist-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 13.5, marginTop: 3, overflowWrap: "anywhere" }}>{gr?.name || direction?.name || "Без конкретної групи"}</div>
           {gr && direction ? <div className="student-waitlist-direction" style={{ color: theme.textMuted, fontSize: 12, fontWeight: 750, marginTop: 2, overflowWrap: "anywhere" }}>{direction.name}</div> : null}
-          <span className="student-waitlist-status" style={{ display: "inline-flex", marginTop: 6, padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, lineHeight: 1, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
+          <span className="student-waitlist-status student-waitlist-desktop-status" style={{ display: "inline-flex", marginTop: 6, padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, lineHeight: 1, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
         </div>
         <div className="student-waitlist-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 }}>
           <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
@@ -582,15 +588,25 @@ export default function StudentsCrmTab({
           .student-mobile-card .students-actions select { width: 100% !important; grid-column: 1 / -1; }
           .student-mobile-card .students-actions button { min-height: 44px !important; }
           .student-trial-card, .student-waitlist-card { grid-template-columns: 1fr !important; padding: 12px !important; gap: 12px !important; }
-          .student-waitlist-card { padding: 8px 9px !important; gap: 7px !important; border-radius: 13px !important; align-items: start !important; min-width: 0 !important; overflow: hidden !important; }
-          .student-waitlist-main { gap: 7px !important; min-width: 0 !important; }
-          .student-waitlist-main > div:last-child { min-width: 0 !important; }
+          .student-waitlist-card { padding: 8px 9px !important; gap: 6px !important; border-radius: 13px !important; align-items: start !important; min-width: 0 !important; overflow: hidden !important; }
+          .student-waitlist-main { display: grid !important; grid-template-columns: 22px minmax(0, 1fr) auto !important; gap: 7px !important; align-items: start !important; min-width: 0 !important; }
+          .student-waitlist-main > div:nth-child(2) { min-width: 0 !important; overflow: hidden !important; }
+          .student-waitlist-mobile-meta { display: flex !important; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 48px; max-width: 82px; }
+          .student-waitlist-date { color: ${theme.textLight}; font-size: 10.5px; font-weight: 850; line-height: 1; white-space: nowrap; }
+          .student-waitlist-desktop-status { display: none !important; }
           .student-waitlist-index { width: 22px !important; height: 22px !important; border-radius: 7px !important; font-size: 10.5px !important; margin-top: 1px; }
-          .student-waitlist-name { font-size: 14px !important; line-height: 1.08 !important; overflow-wrap: anywhere !important; }
-          .student-waitlist-contact { font-size: 11.5px !important; margin-top: 1px !important; line-height: 1.18 !important; overflow-wrap: anywhere !important; }
-          .student-waitlist-note { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 11.5px !important; line-height: 1.2 !important; margin-top: 3px !important; overflow-wrap: anywhere !important; }
-          .student-waitlist-group, .student-waitlist-direction { font-size: 12px !important; line-height: 1.15 !important; margin-top: 1px !important; overflow-wrap: anywhere !important; }
-          .student-waitlist-status { padding: 3px 7px !important; font-size: 11px !important; margin-top: 4px !important; }
+          .student-waitlist-name, .student-waitlist-contact, .student-waitlist-note, .student-waitlist-group, .student-waitlist-direction { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+          .student-waitlist-name { font-size: 14px !important; line-height: 1.08 !important; }
+          .student-waitlist-contact { font-size: 11.5px !important; margin-top: 1px !important; line-height: 1.18 !important; }
+          .student-waitlist-note { display: block !important; font-size: 11.5px !important; line-height: 1.15 !important; margin-top: 2px !important; }
+          .student-waitlist-note::before { content: none !important; }
+          .student-waitlist-info { display: flex !important; gap: 5px !important; align-items: center !important; min-width: 0 !important; overflow: hidden !important; }
+          .student-waitlist-info > div:first-child { display: none !important; }
+          .student-waitlist-group, .student-waitlist-direction { font-size: 12px !important; line-height: 1.15 !important; margin-top: 0 !important; min-width: 0 !important; }
+          .student-waitlist-group { flex: 1 1 auto; }
+          .student-waitlist-direction { flex: 0 1 auto; }
+          .student-waitlist-direction::before { content: "· "; color: ${theme.textLight}; }
+          .student-waitlist-status { padding: 3px 7px !important; font-size: 11px !important; margin-top: 0 !important; }
           .student-waitlist-actions { justify-content: stretch !important; width: 100%; gap: 5px !important; min-width: 0 !important; }
           .student-waitlist-actions button { min-height: 36px !important; flex: 1 1 96px; min-width: 0 !important; padding: 6px 7px !important; font-size: 11.5px !important; line-height: 1.05 !important; white-space: normal !important; }
           .student-trial-card { padding: 9px 10px !important; gap: 7px !important; align-items: start !important; }
