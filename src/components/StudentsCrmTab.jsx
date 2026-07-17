@@ -554,15 +554,15 @@ export default function StudentsCrmTab({
   };
 
   const renderReserveFilters = () => (
-    <div className="reserve-filters" style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.4fr) minmax(170px, .8fr) minmax(190px, .9fr) auto", gap: 10, alignItems: "center", marginBottom: 14 }}>
+    <div className="reserve-filters" style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.4fr) minmax(170px, .8fr) minmax(190px, .9fr) auto", gap: 8, alignItems: "center", marginBottom: 12, minWidth: 0 }}>
       <input
-        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0, height: 40 }}
         value={reserveSearch}
         onChange={(e) => setReserveSearch(e.target.value)}
         placeholder="Пошук у резерві: ім’я, контакт, група, напрямок..."
       />
       <select
-        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0, height: 40 }}
         value={reserveFilterDir}
         onChange={(e) => { setReserveFilterDir(e.target.value); setReserveFilterGroup("all"); }}
       >
@@ -570,14 +570,14 @@ export default function StudentsCrmTab({
         {reserveDirections.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
       </select>
       <select
-        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0 }}
+        style={{ ...inputSt, width: "100%", maxWidth: "none", minWidth: 0, height: 40 }}
         value={reserveFilterGroup}
         onChange={(e) => setReserveFilterGroup(e.target.value)}
       >
         <option value="all">Усі групи</option>
         {reserveGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
       </select>
-      <button type="button" style={{ ...btnS, minHeight: 42, padding: "0 13px", color: reserveFilterCount ? theme.danger : theme.textMuted }} onClick={resetReserveFilters}>Скинути фільтри</button>
+      <button type="button" style={{ ...btnS, minHeight: 40, padding: "0 11px", color: reserveFilterCount ? theme.danger : theme.textMuted, whiteSpace: "nowrap" }} onClick={resetReserveFilters}>Скинути фільтри</button>
     </div>
   );
 
@@ -593,36 +593,37 @@ export default function StudentsCrmTab({
       <div key={w.id} className="student-waitlist-card" style={{
         background: theme.card,
         border: `1px solid ${theme.border}`,
-        borderRadius: 16,
-        padding: "12px 14px",
+        borderRadius: 14,
+        padding: "10px 12px",
         display: "grid",
         gridTemplateColumns: "minmax(210px, 1.25fr) minmax(180px, 1fr) minmax(105px, .55fr) minmax(220px, 1.15fr)",
-        gap: 12,
+        gap: 10,
         alignItems: "center",
+        minWidth: 0,
       }}>
         <div className="student-waitlist-main" style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
           <div className="student-waitlist-index" style={{ width: 28, height: 28, borderRadius: 9, display: "grid", placeItems: "center", background: theme.input, color: theme.warning, fontSize: 12, fontWeight: 900, flex: "0 0 auto" }}>{index + 1}</div>
           <div style={{ minWidth: 0 }}>
-            <div className="student-waitlist-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 15, lineHeight: 1.15 }}>{displayName}</div>
-            <div className="student-waitlist-contact" style={{ color: theme.textMuted, fontSize: 12.5, fontWeight: 650, marginTop: 4, overflowWrap: "anywhere" }}>{displayContact}</div>
-            <div className="student-waitlist-mobile-date" style={{ display: "none", color: theme.textLight, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{formatWaitlistDate(w)}</div>
+            <div className="student-waitlist-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 15, lineHeight: 1.12, overflowWrap: "anywhere" }}>{displayName}</div>
+            <div className="student-waitlist-contact" style={{ color: theme.textMuted, fontSize: 12.5, fontWeight: 650, marginTop: 3, overflowWrap: "anywhere" }}>{displayContact}</div>
+            <div className="student-waitlist-mobile-date" style={{ display: "none", color: theme.textLight, fontSize: 11.5, fontWeight: 800, marginTop: 2 }}>{formatWaitlistDate(w)}</div>
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
           <div className="student-waitlist-label" style={{ color: theme.textLight, fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Група</div>
-          <div className="student-waitlist-group" style={{ color: gr ? theme.secondary : theme.textMuted, fontWeight: 850, fontSize: 13.5, marginTop: 4 }}>{gr?.name || "Будь-яка група цього напрямку"}</div>
-          <div className="student-waitlist-direction-inline" style={{ color: direction?.color || theme.warning, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{direction?.name || "Без напрямку"}</div>
+          <div className="student-waitlist-group" style={{ color: gr ? theme.secondary : theme.textMuted, fontWeight: 850, fontSize: 13.5, marginTop: 3, overflowWrap: "anywhere" }}>{gr?.name || "Будь-яка група цього напрямку"}</div>
+          <div className="student-waitlist-direction-inline" style={{ color: direction?.color || theme.warning, fontSize: 12, fontWeight: 800, marginTop: 2, overflowWrap: "anywhere" }}>{direction?.name || "Без напрямку"}</div>
         </div>
         <div className="student-waitlist-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 12.5 }}>{formatWaitlistDate(w)}</div>
         <div className="student-waitlist-side" style={{ display: "grid", gap: 8, justifyItems: "end", minWidth: 0 }}>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
-            <span style={{ display: "inline-flex", padding: "5px 9px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 12, fontWeight: 900 }}>{statusLabel}</span>
+            <span className="student-waitlist-status" style={{ display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, fontWeight: 900, lineHeight: 1 }}>{statusLabel}</span>
             {w.note ? <span className="student-waitlist-note" title={w.note} style={{ color: theme.textLight, fontSize: 12, lineHeight: 1.3, textAlign: "right", maxWidth: 260 }}>Нотатка: {w.note}</span> : null}
           </div>
-          <div className="student-waitlist-actions" style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
-            {gr ? <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
-            <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
+          <div className="student-waitlist-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 }}>
+            <button style={{ ...btnS, padding: "7px 9px", fontSize: 12.5 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
+            {gr ? <button style={{ ...btnS, padding: "7px 9px", fontSize: 12.5 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
+            <button style={{ ...btnS, padding: "7px 9px", fontSize: 12.5, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
           </div>
         </div>
       </div>
@@ -684,22 +685,33 @@ export default function StudentsCrmTab({
           .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
           .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
           .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
-          .reserve-filters { grid-template-columns: 1fr !important; gap: 8px !important; margin-bottom: 10px !important; }
-          .reserve-filters button, .reserve-filters select, .reserve-filters input { min-height: 42px !important; }
-          .student-waitlist-card button { min-height: 40px !important; flex: 1 1 auto; }
-          .student-waitlist-card { align-items: start !important; }
-          .student-waitlist-index { width: 26px !important; height: 26px !important; }
-          .student-waitlist-name { font-size: 14.5px !important; }
-          .student-waitlist-contact { font-size: 12px !important; margin-top: 2px !important; }
+          .reserve-filters { grid-template-columns: 1fr !important; gap: 6px !important; margin-bottom: 8px !important; min-width: 0 !important; }
+          .reserve-filters button, .reserve-filters select, .reserve-filters input { min-height: 38px !important; height: 38px !important; width: 100% !important; max-width: none !important; min-width: 0 !important; font-size: 12.5px !important; border-radius: 11px !important; }
+          .reserve-filters button { min-height: 36px !important; height: 36px !important; justify-self: start !important; width: auto !important; padding: 0 10px !important; }
+          .reserve-direction-list { gap: 7px !important; }
+          .reserve-direction-section { border-radius: 14px !important; min-width: 0 !important; }
+          .reserve-direction-toggle { padding: 9px 10px !important; gap: 7px !important; min-height: 40px !important; }
+          .reserve-direction-title { gap: 6px !important; flex-wrap: nowrap !important; overflow: hidden !important; }
+          .reserve-direction-title span:nth-child(2) { font-size: 14px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+          .reserve-direction-count { padding: 2px 7px !important; font-size: 11px !important; flex: 0 0 auto; }
+          .reserve-direction-entries { padding: 0 6px 6px !important; gap: 6px !important; }
+          .student-waitlist-card button { min-height: 36px !important; flex: 1 1 96px; min-width: 0 !important; }
+          .student-waitlist-card { align-items: start !important; border-radius: 13px !important; padding: 8px 9px !important; gap: 7px !important; min-width: 0 !important; overflow: hidden !important; }
+          .student-waitlist-main { gap: 7px !important; min-width: 0 !important; }
+          .student-waitlist-main > div:last-child { min-width: 0 !important; }
+          .student-waitlist-index { width: 22px !important; height: 22px !important; border-radius: 7px !important; font-size: 10.5px !important; margin-top: 1px; }
+          .student-waitlist-name { font-size: 14px !important; line-height: 1.08 !important; overflow-wrap: anywhere !important; }
+          .student-waitlist-contact { font-size: 11.5px !important; margin-top: 1px !important; line-height: 1.18 !important; overflow-wrap: anywhere !important; }
           .student-waitlist-date { display: none !important; }
           .student-waitlist-mobile-date { display: block !important; }
           .student-waitlist-label { display: none !important; }
-          .student-waitlist-group, .student-waitlist-direction-inline { font-size: 12.5px !important; margin-top: 1px !important; }
-          .student-waitlist-side { justify-items: stretch !important; }
-          .student-waitlist-side > div { justify-content: space-between !important; }
-          .student-waitlist-note { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left !important; max-width: none !important; flex: 1 1 150px; }
-          .student-waitlist-actions { justify-content: stretch !important; width: 100%; gap: 6px !important; }
-          .student-waitlist-actions button { padding: 7px 9px !important; font-size: 12px !important; }
+          .student-waitlist-group, .student-waitlist-direction-inline { font-size: 12px !important; line-height: 1.15 !important; margin-top: 1px !important; overflow-wrap: anywhere !important; }
+          .student-waitlist-side { justify-items: stretch !important; gap: 6px !important; }
+          .student-waitlist-side > div { justify-content: flex-start !important; min-width: 0 !important; gap: 6px !important; }
+          .student-waitlist-status { padding: 3px 7px !important; font-size: 11px !important; }
+          .student-waitlist-note { display: -webkit-box !important; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-align: left !important; max-width: none !important; flex: 1 1 120px; min-width: 0 !important; font-size: 11.5px !important; line-height: 1.2 !important; overflow-wrap: anywhere !important; }
+          .student-waitlist-actions { justify-content: stretch !important; width: 100%; gap: 5px !important; min-width: 0 !important; }
+          .student-waitlist-actions button { padding: 6px 7px !important; font-size: 11.5px !important; line-height: 1.05 !important; white-space: normal !important; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
@@ -894,25 +906,26 @@ export default function StudentsCrmTab({
               <>
                 {renderReserveFilters()}
                 {groupedWaitlist.length > 0 ? (
-                  <div style={{ display: "grid", gap: 10 }}>
+                  <div className="reserve-direction-list" style={{ display: "grid", gap: 8, minWidth: 0 }}>
                     {groupedWaitlist.map(({ direction, entries }) => {
                       const isCollapsed = Boolean(collapsedReserveDirs[direction.id]);
                       return (
-                        <div key={`reserve_dir_${direction.id}`} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 18, overflow: "hidden" }}>
+                        <div className="reserve-direction-section" key={`reserve_dir_${direction.id}`} style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 16, overflow: "hidden", minWidth: 0 }}>
                           <button
                             type="button"
                             onClick={() => setCollapsedReserveDirs((prev) => ({ ...prev, [direction.id]: !prev[direction.id] }))}
-                            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "13px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
+                            className="reserve-direction-toggle"
+                            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "11px 13px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", minWidth: 0 }}
                           >
-                            <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0, flexWrap: "wrap" }}>
-                              <span style={{ width: 9, height: 9, borderRadius: 99, background: direction.color || theme.warning }} />
-                              <span style={{ color: theme.textMain, fontSize: 16, fontWeight: 900 }}>{direction.name}</span>
-                              <span style={{ borderRadius: 999, padding: "4px 9px", background: `${direction.color || theme.warning}18`, color: direction.color || theme.warning, fontSize: 12, fontWeight: 900 }}>{entries.length}</span>
+                            <span className="reserve-direction-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
+                              <span style={{ width: 8, height: 8, borderRadius: 99, background: direction.color || theme.warning, flex: "0 0 auto" }} />
+                              <span style={{ color: theme.textMain, fontSize: 15.5, fontWeight: 900, minWidth: 0, overflowWrap: "anywhere" }}>{direction.name}</span>
+                              <span className="reserve-direction-count" style={{ borderRadius: 999, padding: "3px 8px", background: `${direction.color || theme.warning}18`, color: direction.color || theme.warning, fontSize: 11.5, fontWeight: 900 }}>{entries.length}</span>
                             </span>
                             <span style={{ color: theme.textLight, fontSize: 15, fontWeight: 900 }}>{isCollapsed ? "▼" : "▲"}</span>
                           </button>
                           {!isCollapsed && (
-                            <div style={{ padding: "0 10px 10px", display: "grid", gap: 8 }}>
+                            <div className="reserve-direction-entries" style={{ padding: "0 8px 8px", display: "grid", gap: 7, minWidth: 0 }}>
                               {entries.map((w, i) => renderWaitlistCard(w, i))}
                             </div>
                           )}
