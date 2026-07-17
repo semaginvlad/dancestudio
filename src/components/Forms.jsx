@@ -374,14 +374,19 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
   );
 }
 
-export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, directionsList = DIRECTIONS }) {
-  const [mode, setMode] = useState("existing");
-  const [studentId, setStudentId] = useState("");
-  const [directionId, setDirectionId] = useState("");
-  const [groupId, setGroupId] = useState("");
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
-  const [note, setNote] = useState("");
+export function WaitlistForm({ initial, onDone, onCancel, students, groups, studentGrps, directionsList = DIRECTIONS, submitLabel }) {
+  const initialGroup = groups.find((g) => String(g.id) === String(initial?.groupId || ""));
+  const initialDirectionId = initial?.directionId || initialGroup?.directionId || "";
+  const isEditing = Boolean(initial?.id);
+  const fixedMode = isEditing ? (initial?.studentId ? "existing" : "new") : null;
+  const [mode, setMode] = useState(fixedMode || "existing");
+  const [studentId, setStudentId] = useState(initial?.studentId || "");
+  const [directionId, setDirectionId] = useState(initialDirectionId);
+  const [groupId, setGroupId] = useState(initial?.groupId || "");
+  const [name, setName] = useState(initial?.name || "");
+  const [contact, setContact] = useState(initial?.contact || "");
+  const [note, setNote] = useState(initial?.note || "");
+  const [isSaving, setIsSaving] = useState(false);
   const filteredGroups = directionId ? groups.filter((g) => String(g.directionId) === String(directionId)) : [];
   const handleDirectionChange = (nextDirectionId) => {
     setDirectionId(nextDirectionId);
@@ -389,12 +394,23 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, 
     if (selectedGroup && String(selectedGroup.directionId) !== String(nextDirectionId)) setGroupId("");
   };
   const canSubmit = (mode === "existing" ? studentId : name.trim()) && directionId;
+  const handleSubmit = async () => {
+    if (!canSubmit || isSaving) return;
+    const payload = { studentId: mode === "existing" ? studentId : null, directionId, groupId: groupId || null, name: name.trim(), contact: contact.trim(), note: note.trim() };
+    if (!isEditing) { payload.dateAdded = today(); payload.status = "waiting"; }
+    setIsSaving(true);
+    try {
+      await onDone(payload);
+    } finally {
+      setIsSaving(false);
+    }
+  };
   return (
     <div className="waitlist-form">
       <Field label="Тип контакту">
-        <div className="waitlist-segmented" style={{ display: "flex", gap: 8 }}>
-          <button type="button" aria-pressed={mode === "existing"} style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
-          <button type="button" aria-pressed={mode === "new"} style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+        <div className="waitlist-segmented" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" aria-pressed={mode === "existing"} disabled={isEditing} style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7, cursor: isEditing ? "default" : "pointer" }} onClick={() => { if (!isEditing) setMode("existing"); }}>Існуюча учениця</button>
+          <button type="button" aria-pressed={mode === "new"} disabled={isEditing} style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7, cursor: isEditing ? "default" : "pointer" }} onClick={() => { if (!isEditing) setMode("new"); }}>Новий контакт</button>
         </div>
       </Field>
       {mode === "existing" ? (
@@ -420,10 +436,8 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, 
       <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       <div className="waitlist-actions" style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
         <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-        <button type="button" style={{ ...btnP, background: theme.warning, opacity: canSubmit ? 1 : .4 }} aria-disabled={!canSubmit} onClick={() => {
-          if (canSubmit) onDone({ studentId: mode === "existing" ? studentId : null, directionId, groupId: groupId || null, dateAdded: today(), name: name.trim(), contact: contact.trim(), note: note.trim(), status: "waiting" })
-        }}>
-          Додати в резерв
+        <button type="button" disabled={!canSubmit || isSaving} style={{ ...btnP, background: theme.warning, opacity: canSubmit && !isSaving ? 1 : .4 }} aria-disabled={!canSubmit || isSaving} onClick={handleSubmit}>
+          {isSaving ? "Зберігаємо..." : (submitLabel || (isEditing ? "Зберегти зміни" : "Додати в резерв"))}
         </button>
       </div>
     </div>

@@ -42,8 +42,14 @@ export default function StudentsCrmTab({
 }) {
   const [selectedSummaryFilter, setSelectedSummaryFilter] = React.useState("all");
   const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState(false);
+  const [waitlistMode, setWaitlistMode] = React.useState("active");
+  const [openWaitlistStatusId, setOpenWaitlistStatusId] = React.useState(null);
 
-  const activeWaitlist = waitlist.filter((w) => ["waiting", "contacted"].includes(String(w.status || "waiting")));
+  const waitlistActiveStatuses = new Set(["waiting", "contacted", "offered"]);
+  const waitlistCompletedStatuses = new Set(["joined", "declined", "removed"]);
+  const getWaitlistStatus = (w) => String(w.status || "waiting");
+  const activeWaitlist = waitlist.filter((w) => waitlistActiveStatuses.has(getWaitlistStatus(w)));
+  const completedWaitlist = waitlist.filter((w) => waitlistCompletedStatuses.has(getWaitlistStatus(w)));
   const activeTrialBookingStatuses = new Set(["new", "contacted", "confirmed"]);
   const activeTrialBookings = trialBookings.filter((booking) => activeTrialBookingStatuses.has(String(booking.status || "new")));
   const trialHistoryStatuses = new Set(["no_show", "declined", "cancelled", "came", "became_student"]);
@@ -131,24 +137,30 @@ export default function StudentsCrmTab({
     };
   };
 
-  const markWaitlistContacted = async (w) => {
+  const waitlistStatusActions = [
+    { status: "waiting", label: "Очікує", color: theme.warning || "#f59e0b", background: "rgba(245, 158, 11, 0.16)" },
+    { status: "contacted", label: "Написали", color: theme.primary || "#2563eb", background: "rgba(37, 99, 235, 0.14)" },
+    { status: "offered", label: "Запропонували групу", color: theme.secondary || "#7c3aed", background: "rgba(124, 58, 237, 0.14)" },
+    { status: "joined", label: "Записалась", color: theme.success || "#16a34a", background: "rgba(22, 163, 74, 0.14)" },
+    { status: "declined", label: "Відмовилась", color: theme.textMuted || "#64748b", background: "rgba(100, 116, 139, 0.14)" },
+    { status: "removed", label: "Прибрано", color: theme.danger || "#dc2626", background: "rgba(220, 38, 38, 0.12)" },
+  ];
+  const waitlistStatusById = Object.fromEntries(waitlistStatusActions.map((item) => [item.status, item]));
+
+  const updateWaitlistStatus = async (w, nextStatus) => {
     try {
-      const next = await db.updateWaitlist(w.id, { status: "contacted" });
+      const next = await db.updateWaitlist(w.id, { status: nextStatus });
       updateWaitlistRow(next);
+      setOpenWaitlistStatusId(null);
     } catch (e) {
-      console.error("Failed to mark waitlist entry as contacted:", e);
-      alert(`Не вдалося оновити резерв: ${e?.message || e}`);
+      console.error("Failed to update waitlist status:", e);
+      alert(`Не вдалося змінити статус резерву: ${e?.message || e}`);
     }
   };
 
   const removeWaitlistEntry = async (w) => {
-    try {
-      const next = await db.updateWaitlist(w.id, { status: "removed" });
-      updateWaitlistRow(next);
-    } catch (e) {
-      console.error("Failed to remove waitlist entry:", e);
-      alert(`Не вдалося прибрати з резерву: ${e?.message || e}`);
-    }
+    if (!window.confirm("Прибрати запис із резерву? Запис не буде видалено, лише отримає статус ‘Прибрано’.")) return;
+    await updateWaitlistStatus(w, "removed");
   };
 
   const joinWaitlistEntry = async (w) => {
@@ -229,7 +241,7 @@ export default function StudentsCrmTab({
     { filter: "active", label: "Активні", value: activeStudentIds.size, hint: "у групах або з активним абонементом", color: theme.success || "#16a34a" },
     { filter: "no_subscription", label: "Без абонемента", value: studentsWithoutSubCount, hint: "є група, немає активного абонемента", color: theme.textMuted },
     { filter: "debt", label: "Борг", value: debtStudentIds.size, hint: "борг / unpaid у доступних даних", color: theme.danger || "#dc2626" },
-    { filter: "reserve", label: "Резерв", value: activeWaitlist.length, hint: "waiting / contacted", color: theme.warning || "#f59e0b" },
+    { filter: "reserve", label: "Резерв", value: activeWaitlist.length, hint: "очікує / написали / запропонували", color: theme.warning || "#f59e0b" },
     { filter: "trials", label: "Пробні", value: activeTrialBookings.length, hint: "активні записи на пробне", color: theme.primary || "#2563eb" },
     { filter: "archive", label: "Архів", value: studentsByDirection.inactive.length, hint: "неактивні профілі", color: theme.textMuted },
   ];
@@ -489,6 +501,61 @@ export default function StudentsCrmTab({
     );
   };
 
+  const renderWaitlistStatusSelector = (w, status, variant) => {
+    const meta = waitlistStatusById[status] || waitlistStatusById.waiting;
+    const isOpen = openWaitlistStatusId === w.id;
+    return (
+      <div className="student-waitlist-status-wrap" style={{ position: "relative", display: "inline-flex", maxWidth: "100%" }}>
+        <button
+          type="button"
+          className="student-waitlist-status"
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          onClick={(e) => { e.stopPropagation(); setOpenWaitlistStatusId(isOpen ? null : w.id); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: variant === "mobile" ? "3px 7px" : "4px 8px",
+            borderRadius: 999,
+            border: `1px solid ${meta.color}44`,
+            background: meta.background,
+            color: meta.color,
+            fontSize: 11.5,
+            lineHeight: 1,
+            fontWeight: 900,
+            cursor: "pointer",
+            maxWidth: "100%",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{meta.label}</span>
+          <span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
+        </button>
+        {isOpen ? (
+          <div role="menu" className="student-waitlist-status-menu" style={{ position: "absolute", zIndex: 20, right: 0, top: "calc(100% + 6px)", width: 210, maxWidth: "calc(100vw - 24px)", display: "grid", gap: 4, padding: 6, borderRadius: 14, border: `1px solid ${theme.border}`, background: theme.card, boxShadow: "0 18px 42px rgba(15,23,42,.18)" }}>
+            {waitlistStatusActions.map((item) => {
+              const selected = item.status === status;
+              return (
+                <button
+                  key={item.status}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selected}
+                  onClick={(e) => { e.stopPropagation(); updateWaitlistStatus(w, item.status); }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 34, borderRadius: 10, border: `1px solid ${selected ? item.color : "transparent"}`, background: selected ? item.background : "transparent", color: selected ? item.color : theme.textMain, padding: "7px 9px", fontSize: 12, fontWeight: 850, cursor: "pointer", textAlign: "left" }}
+                >
+                  <span>{item.label}</span>
+                  <span style={{ color: item.color, width: 14, textAlign: "center" }}>{selected ? "✓" : ""}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderWaitlistCard = (w, index) => {
     const st = studentMap[w.studentId];
     const gr = groupMap[w.groupId];
@@ -510,6 +577,7 @@ export default function StudentsCrmTab({
         gap: 10,
         alignItems: "center",
         minWidth: 0,
+        overflow: openWaitlistStatusId === w.id ? "visible" : undefined,
       }}>
         <div className="student-waitlist-main" style={{ display: "flex", gap: 9, alignItems: "flex-start", minWidth: 0 }}>
           <div className="student-waitlist-index" style={{
@@ -531,23 +599,56 @@ export default function StudentsCrmTab({
           </div>
           <div className="student-waitlist-mobile-meta" style={{ display: "none" }}>
             {displayDate ? <span className="student-waitlist-date">{displayDate}</span> : null}
-            <span className="student-waitlist-status" style={{ display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, lineHeight: 1, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
+            {renderWaitlistStatusSelector(w, status, "mobile")}
           </div>
         </div>
         <div className="student-waitlist-info" style={{ minWidth: 0 }}>
           <div style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>{gr ? "Група" : "Напрямок"}</div>
           <div className="student-waitlist-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 13.5, marginTop: 3, overflowWrap: "anywhere" }}>{gr?.name || direction?.name || "Без конкретної групи"}</div>
           {gr && direction ? <div className="student-waitlist-direction" style={{ color: theme.textMuted, fontSize: 12, fontWeight: 750, marginTop: 2, overflowWrap: "anywhere" }}>{direction.name}</div> : null}
-          <span className="student-waitlist-status student-waitlist-desktop-status" style={{ display: "inline-flex", marginTop: 6, padding: "4px 8px", borderRadius: 999, background: status === "contacted" ? "rgba(59, 130, 246, 0.14)" : "rgba(245, 158, 11, 0.16)", color: status === "contacted" ? "#2563eb" : theme.warning, fontSize: 11.5, lineHeight: 1, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
+          <div className="student-waitlist-desktop-status" style={{ marginTop: 6 }}>{renderWaitlistStatusSelector(w, status, "desktop")}</div>
         </div>
         <div className="student-waitlist-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 }}>
-          <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => markWaitlistContacted(w)}>Написали</button>
+          <button type="button" aria-label={`Редагувати запис резерву: ${displayName}`} style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => { setEditItem(w); setModal("editWaitlist"); }}>Редагувати</button>
           {gr ? <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
           <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
         </div>
       </div>
     );
   };
+
+  const waitlistModeRows = waitlistMode === "completed" ? completedWaitlist : activeWaitlist;
+  const normalizedWaitlistSearch = String(searchQ || "").trim().toLowerCase();
+  const filteredWaitlist = waitlistModeRows.filter((w) => {
+    const st = studentMap[w.studentId];
+    const gr = groupMap[w.groupId];
+    const directionId = String(w.directionId || gr?.directionId || "");
+    const haystack = [w.name, w.contact, w.note, st && getDisplayName(st), st?.phone, st?.telegram, st?.instagram, gr?.name, dirMap[directionId]?.name]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (normalizedWaitlistSearch && !haystack.includes(normalizedWaitlistSearch)) return false;
+    if (stFilterDir !== "all" && directionId !== String(stFilterDir)) return false;
+    if (stFilterGroup !== "all" && String(w.groupId || "") !== String(stFilterGroup)) return false;
+    return true;
+  });
+  const groupedWaitlist = directionsList
+    .map((direction) => ({
+      direction,
+      rows: filteredWaitlist.filter((w) => {
+        const gr = groupMap[w.groupId];
+        return String(w.directionId || gr?.directionId || "") === String(direction.id);
+      }),
+    }))
+    .filter(({ rows }) => rows.length > 0);
+  const waitlistWithoutDirection = filteredWaitlist.filter((w) => {
+    const gr = groupMap[w.groupId];
+    return !String(w.directionId || gr?.directionId || "");
+  });
+  const waitlistGroupsForRender = [
+    ...groupedWaitlist,
+    ...(waitlistWithoutDirection.length ? [{ direction: { id: "_none", name: "Без напрямку", color: theme.textMuted }, rows: waitlistWithoutDirection }] : []),
+  ];
 
   const reserveGroupHints = groups.filter((g) => activeWaitlist.some((w) => String(w.groupId) === String(g.id))).map((g) => {
     const groupSubs = subsExt.filter((s) => String(s.groupId) === String(g.id));
@@ -589,6 +690,7 @@ export default function StudentsCrmTab({
           .student-mobile-card .students-actions button { min-height: 44px !important; }
           .student-trial-card, .student-waitlist-card { grid-template-columns: 1fr !important; padding: 12px !important; gap: 12px !important; }
           .student-waitlist-card { padding: 8px 9px !important; gap: 6px !important; border-radius: 13px !important; align-items: start !important; min-width: 0 !important; overflow: hidden !important; }
+          .student-waitlist-card:has(.student-waitlist-status-menu) { overflow: visible !important; }
           .student-waitlist-main { display: grid !important; grid-template-columns: 22px minmax(0, 1fr) auto !important; gap: 7px !important; align-items: start !important; min-width: 0 !important; }
           .student-waitlist-main > div:nth-child(2) { min-width: 0 !important; overflow: hidden !important; }
           .student-waitlist-mobile-meta { display: flex !important; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 48px; max-width: 82px; }
@@ -802,7 +904,7 @@ export default function StudentsCrmTab({
 
         {shouldShowReserveSection && (
           <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
-            {renderSectionHeader("Резерв / потенційні", activeWaitlist.length, "Активні заявки зі статусом waiting або contacted", theme.warning || "#f59e0b")}
+            {renderSectionHeader("Резерв / потенційні", filteredWaitlist.length, "Активні та завершені заявки резерву", theme.warning || "#f59e0b")}
             {reserveGroupHints.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 900, color: theme.textMain, marginBottom: 8 }}>Сигнали по групах</div>
@@ -815,12 +917,31 @@ export default function StudentsCrmTab({
                 </div>
               </div>
             )}
-            {activeWaitlist.length > 0 ? (
+            <div className="student-waitlist-mode" style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 999, background: theme.card, border: `1px solid ${theme.border}`, marginBottom: 14 }}>
+              {[
+                ["active", `Активні ${activeWaitlist.length}`],
+                ["completed", `Завершені ${completedWaitlist.length}`],
+              ].map(([mode, label]) => (
+                <button key={mode} type="button" aria-pressed={waitlistMode === mode} onClick={() => setWaitlistMode(mode)} style={{ border: "none", borderRadius: 999, padding: "7px 11px", background: waitlistMode === mode ? (theme.warning || "#f59e0b") : "transparent", color: waitlistMode === mode ? "#fff" : theme.textMuted, fontSize: 12, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}>{label}</button>
+              ))}
+            </div>
+            {filteredWaitlist.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {activeWaitlist.map((w, i) => renderWaitlistCard(w, i))}
+                {waitlistGroupsForRender.map(({ direction, rows }) => (
+                  <div key={`waitlist_${direction.id}`} style={{ display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMain, fontSize: 13, fontWeight: 900 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 99, background: direction.color || theme.warning }} />
+                      <span>{direction.name}</span>
+                      <span style={{ color: theme.textLight }}>{rows.length}</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {rows.map((w, i) => renderWaitlistCard(w, i))}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (selectedSummaryFilter === "reserve" ? filterEmptyState : (
-              <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>Активного резерву поки немає.</div>
+              <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>{waitlistMode === "active" ? "Активного резерву поки немає." : "Завершених записів резерву поки немає."}</div>
             ))}
           </section>
         )}
