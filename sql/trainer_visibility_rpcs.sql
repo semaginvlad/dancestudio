@@ -51,7 +51,8 @@ returns table (
   trainer_pct numeric,
   created_at timestamptz,
   archived_at timestamptz,
-  is_active boolean
+  is_active boolean,
+  start_date date
 )
 language sql
 stable
@@ -64,14 +65,14 @@ as $$
     g.direction_id,
     g.schedule,
     g.trainer_id::text as trainer_id,
-    g.trainer_pct,
+    null::numeric as trainer_pct,
     g.created_at,
     g.archived_at,
-    coalesce(g.is_active, true) as is_active
+    true::boolean as is_active,
+    g.start_date
   from public.groups g
   where (public.crm_is_admin_session() or public.crm_is_active_trainer_session())
     and g.archived_at is null
-    and coalesce(g.is_active, true) = true
   order by g.name asc;
 $$;
 
@@ -104,7 +105,7 @@ as $$
     g.trainer_pct,
     g.created_at,
     g.archived_at,
-    coalesce(g.is_active, true) as is_active
+    true::boolean as is_active
   from public.trainers t
   join public.trainer_groups tg on tg.trainer_id = t.id
   join public.groups g on g.id = tg.group_id
@@ -113,7 +114,6 @@ as $$
     and t.archived_at is null
     and t.access_disabled_at is null
     and g.archived_at is null
-    and coalesce(g.is_active, true) = true
   order by g.name asc;
 $$;
 

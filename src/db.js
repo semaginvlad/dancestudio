@@ -206,6 +206,7 @@ const mapGroup = (g) => ({
   ageCategory: g.age_category ?? g.ageCategory ?? null,
   archivedAt: g.archived_at ?? g.archivedAt ?? null,
   isActive: g.is_active ?? g.isActive ?? true,
+  startDate: g.start_date ?? g.startDate ?? null,
 })
 
 export async function fetchGroups() {
@@ -254,6 +255,7 @@ export async function updateGroup(id, g) {
   if (g.name !== undefined) payload.name = g.name
   if (g.directionId !== undefined) payload.direction_id = g.directionId
   if (g.schedule !== undefined) payload.schedule = g.schedule
+  if (g.startDate !== undefined) payload.start_date = g.startDate || null
   if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
   if (g.trainer_id !== undefined) payload.trainer_id = g.trainer_id
   if (g.publicLevel !== undefined) payload.public_level = g.publicLevel || null
@@ -370,6 +372,7 @@ export async function insertGroup(group) {
     name: group.name,
     direction_id: group.directionId,
     schedule: Array.isArray(group.schedule) ? group.schedule : [],
+    start_date: group.startDate || null,
     trainer_pct: group.trainerPct ?? 0,
     public_level: group.publicLevel || null,
     public_join_status: group.publicJoinStatus || 'open',
@@ -1509,17 +1512,15 @@ export async function renameStudioRoom(id, oldName, newName) {
   if (!id) throw new Error('id is required');
   if (!nextName) throw new Error('name is required');
 
-  const updatedRoom = await updateStudioRoom(id, { name: nextName });
-
-  if (prevName && prevName.toLowerCase() !== nextName.toLowerCase()) {
-    const { error } = await supabase
-      .from('room_bookings')
-      .update({ room_name: nextName })
-      .eq('room_name', prevName);
-    if (error) throw error;
+  if (prevName && prevName.toLowerCase() === nextName.toLowerCase()) {
+    return updateStudioRoom(id, { name: nextName });
   }
-
-  return updatedRoom;
+  const { data, error } = await supabase.rpc('rename_studio_room', {
+    p_room_id: id,
+    p_new_name: nextName,
+  });
+  if (error) throw error;
+  return mapStudioRoom(data);
 }
 
 // ─── CUSTOM ORDERS ───
