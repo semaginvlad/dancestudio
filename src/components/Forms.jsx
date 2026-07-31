@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { theme, DIRECTIONS, PLAN_TYPES, PAY_METHODS, inputSt, btnP, btnS } from "../shared/constants";
 import { addMonth, today } from "../shared/utils";
+import { getInternalGroupLabel } from "../shared/groupLabels";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
@@ -437,7 +438,7 @@ export function WaitlistForm({ initial, onDone, onCancel, students, groups, stud
       <Field label="В яку групу чекає?">
         <select style={{ ...inputSt, cursor: "pointer" }} value={groupId} onChange={(e) => setGroupId(e.target.value)} disabled={!directionId}>
           <option value="">{directionId ? "Будь-яка група цього напрямку" : "Спочатку оберіть напрямок"}</option>
-          {filteredGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+          {filteredGroups.map((group) => <option key={group.id} value={group.id}>{getInternalGroupLabel(group)}</option>)}
         </select>
       </Field>
       <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
