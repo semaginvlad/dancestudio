@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -23,6 +24,38 @@ export const onAuthChange = (callback) => {
   });
   return data.subscription;
 };
+
+// ─── SITE INQUIRIES (ADMIN RPC ONLY) ───
+export async function fetchSiteInquiries({ status = "", search = "" } = {}) {
+  const { data, error } = await supabase.rpc('crm_fetch_site_inquiries', {
+    p_status: status || null,
+    p_search: String(search || '').trim() || null,
+  });
+  if (error) throw error;
+  return (data || []).map(mapSiteInquiry);
+}
+
+export async function updateSiteInquiry(id, patch = {}) {
+  if (!id) throw new Error('Site inquiry id is required');
+  const updatesStatus = Object.prototype.hasOwnProperty.call(patch, 'status');
+  const updatesNote = Object.prototype.hasOwnProperty.call(patch, 'adminNote');
+  if (!updatesStatus && !updatesNote) throw new Error('Site inquiry patch is empty');
+  if (updatesStatus && !SITE_INQUIRY_EDITABLE_STATUSES.includes(patch.status)) {
+    throw new Error('Цей статус недоступний у V1');
+  }
+  const adminNote = updatesNote ? String(patch.adminNote ?? '') : null;
+  if (adminNote.length > 4000) throw new Error('Нотатка адміністратора задовга');
+
+  const { data, error } = await supabase.rpc('crm_update_site_inquiry', {
+    p_inquiry_id: id,
+    p_status: updatesStatus ? patch.status : null,
+    p_admin_note: adminNote,
+    p_update_status: updatesStatus,
+    p_update_admin_note: updatesNote,
+  });
+  if (error) throw error;
+  return mapSiteInquiry(Array.isArray(data) ? data[0] : data);
+}
 
 export async function upsertPushSubscription(userId, payload = {}) {
   if (!userId) throw new Error("userId is required");
