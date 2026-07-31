@@ -49,6 +49,7 @@ import AppUpdateBanner from "./components/AppUpdateBanner";
 import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
 import SiteTab from "./components/SiteTab";
+import SiteInquiriesTab from "./components/SiteInquiriesTab";
 import {
   extractPushSubscriptionPayload,
   getPushStatus,
@@ -2515,6 +2516,7 @@ export default function App() {
                 <option value="analytics:notifications">Аналітика · Автоматизація</option>
                 <option value="finance:finance">Фінанси</option>
                 <option value="pro:pro">Про-аналітика</option>
+                <option value="inquiries:inquiries">Запити</option>
                 <option value="site:site">Сайт</option>
               </select>
             </div>
@@ -2523,6 +2525,7 @@ export default function App() {
               <button type="button" onClick={() => setAdminTab("analytics")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "analytics" ? theme.primary : "transparent", color: adminTab === "analytics" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Аналітика</button>
               <button type="button" onClick={() => setAdminTab("finance")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "finance" ? theme.primary : "transparent", color: adminTab === "finance" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Фінанси</button>
               <button type="button" onClick={() => setAdminTab("pro")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pro" ? theme.primary : "transparent", color: adminTab === "pro" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Про-аналітика</button>
+              <button type="button" onClick={() => setAdminTab("inquiries")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "inquiries" ? theme.primary : "transparent", color: adminTab === "inquiries" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Запити</button>
               <button type="button" onClick={() => setAdminTab("site")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "site" ? theme.primary : "transparent", color: adminTab === "site" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сайт</button>
               </div>
             </div>
@@ -2675,6 +2678,7 @@ export default function App() {
             ))}
             
             {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
+            {adminTab === "inquiries" && <SiteInquiriesTab />}
             {adminTab === "site" && <SiteTab />}
           </div>
         )}
