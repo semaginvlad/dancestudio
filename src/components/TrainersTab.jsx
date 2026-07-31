@@ -4,6 +4,7 @@ import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyti
 import { PLAN_TYPES, WEEKDAYS, theme as appTheme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 import { resolveGroupTrainer } from "../shared/groupTrainer";
+import { isTrainerArchived } from "../shared/trainers";
 
 const theme = {
   get bg() { return appTheme.bg; },
@@ -264,6 +265,7 @@ export default function TrainersTab({
   subs = [],
   attn = [],
   cancelled = [],
+  onTrainerDeleted,
 }) {
   const isDark = theme.bg === "#0F131A";
   const [selectedTrainerId, setSelectedTrainerId] = useStickyState(trainers[0]?.id || "", "ds_trainers_selectedTrainerId");
@@ -288,8 +290,11 @@ export default function TrainersTab({
   const [detailState, setDetailState] = useState({ type: "overview", title: "Огляд", payload: null });
   const [mobileListOpen, setMobileListOpen] = useState(true);
   const [detailExpanded, setDetailExpanded] = useState(false);
+  const [deleteDraft, setDeleteDraft] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
-  const isTrainerArchived = (t) => !!t?.archivedAt || t?.isActive === false;
   const safeTrainers = useMemo(() => (Array.isArray(trainers) ? trainers : []).filter(Boolean), [trainers]);
 
   const filteredTrainers = useMemo(() => {
@@ -1055,6 +1060,35 @@ export default function TrainersTab({
     }
   };
 
+  const openPermanentDelete = (trainer) => {
+    if (!trainer?.archivedAt) return;
+    setDeleteDraft(trainer);
+    setDeleteConfirmation("");
+    setDeleteError("");
+  };
+
+  const permanentlyDeleteTrainer = async () => {
+    if (deleteBusy || !deleteDraft?.archivedAt) return;
+    const expectedName = getTrainerDisplayName(deleteDraft);
+    if (deleteConfirmation !== expectedName) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      const deletedId = await db.deleteArchivedTrainer(deleteDraft.id);
+      setTrainers((prev) => prev.filter((trainer) => String(trainer.id) !== String(deletedId)));
+      setTrainerGroups((prev) => prev.filter((row) => String(row.trainerId) !== String(deletedId)));
+      if (String(selectedTrainerId) === String(deletedId)) setSelectedTrainerId("");
+      setGroupDraftIds([]);
+      onTrainerDeleted?.(deletedId);
+      setDeleteDraft(null);
+      setDeleteConfirmation("");
+    } catch (error) {
+      setDeleteError(error?.message || "Не вдалося видалити тренера назавжди.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const createOrResetAccess = async (trainer, reset = false) => {
     if (!trainer?.email) return alert("Для доступу потрібен email тренера");
     const password = window.prompt("Тимчасовий пароль (мінімум 6 символів)", generateTempPassword());
@@ -1519,6 +1553,12 @@ export default function TrainersTab({
               {selectedTrainer.authUserId && <button type="button" onClick={() => toggleAccess(selectedTrainer)} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "6px 9px", background: theme.panelSoft, color: selectedTrainer.accessDisabledAt ? theme.good : theme.bad, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{selectedTrainer.accessDisabledAt ? "Відкрити доступ" : "Закрити доступ"}</button>}
             </div>
 
+            {trainerArchiveFilter === "archived" && selectedTrainer.archivedAt && (
+              <div style={{ borderTop: `1px solid ${theme.danger}55`, marginTop: 10, paddingTop: 10 }}>
+                <button type="button" onClick={() => openPermanentDelete(selectedTrainer)} style={{ width: "100%", maxWidth: "100%", whiteSpace: "normal", border: `1px solid ${theme.danger}`, borderRadius: 9, padding: "7px 9px", background: "transparent", color: theme.danger, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Видалити назавжди</button>
+              </div>
+            )}
+
             <div className="admin-trainers-groups-panel" style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div>
@@ -1978,6 +2018,23 @@ export default function TrainersTab({
           <div style={{ fontSize: 12, color: theme.textSoft }}>Telegram / Instagram / AI інтеграції підготовлені на рівні foundation.</div>
         </button>
       </section>
+      {deleteDraft && (
+        <div role="dialog" aria-modal="true" aria-labelledby="delete-trainer-title" style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.62)", display: "grid", placeItems: "center", padding: 16 }}>
+          <div style={{ width: "min(460px, 100%)", maxWidth: "100%", boxSizing: "border-box", borderRadius: 16, border: `1px solid ${theme.danger}88`, background: theme.panel, color: theme.text, padding: 18, display: "grid", gap: 14 }}>
+            <div id="delete-trainer-title" style={{ fontSize: 19, fontWeight: 900 }}>Видалити тренера назавжди?</div>
+            <div style={{ color: theme.textSoft, lineHeight: 1.45 }}>Тренера буде видалено назавжди. Відновити його буде неможливо.</div>
+            <label style={{ display: "grid", gap: 6, minWidth: 0 }}>
+              <span style={{ fontSize: 13 }}>Введіть точне ім’я: <strong>{getTrainerDisplayName(deleteDraft)}</strong></span>
+              <input autoFocus disabled={deleteBusy} value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} style={{ width: "100%", minWidth: 0, boxSizing: "border-box", border: `1px solid ${theme.border}`, borderRadius: 10, padding: "10px 11px", background: theme.panelSoft, color: theme.text }} />
+            </label>
+            {deleteError && <div role="alert" style={{ color: theme.danger, fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{deleteError}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" disabled={deleteBusy} onClick={() => { setDeleteDraft(null); setDeleteConfirmation(""); setDeleteError(""); }} style={{ border: `1px solid ${theme.border}`, borderRadius: 9, padding: "9px 12px", background: theme.panelSoft, color: theme.text }}>Скасувати</button>
+              <button type="button" disabled={deleteBusy || deleteConfirmation !== getTrainerDisplayName(deleteDraft)} onClick={permanentlyDeleteTrainer} style={{ border: "none", borderRadius: 9, padding: "9px 12px", background: theme.danger, color: "#fff", fontWeight: 800, opacity: !deleteBusy && deleteConfirmation === getTrainerDisplayName(deleteDraft) ? 1 : .5 }}>{deleteBusy ? "Видалення…" : "Видалити назавжди"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

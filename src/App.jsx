@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
+import { getOperationalTrainers } from "./shared/trainers";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -2545,6 +2546,9 @@ export default function App() {
                 analyticsFoundation={analytics.foundation}
                 cancelled={cancelled}
                 themeMode={themeMode}
+                onTrainerDeleted={(deletedId) => {
+                  if (String(filterTrainer) === String(deletedId)) setFilterTrainer("");
+                }}
               />
             ) : trainersSubtab === "groups" ? (
               <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
@@ -3094,7 +3098,7 @@ export default function App() {
             <Field label="Тренер (опційно)">
               <select style={inputSt} value={newGroupDraft.trainerId} onChange={(e) => setNewGroupDraft((p) => ({ ...p, trainerId: e.target.value }))}>
                 <option value="">— Без прив'язки —</option>
-                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+                {getOperationalTrainers(trainers, newGroupDraft.trainerId).map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
               </select>
             </Field>
           </div>
@@ -3295,7 +3299,7 @@ export default function App() {
             <Field label="Тренер">
               <select style={inputSt} value={groupEditDraft.trainerId} onChange={(e) => setGroupEditDraft((p) => ({ ...p, trainerId: e.target.value }))}>
                 <option value="">— Без прив'язки —</option>
-                {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
+                {getOperationalTrainers(trainers, groupEditDraft.trainerId).map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
               </select>
             </Field>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
