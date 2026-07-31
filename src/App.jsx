@@ -2476,19 +2476,20 @@ export default function App() {
                 .admin-mobile-filter-toggle, .admin-mobile-reset { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 14px; border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMain}; padding: 0 12px; font-weight: 800; position: relative; }
                 .admin-mobile-badge { position: absolute; top: -7px; right: -6px; min-width: 20px; height: 20px; border-radius: 999px; background: ${theme.danger}; color: #fff; border: 2px solid ${theme.card}; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
                 .admin-group-filter-card, .admin-finance-filter-card { display: none !important; }
-                .admin-group-filter-card.is-open, .admin-finance-filter-card.is-open { display: grid !important; position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 950; max-height: min(78dvh, 680px); overflow: auto; padding: 14px !important; border-radius: 22px 22px 16px 16px !important; box-shadow: 0 24px 48px rgba(0,0,0,.24); }
-                .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; min-width: 0 !important; }
-                .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 44px !important; }
-                .admin-group-card { padding: 12px !important; border-radius: 16px !important; }
+                .admin-group-filter-card.is-open, .admin-finance-filter-card.is-open { display: grid !important; position: fixed; inset: 84px 8px calc(8px + env(safe-area-inset-bottom, 0px)); z-index: 1001; max-height: none; overflow-y: auto; align-content: start; gap: 14px !important; padding: 16px !important; border-radius: 20px !important; background: ${theme.card} !important; border: 1px solid ${theme.border} !important; box-shadow: 0 24px 48px rgba(0,0,0,.32); }
+                .admin-group-filter-card.is-open::before { content: "Фільтри груп"; color: ${theme.textMain}; font-size: 18px; font-weight: 900; }
+                .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 10px !important; min-width: 0 !important; }
+                .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 46px !important; box-sizing: border-box; background: ${theme.input} !important; color: ${theme.textMain} !important; border: 1px solid ${theme.border} !important; }
+                .admin-group-card { padding: 10px !important; gap: 8px !important; border-radius: 16px !important; }
                 .admin-group-card > div:first-child { grid-template-columns: 1fr !important; gap: 8px !important; }
-                .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 8px !important; }
+                .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 2px !important; }
                 .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
-                .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
-                .admin-group-actions button:first-child { grid-column: 1 / -1; }
-                .admin-group-actions button, .admin-finance-card button { min-height: 42px; padding: 8px !important; font-size: 12px !important; }
-                .admin-group-meta { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; align-items: stretch !important; }
-                .admin-group-meta > span { min-width: 0; min-height: 32px; box-sizing: border-box; white-space: normal; line-height: 1.2; }
-                .admin-group-footer { display: grid !important; grid-template-columns: 1fr auto; gap: 6px !important; align-items: center; }
+                .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
+                .admin-group-actions button:first-child { grid-column: auto; }
+                .admin-group-actions button, .admin-finance-card button { min-height: 38px; padding: 6px !important; font-size: 11px !important; }
+                .admin-group-meta { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px !important; align-items: stretch !important; }
+                .admin-group-meta > span { min-width: 0; min-height: 30px; padding: 5px 7px !important; box-sizing: border-box; white-space: normal; line-height: 1.15; font-size: 11px !important; }
+                .admin-group-footer { display: none !important; }
                 .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; margin-bottom: 8px !important; }
                 .admin-finance-summary > div { padding: 9px 10px !important; border-radius: 14px !important; min-width: 0; }
                 .admin-finance-summary div[style*="font-size: 13"] { font-size: 10px !important; letter-spacing: .25px !important; line-height: 1.15 !important; }
@@ -2571,7 +2572,7 @@ export default function App() {
                       {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
                     </select>
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div><button type="button" className="admin-mobile-reset" onClick={() => { setAdminGroupSearch(""); setAdminGroupArchiveFilter("active"); setAdminGroupTrainerFilter("all"); }}>Скинути</button></div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length} груп.</div><button type="button" className="admin-mobile-reset" onClick={() => { setAdminGroupSearch(""); setAdminGroupArchiveFilter("active"); setAdminGroupTrainerFilter("all"); }}>Скинути</button></div>
                 </div>
                 <details style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
                   <summary style={{ cursor: "pointer", fontWeight: 900, color: theme.textMain }}>Історія обʼєднань ({groupMergeOperations.length})</summary>
