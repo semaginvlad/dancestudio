@@ -280,6 +280,15 @@ export async function deleteArchivedGroup(groupId) {
   return row.deleted_id
 }
 
+export async function deleteArchivedTrainer(trainerId) {
+  if (!trainerId) throw new Error('trainerId is required')
+  const { data, error } = await supabase.rpc('delete_archived_trainer', { p_trainer_id: trainerId })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.deleted_id) throw new Error('RPC delete_archived_trainer did not return a deleted trainer id')
+  return row.deleted_id
+}
+
 
 
 // ─── GROUP MERGE OPERATIONS ───

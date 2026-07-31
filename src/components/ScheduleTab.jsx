@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { useStickyState } from "../shared/utils";
+import { getOperationalTrainers } from "../shared/trainers";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -856,8 +857,8 @@ export default function ScheduleTab({
     { value: "direction", label: "Напрямок" },
   ];
   const mobileTrainerFilterOptions = useMemo(
-    () => safeTrainers.map((trainer) => ({ value: String(trainer.id || trainer.authUserId || ""), label: getTrainerDisplayName(trainer) || trainer.email || trainer.id || "Тренер", altValues: [trainer.id, trainer.authUserId].filter(Boolean).map(String) })).filter((option) => option.value),
-    [safeTrainers],
+    () => getOperationalTrainers(safeTrainers, mobileFilterValue).map((trainer) => ({ value: String(trainer.id || trainer.authUserId || ""), label: getTrainerDisplayName(trainer) || trainer.email || trainer.id || "Тренер", altValues: [trainer.id, trainer.authUserId].filter(Boolean).map(String) })).filter((option) => option.value),
+    [safeTrainers, mobileFilterValue],
   );
   const mobileGroupFilterOptions = useMemo(
     () => safeGroups.map((group) => ({ value: String(group.id || ""), label: group.name || group.title || group.id || "Група" })).filter((option) => option.value),
@@ -2415,7 +2416,7 @@ export default function ScheduleTab({
               >
                 {isAdmin ? <option value="">Тренер</option> : null}
                 {!isAdmin && currentTrainerId ? <option value={currentTrainerId}>{currentTrainerName || currentTrainerId}</option> : null}
-                {isAdmin && safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
+                {isAdmin && getOperationalTrainers(safeTrainers, draft.trainerId).map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t)}</option>)}
               </select>
             ) : null}
             {formMode === "compact" ? <button style={{ ...editorBtnSt, minHeight: isMobile ? 34 : 36 }} onClick={applyQuickToFullForm}>Показати всі поля</button> : null}
@@ -2657,7 +2658,7 @@ export default function ScheduleTab({
                     >
                       {isAdmin ? <option value="">Оберіть тренера</option> : null}
                       {!isAdmin && bulkPlanSetup.trainerId ? <option value={bulkPlanSetup.trainerId}>{currentTrainerName || "Поточний тренер"}</option> : null}
-                      {isAdmin && safeTrainers.map((trainer) => <option key={trainer.id} value={trainer.authUserId || trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
+                      {isAdmin && getOperationalTrainers(safeTrainers, bulkPlanSetup.trainerId).map((trainer) => <option key={trainer.id} value={trainer.authUserId || trainer.id}>{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</option>)}
                     </select>
                     <div style={editorSectionLabelSt}>Період</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
@@ -2911,7 +2912,7 @@ export default function ScheduleTab({
               </select>
               <select style={editorInputSt} value={groupOverrideEdit.trainerId || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, trainerId: e.target.value }))}>
                 <option value="">Без тренера</option>
-                {safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
+                {getOperationalTrainers(safeTrainers, groupOverrideEdit.trainerId).map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
               </select>
               <input style={editorInputSt} placeholder="Нотатка" value={groupOverrideEdit.note || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, note: e.target.value }))} />
               <select style={editorInputSt} value="active" disabled>
@@ -2957,7 +2958,7 @@ export default function ScheduleTab({
               </select>
               <select style={editorInputSt} value={groupSlotEdit.trainerId || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, trainerId: e.target.value, error: "" }))}>
                 <option value="">Без тренера</option>
-                {safeTrainers.map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
+                {getOperationalTrainers(safeTrainers, groupSlotEdit.trainerId).map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
               </select>
               <input style={editorInputSt} placeholder="Нотатка" value={groupSlotEdit.note || ""} onChange={(e) => setGroupSlotEdit((p) => ({ ...p, note: e.target.value, error: "" }))} />
               {groupSlotEdit.error ? <div style={{ color: theme.danger, fontSize: 12 }}>{groupSlotEdit.error}</div> : null}

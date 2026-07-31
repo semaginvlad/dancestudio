@@ -3,6 +3,7 @@ import { supabase } from "../supabase";
 import { theme } from "../shared/constants";
 import { buildGroupDispatchPlan, buildTrainerGroupDraft, isDispatchDueNow, isTrainerChatByNote, parseTrainerGroupIds, parseTrainerGroups } from "../shared/trainerDigest";
 import { today, useStickyState } from "../shared/utils";
+import { isTrainerArchived } from "../shared/trainers";
 
 const buildAuthHeaders = async (headers = {}) => {
   const { data } = await supabase.auth.getSession();
@@ -1011,13 +1012,7 @@ export default function TrainersNotificationsTab({
     return raw ? `${raw.slice(0, 8)}…` : "—";
   };
 
-  const isTrainerArchivedOrInactive = (trainer = {}) => {
-    const archivedAt = trainer.archived_at || trainer.archivedAt || null;
-    const accessDisabledAt = trainer.access_disabled_at || trainer.accessDisabledAt || null;
-    const explicitlyArchived = trainer.archived === true || trainer.is_archived === true || trainer.isArchived === true;
-    const explicitlyInactive = trainer.is_active === false || trainer.isActive === false || trainer.active === false;
-    return !!archivedAt || !!accessDisabledAt || explicitlyArchived || explicitlyInactive;
-  };
+  const isTrainerArchivedOrInactive = isTrainerArchived;
 
   const notificationRecipients = useMemo(() => {
     const mapped = (trainers || [])
