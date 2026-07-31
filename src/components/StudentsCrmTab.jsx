@@ -1,5 +1,6 @@
 import React from "react";
 import * as db from "../db";
+import { getInternalGroupLabel } from "../shared/groupLabels";
 
 export default function StudentsCrmTab({
   theme,
@@ -338,7 +339,7 @@ export default function StudentsCrmTab({
           >
             <option value="">Група для відновлення</option>
             {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
+              <option key={g.id} value={g.id}>{getInternalGroupLabel(g)}</option>
             ))}
           </select>
           <button type="button" style={{ ...btnS, padding: "9px 14px", fontSize: 13, background: theme.bg }} onClick={() => restoreStudentToGroup(st.id)}>↩ Відновити</button>

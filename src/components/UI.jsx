@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { theme, DIRECTIONS, inputSt } from "../shared/constants";
 import { getDisplayName } from "../shared/utils";
+import { getInternalGroupLabel } from "../shared/groupLabels";
 
 export function Modal({open, onClose, title, children, wide, variant}){
   if(!open) return null;
@@ -90,7 +91,7 @@ export function GroupSelect({groups, value, onChange, filterDir = "all", allowAl
       {allowAll && <option value="all">Усі групи</option>}
       {DIRECTIONS.filter(d => filterDir === "all" || d.id === filterDir).map(d=>(
         <optgroup key={d.id} label={d.name}>
-          {filteredGroups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
+          {filteredGroups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{getInternalGroupLabel(g)}</option>)}
         </optgroup>
       ))}
     </select>

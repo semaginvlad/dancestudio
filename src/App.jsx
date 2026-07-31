@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
+import { formatGroupScheduleLabel, getGroupAgeCategoryLabel, getGroupLevelLabel } from "./shared/groupLabels";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -81,8 +82,8 @@ const PUBLIC_JOIN_STATUS_OPTIONS = [
   { value: "closed", label: "Закрита група" },
 ];
 const AGE_CATEGORY_OPTIONS = [
-  { value: "teens_under_16", label: "Підлітки до 16 років" },
-  { value: "adults_16_plus", label: "Дорослі 16+" },
+  { value: "teens_under_16", label: "10–16" },
+  { value: "adults_16_plus", label: "16+" },
 ];
 const addDaysForScheduleRange = (date, days) => {
   const d = new Date(`${date}T12:00:00`);
@@ -765,9 +766,9 @@ export default function App() {
       startDate: newGroupDraft.startDate || null,
       trainerPct: trainerPctNum,
       showOnPublicSite: !!newGroupDraft.showOnPublicSite,
-      publicLevel: newGroupDraft.showOnPublicSite ? newGroupDraft.publicLevel || null : null,
+      publicLevel: newGroupDraft.publicLevel || null,
       publicJoinStatus: newGroupDraft.publicJoinStatus || "open",
-      ageCategory: newGroupDraft.showOnPublicSite ? newGroupDraft.ageCategory || null : null,
+      ageCategory: newGroupDraft.ageCategory || null,
     };
     try {
       const created = await db.insertGroup(payload);
@@ -837,9 +838,9 @@ export default function App() {
       startDate: groupEditDraft.startDate || null,
       trainerPct: trainerPctNum,
       showOnPublicSite: !!groupEditDraft.showOnPublicSite,
-      publicLevel: groupEditDraft.showOnPublicSite ? groupEditDraft.publicLevel || null : null,
+      publicLevel: groupEditDraft.publicLevel || null,
       publicJoinStatus: groupEditDraft.publicJoinStatus || "open",
-      ageCategory: groupEditDraft.showOnPublicSite ? groupEditDraft.ageCategory || null : null,
+      ageCategory: groupEditDraft.ageCategory || null,
     };
     try {
       const updated = await db.updateGroup(groupEditDraft.id, payload);
@@ -1073,9 +1074,7 @@ export default function App() {
     const group = groups.find((g) => String(g.id) === String(groupId)) || scheduleGroups.find((g) => String(g.id) === String(groupId)) || { id: groupId };
     return resolveTrainerForGroup(group).trainerId;
   };
-  const formatGroupSchedule = (schedule) => parseGroupSchedule(schedule)
-    .map((s) => `${WEEKDAYS[Number(s.day)] || "?"}${s.time ? ` ${s.time}` : ""}`)
-    .join(" · ");
+  const formatGroupSchedule = formatGroupScheduleLabel;
   const getGroupLabel = (group) => group ? `${group.name || group.id} (${group.id})` : "—";
   const getGroupMergeScheduleModeLabel = (mode) => {
     if (mode === "keep_target_schedule") return "Залишити графік цільової групи";
@@ -1106,7 +1105,7 @@ export default function App() {
       if (adminGroupTrainerFilter !== "all" && String(trainerInfo.trainerId || "") !== String(adminGroupTrainerFilter)) return false;
       if (!q) return true;
       const dir = dirMap[group.directionId];
-      return [group.name, group.id, group.directionId, dir?.name, trainerInfo.trainerName, formatGroupSchedule(group.schedule)]
+      return [group.name, group.id, group.directionId, dir?.name, trainerInfo.trainerName, getGroupLevelLabel(group.publicLevel), formatGroupSchedule(group.schedule)]
         .some((value) => String(value || "").toLowerCase().includes(q));
     });
   }, [adminGroupRows, adminGroupArchiveFilter, adminGroupTrainerFilter, adminGroupSearch, dirMap]);
@@ -2477,14 +2476,20 @@ export default function App() {
                 .admin-mobile-filter-toggle, .admin-mobile-reset { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 14px; border: 1px solid ${theme.border}; background: ${theme.card}; color: ${theme.textMain}; padding: 0 12px; font-weight: 800; position: relative; }
                 .admin-mobile-badge { position: absolute; top: -7px; right: -6px; min-width: 20px; height: 20px; border-radius: 999px; background: ${theme.danger}; color: #fff; border: 2px solid ${theme.card}; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
                 .admin-group-filter-card, .admin-finance-filter-card { display: none !important; }
-                .admin-group-filter-card.is-open, .admin-finance-filter-card.is-open { display: grid !important; position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 950; max-height: min(78dvh, 680px); overflow: auto; padding: 14px !important; border-radius: 22px 22px 16px 16px !important; box-shadow: 0 24px 48px rgba(0,0,0,.24); }
-                .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; min-width: 0 !important; }
-                .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 44px !important; }
-                .admin-group-card { padding: 12px !important; border-radius: 16px !important; }
-                .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 8px !important; }
+                .admin-group-filter-card.is-open, .admin-finance-filter-card.is-open { display: grid !important; position: fixed; inset: 84px 8px calc(8px + env(safe-area-inset-bottom, 0px)); z-index: 1001; max-height: none; overflow-y: auto; align-content: start; gap: 14px !important; padding: 16px !important; border-radius: 20px !important; background: ${theme.card} !important; border: 1px solid ${theme.border} !important; box-shadow: 0 24px 48px rgba(0,0,0,.32); }
+                .admin-group-filter-card.is-open::before { content: "Фільтри груп"; color: ${theme.textMain}; font-size: 18px; font-weight: 900; }
+                .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 10px !important; min-width: 0 !important; }
+                .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 46px !important; box-sizing: border-box; background: ${theme.input} !important; color: ${theme.textMain} !important; border: 1px solid ${theme.border} !important; }
+                .admin-group-card { padding: 10px !important; gap: 8px !important; border-radius: 16px !important; }
+                .admin-group-card > div:first-child { grid-template-columns: 1fr !important; gap: 8px !important; }
+                .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 2px !important; }
                 .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
                 .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
-                .admin-group-actions button, .admin-finance-card button { min-height: 44px; padding: 8px !important; font-size: 12px !important; }
+                .admin-group-actions button:first-child { grid-column: auto; }
+                .admin-group-actions button, .admin-finance-card button { min-height: 38px; padding: 6px !important; font-size: 11px !important; }
+                .admin-group-meta { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px !important; align-items: stretch !important; }
+                .admin-group-meta > span { min-width: 0; min-height: 30px; padding: 5px 7px !important; box-sizing: border-box; white-space: normal; line-height: 1.15; font-size: 11px !important; }
+                .admin-group-footer { display: none !important; }
                 .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; margin-bottom: 8px !important; }
                 .admin-finance-summary > div { padding: 9px 10px !important; border-radius: 14px !important; min-width: 0; }
                 .admin-finance-summary div[style*="font-size: 13"] { font-size: 10px !important; letter-spacing: .25px !important; line-height: 1.15 !important; }
@@ -2567,7 +2572,7 @@ export default function App() {
                       {trainers.map((t) => <option key={t.id} value={t.id}>{t.name || [t.firstName, t.lastName].filter(Boolean).join(" ") || t.id}</option>)}
                     </select>
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length}. Тренер визначається через trainer_groups, а для старих груп — fallback на trainerId/trainer_id/coachId/coach_id/trainer/trainer_id_fk.</div><button type="button" className="admin-mobile-reset" onClick={() => { setAdminGroupSearch(""); setAdminGroupArchiveFilter("active"); setAdminGroupTrainerFilter("all"); }}>Скинути</button></div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12, color: theme.textMuted }}>Показано {filteredAdminGroupRows.length} з {groups.length} груп.</div><button type="button" className="admin-mobile-reset" onClick={() => { setAdminGroupSearch(""); setAdminGroupArchiveFilter("active"); setAdminGroupTrainerFilter("all"); }}>Скинути</button></div>
                 </div>
                 <details style={{ ...cardSt, padding: 14, border: `1px solid ${theme.border}` }}>
                   <summary style={{ cursor: "pointer", fontWeight: 900, color: theme.textMain }}>Історія обʼєднань ({groupMergeOperations.length})</summary>
@@ -2618,33 +2623,35 @@ export default function App() {
                         const scheduleText = formatGroupSchedule(g.schedule) || "—";
                         const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
                         return (
-                          <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                              <div className="admin-group-main" style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
-                              <div>
-                                <div className="admin-group-title" style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
-                                <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
+                          <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 12, display: "grid", gap: 10, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "start" }}>
+                              <div className="admin-group-main" style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                                <div className="admin-group-title" style={{ fontWeight: 900, color: theme.textMain, fontSize: 17, lineHeight: 1.2 }}>{g.name}</div>
+                                <div style={{ fontSize: 11, color: theme.textMuted }}>ID: {g.id}</div>
                               </div>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
-                                <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
-                                <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
-                                <span style={badgeStyle}>Учениць: {studentsCount}</span>
-                                <span style={badgeStyle}>Розклад: {scheduleText}</span>
-                              </div>
-                              <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
-                            </div>
-                              <div className="admin-group-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
-                              <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
-                              {!!g.archived_at && (
-                                <span style={{ width: "100%", display: "flex", justifyContent: "flex-end", marginTop: 4, paddingTop: 10, borderTop: `1px solid ${theme.border}` }}>
-                                  <button type="button" style={{ ...btnS, color: theme.danger, borderColor: theme.danger, maxWidth: "100%", whiteSpace: "normal" }} onClick={() => openPermanentGroupDelete(g)}>Видалити назавжди</button>
-                                </span>
-                              )}
+                              <div className="admin-group-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                <button type="button" style={{ ...btnP, minHeight: 34, padding: "7px 10px", fontSize: 12 }} onClick={() => openEditGroup(g)}>Редагувати</button>
+                                <button type="button" style={{ ...btnS, minHeight: 34, padding: "7px 10px", fontSize: 12, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
+                                <button type="button" style={{ ...btnS, minHeight: 34, padding: "7px 10px", fontSize: 12, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
                               </div>
                             </div>
+                            <div className="admin-group-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                              <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                              {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>{getGroupLevelLabel(g.publicLevel)}</span>}
+                              {getGroupAgeCategoryLabel(g.ageCategory) && <span style={badgeStyle}>{getGroupAgeCategoryLabel(g.ageCategory)}</span>}
+                              <span style={badgeStyle}>👥 {studentsCount}</span>
+                              <span style={badgeStyle}>🕒 {scheduleText}</span>
+                              <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                            </div>
+                            <div className="admin-group-footer" style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", fontSize: 11, color: theme.textMuted }}>
+                              <span>{dir?.name || g.directionId || "—"}</span>
+                              <span>Відсоток тренера: {g.trainerPct ?? 0}%</span>
+                            </div>
+                            {!!g.archived_at && (
+                              <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8, borderTop: `1px solid ${theme.border}` }}>
+                                <button type="button" style={{ ...btnS, color: theme.danger, borderColor: theme.danger, minHeight: 34, padding: "7px 10px", fontSize: 12 }} onClick={() => openPermanentGroupDelete(g)}>Видалити назавжди</button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -3018,7 +3025,7 @@ export default function App() {
       <Modal open={modal==="addGroup"} onClose={()=>setModal(null)} title="Нова група" variant="admin-mobile">
         <div style={{ display: "grid", gap: 12 }}>
           <Field label="Назва групи *">
-            <input style={inputSt} value={newGroupDraft.name} onChange={(e) => setNewGroupDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Напр. Beginners 19:00" />
+            <input style={inputSt} value={newGroupDraft.name} onChange={(e) => setNewGroupDraft((p) => ({ ...p, name: e.target.value }))} placeholder="Напр. Bachata" />
           </Field>
           <Field label="ID групи (опційно)">
             <input style={inputSt} value={newGroupDraft.id} onChange={(e) => setNewGroupDraft((p) => ({ ...p, id: e.target.value }))} placeholder="auto from name if empty" />
@@ -3039,29 +3046,29 @@ export default function App() {
             </div>
           </Field>
 
+          <Field label="Рівень групи">
+            <select style={inputSt} value={newGroupDraft.publicLevel} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Вікова категорія">
+            <select style={inputSt} value={newGroupDraft.ageCategory} onChange={(e) => setNewGroupDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
           <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${newGroupDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: newGroupDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
               <input
                 type="checkbox"
                 checked={!!newGroupDraft.showOnPublicSite}
-                onChange={(e) => setNewGroupDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, publicLevel: e.target.checked ? p.publicLevel : "", ageCategory: e.target.checked ? p.ageCategory : "" }))}
+                onChange={(e) => setNewGroupDraft((p) => ({ ...p, showOnPublicSite: e.target.checked }))}
               />
               Показувати на сайті
             </label>
             {newGroupDraft.showOnPublicSite && (
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                <Field label="Рівень на сайті *">
-                  <select style={inputSt} value={newGroupDraft.publicLevel} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Вікова категорія *">
-                  <select style={inputSt} value={newGroupDraft.ageCategory} onChange={(e) => setNewGroupDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
                 <Field label="Запис до групи">
                   <select style={inputSt} value={newGroupDraft.publicJoinStatus} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
                     {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -3253,29 +3260,29 @@ export default function App() {
               </select>
             </Field>
 
+          <Field label="Рівень групи">
+            <select style={inputSt} value={groupEditDraft.publicLevel} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Вікова категорія">
+            <select style={inputSt} value={groupEditDraft.ageCategory} onChange={(e) => setGroupEditDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
           <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${groupEditDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: groupEditDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
               <input
                 type="checkbox"
                 checked={!!groupEditDraft.showOnPublicSite}
-                onChange={(e) => setGroupEditDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, publicLevel: e.target.checked ? p.publicLevel : "", ageCategory: e.target.checked ? p.ageCategory : "" }))}
+                onChange={(e) => setGroupEditDraft((p) => ({ ...p, showOnPublicSite: e.target.checked }))}
               />
               Показувати на сайті
             </label>
             {groupEditDraft.showOnPublicSite && (
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                <Field label="Рівень на сайті *">
-                  <select style={inputSt} value={groupEditDraft.publicLevel} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Вікова категорія *">
-                  <select style={inputSt} value={groupEditDraft.ageCategory} onChange={(e) => setGroupEditDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
                 <Field label="Запис до групи">
                   <select style={inputSt} value={groupEditDraft.publicJoinStatus} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
                     {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
