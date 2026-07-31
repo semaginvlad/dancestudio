@@ -4,6 +4,7 @@ import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
+import { getInternalGroupLabel } from "../shared/groupLabels";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -861,7 +862,7 @@ export default function ScheduleTab({
     [safeTrainers, mobileFilterValue],
   );
   const mobileGroupFilterOptions = useMemo(
-    () => safeGroups.map((group) => ({ value: String(group.id || ""), label: group.name || group.title || group.id || "Група" })).filter((option) => option.value),
+    () => safeGroups.map((group) => ({ value: String(group.id || ""), label: getInternalGroupLabel(group) })).filter((option) => option.value),
     [safeGroups],
   );
   const mobileDirectionFilterOptions = useMemo(() => {
@@ -2648,7 +2649,7 @@ export default function ScheduleTab({
                   <div style={{ display: "grid", gap: 10 }}>
                     <div style={editorSectionLabelSt}>Група і тренер</div>
                     <select style={editorInputSt} value={bulkPlanSetup.groupId || ""} onChange={(e) => updateBulkSetupGroup(e.target.value)}>
-                      {bulkPlannerGroups.map((group) => <option key={group.id} value={group.id}>{group.name || group.title || group.id}</option>)}
+                      {bulkPlannerGroups.map((group) => <option key={group.id} value={group.id}>{getInternalGroupLabel(group)}</option>)}
                     </select>
                     <select
                       style={{ ...editorInputSt, opacity: isAdmin ? 1 : 0.78 }}
