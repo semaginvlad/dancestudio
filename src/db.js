@@ -463,7 +463,25 @@ const mapSiteTrainerProfile = (row) => ({
   updatedAt: row.updated_at || null,
   name: row.trainers?.name || [row.trainers?.first_name, row.trainers?.last_name].filter(Boolean).join(' ') || row.trainer_id,
   isOperational: row.trainers?.is_active === true && !row.trainers?.archived_at,
+  content: {
+    publicName: row.public_name ?? null,
+    roleLabel: row.role_label ?? null,
+    mainDirectionName: row.main_direction_name ?? null,
+    heroLabel: row.hero_label ?? null,
+    profileEyebrow: row.profile_eyebrow ?? null,
+    mainDirectionEyebrow: row.main_direction_eyebrow ?? null,
+    mainDirectionDetailEyebrow: row.main_direction_detail_eyebrow ?? null,
+    profileSummary: row.profile_summary ?? null,
+    videoSummary: row.video_summary ?? null,
+    emptyPortraitSummary: row.empty_portrait_summary ?? null,
+    primaryCtaLabel: row.primary_cta_label ?? null,
+    secondaryCtaLabel: row.secondary_cta_label ?? null,
+    profileSections: row.profile_sections ?? null,
+  },
 });
+
+const SITE_TRAINER_CONTENT_SELECT = 'trainer_id,public_name,role_label,main_direction_name,hero_label,profile_eyebrow,main_direction_eyebrow,main_direction_detail_eyebrow,profile_summary,video_summary,empty_portrait_summary,primary_cta_label,secondary_cta_label,profile_sections,updated_at';
+const SITE_TRAINER_ADMIN_SELECT = `trainer_id,publication_status,show_on_public_site,sort_order,updated_at,public_name,role_label,main_direction_name,hero_label,profile_eyebrow,main_direction_eyebrow,main_direction_detail_eyebrow,profile_summary,video_summary,empty_portrait_summary,primary_cta_label,secondary_cta_label,profile_sections,trainers(name,first_name,last_name,is_active,archived_at)`;
 
 const mapSiteDirectionProfile = (row) => ({
   directionId: row.direction_id,
@@ -483,7 +501,7 @@ export async function fetchSiteContentAdmin() {
       .select('page_key,is_published,show_in_navigation,sort_order,updated_at')
       .order('sort_order', { ascending: true }).order('page_key', { ascending: true }),
     supabase.from('site_trainer_profiles')
-      .select('trainer_id,publication_status,show_on_public_site,sort_order,updated_at,trainers(name,first_name,last_name,is_active,archived_at)')
+      .select(SITE_TRAINER_ADMIN_SELECT)
       .order('sort_order', { ascending: true }).order('trainer_id', { ascending: true }),
     supabase.from('site_direction_profiles')
       .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)')
@@ -519,9 +537,32 @@ export async function updateSiteTrainerProfile(trainerId, patch = {}) {
   if (patch.showOnPublicSite !== undefined) payload.show_on_public_site = !!patch.showOnPublicSite;
   if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
   const { data, error } = await supabase.from('site_trainer_profiles').update(payload).eq('trainer_id', trainerId)
-    .select('trainer_id,publication_status,show_on_public_site,sort_order,updated_at,trainers(name,first_name,last_name,is_active,archived_at)').single();
+    .select(SITE_TRAINER_ADMIN_SELECT).single();
   if (error) throw error;
   return mapSiteTrainerProfile(data);
+}
+
+export async function fetchSiteTrainerProfileContent(trainerId) {
+  const { data, error } = await supabase.from('site_trainer_profiles')
+    .select(SITE_TRAINER_CONTENT_SELECT).eq('trainer_id', trainerId).single();
+  if (error) throw error;
+  return mapSiteTrainerProfile(data).content;
+}
+
+export async function updateSiteTrainerProfileContent(trainerId, content) {
+  const payload = {
+    public_name: content.publicName, role_label: content.roleLabel,
+    main_direction_name: content.mainDirectionName, hero_label: content.heroLabel,
+    profile_eyebrow: content.profileEyebrow, main_direction_eyebrow: content.mainDirectionEyebrow,
+    main_direction_detail_eyebrow: content.mainDirectionDetailEyebrow,
+    profile_summary: content.profileSummary, video_summary: content.videoSummary,
+    empty_portrait_summary: content.emptyPortraitSummary, primary_cta_label: content.primaryCtaLabel,
+    secondary_cta_label: content.secondaryCtaLabel, profile_sections: content.profileSections,
+  };
+  const { data, error } = await supabase.from('site_trainer_profiles').update(payload)
+    .eq('trainer_id', trainerId).select(SITE_TRAINER_CONTENT_SELECT).single();
+  if (error) throw error;
+  return mapSiteTrainerProfile(data).content;
 }
 
 export async function updateSiteDirectionProfile(directionId, patch = {}) {
