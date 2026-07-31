@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
-import { formatGroupScheduleLabel, getGroupLevelLabel } from "./shared/groupLabels";
+import { formatGroupScheduleLabel, getGroupAgeCategoryLabel, getGroupLevelLabel } from "./shared/groupLabels";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -2480,6 +2480,7 @@ export default function App() {
                 .admin-group-filter-row, .admin-finance-filter-row { display: grid !important; grid-template-columns: 1fr !important; gap: 8px !important; min-width: 0 !important; }
                 .admin-group-filter-row input, .admin-group-filter-row select, .admin-finance-filter-row select { width: 100% !important; min-width: 0 !important; height: 44px !important; }
                 .admin-group-card { padding: 12px !important; border-radius: 16px !important; }
+                .admin-group-card > div:first-child { grid-template-columns: 1fr !important; gap: 8px !important; }
                 .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 8px !important; }
                 .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
                 .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
@@ -2617,34 +2618,35 @@ export default function App() {
                         const scheduleText = formatGroupSchedule(g.schedule) || "—";
                         const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
                         return (
-                          <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 16, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                              <div className="admin-group-main" style={{ display: "grid", gap: 10, minWidth: 260, flex: "1 1 360px" }}>
-                              <div>
-                                <div className="admin-group-title" style={{ fontWeight: 900, color: theme.textMain, fontSize: 18 }}>{g.name}</div>
-                                <div style={{ fontSize: 12, color: theme.textMuted }}>ID: {g.id}</div>
+                          <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 12, display: "grid", gap: 10, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "start" }}>
+                              <div className="admin-group-main" style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                                <div className="admin-group-title" style={{ fontWeight: 900, color: theme.textMain, fontSize: 17, lineHeight: 1.2 }}>{g.name}</div>
+                                <div style={{ fontSize: 11, color: theme.textMuted }}>ID: {g.id}</div>
                               </div>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
-                                <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
-                                <span style={badgeStyle}>Напрямок: {dir?.name || g.directionId || "—"}</span>
-                                {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>Рівень: {getGroupLevelLabel(g.publicLevel)}</span>}
-                                <span style={badgeStyle}>Учениць: {studentsCount}</span>
-                                <span style={badgeStyle}>Розклад: {scheduleText}</span>
-                              </div>
-                              <div style={{ fontSize: 12, color: theme.textMuted }}>Джерело тренера: {trainerInfo.source === "trainer_groups" ? "звʼязка trainer_groups" : trainerInfo.source === "groups" ? "поле групи (legacy fallback)" : "не вказано"} · Відсоток тренера: {g.trainerPct ?? 0}%</div>
-                            </div>
-                              <div className="admin-group-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
-                              <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
-                              <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
-                              {!!g.archived_at && (
-                                <span style={{ width: "100%", display: "flex", justifyContent: "flex-end", marginTop: 4, paddingTop: 10, borderTop: `1px solid ${theme.border}` }}>
-                                  <button type="button" style={{ ...btnS, color: theme.danger, borderColor: theme.danger, maxWidth: "100%", whiteSpace: "normal" }} onClick={() => openPermanentGroupDelete(g)}>Видалити назавжди</button>
-                                </span>
-                              )}
+                              <div className="admin-group-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                <button type="button" style={{ ...btnP, minHeight: 34, padding: "7px 10px", fontSize: 12 }} onClick={() => openEditGroup(g)}>Редагувати</button>
+                                <button type="button" style={{ ...btnS, minHeight: 34, padding: "7px 10px", fontSize: 12, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
+                                <button type="button" style={{ ...btnS, minHeight: 34, padding: "7px 10px", fontSize: 12, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
                               </div>
                             </div>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                              <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                              {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>{getGroupLevelLabel(g.publicLevel)}</span>}
+                              {getGroupAgeCategoryLabel(g.ageCategory) && <span style={badgeStyle}>{getGroupAgeCategoryLabel(g.ageCategory)}</span>}
+                              <span style={badgeStyle}>👥 {studentsCount}</span>
+                              <span style={badgeStyle}>🕒 {scheduleText}</span>
+                              <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", fontSize: 11, color: theme.textMuted }}>
+                              <span>{dir?.name || g.directionId || "—"}</span>
+                              <span>Відсоток тренера: {g.trainerPct ?? 0}%</span>
+                            </div>
+                            {!!g.archived_at && (
+                              <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8, borderTop: `1px solid ${theme.border}` }}>
+                                <button type="button" style={{ ...btnS, color: theme.danger, borderColor: theme.danger, minHeight: 34, padding: "7px 10px", fontSize: 12 }} onClick={() => openPermanentGroupDelete(g)}>Видалити назавжди</button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
