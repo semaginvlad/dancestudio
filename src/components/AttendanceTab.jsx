@@ -12,6 +12,7 @@ import {
   getCancelledDatesForGroup,
 } from "../shared/utils";
 import { theme } from "../shared/constants";
+import { getInternalGroupLabel } from "../shared/groupLabels";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -3496,7 +3497,7 @@ export default function AttendanceTab({
         <div className="attendance-toolbar-left" style={styles.toolbarLeft}>
           <div className="attendance-group-picker" style={styles.groupPickerWrap} ref={groupPickerRef}>
             <button type="button" style={styles.groupPickerBtn(groupPickerOpen)} onClick={() => setGroupPickerOpen((v) => !v)}>
-              <span>{currentGroup?.name || "Вибери групу"}</span>
+              <span>{currentGroup ? getInternalGroupLabel(currentGroup) : "Вибери групу"}</span>
               <span style={{ color: theme.textMuted }}>{groupPickerOpen ? "▲" : "▼"}</span>
             </button>
           </div>
@@ -3594,7 +3595,7 @@ export default function AttendanceTab({
                       setGroupPickerOpen(false);
                     }}
                   >
-                    {g.name}
+                    {getInternalGroupLabel(g)}
                   </button>
                 );
               })}
