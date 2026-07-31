@@ -271,6 +271,15 @@ export async function updateGroup(id, g) {
   return mapGroup(data)
 }
 
+export async function deleteArchivedGroup(groupId) {
+  if (!groupId) throw new Error('groupId is required')
+  const { data, error } = await supabase.rpc('delete_archived_group', { p_group_id: groupId })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.deleted_id) throw new Error('RPC delete_archived_group did not return a deleted group id')
+  return row.deleted_id
+}
+
 
 
 // ─── GROUP MERGE OPERATIONS ───

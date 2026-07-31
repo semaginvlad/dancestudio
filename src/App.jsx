@@ -197,6 +197,10 @@ export default function App() {
   const [groupEditDraft, setGroupEditDraft] = useState(null);
   const [groupMergeDraft, setGroupMergeDraft] = useState(null);
   const [groupMergeBusy, setGroupMergeBusy] = useState(false);
+  const [groupDeleteDraft, setGroupDeleteDraft] = useState(null);
+  const [groupDeleteConfirmation, setGroupDeleteConfirmation] = useState("");
+  const [groupDeleteBusy, setGroupDeleteBusy] = useState(false);
+  const [groupDeleteError, setGroupDeleteError] = useState("");
   const [groupMergeOperations, setGroupMergeOperations] = useState([]);
   const [adminGroupFiltersOpen, setAdminGroupFiltersOpen] = useState(false);
   const [adminFinanceFiltersOpen, setAdminFinanceFiltersOpen] = useState(false);
@@ -897,6 +901,44 @@ export default function App() {
       setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? { ...g, ...updated } : g)));
     } catch (e) {
       alert(e?.message || (shouldArchive ? "Не вдалося архівувати групу" : "Не вдалося відновити групу"));
+    }
+  };
+
+  const openPermanentGroupDelete = (group) => {
+    if (!group?.archived_at) return;
+    setGroupDeleteDraft(group);
+    setGroupDeleteConfirmation("");
+    setGroupDeleteError("");
+  };
+
+  const closePermanentGroupDelete = () => {
+    if (groupDeleteBusy) return;
+    setGroupDeleteDraft(null);
+    setGroupDeleteConfirmation("");
+    setGroupDeleteError("");
+  };
+
+  const permanentlyDeleteGroup = async () => {
+    if (!groupDeleteDraft?.archived_at || groupDeleteBusy) return;
+    if (groupDeleteConfirmation !== groupDeleteDraft.name) return;
+    setGroupDeleteBusy(true);
+    setGroupDeleteError("");
+    try {
+      const deletedId = await db.deleteArchivedGroup(groupDeleteDraft.id);
+      const keepOtherGroups = (row) => String(row.id) !== String(deletedId);
+      const keepOtherGroupLinks = (row) => String(row.groupId ?? row.group_id) !== String(deletedId);
+      setGroups((prev) => prev.filter(keepOtherGroups));
+      setScheduleGroups((prev) => prev.filter(keepOtherGroups));
+      setTrainerGroups((prev) => prev.filter(keepOtherGroupLinks));
+      setCancelled((prev) => prev.filter(keepOtherGroupLinks));
+      setScheduleCancelled((prev) => prev.filter(keepOtherGroupLinks));
+      setGroupLessonOverrides((prev) => prev.filter(keepOtherGroupLinks));
+      setGroupDeleteDraft(null);
+      setGroupDeleteConfirmation("");
+    } catch (e) {
+      setGroupDeleteError(e?.message || "Не вдалося видалити групу назавжди.");
+    } finally {
+      setGroupDeleteBusy(false);
     }
   };
 
@@ -2592,6 +2634,11 @@ export default function App() {
                               <button type="button" style={btnS} onClick={() => openEditGroup(g)}>Редагувати</button>
                               <button type="button" style={{ ...btnS, opacity: archiveMeta.mode ? 1 : 0.5, cursor: archiveMeta.mode ? "pointer" : "not-allowed" }} disabled={!archiveMeta.mode} title={archiveMeta.mode ? "" : "Потрібне поле is_active, active або archived_at"} onClick={() => toggleGroupArchive(g)}>{archiveMeta.isArchived ? "Відновити" : "Архівувати"}</button>
                               <button type="button" style={{ ...btnS, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
+                              {!!g.archived_at && (
+                                <span style={{ width: "100%", display: "flex", justifyContent: "flex-end", marginTop: 4, paddingTop: 10, borderTop: `1px solid ${theme.border}` }}>
+                                  <button type="button" style={{ ...btnS, color: theme.danger, borderColor: theme.danger, maxWidth: "100%", whiteSpace: "normal" }} onClick={() => openPermanentGroupDelete(g)}>Видалити назавжди</button>
+                                </span>
+                              )}
                               </div>
                             </div>
                           </div>
@@ -3259,6 +3306,23 @@ export default function App() {
         )}
       </Modal>
       
+      <Modal open={!!groupDeleteDraft} onClose={closePermanentGroupDelete} title="Остаточне видалення групи" variant="admin-mobile">
+        {groupDeleteDraft && (
+          <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+            <div style={{ color: theme.danger, fontWeight: 700, lineHeight: 1.5 }}>Групу буде видалено назавжди. Відновити її буде неможливо.</div>
+            <div style={{ color: theme.textMuted, lineHeight: 1.5 }}>Якщо до групи привʼязана історія, абонементи, оплати, пробні записи або інші важливі дані, видалення буде заблоковано.</div>
+            <Field label={<>Для підтвердження введіть точну назву: <strong>{groupDeleteDraft.name}</strong></>}>
+              <input autoFocus style={{ ...inputSt, width: "100%", minWidth: 0 }} value={groupDeleteConfirmation} disabled={groupDeleteBusy} onChange={(e) => setGroupDeleteConfirmation(e.target.value)} />
+            </Field>
+            {groupDeleteError && <div role="alert" style={{ padding: 12, borderRadius: 12, background: `${theme.danger}18`, color: theme.danger, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{groupDeleteError}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={btnS} disabled={groupDeleteBusy} onClick={closePermanentGroupDelete}>Скасувати</button>
+              <button type="button" style={{ ...btnP, background: theme.danger, opacity: groupDeleteConfirmation === groupDeleteDraft.name && !groupDeleteBusy ? 1 : 0.5 }} disabled={groupDeleteConfirmation !== groupDeleteDraft.name || groupDeleteBusy} onClick={permanentlyDeleteGroup}>{groupDeleteBusy ? "Видалення…" : "Видалити назавжди"}</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
       {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
