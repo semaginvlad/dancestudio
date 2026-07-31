@@ -69,6 +69,20 @@ const normalizeDirectionId = (name = "") => String(name || "")
   .replace(/[^a-z0-9]+/gi, "_")
   .replace(/^_+|_+$/g, "");
 const UI_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+const PUBLIC_LEVEL_OPTIONS = [
+  { value: "base", label: "BASE" },
+  { value: "mix", label: "MIX" },
+];
+const PUBLIC_JOIN_STATUS_OPTIONS = [
+  { value: "open", label: "Можна приєднатись" },
+  { value: "experience_only", label: "Лише з досвідом" },
+  { value: "closed", label: "Закрита група" },
+];
+const AGE_CATEGORY_OPTIONS = [
+  { value: "teens_under_16", label: "Підлітки до 16 років" },
+  { value: "adults_16_plus", label: "Дорослі 16+" },
+];
 const addDaysForScheduleRange = (date, days) => {
   const d = new Date(`${date}T12:00:00`);
   d.setDate(d.getDate() + days);
@@ -168,6 +182,10 @@ export default function App() {
     schedule: [],
     trainerPct: "0",
     trainerId: "",
+    showOnPublicSite: false,
+    publicLevel: "",
+    publicJoinStatus: "open",
+    ageCategory: "",
   });
 
   const [expandedDirs, setExpandedDirs] = useState({});
@@ -702,6 +720,14 @@ export default function App() {
         return;
       }
     }
+    if (newGroupDraft.showOnPublicSite && !newGroupDraft.publicLevel) {
+      alert("Оберіть рівень на сайті для публічної групи.");
+      return;
+    }
+    if (newGroupDraft.showOnPublicSite && !newGroupDraft.ageCategory) {
+      alert("Оберіть вікову категорію для публічної групи.");
+      return;
+    }
     const selectedTrainerId = String(newGroupDraft.trainerId || "").trim();
     const validTrainerId = selectedTrainerId && trainers.some((t) => String(t.id) === selectedTrainerId)
       ? selectedTrainerId
@@ -713,6 +739,10 @@ export default function App() {
       directionId,
       schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
       trainerPct: trainerPctNum,
+      showOnPublicSite: !!newGroupDraft.showOnPublicSite,
+      publicLevel: newGroupDraft.showOnPublicSite ? newGroupDraft.publicLevel || null : null,
+      publicJoinStatus: newGroupDraft.publicJoinStatus || "open",
+      ageCategory: newGroupDraft.showOnPublicSite ? newGroupDraft.ageCategory || null : null,
     };
     try {
       const created = await db.insertGroup(payload);
@@ -735,6 +765,10 @@ export default function App() {
         schedule: [],
         trainerPct: "0",
         trainerId: "",
+        showOnPublicSite: false,
+        publicLevel: "",
+        publicJoinStatus: "open",
+        ageCategory: "",
       });
       setModal(null);
     } catch (e) {
@@ -751,17 +785,33 @@ export default function App() {
       schedule: parseGroupSchedule(group.schedule),
       trainerPct: String(group.trainerPct ?? 0),
       trainerId: getGroupPrimaryTrainerId(group.id),
+      showOnPublicSite: !!group.showOnPublicSite,
+      publicLevel: group.publicLevel || "",
+      publicJoinStatus: group.publicJoinStatus || "open",
+      ageCategory: group.ageCategory || "",
     });
   };
 
   const saveGroupEdit = async () => {
     if (!groupEditDraft?.id) return;
+    if (groupEditDraft.showOnPublicSite && !groupEditDraft.publicLevel) {
+      alert("Оберіть рівень на сайті для публічної групи.");
+      return;
+    }
+    if (groupEditDraft.showOnPublicSite && !groupEditDraft.ageCategory) {
+      alert("Оберіть вікову категорію для публічної групи.");
+      return;
+    }
     const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(groupEditDraft.trainerPct || "").trim(), 10) || 0));
     const payload = {
       name: String(groupEditDraft.name || "").trim(),
       directionId: groupEditDraft.directionId,
       schedule: Array.isArray(groupEditDraft.schedule) ? groupEditDraft.schedule : [],
       trainerPct: trainerPctNum,
+      showOnPublicSite: !!groupEditDraft.showOnPublicSite,
+      publicLevel: groupEditDraft.showOnPublicSite ? groupEditDraft.publicLevel || null : null,
+      publicJoinStatus: groupEditDraft.publicJoinStatus || "open",
+      ageCategory: groupEditDraft.showOnPublicSite ? groupEditDraft.ageCategory || null : null,
     };
     try {
       const updated = await db.updateGroup(groupEditDraft.id, payload);
@@ -2883,6 +2933,38 @@ export default function App() {
               )}
             </div>
           </Field>
+
+          <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${newGroupDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: newGroupDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
+              <input
+                type="checkbox"
+                checked={!!newGroupDraft.showOnPublicSite}
+                onChange={(e) => setNewGroupDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, publicLevel: e.target.checked ? p.publicLevel : "", ageCategory: e.target.checked ? p.ageCategory : "" }))}
+              />
+              Показувати на сайті
+            </label>
+            {newGroupDraft.showOnPublicSite && (
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                <Field label="Рівень на сайті *">
+                  <select style={inputSt} value={newGroupDraft.publicLevel} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
+                    <option value="">— Оберіть —</option>
+                    {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Вікова категорія *">
+                  <select style={inputSt} value={newGroupDraft.ageCategory} onChange={(e) => setNewGroupDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+                    <option value="">— Оберіть —</option>
+                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Запис до групи">
+                  <select style={inputSt} value={newGroupDraft.publicJoinStatus} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
+                    {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+              </div>
+            )}
+          </div>
           <Field label="Графік занять">
             <ScheduleEditor value={newGroupDraft.schedule} onChange={(schedule) => setNewGroupDraft((p) => ({ ...p, schedule }))} />
           </Field>
@@ -3062,6 +3144,38 @@ export default function App() {
                 {directionsList.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </Field>
+
+          <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${groupEditDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: groupEditDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
+              <input
+                type="checkbox"
+                checked={!!groupEditDraft.showOnPublicSite}
+                onChange={(e) => setGroupEditDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, publicLevel: e.target.checked ? p.publicLevel : "", ageCategory: e.target.checked ? p.ageCategory : "" }))}
+              />
+              Показувати на сайті
+            </label>
+            {groupEditDraft.showOnPublicSite && (
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                <Field label="Рівень на сайті *">
+                  <select style={inputSt} value={groupEditDraft.publicLevel} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicLevel: e.target.value }))}>
+                    <option value="">— Оберіть —</option>
+                    {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Вікова категорія *">
+                  <select style={inputSt} value={groupEditDraft.ageCategory} onChange={(e) => setGroupEditDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+                    <option value="">— Оберіть —</option>
+                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Запис до групи">
+                  <select style={inputSt} value={groupEditDraft.publicJoinStatus} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
+                    {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </Field>
+              </div>
+            )}
+          </div>
             <Field label="Графік">
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {UI_WEEKDAY_ORDER.map((dayIdx) => {

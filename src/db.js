@@ -200,6 +200,10 @@ const mapGroup = (g) => ({
   directionId: g.direction_id,
   trainerPct: g.trainer_pct,
   trainer_id: g.trainer_id,
+  publicLevel: g.public_level ?? g.publicLevel ?? null,
+  publicJoinStatus: g.public_join_status ?? g.publicJoinStatus ?? 'open',
+  showOnPublicSite: g.show_on_public_site ?? g.showOnPublicSite ?? false,
+  ageCategory: g.age_category ?? g.ageCategory ?? null,
   archivedAt: g.archived_at ?? g.archivedAt ?? null,
   isActive: g.is_active ?? g.isActive ?? true,
 })
@@ -252,13 +256,17 @@ export async function updateGroup(id, g) {
   if (g.schedule !== undefined) payload.schedule = g.schedule
   if (g.trainerPct !== undefined) payload.trainer_pct = g.trainerPct
   if (g.trainer_id !== undefined) payload.trainer_id = g.trainer_id
+  if (g.publicLevel !== undefined) payload.public_level = g.publicLevel || null
+  if (g.publicJoinStatus !== undefined) payload.public_join_status = g.publicJoinStatus || 'open'
+  if (g.showOnPublicSite !== undefined) payload.show_on_public_site = !!g.showOnPublicSite
+  if (g.ageCategory !== undefined) payload.age_category = g.ageCategory || null
   if (g.is_active !== undefined) payload.is_active = g.is_active
   if (g.active !== undefined) payload.active = g.active
   if (g.archived_at !== undefined) payload.archived_at = g.archived_at
 
   const { data, error } = await supabase.from('groups').update(payload).eq('id', id).select().single()
   if (error) throw error
-  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id }
+  return mapGroup(data)
 }
 
 
@@ -363,10 +371,14 @@ export async function insertGroup(group) {
     direction_id: group.directionId,
     schedule: Array.isArray(group.schedule) ? group.schedule : [],
     trainer_pct: group.trainerPct ?? 0,
+    public_level: group.publicLevel || null,
+    public_join_status: group.publicJoinStatus || 'open',
+    show_on_public_site: !!group.showOnPublicSite,
+    age_category: group.ageCategory || null,
   };
   const { data, error } = await supabase.from('groups').insert(payload).select().single();
   if (error) throw error;
-  return { ...data, directionId: data.direction_id, trainerPct: data.trainer_pct, trainer_id: data.trainer_id };
+  return mapGroup(data);
 }
 
 // ─── DIRECTIONS ───
