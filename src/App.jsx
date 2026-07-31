@@ -136,6 +136,7 @@ export default function App() {
   const [trainers, setTrainers] = useState([]);
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
+  const [studioRooms, setStudioRooms] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
   const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
   const [trainingLessonReports, setTrainingLessonReports] = useState([]);
@@ -216,6 +217,18 @@ export default function App() {
 
   const adminEmails = ADMIN_EMAILS;
   const isAdmin = user && isAdminEmail(user.email, adminEmails);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setStudioRooms([]);
+      return;
+    }
+    let active = true;
+    db.fetchStudioRooms().then((rooms) => {
+      if (active) setStudioRooms(Array.isArray(rooms) ? rooms : []);
+    });
+    return () => { active = false; };
+  }, [isAdmin]);
 
 
 
@@ -816,6 +829,7 @@ export default function App() {
     try {
       const updated = await db.updateGroup(groupEditDraft.id, payload);
       setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
+      setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? { ...g, ...updated } : g)));
 
       const targetTrainerId = String(groupEditDraft.trainerId || "").trim();
       const groupRows = trainerGroups.filter((tg) => String(tg.groupId) === String(groupEditDraft.id));
@@ -1379,25 +1393,52 @@ export default function App() {
 
   const ScheduleEditor = ({ value, onChange, disabled = false }) => {
     const rows = parseGroupSchedule(value);
+    const getRoomName = (slot = {}) => String(
+      slot.roomName ?? slot.room_name ?? slot.room ?? slot.location ?? slot.hall ?? "",
+    ).trim();
+    const roomOptions = Array.from(new Set([
+      ...studioRooms
+        .filter((room) => room?.isActive !== false)
+        .map((room) => String(room?.name || "").trim())
+        .filter(Boolean),
+      ...rows.map(getRoomName).filter(Boolean),
+    ]));
     const updateRow = (index, patch) => {
       onChange(rows.map((slot, slotIndex) => (
         slotIndex === index ? { ...slot, ...patch } : slot
       )));
     };
+    const updateRoom = (index, roomName) => {
+      onChange(rows.map((slot, slotIndex) => {
+        if (slotIndex !== index) return slot;
+        const { room_name, room, location, hall, ...rest } = slot;
+        return { ...rest, roomName };
+      }));
+    };
     const removeRow = (index) => onChange(rows.filter((_, slotIndex) => slotIndex !== index));
     return (
       <div style={{ display: "grid", gap: 8 }}>
         {rows.map((slot, index) => (
-          <div key={`${slot.day}-${slot.time}-${index}`} style={{ display: "grid", gridTemplateColumns: "1fr 120px auto", gap: 8, alignItems: "center" }}>
+          <div key={`${slot.day}-${slot.time}-${index}`} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, alignItems: "center" }}>
             <select style={inputSt} value={Number(slot.day) || 0} onChange={(e) => updateRow(index, { day: Number(e.target.value) })} disabled={disabled}>
               {UI_WEEKDAY_ORDER.map((dayIdx) => <option key={dayIdx} value={dayIdx}>{WEEKDAYS[dayIdx]}</option>)}
             </select>
             <input style={inputSt} type="time" value={String(slot.time || "")} onChange={(e) => updateRow(index, { time: e.target.value })} disabled={disabled} />
-            <button type="button" style={{ ...btnS, color: theme.danger }} onClick={() => removeRow(index)} disabled={disabled}>Видалити</button>
+            <select
+              aria-label="Зал"
+              style={inputSt}
+              value={getRoomName(slot)}
+              onChange={(e) => updateRoom(index, e.target.value)}
+              disabled={disabled}
+            >
+              <option value="">Зал не вибрано</option>
+              {roomOptions.map((roomName) => <option key={roomName} value={roomName}>{roomName}</option>)}
+            </select>
+            <button type="button" style={{ ...btnS, color: theme.danger, width: "100%" }} onClick={() => removeRow(index)} disabled={disabled}>Видалити</button>
           </div>
         ))}
         {!rows.length && <div style={{ fontSize: 12, color: theme.textMuted }}>Графік порожній — групу можна створити без занять.</div>}
-        <button type="button" style={btnS} onClick={() => onChange([...rows, { day: 1, time: "19:00" }])} disabled={disabled}>Додати заняття</button>
+        <button type="button" style={btnS} onClick={() => onChange([...rows, { day: 1, time: "19:00", roomName: "" }])} disabled={disabled}>Додати заняття</button>
       </div>
     );
   };
@@ -3177,26 +3218,7 @@ export default function App() {
             )}
           </div>
             <Field label="Графік">
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {UI_WEEKDAY_ORDER.map((dayIdx) => {
-                  const label = WEEKDAYS[dayIdx];
-                  const active = groupEditDraft.schedule.some((x) => Number(x.day) === dayIdx);
-                  return (
-                    <Pill
-                      key={dayIdx}
-                      active={active}
-                      onClick={() => setGroupEditDraft((p) => ({
-                        ...p,
-                        schedule: active
-                          ? p.schedule.filter((x) => Number(x.day) !== dayIdx)
-                          : [...p.schedule, { day: dayIdx, time: "19:00" }],
-                      }))}
-                    >
-                      {label}
-                    </Pill>
-                  );
-                })}
-              </div>
+              <ScheduleEditor value={groupEditDraft.schedule} onChange={(schedule) => setGroupEditDraft((p) => ({ ...p, schedule }))} />
             </Field>
             <Field label="Відсоток тренера">
               <input style={inputSt} type="text" inputMode="numeric" value={groupEditDraft.trainerPct} onChange={(e) => {
