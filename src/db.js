@@ -432,7 +432,6 @@ export async function insertDirection(direction) {
 
 export async function updateDirection(id, direction) {
   const payload = {};
-  if (direction.id !== undefined) payload.id = direction.id;
   if (direction.name !== undefined) payload.name = direction.name;
   if (direction.color !== undefined) payload.color = direction.color || "#7b8ea8";
   if (direction.isActive !== undefined) payload.is_active = !!direction.isActive;
@@ -446,6 +445,105 @@ export async function deleteDirection(id) {
   const { error } = await supabase.from("directions").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ─── SITE CONTENT (ADMIN ONLY) ───
+const mapSitePage = (row) => ({
+  pageKey: row.page_key,
+  isPublished: !!row.is_published,
+  showInNavigation: !!row.show_in_navigation,
+  sortOrder: Number(row.sort_order || 0),
+  updatedAt: row.updated_at || null,
+});
+
+const mapSiteTrainerProfile = (row) => ({
+  trainerId: row.trainer_id,
+  publicationStatus: row.publication_status,
+  showOnPublicSite: !!row.show_on_public_site,
+  sortOrder: Number(row.sort_order || 0),
+  updatedAt: row.updated_at || null,
+  name: row.trainers?.name || [row.trainers?.first_name, row.trainers?.last_name].filter(Boolean).join(' ') || row.trainer_id,
+  isOperational: row.trainers?.is_active === true && !row.trainers?.archived_at,
+});
+
+const mapSiteDirectionProfile = (row) => ({
+  directionId: row.direction_id,
+  publicSlug: row.public_slug,
+  publicationStatus: row.publication_status,
+  showOnPublicSite: !!row.show_on_public_site,
+  sortOrder: Number(row.sort_order || 0),
+  updatedAt: row.updated_at || null,
+  name: row.directions?.name || row.direction_id,
+  color: row.directions?.color || '#7b8ea8',
+  isOperational: row.directions?.is_active === true && !row.directions?.archived_at,
+});
+
+export async function fetchSiteContentAdmin() {
+  const [pagesResult, trainersResult, directionsResult] = await Promise.all([
+    supabase.from('site_pages')
+      .select('page_key,is_published,show_in_navigation,sort_order,updated_at')
+      .order('sort_order', { ascending: true }).order('page_key', { ascending: true }),
+    supabase.from('site_trainer_profiles')
+      .select('trainer_id,publication_status,show_on_public_site,sort_order,updated_at,trainers(name,first_name,last_name,is_active,archived_at)')
+      .order('sort_order', { ascending: true }).order('trainer_id', { ascending: true }),
+    supabase.from('site_direction_profiles')
+      .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)')
+      .order('sort_order', { ascending: true }).order('direction_id', { ascending: true }),
+  ]);
+  const failed = [pagesResult, trainersResult, directionsResult].find((result) => result.error);
+  if (failed?.error) {
+    const error = new Error('Розділ «Сайт» ще недоступний. Перевірте, чи migration Site Content V1 пройшла ручну перевірку та була застосована.');
+    error.cause = failed.error;
+    throw error;
+  }
+  return {
+    pages: (pagesResult.data || []).map(mapSitePage),
+    trainers: (trainersResult.data || []).map(mapSiteTrainerProfile),
+    directions: (directionsResult.data || []).map(mapSiteDirectionProfile),
+  };
+}
+
+export async function updateSitePage(pageKey, patch = {}) {
+  const payload = {};
+  if (patch.isPublished !== undefined) payload.is_published = !!patch.isPublished;
+  if (patch.showInNavigation !== undefined) payload.show_in_navigation = !!patch.showInNavigation;
+  if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
+  const { data, error } = await supabase.from('site_pages').update(payload).eq('page_key', pageKey)
+    .select('page_key,is_published,show_in_navigation,sort_order,updated_at').single();
+  if (error) throw error;
+  return mapSitePage(data);
+}
+
+export async function updateSiteTrainerProfile(trainerId, patch = {}) {
+  const payload = {};
+  if (patch.publicationStatus !== undefined) payload.publication_status = patch.publicationStatus;
+  if (patch.showOnPublicSite !== undefined) payload.show_on_public_site = !!patch.showOnPublicSite;
+  if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
+  const { data, error } = await supabase.from('site_trainer_profiles').update(payload).eq('trainer_id', trainerId)
+    .select('trainer_id,publication_status,show_on_public_site,sort_order,updated_at,trainers(name,first_name,last_name,is_active,archived_at)').single();
+  if (error) throw error;
+  return mapSiteTrainerProfile(data);
+}
+
+export async function updateSiteDirectionProfile(directionId, patch = {}) {
+  const payload = {};
+  if (patch.publicationStatus !== undefined) payload.publication_status = patch.publicationStatus;
+  if (patch.showOnPublicSite !== undefined) payload.show_on_public_site = !!patch.showOnPublicSite;
+  if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
+  const { data, error } = await supabase.from('site_direction_profiles').update(payload).eq('direction_id', directionId)
+    .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)').single();
+  if (error) throw error;
+  return mapSiteDirectionProfile(data);
+}
+
+const reorderSiteRows = async (items, updateItem, idKey) => {
+  const ordered = [...items].map((item, index) => ({ ...item, sortOrder: (index + 1) * 10 }));
+  await Promise.all(ordered.map((item) => updateItem(item[idKey], { sortOrder: item.sortOrder })));
+  return ordered;
+};
+
+export const reorderSitePages = (pages) => reorderSiteRows(pages, updateSitePage, 'pageKey');
+export const reorderSiteTrainerProfiles = (trainers) => reorderSiteRows(trainers, updateSiteTrainerProfile, 'trainerId');
+export const reorderSiteDirectionProfiles = (directions) => reorderSiteRows(directions, updateSiteDirectionProfile, 'directionId');
 
 // ─── TRAINERS ───
 const mapTrainer = (t) => ({

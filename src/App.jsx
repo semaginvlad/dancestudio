@@ -48,6 +48,7 @@ import TrainersNotificationsTab from "./components/TrainersNotificationsTab";
 import AppUpdateBanner from "./components/AppUpdateBanner";
 import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
+import SiteTab from "./components/SiteTab";
 import {
   extractPushSubscriptionPayload,
   getPushStatus,
@@ -1013,13 +1014,10 @@ export default function App() {
     const base = directionsList.find((d) => String(d.id) === String(directionId));
     const edit = directionEdits[directionId] || {};
     if (!base) return;
-    const nextId = normalizeDirectionId(edit.id ?? base.id);
     const nextName = String(edit.name ?? base.name ?? "").trim();
-    if (!nextId || !nextName) { alert("ID та назва напрямку обов'язкові."); return; }
-    if (nextId !== base.id && directionsList.some((d) => String(d.id) === nextId)) { alert("Конфлікт ID напрямку."); return; }
+    if (!nextName) { alert("Назва напрямку обов'язкова."); return; }
     try {
       const updated = await db.updateDirection(base.id, {
-        id: nextId,
         name: nextName,
         color: edit.color ?? base.color ?? "#7b8ea8",
       });
@@ -2517,13 +2515,15 @@ export default function App() {
                 <option value="analytics:notifications">Аналітика · Автоматизація</option>
                 <option value="finance:finance">Фінанси</option>
                 <option value="pro:pro">Про-аналітика</option>
+                <option value="site:site">Сайт</option>
               </select>
             </div>
             <div className="admin-desktop-tabs" style={{ overflowX: "auto", maxWidth: "100%" }}>
               <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, minWidth: "max-content" }}>
               <button type="button" onClick={() => setAdminTab("analytics")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "analytics" ? theme.primary : "transparent", color: adminTab === "analytics" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Аналітика</button>
               <button type="button" onClick={() => setAdminTab("finance")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "finance" ? theme.primary : "transparent", color: adminTab === "finance" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Фінанси</button>
-                            <button type="button" onClick={() => setAdminTab("pro")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pro" ? theme.primary : "transparent", color: adminTab === "pro" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Про-аналітика</button>
+              <button type="button" onClick={() => setAdminTab("pro")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pro" ? theme.primary : "transparent", color: adminTab === "pro" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Про-аналітика</button>
+              <button type="button" onClick={() => setAdminTab("site")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "site" ? theme.primary : "transparent", color: adminTab === "site" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сайт</button>
               </div>
             </div>
             {adminTab === "analytics" && (
@@ -2675,6 +2675,7 @@ export default function App() {
             ))}
             
             {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
+            {adminTab === "site" && <SiteTab />}
           </div>
         )}
         
@@ -3006,7 +3007,7 @@ export default function App() {
                 <div key={d.id} style={{ ...cardSt, padding: 14, display: "grid", gap: 8 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px auto auto auto", gap: 8, alignItems: "center" }}>
                     <input style={inputSt} value={edit.name ?? d.name ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { name: e.target.value })} disabled={!persisted} />
-                    <input style={inputSt} value={edit.id ?? d.id ?? ""} onChange={(e) => upsertDirectionEdit(d.id, { id: e.target.value })} disabled={!persisted} />
+                    <input style={inputSt} value={d.id ?? ""} disabled title="ID наявного напрямку не можна змінювати" />
                     <input style={inputSt} value={edit.color ?? d.color ?? "#7b8ea8"} onChange={(e) => upsertDirectionEdit(d.id, { color: e.target.value })} disabled={!persisted} />
                     <button type="button" style={btnS} onClick={() => toggleDirectionActive(d)} disabled={!persisted}>{d.isActive === false ? "Увімкнути" : "Архівувати"}</button>
                     <button type="button" style={btnP} onClick={() => saveDirectionEdit(d.id)} disabled={!persisted}>Зберегти</button>
