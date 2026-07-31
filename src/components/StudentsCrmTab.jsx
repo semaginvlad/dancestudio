@@ -609,6 +609,7 @@ export default function StudentsCrmTab({
           <div className="student-waitlist-desktop-status" style={{ marginTop: 6 }}>{renderWaitlistStatusSelector(w, status, "desktop")}</div>
         </div>
         <div className="student-waitlist-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 }}>
+          <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => { setEditItem(w); setModal("editWaitlist"); }}>Редагувати</button>
           {gr ? <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5 }} onClick={() => joinWaitlistEntry(w)}>Додати в групу</button> : null}
           <button style={{ ...btnS, padding: "8px 10px", fontSize: 12.5, color: theme.danger, background: theme.input }} onClick={() => removeWaitlistEntry(w)}>Прибрати</button>
         </div>
