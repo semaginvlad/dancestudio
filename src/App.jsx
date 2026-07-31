@@ -2545,6 +2545,9 @@ export default function App() {
                 analyticsFoundation={analytics.foundation}
                 cancelled={cancelled}
                 themeMode={themeMode}
+                onTrainerDeleted={(deletedId) => {
+                  if (String(filterTrainer) === String(deletedId)) setFilterTrainer("");
+                }}
               />
             ) : trainersSubtab === "groups" ? (
               <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
