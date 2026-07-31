@@ -82,8 +82,8 @@ const PUBLIC_JOIN_STATUS_OPTIONS = [
   { value: "closed", label: "Закрита група" },
 ];
 const AGE_CATEGORY_OPTIONS = [
-  { value: "teens_under_16", label: "Підлітки до 16 років" },
-  { value: "adults_16_plus", label: "Дорослі 16+" },
+  { value: "teens_under_16", label: "10–16" },
+  { value: "adults_16_plus", label: "16+" },
 ];
 const addDaysForScheduleRange = (date, days) => {
   const d = new Date(`${date}T12:00:00`);
@@ -768,7 +768,7 @@ export default function App() {
       showOnPublicSite: !!newGroupDraft.showOnPublicSite,
       publicLevel: newGroupDraft.publicLevel || null,
       publicJoinStatus: newGroupDraft.publicJoinStatus || "open",
-      ageCategory: newGroupDraft.showOnPublicSite ? newGroupDraft.ageCategory || null : null,
+      ageCategory: newGroupDraft.ageCategory || null,
     };
     try {
       const created = await db.insertGroup(payload);
@@ -840,7 +840,7 @@ export default function App() {
       showOnPublicSite: !!groupEditDraft.showOnPublicSite,
       publicLevel: groupEditDraft.publicLevel || null,
       publicJoinStatus: groupEditDraft.publicJoinStatus || "open",
-      ageCategory: groupEditDraft.showOnPublicSite ? groupEditDraft.ageCategory || null : null,
+      ageCategory: groupEditDraft.ageCategory || null,
     };
     try {
       const updated = await db.updateGroup(groupEditDraft.id, payload);
@@ -3045,23 +3045,23 @@ export default function App() {
               {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
+          <Field label="Вікова категорія">
+            <select style={inputSt} value={newGroupDraft.ageCategory} onChange={(e) => setNewGroupDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
           <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${newGroupDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: newGroupDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
               <input
                 type="checkbox"
                 checked={!!newGroupDraft.showOnPublicSite}
-                onChange={(e) => setNewGroupDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, ageCategory: e.target.checked ? p.ageCategory : "" }))}
+                onChange={(e) => setNewGroupDraft((p) => ({ ...p, showOnPublicSite: e.target.checked }))}
               />
               Показувати на сайті
             </label>
             {newGroupDraft.showOnPublicSite && (
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                <Field label="Вікова категорія *">
-                  <select style={inputSt} value={newGroupDraft.ageCategory} onChange={(e) => setNewGroupDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
                 <Field label="Запис до групи">
                   <select style={inputSt} value={newGroupDraft.publicJoinStatus} onChange={(e) => setNewGroupDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
                     {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -3259,23 +3259,23 @@ export default function App() {
               {PUBLIC_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
+          <Field label="Вікова категорія">
+            <select style={inputSt} value={groupEditDraft.ageCategory} onChange={(e) => setGroupEditDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
+              <option value="">— Не вказано —</option>
+              {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
           <div style={{ display: "grid", gap: 12, padding: 14, border: `1px solid ${groupEditDraft.showOnPublicSite ? theme.primary : theme.border}`, borderRadius: 18, background: groupEditDraft.showOnPublicSite ? `${theme.primary}12` : theme.input }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800, color: theme.textMain }}>
               <input
                 type="checkbox"
                 checked={!!groupEditDraft.showOnPublicSite}
-                onChange={(e) => setGroupEditDraft((p) => ({ ...p, showOnPublicSite: e.target.checked, ageCategory: e.target.checked ? p.ageCategory : "" }))}
+                onChange={(e) => setGroupEditDraft((p) => ({ ...p, showOnPublicSite: e.target.checked }))}
               />
               Показувати на сайті
             </label>
             {groupEditDraft.showOnPublicSite && (
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                <Field label="Вікова категорія *">
-                  <select style={inputSt} value={groupEditDraft.ageCategory} onChange={(e) => setGroupEditDraft((p) => ({ ...p, ageCategory: e.target.value }))}>
-                    <option value="">— Оберіть —</option>
-                    {AGE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </Field>
                 <Field label="Запис до групи">
                   <select style={inputSt} value={groupEditDraft.publicJoinStatus} onChange={(e) => setGroupEditDraft((p) => ({ ...p, publicJoinStatus: e.target.value }))}>
                     {PUBLIC_JOIN_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
