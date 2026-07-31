@@ -374,14 +374,17 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
   );
 }
 
-export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, directionsList = DIRECTIONS }) {
-  const [mode, setMode] = useState("existing");
-  const [studentId, setStudentId] = useState("");
-  const [directionId, setDirectionId] = useState("");
-  const [groupId, setGroupId] = useState("");
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
-  const [note, setNote] = useState("");
+export function WaitlistForm({ initial, onDone, onCancel, students, groups, studentGrps, directionsList = DIRECTIONS }) {
+  const isEditing = Boolean(initial?.id);
+  const lockedMode = initial?.studentId ? "existing" : "new";
+  const [mode, setMode] = useState(isEditing ? lockedMode : "existing");
+  const [studentId, setStudentId] = useState(initial?.studentId || "");
+  const [directionId, setDirectionId] = useState(initial?.directionId || "");
+  const [groupId, setGroupId] = useState(initial?.groupId || "");
+  const [name, setName] = useState(initial?.name || "");
+  const [contact, setContact] = useState(initial?.contact || "");
+  const [note, setNote] = useState(initial?.note || "");
+  const [saving, setSaving] = useState(false);
   const filteredGroups = directionId ? groups.filter((g) => String(g.directionId) === String(directionId)) : [];
   const handleDirectionChange = (nextDirectionId) => {
     setDirectionId(nextDirectionId);
@@ -389,16 +392,36 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, 
     if (selectedGroup && String(selectedGroup.directionId) !== String(nextDirectionId)) setGroupId("");
   };
   const canSubmit = (mode === "existing" ? studentId : name.trim()) && directionId;
+  const handleSubmit = async () => {
+    if (!canSubmit || saving) return;
+    const values = {
+      studentId: mode === "existing" ? studentId : null,
+      directionId,
+      groupId: groupId || null,
+      name: name.trim(),
+      contact: contact.trim(),
+      note: note.trim(),
+    };
+    if (!isEditing) Object.assign(values, { dateAdded: today(), status: "waiting" });
+    setSaving(true);
+    try {
+      await onDone(values);
+    } catch {
+      // The modal owner reports persistence errors; keep the form open for retry.
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="waitlist-form">
       <Field label="Тип контакту">
         <div className="waitlist-segmented" style={{ display: "flex", gap: 8 }}>
-          <button type="button" aria-pressed={mode === "existing"} style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
-          <button type="button" aria-pressed={mode === "new"} style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
+          <button type="button" disabled={isEditing} aria-pressed={mode === "existing"} style={{ ...btnS, opacity: mode === "existing" ? 1 : 0.7 }} onClick={() => setMode("existing")}>Існуюча учениця</button>
+          <button type="button" disabled={isEditing} aria-pressed={mode === "new"} style={{ ...btnS, opacity: mode === "new" ? 1 : 0.7 }} onClick={() => setMode("new")}>Новий контакт</button>
         </div>
       </Field>
       {mode === "existing" ? (
-        <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
+        <Field label="Учениця *"><div aria-disabled={isEditing} style={isEditing ? { pointerEvents: "none", opacity: 0.75 } : undefined}><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></div></Field>
       ) : (
         <>
           <Field label="Ім'я *"><input style={inputSt} value={name} onChange={(e) => setName(e.target.value)} /></Field>
@@ -419,11 +442,9 @@ export function WaitlistForm({ onDone, onCancel, students, groups, studentGrps, 
       </Field>
       <Field label="Нотатка"><input style={inputSt} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       <div className="waitlist-actions" style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
-        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-        <button type="button" style={{ ...btnP, background: theme.warning, opacity: canSubmit ? 1 : .4 }} aria-disabled={!canSubmit} onClick={() => {
-          if (canSubmit) onDone({ studentId: mode === "existing" ? studentId : null, directionId, groupId: groupId || null, dateAdded: today(), name: name.trim(), contact: contact.trim(), note: note.trim(), status: "waiting" })
-        }}>
-          Додати в резерв
+        <button type="button" style={btnS} disabled={saving} onClick={onCancel}>Скасувати</button>
+        <button type="button" style={{ ...btnP, background: theme.warning, opacity: canSubmit && !saving ? 1 : .4 }} disabled={!canSubmit || saving} onClick={handleSubmit}>
+          {saving ? "Збереження…" : isEditing ? "Зберегти" : "Додати в резерв"}
         </button>
       </div>
     </div>
