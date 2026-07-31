@@ -56,6 +56,14 @@ where g.show_on_public_site is not true
    or nullif(pg_catalog.btrim(g.public_level), '') is null
    or nullif(pg_catalog.btrim(g.age_category), '') is null;
 
+-- Group launch regression: this query must return zero rows. Groups without a
+-- start_date intentionally retain their historical recurring schedule.
+select r.*
+from public.fetch_public_schedule(current_date, current_date + 30) as r
+join public.groups as g on g.id::text = r.group_id
+where g.start_date is not null
+  and r.date < g.start_date;
+
 -- Grants and security metadata. These checks intentionally run before the expected
 -- error statements at the bottom of the file.
 select

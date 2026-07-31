@@ -167,6 +167,7 @@ const getRoomLabel = (event) =>
   event?.location ||
   event?.hall ||
   "";
+const getRoomId = (event) => event?.roomId || event?.room_id || "";
 const normalizeRoomName = (value = "") =>
   String(value || "").replace(/\s+/g, " ").trim();
 
@@ -600,6 +601,15 @@ export default function ScheduleTab({
       });
   }, [studioRooms]);
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
+  const studioRoomNameById = useMemo(
+    () => new Map(activeStudioRooms.map((room) => [String(room.id), normalizeRoomName(room.name)])),
+    [activeStudioRooms],
+  );
+  const resolveRoomName = (source, legacyGroup = null) => {
+    const roomId = String(getRoomId(source) || "");
+    if (roomId && studioRoomNameById.has(roomId)) return studioRoomNameById.get(roomId);
+    return getRoomLabel(source) || getRoomLabel(legacyGroup) || primaryRoomName;
+  };
   const cancelledSet = useMemo(
     () =>
       new Set(
@@ -653,7 +663,9 @@ export default function ScheduleTab({
           direction: getGroupDirectionName(g),
           trainerId: slotTrainerId || null,
           trainer: trainerMap.get(String(slotTrainerId || "")) || "—",
-          roomName: getRoomLabel(row) || getRoomLabel(g) || primaryRoomName,
+          roomId: getRoomId(row) || null,
+          roomName: resolveRoomName(row, g),
+          groupStartDate: String(g.startDate || g.start_date || "").slice(0, 10) || null,
           note: getSlotNote(row),
         });
       }),
@@ -663,6 +675,7 @@ export default function ScheduleTab({
       slots
         .filter((s) => s.weekday === d.getDay())
         .forEach((s) => {
+          if (s.groupStartDate && date < s.groupStartDate) return;
           const override = groupLessonOverrideMap.get(`${s.groupId}:${date}:${s.slotIndex}`);
           if (override?.status === "cancelled") return;
           const effectiveStartTime = override?.status === "active" ? override.startTime : s.startTime;
@@ -807,6 +820,7 @@ export default function ScheduleTab({
     cancelledSet,
     bookingTypes,
     primaryRoomName,
+    studioRoomNameById,
     groupLessonOverrideMap,
   ]);
   const eventsByDay = useMemo(() => buildEventsByDayForDates(weekDays), [buildEventsByDayForDates, weekDays]);
@@ -1861,6 +1875,11 @@ export default function ScheduleTab({
       setExistingOrDefault(next, ["title", "name", "label"], title, "title");
       next.title = title;
       setExistingOrDefault(next, ["roomName", "room_name", "room", "location", "hall"], normalizeRoomName(groupSlotEdit.roomName || primaryRoomName) || primaryRoomName, "roomName");
+      const selectedStudioRoom = activeStudioRooms.find((room) => normalizeRoomName(room.name) === normalizeRoomName(groupSlotEdit.roomName));
+      if (selectedStudioRoom?.id) {
+        next.roomId = selectedStudioRoom.id;
+        next.roomName = selectedStudioRoom.name;
+      }
       setExistingOrDefault(next, ["trainerId", "trainer_id"], groupSlotEdit.trainerId || null, "trainerId");
       const note = String(groupSlotEdit.note || "").trim() || null;
       setExistingOrDefault(next, ["note", "notes", "description"], note, "note");
@@ -2162,6 +2181,7 @@ export default function ScheduleTab({
     }
     try {
       await renameStudioRoom(room.id, room.name, nextName);
+      window.dispatchEvent(new CustomEvent("studio-rooms-changed"));
       if (String(selectedRoom || "").toLowerCase() === normalizeRoomName(room.name).toLowerCase()) {
         setSelectedRoom(nextName);
       }
