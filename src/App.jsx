@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
+import { formatGroupScheduleLabel, getGroupLevelLabel } from "./shared/groupLabels";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -1073,19 +1074,7 @@ export default function App() {
     const group = groups.find((g) => String(g.id) === String(groupId)) || scheduleGroups.find((g) => String(g.id) === String(groupId)) || { id: groupId };
     return resolveTrainerForGroup(group).trainerId;
   };
-  const formatGroupSchedule = (schedule) => {
-    const slots = parseGroupSchedule(schedule)
-      .map((slot) => ({ day: WEEKDAYS[Number(slot.day)] || "?", time: String(slot.time || "").trim() }))
-      .filter((slot) => slot.time);
-    const byTime = new Map();
-    slots.forEach((slot) => {
-      const days = byTime.get(slot.time) || [];
-      days.push(slot.day);
-      byTime.set(slot.time, days);
-    });
-    return Array.from(byTime, ([time, days]) => `${days.join("/")} ${time}`).join(" · ");
-  };
-  const getGroupLevelLabel = (level) => PUBLIC_LEVEL_OPTIONS.find((option) => option.value === level)?.label || "";
+  const formatGroupSchedule = formatGroupScheduleLabel;
   const getGroupLabel = (group) => group ? `${group.name || group.id} (${group.id})` : "—";
   const getGroupMergeScheduleModeLabel = (mode) => {
     if (mode === "keep_target_schedule") return "Залишити графік цільової групи";
