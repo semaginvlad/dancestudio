@@ -2483,8 +2483,12 @@ export default function App() {
                 .admin-group-card > div:first-child { grid-template-columns: 1fr !important; gap: 8px !important; }
                 .admin-group-main { min-width: 0 !important; flex-basis: 100% !important; gap: 8px !important; }
                 .admin-group-title { font-size: 16px !important; overflow-wrap: anywhere; }
-                .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px !important; }
-                .admin-group-actions button, .admin-finance-card button { min-height: 44px; padding: 8px !important; font-size: 12px !important; }
+                .admin-group-actions { width: 100%; display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
+                .admin-group-actions button:first-child { grid-column: 1 / -1; }
+                .admin-group-actions button, .admin-finance-card button { min-height: 42px; padding: 8px !important; font-size: 12px !important; }
+                .admin-group-meta { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; align-items: stretch !important; }
+                .admin-group-meta > span { min-width: 0; min-height: 32px; box-sizing: border-box; white-space: normal; line-height: 1.2; }
+                .admin-group-footer { display: grid !important; grid-template-columns: 1fr auto; gap: 6px !important; align-items: center; }
                 .admin-finance-summary { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 7px !important; margin-bottom: 8px !important; }
                 .admin-finance-summary > div { padding: 9px 10px !important; border-radius: 14px !important; min-width: 0; }
                 .admin-finance-summary div[style*="font-size: 13"] { font-size: 10px !important; letter-spacing: .25px !important; line-height: 1.15 !important; }
@@ -2630,7 +2634,7 @@ export default function App() {
                                 <button type="button" style={{ ...btnS, minHeight: 34, padding: "7px 10px", fontSize: 12, opacity: archiveMeta.isArchived ? 0.55 : 1, cursor: archiveMeta.isArchived ? "not-allowed" : "pointer" }} disabled={archiveMeta.isArchived} title={archiveMeta.isArchived ? "Архівні групи не можна обʼєднувати" : "Обʼєднати з іншою активною групою"} onClick={() => openGroupMerge(g)}>Обʼєднати</button>
                               </div>
                             </div>
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                            <div className="admin-group-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                               <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
                               {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>{getGroupLevelLabel(g.publicLevel)}</span>}
                               {getGroupAgeCategoryLabel(g.ageCategory) && <span style={badgeStyle}>{getGroupAgeCategoryLabel(g.ageCategory)}</span>}
@@ -2638,7 +2642,7 @@ export default function App() {
                               <span style={badgeStyle}>🕒 {scheduleText}</span>
                               <span style={badgeStyle}>Тренер: {trainerInfo.trainerName || trainerInfo.trainerId || "—"}</span>
                             </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", fontSize: 11, color: theme.textMuted }}>
+                            <div className="admin-group-footer" style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", fontSize: 11, color: theme.textMuted }}>
                               <span>{dir?.name || g.directionId || "—"}</span>
                               <span>Відсоток тренера: {g.trainerPct ?? 0}%</span>
                             </div>
