@@ -39,7 +39,14 @@ export const resolveGroupTrainer = ({ group, trainerGroups = [], trainers = [] }
   const groupRows = groupId
     ? trainerGroups.filter((row) => normalizeEntityId(row.groupId ?? row.group_id) === groupId)
     : [];
-  const primary = groupRows.find((row) => row.isPrimary || row.is_primary) || groupRows[0];
+  const orderedRows = [...groupRows].sort((left, right) => {
+    const leftPrimary = left.isPrimary || left.is_primary ? 1 : 0;
+    const rightPrimary = right.isPrimary || right.is_primary ? 1 : 0;
+    if (leftPrimary !== rightPrimary) return rightPrimary - leftPrimary;
+    return normalizeEntityId(left.trainerId ?? left.trainer_id)
+      .localeCompare(normalizeEntityId(right.trainerId ?? right.trainer_id));
+  });
+  const primary = orderedRows[0];
   const relationTrainerId = normalizeEntityId(primary?.trainerId ?? primary?.trainer_id);
   const directTrainerId = getGroupDirectTrainerId(group);
   const trainerId = relationTrainerId || directTrainerId;

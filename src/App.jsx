@@ -2,6 +2,12 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
+import {
+  buildGroupArchivePatch,
+  buildGroupArchiveRestorePatch,
+  getGroupArchiveMeta,
+  isGroupArchived,
+} from "./shared/groupArchive";
 import { formatGroupScheduleLabel, getGroupAgeCategoryLabel, getGroupLevelLabel } from "./shared/groupLabels";
 import Analytics from "./pages/Analytics";
 import {
@@ -92,22 +98,6 @@ const addDaysForScheduleRange = (date, days) => {
   d.setDate(d.getDate() + days);
   return toLocalISO(d);
 };
-
-const getGroupArchiveMeta = (group = {}) => {
-  if (Object.prototype.hasOwnProperty.call(group, "is_active")) {
-    return { mode: "is_active", isArchived: group.is_active === false };
-  }
-  if (Object.prototype.hasOwnProperty.call(group, "active")) {
-    return { mode: "active", isArchived: group.active === false };
-  }
-  if (Object.prototype.hasOwnProperty.call(group, "archived_at")) {
-    return { mode: "archived_at", isArchived: !!group.archived_at };
-  }
-  return { mode: null, isArchived: false };
-};
-
-const isGroupArchived = (group) => getGroupArchiveMeta(group).isArchived;
-
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -876,13 +866,6 @@ export default function App() {
     }
   };
 
-  const buildGroupArchivePatch = (mode, shouldArchive) => {
-    if (mode === "is_active") return { is_active: !shouldArchive };
-    if (mode === "active") return { active: !shouldArchive };
-    if (mode === "archived_at") return { archived_at: shouldArchive ? today() : null };
-    return null;
-  };
-
   const toggleGroupArchive = async (group) => {
     const meta = archiveMetaByGroupId[String(group.id)];
     if (!meta?.mode) {
@@ -896,7 +879,7 @@ export default function App() {
       if (!confirmed) return;
     }
 
-    const patch = buildGroupArchivePatch(meta.mode, shouldArchive);
+    const patch = buildGroupArchivePatch(meta, shouldArchive);
     if (!patch) return;
 
     try {
@@ -1318,7 +1301,7 @@ export default function App() {
 
       let archivedSourceGroup = null;
       if (groupMergeSummary.shouldArchiveSource) {
-        const archivePatch = buildGroupArchivePatch(sourceMeta.mode, true);
+        const archivePatch = buildGroupArchivePatch(sourceMeta, true);
         archivedSourceGroup = await db.updateGroup(sourceId, archivePatch);
       }
       const completedOperation = await db.updateGroupMergeOperationStatus(savedOperation.id, "completed");
@@ -1402,7 +1385,10 @@ export default function App() {
       const archiveMode = operation.previousSourceArchiveState?.mode;
       let updatedSourceGroup = null;
       if (archiveMode) {
-        const restorePatch = buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore);
+        const restorePatch = buildGroupArchiveRestorePatch(
+          operation.previousSourceArchiveState,
+          !!operation.sourceWasArchivedBefore,
+        );
         if (restorePatch) updatedSourceGroup = await db.updateGroup(operation.sourceGroupId, restorePatch);
       }
 
@@ -2625,6 +2611,12 @@ export default function App() {
                         const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
                         const scheduleText = formatGroupSchedule(g.schedule) || "—";
                         const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
+                        const publicSiteIssues = [
+                          archiveMeta.isArchived ? "група архівна" : "",
+                          !g.publicLevel ? "не вказано рівень" : "",
+                          !g.ageCategory ? "не вказано вік" : "",
+                          !parseGroupSchedule(g.schedule).length ? "немає графіка" : "",
+                        ].filter(Boolean);
                         return (
                           <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 12, display: "grid", gap: 10, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
                             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "start" }}>
@@ -2640,6 +2632,9 @@ export default function App() {
                             </div>
                             <div className="admin-group-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                               <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                              <span style={{ ...badgeStyle, color: g.showOnPublicSite && !publicSiteIssues.length ? theme.success : g.showOnPublicSite ? theme.danger : theme.textMuted }}>
+                                {g.showOnPublicSite ? (publicSiteIssues.length ? `Сайт: не опубліковано — ${publicSiteIssues.join(", ")}` : "Показується на сайті") : "Приховано із сайту"}
+                              </span>
                               {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>{getGroupLevelLabel(g.publicLevel)}</span>}
                               {getGroupAgeCategoryLabel(g.ageCategory) && <span style={badgeStyle}>{getGroupAgeCategoryLabel(g.ageCategory)}</span>}
                               <span style={badgeStyle}>👥 {studentsCount}</span>
