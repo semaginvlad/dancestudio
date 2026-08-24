@@ -56,6 +56,20 @@ where g.show_on_public_site is not true
    or nullif(pg_catalog.btrim(g.public_level), '') is null
    or nullif(pg_catalog.btrim(g.age_category), '') is null;
 
+-- Trainer-source regression: this query must return zero rows. When a lesson
+-- does not override its trainer, the public projection must resolve the same
+-- primary trainer_groups assignment that the CRM application uses.
+select r.*
+from public.fetch_public_schedule(current_date, current_date + 30) as r
+where r.status = 'active'
+  and r.trainer_name is null
+  and exists (
+    select 1
+    from public.trainer_groups as tg
+    where tg.group_id::text = r.group_id
+      and tg.trainer_id is not null
+  );
+
 -- Group launch regression: this query must return zero rows. Groups without a
 -- start_date intentionally retain their historical recurring schedule.
 select r.*
