@@ -2611,6 +2611,12 @@ export default function App() {
                         const studentsCount = studentGrps.filter((sg) => String(sg.groupId) === String(g.id)).length;
                         const scheduleText = formatGroupSchedule(g.schedule) || "—";
                         const badgeStyle = { display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 700, background: theme.bg, border: `1px solid ${theme.border}`, color: theme.textMuted };
+                        const publicSiteIssues = [
+                          archiveMeta.isArchived ? "група архівна" : "",
+                          !g.publicLevel ? "не вказано рівень" : "",
+                          !g.ageCategory ? "не вказано вік" : "",
+                          !parseGroupSchedule(g.schedule).length ? "немає графіка" : "",
+                        ].filter(Boolean);
                         return (
                           <div key={g.id} className="admin-group-card" style={{ ...cardSt, padding: 12, display: "grid", gap: 10, border: `1px solid ${archiveMeta.isArchived ? theme.danger : theme.border}` }}>
                             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "start" }}>
@@ -2626,6 +2632,9 @@ export default function App() {
                             </div>
                             <div className="admin-group-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                               <span style={{ ...badgeStyle, color: archiveMeta.isArchived ? theme.danger : theme.success }}>{archiveMeta.isArchived ? "Архівна" : "Активна"}</span>
+                              <span style={{ ...badgeStyle, color: g.showOnPublicSite && !publicSiteIssues.length ? theme.success : g.showOnPublicSite ? theme.danger : theme.textMuted }}>
+                                {g.showOnPublicSite ? (publicSiteIssues.length ? `Сайт: не опубліковано — ${publicSiteIssues.join(", ")}` : "Показується на сайті") : "Приховано із сайту"}
+                              </span>
                               {getGroupLevelLabel(g.publicLevel) && <span style={badgeStyle}>{getGroupLevelLabel(g.publicLevel)}</span>}
                               {getGroupAgeCategoryLabel(g.ageCategory) && <span style={badgeStyle}>{getGroupAgeCategoryLabel(g.ageCategory)}</span>}
                               <span style={badgeStyle}>👥 {studentsCount}</span>
