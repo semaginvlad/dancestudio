@@ -723,6 +723,13 @@ export async function fetchTrainerGroups() {
 }
 
 export async function upsertTrainerGroup(trainerId, groupId) {
+  const { error: demoteError } = await supabase
+    .from('trainer_groups')
+    .update({ is_primary: false })
+    .eq('group_id', groupId)
+    .neq('trainer_id', trainerId);
+  if (demoteError) throw demoteError;
+
   const payload = { trainer_id: trainerId, group_id: groupId, is_primary: true };
   const { data, error } = await supabase
     .from('trainer_groups')
