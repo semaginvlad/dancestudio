@@ -34,7 +34,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
               <div style={{ fontSize: 13, color: d.color, fontWeight: 600, marginBottom: 10 }}>{d.name}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {groups.filter(g => g.directionId === d.id).map(g => (
-                  <Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={() => toggleGrp(g.id)}>{g.name}</Pill>
+                  <Pill key={g.id} active={selGrps.includes(g.id)} color={d.color} onClick={() => toggleGrp(g.id)}>{getInternalGroupLabel(g)}</Pill>
                 ))}
               </div>
             </div>

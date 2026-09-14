@@ -14,6 +14,7 @@ import {
 } from "../shared/utils";
 import { theme } from "../shared/constants";
 import { getInternalGroupLabel } from "../shared/groupLabels";
+import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrainer";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -1016,13 +1017,6 @@ const getActiveSubOnDateForCell = (subs, studentId, groupId, dateStr, cancelledD
   if (cancelledDates.has(toDateKey(dateStr))) return null;
   return getActiveSubOnDatePlain(subs, studentId, groupId, dateStr);
 };
-const getTrainerId = (group) =>
-  group?.trainerId ?? group?.trainer_id ?? group?.coachId ?? group?.coach_id ?? group?.trainer ?? group?.trainer_id_fk ?? null;
-const sameTrainer = (a, b) => {
-  const left = getTrainerId(a);
-  const right = getTrainerId(b);
-  return !!left && !!right && String(left) === String(right);
-};
 const getRowSubId = (row) => row?.subId ?? row?.sub_id ?? row?.subscriptionId ?? row?.subscription_id ?? null;
 const getRowGroupId = (row) => row?.groupId ?? row?.group_id ?? null;
 const getGroupName = (group) => group?.name || group?.title || group?.label || (group?.id ? `Група ${group.id}` : "Група");
@@ -1240,6 +1234,8 @@ const formatSubscriptionChangeSummary = (row) => {
 
 export default function AttendanceTab({
   groups,
+  transferGroups = groups,
+  trainerGroups = [],
   trainers = [],
   currentUser = null,
   trainingLessonPlans = [],
@@ -1320,6 +1316,11 @@ export default function AttendanceTab({
   const [transferActiveSub, setTransferActiveSub] = useState(true);
   const [transferSaving, setTransferSaving] = useState(false);
   const [transferError, setTransferError] = useState("");
+  const transferTargets = useMemo(() => getTransferTargetGroups({
+    groups: transferGroups,
+    fromGroup: transferState?.fromGroup,
+    trainerGroups,
+  }), [transferGroups, transferState?.fromGroup, trainerGroups]);
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
   const tableWrapRef = useRef(null);
@@ -2191,7 +2192,7 @@ export default function AttendanceTab({
 
   const openTransferModal = (student) => {
     const activeSub = getStudentActiveSubscription(student.id, gid);
-    const target = (groups || []).find((group) => String(group.id) !== String(gid) && sameTrainer(currentGroup, group));
+    const target = getTransferTargetGroups({ groups: transferGroups, fromGroup: currentGroup, trainerGroups })[0];
     setTransferState({ student, fromGroup: currentGroup, activeSub });
     setTransferTargetGroupId(target?.id || "");
     setTransferActiveSub(!!activeSub);
@@ -2208,8 +2209,8 @@ export default function AttendanceTab({
 
   const handleConfirmTransfer = async () => {
     if (!transferState?.student || !transferState?.fromGroup || !transferTargetGroupId) return;
-    const toGroup = (groups || []).find((group) => String(group.id) === String(transferTargetGroupId));
-    if (!toGroup || !sameTrainer(transferState.fromGroup, toGroup)) {
+    const toGroup = transferTargets.find((group) => String(group.id) === String(transferTargetGroupId));
+    if (!toGroup || !groupsShareTrainer(transferState.fromGroup, toGroup, trainerGroups)) {
       setTransferError("Перенос між різними тренерами поки недоступний, щоб не зачепити фінанси.");
       return;
     }
@@ -4416,8 +4417,8 @@ export default function AttendanceTab({
                 <span><b>Нова група</b> (тільки той самий тренер)</span>
                 <select style={styles.control} value={transferTargetGroupId} onChange={(e) => setTransferTargetGroupId(e.target.value)} disabled={transferSaving}>
                   <option value="">Оберіть групу</option>
-                  {(groups || []).filter((group) => String(group.id) !== String(transferState.fromGroup.id) && sameTrainer(transferState.fromGroup, group)).map((group) => (
-                    <option key={group.id} value={group.id}>{getGroupName(group)}</option>
+                  {transferTargets.map((group) => (
+                    <option key={group.id} value={group.id}>{getInternalGroupLabel(group)}</option>
                   ))}
                 </select>
               </label>
