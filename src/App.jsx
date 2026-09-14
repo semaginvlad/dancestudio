@@ -3,7 +3,7 @@ import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
 import { formatGroupScheduleLabel, getGroupAgeCategoryLabel, getGroupLevelLabel } from "./shared/groupLabels";
-import { parseGroupSchedule, splitPaymentGroups, synchronizeGroupSchedule } from "./shared/groupSchedule";
+import { getExplicitMergeSchedulePatch, getScheduleSlotStartTime, parseGroupSchedule, splitPaymentGroups, synchronizeGroupSchedule, synchronizeScheduleSlotTime, withDirtyGroupSchedule } from "./shared/groupSchedule";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -813,6 +813,7 @@ export default function App() {
       name: group.name || "",
       directionId: group.directionId || directionsList[0]?.id || "",
       schedule: parseGroupSchedule(group.schedule),
+      scheduleDirty: false,
       startDate: group.startDate || group.start_date || "",
       trainerPct: String(group.trainerPct ?? 0),
       trainerId: getGroupPrimaryTrainerId(group.id),
@@ -834,17 +835,16 @@ export default function App() {
       return;
     }
     const trainerPctNum = Math.max(0, Math.min(100, parseInt(String(groupEditDraft.trainerPct || "").trim(), 10) || 0));
-    const payload = {
+    const payload = withDirtyGroupSchedule({
       name: String(groupEditDraft.name || "").trim(),
       directionId: groupEditDraft.directionId,
-      schedule: synchronizeGroupSchedule(groupEditDraft.schedule),
       startDate: groupEditDraft.startDate || null,
       trainerPct: trainerPctNum,
       showOnPublicSite: !!groupEditDraft.showOnPublicSite,
       publicLevel: groupEditDraft.publicLevel || null,
       publicJoinStatus: groupEditDraft.publicJoinStatus || "open",
       ageCategory: groupEditDraft.ageCategory || null,
-    };
+    }, groupEditDraft.schedule, groupEditDraft.scheduleDirty);
     try {
       const updated = await db.updateGroup(groupEditDraft.id, payload);
       setGroups((prev) => prev.map((g) => (String(g.id) === String(updated.id) ? updated : g)));
@@ -1174,7 +1174,7 @@ export default function App() {
     setGroupMergeDraft({
       sourceGroupId: sourceGroup.id,
       targetGroupId: firstTarget?.id || "",
-      scheduleMode: "use_source_schedule",
+      scheduleMode: "keep_target_schedule",
       customSchedule: parseGroupSchedule(sourceGroup.schedule),
       selectedStudentIds: sourceStudentIds,
       studentSearch: "",
@@ -1258,7 +1258,7 @@ export default function App() {
     let savedOperation = null;
     try {
       const previousTargetSchedule = parseGroupSchedule(groupMergeSummary.targetGroup.schedule);
-      const scheduleMode = groupMergeDraft.scheduleMode || "use_source_schedule";
+      const scheduleMode = groupMergeDraft.scheduleMode || "keep_target_schedule";
       const newTargetSchedule = scheduleMode === "use_source_schedule"
         ? parseGroupSchedule(groupMergeSummary.sourceGroup.schedule)
         : scheduleMode === "custom_schedule"
@@ -1304,7 +1304,7 @@ export default function App() {
 
       let updatedTargetGroup = null;
       if (scheduleMode !== "keep_target_schedule") {
-        updatedTargetGroup = await db.updateGroup(targetId, { schedule: synchronizeGroupSchedule(newTargetSchedule) });
+        updatedTargetGroup = await db.updateGroup(targetId, getExplicitMergeSchedulePatch(scheduleMode, newTargetSchedule));
       }
 
       let archivedSourceGroup = null;
@@ -1386,9 +1386,9 @@ export default function App() {
         updatedSubs.push(updatedSub);
       }
 
-      const updatedTargetGroup = await db.updateGroup(operation.targetGroupId, {
-        schedule: synchronizeGroupSchedule(operation.previousTargetSchedule),
-      });
+      const updatedTargetGroup = operation.scheduleMode !== "keep_target_schedule"
+        ? await db.updateGroup(operation.targetGroupId, getExplicitMergeSchedulePatch(operation.scheduleMode, operation.previousTargetSchedule))
+        : null;
 
       const archiveMode = operation.previousSourceArchiveState?.mode;
       let updatedSourceGroup = null;
@@ -1417,12 +1417,12 @@ export default function App() {
         return updated ? { ...sub, ...updated } : sub;
       }));
       setGroups((prev) => prev.map((group) => {
-        if (String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+        if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
         if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
         return group;
       }));
       setScheduleGroups((prev) => prev.map((group) => {
-        if (String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+        if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
         if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
         return group;
       }));
@@ -1468,7 +1468,22 @@ export default function App() {
             <select style={inputSt} value={Number(slot.day) || 0} onChange={(e) => updateRow(index, { day: Number(e.target.value) })} disabled={disabled}>
               {UI_WEEKDAY_ORDER.map((dayIdx) => <option key={dayIdx} value={dayIdx}>{WEEKDAYS[dayIdx]}</option>)}
             </select>
-            <input style={inputSt} type="time" value={String(slot.time || "")} onChange={(e) => updateRow(index, { time: e.target.value })} disabled={disabled} />
+            <input
+              aria-label="Час початку"
+              style={inputSt}
+              type="time"
+              value={getScheduleSlotStartTime(slot)}
+              onChange={(e) => updateRow(index, synchronizeScheduleSlotTime(slot, e.target.value))}
+              disabled={disabled}
+            />
+            <input
+              aria-label="Час завершення"
+              style={inputSt}
+              type="time"
+              value={String(slot.endTime ?? slot.end ?? "")}
+              onChange={(e) => updateRow(index, synchronizeScheduleSlotTime(slot, getScheduleSlotStartTime(slot), e.target.value))}
+              disabled={disabled}
+            />
             <select
               aria-label="Зал"
               style={inputSt}
@@ -1483,7 +1498,7 @@ export default function App() {
           </div>
         ))}
         {!rows.length && <div style={{ fontSize: 12, color: theme.textMuted }}>Графік порожній — групу можна створити без занять.</div>}
-        <button type="button" style={btnS} onClick={() => onChange([...rows, { day: 1, time: "19:00", roomId: "", roomName: "" }])} disabled={disabled}>Додати заняття</button>
+        <button type="button" style={btnS} onClick={() => onChange([...rows, synchronizeScheduleSlotTime({ day: 1, roomId: "", roomName: "" }, "19:00", "20:00")])} disabled={disabled}>Додати заняття</button>
       </div>
     );
   };
@@ -2167,7 +2182,7 @@ export default function App() {
       alert("Редагування розкладу груп доступне тільки адміністратору.");
       return;
     }
-    const updated = await db.updateGroup(groupId, { schedule: synchronizeGroupSchedule(schedule) });
+    const updated = await db.updateGroup(groupId, { schedule });
     setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
     setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
     await loadAllData();
@@ -3133,7 +3148,7 @@ export default function App() {
             <Field label="Графік після обʼєднання">
               <select
                 style={inputSt}
-                value={groupMergeDraft.scheduleMode || "use_source_schedule"}
+                value={groupMergeDraft.scheduleMode || "keep_target_schedule"}
                 onChange={(e) => setGroupMergeDraft((prev) => ({
                   ...prev,
                   scheduleMode: e.target.value,
@@ -3289,7 +3304,7 @@ export default function App() {
             )}
           </div>
             <Field label="Графік">
-              <ScheduleEditor value={groupEditDraft.schedule} onChange={(schedule) => setGroupEditDraft((p) => ({ ...p, schedule }))} />
+              <ScheduleEditor value={groupEditDraft.schedule} onChange={(schedule) => setGroupEditDraft((p) => ({ ...p, schedule, scheduleDirty: true }))} />
             </Field>
             <Field label="Дата початку тренувань">
               <input style={inputSt} type="date" value={groupEditDraft.startDate || ""} onChange={(e) => setGroupEditDraft((p) => ({ ...p, startDate: e.target.value }))} />
