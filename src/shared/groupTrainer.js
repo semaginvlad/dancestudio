@@ -1,3 +1,5 @@
+import { parseGroupSchedule } from "./groupSchedule.js";
+
 export const normalizeEntityId = (value) => {
   if (value === undefined || value === null) return "";
   return String(value).trim();
@@ -33,6 +35,42 @@ export const getGroupDirectTrainerId = (group = {}) => {
   }
   return "";
 };
+
+export const getGroupTrainerIds = (group = {}, trainerGroups = []) => {
+  const groupId = normalizeEntityId(group.id);
+  const trainerIds = new Set();
+  const addTrainerId = (value) => {
+    const id = normalizeEntityId(value);
+    if (id) trainerIds.add(id);
+  };
+
+  trainerGroups.forEach((row) => {
+    if (normalizeEntityId(row.groupId ?? row.group_id) === groupId) {
+      // Both primary and non-primary relations grant the trainer access to the group.
+      addTrainerId(row.trainerId ?? row.trainer_id);
+    }
+  });
+  addTrainerId(getGroupDirectTrainerId(group));
+
+  parseGroupSchedule(group.schedule).forEach((slot) => addTrainerId(slot?.trainerId ?? slot?.trainer_id));
+
+  return trainerIds;
+};
+
+export const groupsShareTrainer = (left, right, trainerGroups = []) => {
+  const leftTrainerIds = getGroupTrainerIds(left, trainerGroups);
+  const rightTrainerIds = getGroupTrainerIds(right, trainerGroups);
+  return Array.from(leftTrainerIds).some((trainerId) => rightTrainerIds.has(trainerId));
+};
+
+export const getTransferTargetGroups = ({ groups = [], fromGroup, trainerGroups = [] } = {}) => (
+  groups.filter((group) => (
+    normalizeEntityId(group.id) !== normalizeEntityId(fromGroup?.id) &&
+    // The DB's archival marker is authoritative. mapGroup exposes its camelCase alias.
+    (group.archived_at ?? group.archivedAt ?? null) === null &&
+    groupsShareTrainer(fromGroup, group, trainerGroups)
+  ))
+);
 
 export const resolveGroupTrainer = ({ group, trainerGroups = [], trainers = [] } = {}) => {
   const groupId = normalizeEntityId(group?.id);
