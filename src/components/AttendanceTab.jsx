@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getScheduleSlotStartTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import * as db from "../db";
 import {
@@ -1733,7 +1734,7 @@ export default function AttendanceTab({
             trainerId: normalizeTrainerIdForPlan(getScheduleRowTrainerId(row, currentGroup)),
             lessonDate: dateStr,
             scheduleSlotIndex: index,
-            startMin: getScheduleTimeMinutes(row.startTime || row.start || row.time || "") ?? 0,
+            startMin: getScheduleTimeMinutes(getScheduleSlotStartTime(row)) ?? 0,
           }))
           .filter((item) => item.trainerId && String(item.trainerId) === String(scope.trainerId || ""));
       }).sort(compareLessonPlanSeriesItems);

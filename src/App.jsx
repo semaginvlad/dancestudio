@@ -3,6 +3,7 @@ import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
 import { formatGroupScheduleLabel, getGroupAgeCategoryLabel, getGroupLevelLabel } from "./shared/groupLabels";
+import { parseGroupSchedule, splitPaymentGroups, synchronizeGroupSchedule } from "./shared/groupSchedule";
 import Analytics from "./pages/Analytics";
 import {
   APP_BUILD_LABEL,
@@ -764,7 +765,7 @@ export default function App() {
       id: draftId,
       name,
       directionId,
-      schedule: Array.isArray(newGroupDraft.schedule) ? newGroupDraft.schedule : [],
+      schedule: synchronizeGroupSchedule(newGroupDraft.schedule),
       startDate: newGroupDraft.startDate || null,
       trainerPct: trainerPctNum,
       showOnPublicSite: !!newGroupDraft.showOnPublicSite,
@@ -836,7 +837,7 @@ export default function App() {
     const payload = {
       name: String(groupEditDraft.name || "").trim(),
       directionId: groupEditDraft.directionId,
-      schedule: Array.isArray(groupEditDraft.schedule) ? groupEditDraft.schedule : [],
+      schedule: synchronizeGroupSchedule(groupEditDraft.schedule),
       startDate: groupEditDraft.startDate || null,
       trainerPct: trainerPctNum,
       showOnPublicSite: !!groupEditDraft.showOnPublicSite,
@@ -870,6 +871,7 @@ export default function App() {
         setTrainerGroups((prev) => prev.filter((x) => String(x.groupId) !== String(groupEditDraft.id)));
       }
 
+      await loadAllData();
       setGroupEditDraft(null);
     } catch (e) {
       alert(e?.message || "Не вдалося зберегти групу");
@@ -963,6 +965,7 @@ export default function App() {
 
   const studentMap = useMemo(()=>Object.fromEntries(students.map(s=>[s.id,s])),[students]);
   const groupMap = useMemo(()=>Object.fromEntries(groups.map(g=>[g.id,g])),[groups]);
+  const paymentGroups = useMemo(() => splitPaymentGroups(groups, subs), [groups, subs]);
   const directionsList = useMemo(() => {
     const base = (directions?.length ? directions : [...DIRECTIONS]).map((d) => ({
       id: d.id,
@@ -1055,18 +1058,6 @@ export default function App() {
     } catch (e) {
       alert(e?.message || "Не вдалося видалити напрямок.");
     }
-  };
-  const parseGroupSchedule = (schedule) => {
-    if (Array.isArray(schedule)) return schedule;
-    if (typeof schedule === "string") {
-      try {
-        const parsed = JSON.parse(schedule);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
   };
   const resolveTrainerForGroup = (group) => resolveGroupTrainer({ group, trainerGroups, trainers });
   const getGroupPrimaryTrainerId = (groupId) => {
@@ -1313,7 +1304,7 @@ export default function App() {
 
       let updatedTargetGroup = null;
       if (scheduleMode !== "keep_target_schedule") {
-        updatedTargetGroup = await db.updateGroup(targetId, { schedule: newTargetSchedule });
+        updatedTargetGroup = await db.updateGroup(targetId, { schedule: synchronizeGroupSchedule(newTargetSchedule) });
       }
 
       let archivedSourceGroup = null;
@@ -1396,7 +1387,7 @@ export default function App() {
       }
 
       const updatedTargetGroup = await db.updateGroup(operation.targetGroupId, {
-        schedule: Array.isArray(operation.previousTargetSchedule) ? operation.previousTargetSchedule : [],
+        schedule: synchronizeGroupSchedule(operation.previousTargetSchedule),
       });
 
       const archiveMode = operation.previousSourceArchiveState?.mode;
@@ -2176,9 +2167,10 @@ export default function App() {
       alert("Редагування розкладу груп доступне тільки адміністратору.");
       return;
     }
-    const updated = await db.updateGroup(groupId, { schedule });
+    const updated = await db.updateGroup(groupId, { schedule: synchronizeGroupSchedule(schedule) });
     setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
     setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
+    await loadAllData();
   };
 
   const clearSubscriptionWarningForStudent = async (groupId, studentId) => {
@@ -2799,7 +2791,7 @@ export default function App() {
                 <select style={inputSt} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
                 <select style={inputSt} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
                 <select style={inputSt} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
-                <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
+                <GroupSelect groups={paymentGroups.current} historicalGroups={paymentGroups.historical} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
                 <select style={inputSt} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
                 <select style={inputSt} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
                 <select style={inputSt} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
@@ -2817,7 +2809,7 @@ export default function App() {
             <select style={{...inputSt,width:"auto"}} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
-            <GroupSelect groups={groups} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
+            <GroupSelect groups={paymentGroups.current} historicalGroups={paymentGroups.historical} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
             <select style={{...inputSt,width:"auto"}} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
             <select style={{...inputSt,width:"auto"}} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
@@ -3342,7 +3334,7 @@ export default function App() {
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
       {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups.filter((group) => !isGroupArchived(group) || String(group.id) === String(editItem?.groupId))} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв" variant={studentsMobileModalVariant}><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="editWaitlist"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис резерву" variant={studentsMobileModalVariant}><WaitlistForm key={editItem?.id || "edit-waitlist"} initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={async(patch)=>{try{const updated=await db.updateWaitlist(editItem.id,patch);setWaitlist(prev=>prev.map(row=>row.id===updated.id?updated:row));setModal(null);setEditItem(null);}catch(e){console.error("Failed to update waitlist entry:",e);alert(`Не вдалося зберегти запис резерву: ${e?.message || e}`);throw e;}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне" variant={trialBookingMobileModalVariant}><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps}/></Modal>
