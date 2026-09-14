@@ -52,6 +52,7 @@ select r.*
 from public.fetch_public_schedule(current_date, current_date + 30) as r
 join public.groups as g on g.id::text = r.group_id
 where g.show_on_public_site is not true
+   or g.is_active is not true
    or g.archived_at is not null
    or nullif(pg_catalog.btrim(g.public_level), '') is null
    or nullif(pg_catalog.btrim(g.age_category), '') is null;
