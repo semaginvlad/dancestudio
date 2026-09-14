@@ -19,12 +19,25 @@ export const getScheduleSlotStartTime = (slot = {}) => {
 export const synchronizeScheduleSlotTime = (slot = {}, startTime, endTime) => {
   const start = String(startTime || "").trim();
   const end = String(endTime ?? slot.endTime ?? slot.end ?? "").trim();
-  return { ...slot, startTime: start, time: end ? `${start}-${end}` : start };
+  const next = { ...slot, startTime: start, time: start, endTime: end };
+  if (Object.prototype.hasOwnProperty.call(next, "start")) next.start = start;
+  if (Object.prototype.hasOwnProperty.call(next, "end")) next.end = end;
+  return next;
 };
 
 export const synchronizeGroupSchedule = (schedule) => parseGroupSchedule(schedule).map((slot) => (
   synchronizeScheduleSlotTime(slot, getScheduleSlotStartTime(slot))
 ));
+
+// Existing schedules can contain conflicting legacy fields. Only an explicit
+// schedule edit is allowed to include that column in a group details update.
+export const withDirtyGroupSchedule = (payload, schedule, scheduleDirty) => (
+  scheduleDirty ? { ...payload, schedule } : payload
+);
+
+export const getExplicitMergeSchedulePatch = (scheduleMode, schedule) => (
+  scheduleMode && scheduleMode !== "keep_target_schedule" ? { schedule } : {}
+);
 
 export const isArchivedGroup = (group = {}) => (
   !!(group.archivedAt ?? group.archived_at) || group.isActive === false ||
