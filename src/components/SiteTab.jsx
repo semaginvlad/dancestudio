@@ -3,6 +3,8 @@ import * as db from '../db';
 import { Badge, Pill } from './UI';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { normalizeSiteTrainerContent, SITE_TRAINER_CONTENT_FIELDS } from '../shared/siteTrainerContent';
+import { formatGroupScheduleLabel } from '../shared/groupLabels';
+import { formatGroupStartDate, getPublicGroupBlockers, isArchivedSiteGroup } from '../shared/siteGroups';
 
 const CONTENT_GROUPS = [
   ['Основне', [['publicName', 'Публічне ім’я'], ['roleLabel', 'Роль'], ['mainDirectionName', 'Назва основного напряму'], ['heroLabel', 'Великий напис на портреті']]],
@@ -79,7 +81,7 @@ const TrainerContentEditor = ({ trainer, onClose, onSaved }) => {
 };
 
 export default function SiteTab() {
-  const [data, setData] = useState({ pages: [], trainers: [], directions: [] });
+  const [data, setData] = useState({ pages: [], trainers: [], directions: [], groups: [] });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -128,6 +130,7 @@ export default function SiteTab() {
   );
   const trainers = useMemo(() => [...data.trainers].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'uk')), [data.trainers]);
   const directions = useMemo(() => [...data.directions].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'uk')), [data.directions]);
+  const groups = useMemo(() => data.groups.filter((group) => !isArchivedSiteGroup(group)), [data.groups]);
 
   if (loading && !data.pages.length) return <div style={cardSt}>Завантаження налаштувань сайту…</div>;
 
@@ -138,7 +141,7 @@ export default function SiteTab() {
         <button type="button" style={btnS} onClick={load} disabled={loading || busy}>Оновити</button>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {[['pages', 'Сторінки'], ['navigation', 'Меню'], ['trainers', 'Тренери'], ['directions', 'Напрямки']].map(([id, label]) => (
+        {[['pages', 'Сторінки'], ['navigation', 'Меню'], ['trainers', 'Тренери'], ['directions', 'Напрямки'], ['groups', 'Групи на сайті']].map(([id, label]) => (
           <Pill key={id} active={section === id} onClick={() => setSection(id)}>{label}</Pill>
         ))}
       </div>
@@ -182,6 +185,20 @@ export default function SiteTab() {
             <Toggle checked={direction.showOnPublicSite} disabled={busy || !direction.isOperational} onChange={(checked) => run(() => db.updateSiteDirectionProfile(direction.directionId, { showOnPublicSite: checked, ...(checked && direction.publicationStatus === 'draft' ? { publicationStatus: 'published' } : {}) }))}>Показувати на сайті</Toggle>
             <OrderButtons index={index} total={directions.length} disabled={busy} onMove={(delta) => move(directions, index, delta, db.reorderSiteDirectionProfiles)} />
           </>} />)}
+      </div>}
+
+      {section === 'groups' && <div style={{ display: 'grid', gap: 10 }}>
+        {!groups.length && <div style={cardSt}>Немає неархівних груп.</div>}
+        {groups.map((group) => {
+          const blockers = getPublicGroupBlockers(group);
+          const schedule = formatGroupScheduleLabel(group.schedule) || 'Не вказано';
+          return <Row key={group.id} title={group.name}
+            subtitle={`Напрямок: ${group.directionName} · Дні та години: ${schedule} · Старт: ${formatGroupStartDate(group.startDate)}`}
+            status={blockers.length
+              ? <Badge color={theme.danger}>Не з’явиться: {blockers.join('; ')}</Badge>
+              : <Badge color={group.showOnPublicSite ? theme.success : theme.textMuted}>{group.showOnPublicSite ? 'На сайті' : 'Приховано'}</Badge>}
+            actions={<Toggle checked={group.showOnPublicSite} disabled={busy} onChange={(checked) => run(() => db.updateSiteGroupVisibility(group.id, checked))}>Показувати на сайті</Toggle>} />;
+        })}
       </div>}
       {busy && <div aria-live="polite" style={{ color: theme.textMuted, fontSize: 12 }}>Збереження…</div>}
       {editingTrainer && <TrainerContentEditor trainer={editingTrainer} onClose={() => setEditingTrainer(null)} onSaved={async () => { await load(); setSuccess('Текст профілю збережено.'); }} />}

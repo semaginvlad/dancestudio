@@ -528,8 +528,21 @@ const mapSiteDirectionProfile = (row) => ({
   isOperational: row.directions?.is_active === true && !row.directions?.archived_at,
 });
 
+const mapSiteGroup = (row, directionNames) => ({
+  id: row.id,
+  name: row.name || row.id,
+  directionId: row.direction_id || null,
+  directionName: directionNames.get(String(row.direction_id)) || row.direction_id || 'Не вказано',
+  schedule: row.schedule,
+  startDate: row.start_date || null,
+  publicLevel: row.public_level || null,
+  ageCategory: row.age_category || null,
+  showOnPublicSite: !!row.show_on_public_site,
+  archivedAt: row.archived_at || null,
+});
+
 export async function fetchSiteContentAdmin() {
-  const [pagesResult, trainersResult, directionsResult] = await Promise.all([
+  const [pagesResult, trainersResult, directionsResult, groupsResult, groupDirectionsResult] = await Promise.all([
     supabase.from('site_pages')
       .select('page_key,is_published,show_in_navigation,sort_order,updated_at')
       .order('sort_order', { ascending: true }).order('page_key', { ascending: true }),
@@ -539,18 +552,35 @@ export async function fetchSiteContentAdmin() {
     supabase.from('site_direction_profiles')
       .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)')
       .order('sort_order', { ascending: true }).order('direction_id', { ascending: true }),
+    supabase.from('groups')
+      .select('id,name,direction_id,schedule,start_date,public_level,age_category,show_on_public_site,archived_at')
+      .is('archived_at', null)
+      .order('name', { ascending: true }),
+    supabase.from('directions').select('id,name'),
   ]);
-  const failed = [pagesResult, trainersResult, directionsResult].find((result) => result.error);
+  const failed = [pagesResult, trainersResult, directionsResult, groupsResult, groupDirectionsResult].find((result) => result.error);
   if (failed?.error) {
     const error = new Error('Розділ «Сайт» ще недоступний. Перевірте, чи migration Site Content V1 пройшла ручну перевірку та була застосована.');
     error.cause = failed.error;
     throw error;
   }
+  const directionNames = new Map((groupDirectionsResult.data || []).map((direction) => [String(direction.id), direction.name || direction.id]));
   return {
     pages: (pagesResult.data || []).map(mapSitePage),
     trainers: (trainersResult.data || []).map(mapSiteTrainerProfile),
     directions: (directionsResult.data || []).map(mapSiteDirectionProfile),
+    groups: (groupsResult.data || []).map((group) => mapSiteGroup(group, directionNames)),
   };
+}
+
+export async function updateSiteGroupVisibility(groupId, showOnPublicSite) {
+  const { data, error } = await supabase.from('groups')
+    .update({ show_on_public_site: !!showOnPublicSite })
+    .eq('id', groupId)
+    .select('id,show_on_public_site')
+    .single();
+  if (error) throw error;
+  return { id: data.id, showOnPublicSite: !!data.show_on_public_site };
 }
 
 export async function updateSitePage(pageKey, patch = {}) {
