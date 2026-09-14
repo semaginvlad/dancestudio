@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
@@ -648,7 +649,7 @@ export default function ScheduleTab({
         const wd = parseWeekday(
           row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay,
         );
-        const st = toMin(row.startTime || row.start || row.time || "");
+        const st = toMin(getScheduleSlotStartTime(row));
         if (wd == null || st == null) return;
         const en = toMin(getSlotEndTimeRaw(row)) ?? st + 60;
         const slotTrainerId = getSlotTrainerId(row, g);
@@ -1312,7 +1313,7 @@ export default function ScheduleTab({
   const getLessonsPerWeek = (group) => {
     const validRows = (Array.isArray(group?.schedule) ? group.schedule : []).filter((row) => {
       const weekday = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
-      const st = toMin(row.startTime || row.start || row.time || "");
+      const st = toMin(getScheduleSlotStartTime(row));
       return weekday != null && st != null;
     });
     return validRows.length || getGroupScheduleWeekdays(group).length || 0;
@@ -1544,7 +1545,7 @@ export default function ScheduleTab({
       rows.forEach((row, slotIndex) => {
         const weekday = parseWeekday(row.weekday ?? row.dayOfWeek ?? row.day ?? row.dow ?? row.weekDay);
         if (weekday !== dateObj.getDay()) return;
-        const st = toMin(row.startTime || row.start || row.time || "");
+        const st = toMin(getScheduleSlotStartTime(row));
         const en = toMin(getSlotEndTimeRaw(row)) ?? (st == null ? null : st + 60);
         if (st == null || en == null || en <= st) return;
         const slotTrainerId = trainerId || getSlotTrainerId(row, group) || "";
@@ -1734,7 +1735,7 @@ export default function ScheduleTab({
     }
     const g = safeGroups.find((x) => String(x.id) === String(e.groupId));
     const slot = Array.isArray(g?.schedule) ? g.schedule[e.slotIndex] : null;
-    const st = toMin(slot?.startTime || slot?.start || slot?.time || e.startTime || "");
+    const st = toMin(getScheduleSlotStartTime(slot) || e.startTime || "");
     const en = toMin(getSlotEndTimeRaw(slot) || e.endTime || "") ?? (st == null ? null : st + 60);
     const trainerId = getSlotTrainerId(slot, g) || "";
     setGroupSlotEdit({
@@ -1868,11 +1869,9 @@ export default function ScheduleTab({
     }
     const nextSchedule = prev.map((row, idx) => {
       if (idx !== groupSlotEdit.slotIndex) return row;
-      const next = { ...row };
+      const next = synchronizeScheduleSlotTime(row, groupSlotEdit.startTime, groupSlotEdit.endTime);
       setExistingOrDefault(next, ["weekday", "dayOfWeek", "day", "dow", "weekDay"], groupSlotEdit.weekday, "weekday");
-      setExistingOrDefault(next, ["startTime", "start"], groupSlotEdit.startTime, "startTime");
       setExistingOrDefault(next, ["endTime", "end"], groupSlotEdit.endTime, "endTime");
-      if ("time" in next) next.time = `${groupSlotEdit.startTime}-${groupSlotEdit.endTime}`;
       const title = String(groupSlotEdit.title || "").trim() || null;
       setExistingOrDefault(next, ["title", "name", "label"], title, "title");
       next.title = title;

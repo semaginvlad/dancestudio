@@ -1,15 +1,5 @@
-import { WEEKDAYS } from "./constants";
-
-const parseSchedule = (schedule) => {
-  if (Array.isArray(schedule)) return schedule;
-  if (typeof schedule !== "string") return [];
-  try {
-    const parsed = JSON.parse(schedule);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
+import { WEEKDAYS } from "./constants.js";
+import { getScheduleSlotStartTime, parseGroupSchedule } from "./groupSchedule.js";
 
 export const getGroupLevelLabel = (level) => {
   const value = String(level || "").trim().toLowerCase();
@@ -27,8 +17,8 @@ export const getGroupAgeCategoryLabel = (ageCategory) => {
 
 export const formatGroupScheduleLabel = (schedule) => {
   const groupedByTime = new Map();
-  parseSchedule(schedule).forEach((slot) => {
-    const time = String(slot?.time || "").trim();
+  parseGroupSchedule(schedule).forEach((slot) => {
+    const time = getScheduleSlotStartTime(slot);
     if (!time) return;
     const day = WEEKDAYS[Number(slot?.day)] || "?";
     const days = groupedByTime.get(time) || [];

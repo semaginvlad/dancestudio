@@ -84,8 +84,9 @@ export function Pill({active, onClick, children, color}){
   return <button type="button" onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||theme.primary):theme.input, color:active?"#fff":theme.textMuted, border:"none", fontFamily:"inherit", transition:"all 0.2s"}}>{children}</button>;
 }
 
-export function GroupSelect({groups, value, onChange, filterDir = "all", allowAll = false}) {
+export function GroupSelect({groups, historicalGroups = [], value, onChange, filterDir = "all", allowAll = false}) {
   const filteredGroups = filterDir === "all" ? groups : groups.filter(g => g.directionId === filterDir);
+  const filteredHistoricalGroups = filterDir === "all" ? historicalGroups : historicalGroups.filter(g => g.directionId === filterDir);
   return (
     <select style={{...inputSt, width:"auto", minWidth:200, cursor:"pointer"}} value={value} onChange={e=>onChange(e.target.value)}>
       {allowAll && <option value="all">Усі групи</option>}
@@ -94,6 +95,9 @@ export function GroupSelect({groups, value, onChange, filterDir = "all", allowAl
           {filteredGroups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{getInternalGroupLabel(g)}</option>)}
         </optgroup>
       ))}
+      {!!filteredHistoricalGroups.length && <optgroup label="Історичні">
+        {filteredHistoricalGroups.map(g=><option key={`historical-${g.id}`} value={g.id}>{getInternalGroupLabel(g)}</option>)}
+      </optgroup>}
     </select>
   );
 }
