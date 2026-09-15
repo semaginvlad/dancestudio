@@ -3,6 +3,7 @@ import * as db from '../db';
 import { Badge, Pill } from './UI';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { normalizeSiteTrainerContent, SITE_TRAINER_CONTENT_FIELDS } from '../shared/siteTrainerContent';
+import { SITE_DIRECTION_CONTENT_FIELDS, SITE_PAGE_CONTENT_FIELDS } from '../shared/sitePageContent';
 import { formatGroupScheduleLabel } from '../shared/groupLabels';
 import { formatGroupStartDate, getPublicGroupBlockers, isArchivedSiteGroup } from '../shared/siteGroups';
 
@@ -20,6 +21,15 @@ const PAGE_LABELS = {
   about: 'Про студію',
   join: 'Приєднатися',
   directions_quiz: 'Квіз напрямків',
+};
+
+const TEXT_LABELS = {
+  eyebrow: 'Верхній маленький підпис', title: 'Головний заголовок', subtitle: 'Підзаголовок', description: 'Опис',
+  primaryCtaLabel: 'Текст основної CTA-кнопки', secondaryCtaLabel: 'Текст другої CTA-кнопки',
+  city: 'Місто', studioLabel: 'Підпис студії', cityStudioLabel: 'Спільний напис «Місто / Dance Studio»',
+  baseTitle: 'Назва BASE', baseLabel: 'Підпис BASE', baseDescription: 'Опис BASE',
+  mixTitle: 'Назва MIX', mixLabel: 'Підпис MIX', mixDescription: 'Опис MIX',
+  loadErrorMessage: 'Повідомлення при помилці завантаження', emptyScheduleMessage: 'Повідомлення, коли занять немає',
 };
 
 const Toggle = ({ checked, disabled, onChange, children }) => (
@@ -80,6 +90,28 @@ const TrainerContentEditor = ({ trainer, onClose, onSaved }) => {
   </div>;
 };
 
+const TextContentEditor = ({ title, content, fields, onClose, onSave }) => {
+  const [form, setForm] = useState(() => Object.fromEntries(fields.map((key) => [key, content?.[key] || ''])));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setSaving(true); setError('');
+    try { await onSave(form); onClose(); }
+    catch (nextError) { setError(nextError?.message || 'Не вдалося зберегти тексти.'); }
+    finally { setSaving(false); }
+  };
+  return <div role="dialog" aria-modal="true" aria-label={`Тексти: ${title}`} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,25,45,.55)', padding: 16, overflowY: 'auto' }}>
+    <div style={{ ...cardSt, maxWidth: 820, margin: '24px auto', display: 'grid', gap: 18 }}>
+      <div><h3 style={{ margin: 0 }}>Тексти: {title}</h3><p style={{ color: theme.textMuted, marginBottom: 0 }}>Порожнє поле = сайт використовує чинний текст із коду. Зберігаються лише дозволені поля цієї сторінки.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+        {fields.map((key) => <label key={key} style={{ fontSize: 13, fontWeight: 600 }}>{TEXT_LABELS[key] || key}<textarea rows={key.toLowerCase().includes('description') || key.toLowerCase().includes('message') ? 3 : 1} style={{ ...inputSt, resize: 'vertical', marginTop: 6 }} value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+      </div>
+      {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><button type="button" style={btnS} disabled={saving} onClick={onClose}>Скасувати</button><button type="button" style={btnP} disabled={saving} onClick={save}>{saving ? 'Збереження…' : 'Зберегти тексти'}</button></div>
+    </div>
+  </div>;
+};
+
 export default function SiteTab() {
   const [data, setData] = useState({ pages: [], trainers: [], directions: [], groups: [] });
   const [loading, setLoading] = useState(true);
@@ -88,6 +120,7 @@ export default function SiteTab() {
   const [success, setSuccess] = useState('');
   const [section, setSection] = useState('pages');
   const [editingTrainer, setEditingTrainer] = useState(null);
+  const [editingText, setEditingText] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +174,7 @@ export default function SiteTab() {
         <button type="button" style={btnS} onClick={load} disabled={loading || busy}>Оновити</button>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {[['pages', 'Сторінки'], ['navigation', 'Меню'], ['trainers', 'Тренери'], ['directions', 'Напрямки'], ['groups', 'Групи на сайті']].map(([id, label]) => (
+        {[['pages', 'Сторінки'], ['texts', 'Тексти сайту'], ['navigation', 'Меню'], ['trainers', 'Тренери'], ['directions', 'Напрямки'], ['groups', 'Групи на сайті']].map(([id, label]) => (
           <Pill key={id} active={section === id} onClick={() => setSection(id)}>{label}</Pill>
         ))}
       </div>
@@ -166,6 +199,12 @@ export default function SiteTab() {
           actions={<OrderButtons index={index} total={menuPages.length} disabled={busy} onMove={(delta) => move(menuPages, index, delta, db.reorderSitePages)} />} />)}
       </div>}
 
+      {section === 'texts' && <div style={{ display: 'grid', gap: 10 }}>
+        {data.pages.map((page) => <Row key={page.pageKey} title={PAGE_LABELS[page.pageKey] || page.pageKey}
+          subtitle={Object.keys(page.content || {}).length ? `Заповнено полів: ${Object.keys(page.content).length}` : 'Використовуються чинні тексти сайту'}
+          actions={<button type="button" style={btnS} disabled={busy} onClick={() => setEditingText({ type: 'page', item: page })}>Редагувати тексти</button>} />)}
+      </div>}
+
       {section === 'trainers' && <div style={{ display: 'grid', gap: 10 }}>
         {trainers.map((trainer, index) => <Row key={trainer.trainerId} title={trainer.name}
           subtitle={`Статус: ${trainer.publicationStatus === 'published' ? 'готовий' : 'чернетка'} · порядок ${trainer.sortOrder}`}
@@ -183,6 +222,7 @@ export default function SiteTab() {
           status={!direction.isOperational ? <Badge color={theme.danger}>Недоступний у CRM</Badge> : <Badge color={direction.showOnPublicSite ? theme.success : theme.textMuted}>{direction.showOnPublicSite ? 'На сайті' : 'Приховано'}</Badge>}
           actions={<>
             <Toggle checked={direction.showOnPublicSite} disabled={busy || !direction.isOperational} onChange={(checked) => run(() => db.updateSiteDirectionProfile(direction.directionId, { showOnPublicSite: checked, ...(checked && direction.publicationStatus === 'draft' ? { publicationStatus: 'published' } : {}) }))}>Показувати на сайті</Toggle>
+            <button type="button" style={btnS} disabled={busy} onClick={() => setEditingText({ type: 'direction', item: direction })}>Редагувати тексти</button>
             <OrderButtons index={index} total={directions.length} disabled={busy} onMove={(delta) => move(directions, index, delta, db.reorderSiteDirectionProfiles)} />
           </>} />)}
       </div>}
@@ -202,6 +242,16 @@ export default function SiteTab() {
       </div>}
       {busy && <div aria-live="polite" style={{ color: theme.textMuted, fontSize: 12 }}>Збереження…</div>}
       {editingTrainer && <TrainerContentEditor trainer={editingTrainer} onClose={() => setEditingTrainer(null)} onSaved={async () => { await load(); setSuccess('Текст профілю збережено.'); }} />}
+      {editingText && <TextContentEditor
+        title={editingText.type === 'page' ? (PAGE_LABELS[editingText.item.pageKey] || editingText.item.pageKey) : editingText.item.name}
+        content={editingText.item.content}
+        fields={editingText.type === 'page' ? SITE_PAGE_CONTENT_FIELDS[editingText.item.pageKey] : SITE_DIRECTION_CONTENT_FIELDS}
+        onClose={() => setEditingText(null)}
+        onSave={async (content) => {
+          if (editingText.type === 'page') await db.updateSitePageContent(editingText.item.pageKey, content);
+          else await db.updateSiteDirectionProfileContent(editingText.item.directionId, content);
+          await load(); setSuccess('Тексти сайту збережено.');
+        }} />}
     </div>
   );
 }
