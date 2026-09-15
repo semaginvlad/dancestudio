@@ -19,7 +19,7 @@ select 'public_content_has_no_unknown_or_private_keys' check_name,
     cross join lateral jsonb_object_keys(rows.content) key
     where key not in ('eyebrow','title','subtitle','description','primary_cta_label','secondary_cta_label',
       'city','studio_label','city_studio_label','base_title','base_label','base_description',
-      'mix_title','mix_label','mix_description','load_error_message','empty_schedule_message')
+      'mix_title','mix_label','mix_description','load_error_message','empty_schedule_message','logo_url')
   ) as ok;
 
 select 'rpc_grants_remain_minimal' check_name,
@@ -27,3 +27,15 @@ select 'rpc_grants_remain_minimal' check_name,
   and has_function_privilege('authenticated','public.fetch_public_site_config()','execute')
   and not has_table_privilege('anon','public.site_pages','select')
   and not has_table_privilege('anon','public.site_direction_profiles','select') as ok;
+
+select 'home_logo_url_is_the_only_public_logo_key' check_name,
+  not exists (
+    select 1
+    from jsonb_array_elements(public.fetch_public_site_config()->'pages') page
+    cross join lateral jsonb_object_keys(page->'content') key
+    where key like '%logo%' and key <> 'logo_url'
+  ) as ok;
+
+select 'site_logo_bucket_is_public_and_png_limited' check_name,
+  exists (select 1 from storage.buckets where id = 'site-assets' and public = true
+    and file_size_limit = 2097152 and allowed_mime_types = array['image/png']::text[]) as ok;
