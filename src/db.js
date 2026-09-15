@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
+import { normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -486,6 +487,7 @@ const mapSitePage = (row) => ({
   showInNavigation: !!row.show_in_navigation,
   sortOrder: Number(row.sort_order || 0),
   updatedAt: row.updated_at || null,
+  content: normalizeSitePageContent(row.page_key, row.content || {}),
 });
 
 const mapSiteTrainerProfile = (row) => ({
@@ -526,6 +528,7 @@ const mapSiteDirectionProfile = (row) => ({
   name: row.directions?.name || row.direction_id,
   color: row.directions?.color || '#7b8ea8',
   isOperational: row.directions?.is_active === true && !row.directions?.archived_at,
+  content: normalizeSiteDirectionContent(row.content || {}),
 });
 
 const mapSiteGroup = (row, directionNames) => ({
@@ -544,13 +547,13 @@ const mapSiteGroup = (row, directionNames) => ({
 export async function fetchSiteContentAdmin() {
   const [pagesResult, trainersResult, directionsResult, groupsResult, groupDirectionsResult] = await Promise.all([
     supabase.from('site_pages')
-      .select('page_key,is_published,show_in_navigation,sort_order,updated_at')
+      .select('page_key,is_published,show_in_navigation,sort_order,content,updated_at')
       .order('sort_order', { ascending: true }).order('page_key', { ascending: true }),
     supabase.from('site_trainer_profiles')
       .select(SITE_TRAINER_ADMIN_SELECT)
       .order('sort_order', { ascending: true }).order('trainer_id', { ascending: true }),
     supabase.from('site_direction_profiles')
-      .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)')
+      .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,content,updated_at,directions(name,color,is_active,archived_at)')
       .order('sort_order', { ascending: true }).order('direction_id', { ascending: true }),
     supabase.from('groups')
       .select('id,name,direction_id,schedule,start_date,public_level,age_category,show_on_public_site,archived_at')
@@ -589,9 +592,17 @@ export async function updateSitePage(pageKey, patch = {}) {
   if (patch.showInNavigation !== undefined) payload.show_in_navigation = !!patch.showInNavigation;
   if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
   const { data, error } = await supabase.from('site_pages').update(payload).eq('page_key', pageKey)
-    .select('page_key,is_published,show_in_navigation,sort_order,updated_at').single();
+    .select('page_key,is_published,show_in_navigation,sort_order,content,updated_at').single();
   if (error) throw error;
   return mapSitePage(data);
+}
+
+export async function updateSitePageContent(pageKey, content) {
+  const payload = normalizeSitePageContent(pageKey, content);
+  const { data, error } = await supabase.from('site_pages').update({ content: payload }).eq('page_key', pageKey)
+    .select('page_key,is_published,show_in_navigation,sort_order,content,updated_at').single();
+  if (error) throw error;
+  return mapSitePage(data).content;
 }
 
 export async function updateSiteTrainerProfile(trainerId, patch = {}) {
@@ -634,9 +645,17 @@ export async function updateSiteDirectionProfile(directionId, patch = {}) {
   if (patch.showOnPublicSite !== undefined) payload.show_on_public_site = !!patch.showOnPublicSite;
   if (patch.sortOrder !== undefined) payload.sort_order = Number(patch.sortOrder);
   const { data, error } = await supabase.from('site_direction_profiles').update(payload).eq('direction_id', directionId)
-    .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,updated_at,directions(name,color,is_active,archived_at)').single();
+    .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,content,updated_at,directions(name,color,is_active,archived_at)').single();
   if (error) throw error;
   return mapSiteDirectionProfile(data);
+}
+
+export async function updateSiteDirectionProfileContent(directionId, content) {
+  const payload = normalizeSiteDirectionContent(content);
+  const { data, error } = await supabase.from('site_direction_profiles').update({ content: payload }).eq('direction_id', directionId)
+    .select('direction_id,public_slug,publication_status,show_on_public_site,sort_order,content,updated_at,directions(name,color,is_active,archived_at)').single();
+  if (error) throw error;
+  return mapSiteDirectionProfile(data).content;
 }
 
 const reorderSiteRows = async (items, updateItem, idKey) => {
