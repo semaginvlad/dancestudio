@@ -10,6 +10,8 @@ import {
 
 const migrationPath = new URL('../supabase/migrations/20260915090000_site_page_and_direction_content.sql', import.meta.url);
 const logoMigrationPath = new URL('../supabase/migrations/20260915120000_site_header_logo.sql', import.meta.url);
+const brandingMigrationPath = new URL('../supabase/migrations/20260915150000_site_branding_independent_of_home_publication.sql', import.meta.url);
+const brandingChecksPath = new URL('../supabase/tests/site_branding_checks.sql', import.meta.url);
 
 test('page text is trimmed and retained for saving', () => {
   assert.deepEqual(normalizeSitePageContent('schedule', {
@@ -45,6 +47,21 @@ test('logo migration provisions constrained storage and exposes only logo_url', 
   assert.match(sql, /public\.rls_is_admin\(\)/);
   assert.match(sql, /'logo_url', nullif\(btrim\(sp\.content->>'logo_url'\)/);
   assert.doesNotMatch(sql, /service.role|service_role/i);
+});
+
+test('follow-up migration exposes branding without publishing the home page', async () => {
+  const [migration, checks] = await Promise.all([
+    readFile(brandingMigrationPath, 'utf8'),
+    readFile(brandingChecksPath, 'utf8'),
+  ]);
+  assert.match(migration, /'branding', jsonb_build_object\([\s\S]*?'logo_url'/);
+  assert.match(migration, /from public\.site_pages sp where sp\.page_key = 'home'/);
+  assert.match(migration, /from public\.site_pages sp\s+where sp\.is_published = true/);
+  assert.doesNotMatch(migration, /(?:update|insert into|delete from)\s+public\.site_pages/i);
+  assert.match(checks, /set is_published = false/);
+  assert.match(checks, /jsonb_array_elements\(public\.fetch_public_site_config\(\)->'pages'\)/);
+  assert.match(checks, /fetch_public_site_config\(\)->'branding'->>'logo_url'/);
+  assert.match(checks, /rollback/);
 });
 
 test('public RPC is additive, whitelists content and preserves the V1 config contract', async () => {
