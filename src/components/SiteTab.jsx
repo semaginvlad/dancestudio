@@ -3,7 +3,7 @@ import * as db from '../db';
 import { Badge, Pill } from './UI';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { normalizeSiteTrainerContent, SITE_TRAINER_CONTENT_FIELDS } from '../shared/siteTrainerContent';
-import { SITE_DIRECTION_CONTENT_FIELDS, SITE_PAGE_CONTENT_FIELDS } from '../shared/sitePageContent';
+import { SITE_DIRECTION_CONTENT_FIELDS, SITE_PAGE_CONTENT_FIELDS, validateSiteLogo } from '../shared/sitePageContent';
 import { formatGroupScheduleLabel } from '../shared/groupLabels';
 import { formatGroupStartDate, getPublicGroupBlockers, isArchivedSiteGroup } from '../shared/siteGroups';
 
@@ -91,12 +91,29 @@ const TrainerContentEditor = ({ trainer, onClose, onSaved }) => {
 };
 
 const TextContentEditor = ({ title, content, fields, onClose, onSave }) => {
-  const [form, setForm] = useState(() => Object.fromEntries(fields.map((key) => [key, content?.[key] || ''])));
+  const textFields = fields.filter((key) => key !== 'logo_url');
+  const [form, setForm] = useState(() => Object.fromEntries(textFields.map((key) => [key, content?.[key] || ''])));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoUrl, setLogoUrl] = useState(content?.logo_url || '');
+  const logoPreviewUrl = useMemo(() => logoFile ? URL.createObjectURL(logoFile) : logoUrl, [logoFile, logoUrl]);
+  useEffect(() => () => { if (logoFile && logoPreviewUrl) URL.revokeObjectURL(logoPreviewUrl); }, [logoFile, logoPreviewUrl]);
+  const uploadLogo = async () => {
+    setSaving(true); setError('');
+    try { validateSiteLogo(logoFile); setLogoUrl(await db.uploadSiteHeaderLogo(logoFile)); setLogoFile(null); }
+    catch (nextError) { setError(nextError?.message || 'Не вдалося завантажити логотип.'); }
+    finally { setSaving(false); }
+  };
+  const removeLogo = async () => {
+    setSaving(true); setError('');
+    try { await db.removeSiteHeaderLogo(); setLogoUrl(''); setLogoFile(null); }
+    catch (nextError) { setError(nextError?.message || 'Не вдалося прибрати логотип.'); }
+    finally { setSaving(false); }
+  };
   const save = async () => {
     setSaving(true); setError('');
-    try { await onSave(form); onClose(); }
+    try { await onSave({ ...content, ...form, logo_url: logoUrl }); onClose(); }
     catch (nextError) { setError(nextError?.message || 'Не вдалося зберегти тексти.'); }
     finally { setSaving(false); }
   };
@@ -104,8 +121,14 @@ const TextContentEditor = ({ title, content, fields, onClose, onSave }) => {
     <div style={{ ...cardSt, maxWidth: 820, margin: '24px auto', display: 'grid', gap: 18 }}>
       <div><h3 style={{ margin: 0 }}>Тексти: {title}</h3><p style={{ color: theme.textMuted, marginBottom: 0 }}>Порожнє поле = сайт використовує чинний текст із коду. Зберігаються лише дозволені поля цієї сторінки.</p></div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
-        {fields.map((key) => <label key={key} style={{ fontSize: 13, fontWeight: 600 }}>{TEXT_LABELS[key] || key}<textarea rows={key.toLowerCase().includes('description') || key.toLowerCase().includes('message') ? 3 : 1} style={{ ...inputSt, resize: 'vertical', marginTop: 6 }} value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+        {textFields.map((key) => <label key={key} style={{ fontSize: 13, fontWeight: 600 }}>{TEXT_LABELS[key] || key}<textarea rows={key.toLowerCase().includes('description') || key.toLowerCase().includes('message') ? 3 : 1} style={{ ...inputSt, resize: 'vertical', marginTop: 6 }} value={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
       </div>
+      {fields.includes('logo_url') && <section style={{ ...cardSt, display: 'grid', gap: 12, background: theme.input }}>
+        <div><h4 style={{ margin: 0 }}>Логотип сайту</h4><div style={{ color: theme.textMuted, fontSize: 12, marginTop: 5 }}>Прозорий PNG, рекомендована ширина від 500 px. Максимум 2 МБ.</div></div>
+        {logoPreviewUrl ? <img src={logoPreviewUrl} alt="Попередній перегляд логотипа" style={{ width: 'min(100%, 500px)', maxHeight: 180, objectFit: 'contain', objectPosition: 'left center' }} /> : <div style={{ color: theme.textMuted }}>Логотип не завантажено.</div>}
+        <input aria-label="PNG-файл логотипа" type="file" accept="image/png" disabled={saving} onChange={(event) => { const file = event.target.files?.[0] || null; try { if (file) validateSiteLogo(file); setLogoFile(file); setError(''); } catch (nextError) { setLogoFile(null); setError(nextError.message); event.target.value = ''; } }} />
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><button type="button" style={btnP} disabled={saving || !logoFile} onClick={uploadLogo}>Завантажити</button><button type="button" style={{ ...btnS, color: theme.danger }} disabled={saving || (!logoUrl && !logoFile)} onClick={removeLogo}>Прибрати логотип</button></div>
+      </section>}
       {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><button type="button" style={btnS} disabled={saving} onClick={onClose}>Скасувати</button><button type="button" style={btnP} disabled={saving} onClick={save}>{saving ? 'Збереження…' : 'Зберегти тексти'}</button></div>
     </div>

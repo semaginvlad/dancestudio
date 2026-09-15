@@ -1,7 +1,7 @@
 import { nullableTrimmed } from './siteTrainerContent.js';
 
 export const SITE_PAGE_CONTENT_FIELDS = {
-  home: ['eyebrow', 'title', 'subtitle', 'description', 'primaryCtaLabel', 'secondaryCtaLabel'],
+  home: ['eyebrow', 'title', 'subtitle', 'description', 'primaryCtaLabel', 'secondaryCtaLabel', 'logo_url'],
   schedule: [
     'eyebrow', 'title', 'city', 'studioLabel', 'cityStudioLabel',
     'baseTitle', 'baseLabel', 'baseDescription',
@@ -34,4 +34,12 @@ export function normalizeSitePageContent(pageKey, content = {}) {
 
 export function normalizeSiteDirectionContent(content = {}) {
   return normalizeWhitelistedContent(content, SITE_DIRECTION_CONTENT_FIELDS);
+}
+
+export const SITE_LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+export function validateSiteLogo(file) {
+  if (!file || file.type !== 'image/png') throw new Error('Оберіть файл у форматі PNG.');
+  if (file.size > SITE_LOGO_MAX_BYTES) throw new Error('Розмір логотипа не може перевищувати 2 МБ.');
+  return file;
 }

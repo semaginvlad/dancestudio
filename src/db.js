@@ -605,6 +605,30 @@ export async function updateSitePageContent(pageKey, content) {
   return mapSitePage(data).content;
 }
 
+const SITE_LOGO_BUCKET = 'site-assets';
+const SITE_LOGO_PATH = 'branding/header-logo.png';
+
+export async function uploadSiteHeaderLogo(file) {
+  const { error: uploadError } = await supabase.storage.from(SITE_LOGO_BUCKET)
+    .upload(SITE_LOGO_PATH, file, { contentType: 'image/png', upsert: true, cacheControl: '31536000' });
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from(SITE_LOGO_BUCKET).getPublicUrl(SITE_LOGO_PATH);
+  const logoUrl = `${data.publicUrl}?v=${Date.now()}`;
+  const { data: page, error: readError } = await supabase.from('site_pages').select('content').eq('page_key', 'home').single();
+  if (readError) throw readError;
+  await updateSitePageContent('home', { ...(page.content || {}), logo_url: logoUrl });
+  return logoUrl;
+}
+
+export async function removeSiteHeaderLogo() {
+  const { error: removeError } = await supabase.storage.from(SITE_LOGO_BUCKET).remove([SITE_LOGO_PATH]);
+  if (removeError) throw removeError;
+  const { data: page, error: readError } = await supabase.from('site_pages').select('content').eq('page_key', 'home').single();
+  if (readError) throw readError;
+  const { logo_url: _removed, ...content } = page.content || {};
+  await updateSitePageContent('home', content);
+}
+
 export async function updateSiteTrainerProfile(trainerId, patch = {}) {
   const payload = {};
   if (patch.publicationStatus !== undefined) payload.publication_status = patch.publicationStatus;
