@@ -48,12 +48,13 @@ begin
     raise exception 'subscription authorization is not bound to subscription, student, and group';
   end if;
 
-  select polwithcheck::text into insert_check
+  select lower(pg_get_expr(polwithcheck, polrelid)) into insert_check
   from pg_policy
   where polrelid = 'public.attendance'::regclass
     and polname = 'attendance_trainer_insert_own_groups';
 
-  select (polqual::text || ' ' || polwithcheck::text) into update_check
+  select lower(pg_get_expr(polqual, polrelid)) || ' '
+         || lower(pg_get_expr(polwithcheck, polrelid)) into update_check
   from pg_policy
   where polrelid = 'public.attendance'::regclass
     and polname = 'attendance_trainer_update_own_groups';
@@ -61,15 +62,17 @@ begin
   if insert_check is null
      or insert_check not like '%rls_owns_group(group_id)%'
      or insert_check not like '%rls_can_record_attendance(student_id, group_id)%'
-     or insert_check not like '%sub_id IS NULL%'
-     or insert_check not like '%student_id IS NULL%sub_id IS NULL%' then
+     or insert_check not like '%rls_can_access_subscription(sub_id, student_id, group_id)%'
+     or insert_check not like '%sub_id is null%'
+     or insert_check not like '%student_id is null%sub_id is null%' then
     raise exception 'trainer INSERT policy does not cover owned guests, no-subscription students, and validated subscriptions';
   end if;
 
   if update_check is null
      or update_check not like '%rls_owns_group(group_id)%'
      or update_check not like '%rls_can_record_attendance(student_id, group_id)%'
-     or update_check not like '%rls_can_access_subscription(sub_id, student_id, group_id)%' then
+     or update_check not like '%rls_can_access_subscription(sub_id, student_id, group_id)%'
+     or update_check not like '%student_id is null%sub_id is null%' then
     raise exception 'trainer UPDATE policy is not equivalently constrained';
   end if;
 
