@@ -3,6 +3,7 @@ import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
+import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -609,9 +610,7 @@ export default function ScheduleTab({
     [activeStudioRooms],
   );
   const resolveRoomName = (source, legacyGroup = null) => {
-    const roomId = String(getRoomId(source) || "");
-    if (roomId && studioRoomNameById.has(roomId)) return studioRoomNameById.get(roomId);
-    return getRoomLabel(source) || getRoomLabel(legacyGroup) || primaryRoomName;
+    return resolveScheduleRoomName(source, studioRoomNameById, legacyGroup);
   };
   const cancelledSet = useMemo(
     () =>
@@ -705,7 +704,7 @@ export default function ScheduleTab({
             title: effectiveTitle,
             note: override?.status === "active" ? override.note || "" : s.note || "",
             cancelled: cancelledSet.has(`${s.groupId}:${date}`),
-            roomName: override?.status === "active" ? (override.roomName || s.roomName || primaryRoomName) : (getRoomLabel(s) || primaryRoomName),
+            roomName: resolveOverrideRoomName(override, s, studioRoomNameById),
             isOverride: override?.status === "active",
             overrideId: override?.status === "active" ? override.id : null,
             originalStartTime: override?.originalStartTime || s.startTime,
@@ -743,7 +742,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
-          roomName: getRoomLabel(b) || primaryRoomName,
+          roomName: resolveRoomName(b),
           directionId: b.directionId || b.direction_id || "",
           direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
@@ -782,7 +781,7 @@ export default function ScheduleTab({
           startMin: st,
           endMin: en,
           title: b.title || "Подія",
-          roomName: getRoomLabel(b) || primaryRoomName,
+          roomName: resolveRoomName(b),
           directionId: b.directionId || b.direction_id || "",
           direction: getDirectionDisplayName(b.directionName || b.direction_name || bt?.label || "Reserve"),
           trainerId: b.trainerId || b.trainer_id || null,
@@ -931,7 +930,7 @@ export default function ScheduleTab({
     return true;
   };
   const applyRoomAndMobileFilters = (arr = []) => (arr || [])
-    .filter((e) => selectedRoom === "all" || (e.roomName || primaryRoomName) === selectedRoom)
+    .filter((e) => selectedRoom === "all" || (e.roomName || UNKNOWN_ROOM_NAME) === selectedRoom)
     .filter(matchesMobileScheduleFilter);
   const mobileFilterEmptyText = hasMobileScheduleFilter ? "Немає подій за цим фільтром" : "У цій залі подій немає.";
   const roomFilteredEventsByDay = useMemo(() => {
@@ -2094,7 +2093,7 @@ export default function ScheduleTab({
   const selectedDateByRoom = useMemo(() => {
     const map = new Map();
     selectedDateEvents.forEach((e) => {
-      const room = (e.roomName || "").trim() || primaryRoomName || NO_ROOM;
+      const room = (e.roomName || "").trim() || UNKNOWN_ROOM_NAME;
       if (!map.has(room)) map.set(room, []);
       map.get(room).push(e);
     });
@@ -2108,7 +2107,7 @@ export default function ScheduleTab({
     const baseRooms = orderedRooms.length ? orderedRooms : eventRoomNames;
     const byRoom = new Map(baseRooms.map((room) => [room, []]));
     selectedDateEvents.forEach((event) => {
-      const room = normalizeRoomName(event.roomName) || primaryRoomName;
+      const room = normalizeRoomName(event.roomName) || UNKNOWN_ROOM_NAME;
       if (!byRoom.has(room)) byRoom.set(room, []);
       byRoom.get(room).push(event);
     });
@@ -2553,7 +2552,7 @@ export default function ScheduleTab({
             <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>🕒 {selectedEventDetails.startTime}–{selectedEventDetails.endTime}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>📅 {selectedEventDetails.date}</span>
-              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>⌂ {selectedEventDetails.roomName || primaryRoomName || "—"}</span>
+              <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>⌂ {selectedEventDetails.roomName || UNKNOWN_ROOM_NAME}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>{getEventTypeLabel(selectedEventDetails.eventType)}</span>
               {selectedEventDetails.cancelled ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", color: theme.danger }}>Скасовано</span> : null}
             </div>
@@ -3035,7 +3034,7 @@ export default function ScheduleTab({
               const monthDayEvents = monthEventsByDay.get(key) || [];
               const items = selectedRoom === "all"
                 ? monthDayEvents
-                : monthDayEvents.filter((e) => (e.roomName || primaryRoomName) === selectedRoom);
+                : monthDayEvents.filter((e) => (e.roomName || UNKNOWN_ROOM_NAME) === selectedRoom);
               const inMonth = d.getMonth() === monthStart.getMonth();
               const sortedItems = items.slice().sort((a, b) => a.startMin - b.startMin);
               const visibleMonthChipCount = selectedRoom === "all" ? 0 : 2;

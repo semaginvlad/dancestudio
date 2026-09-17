@@ -1709,12 +1709,7 @@ export async function upsertTrainingLessonReport(report = {}) {
 }
 
 export async function fetchStudioRooms() {
-  const { data, error } = await supabase
-    .from('studio_rooms')
-    .select('*')
-    .eq('is_active', true)
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
+  const { data, error } = await supabase.rpc('crm_fetch_active_studio_rooms');
   if (error) {
     console.warn('studio_rooms:', error.message);
     return [];
