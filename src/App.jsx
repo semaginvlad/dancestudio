@@ -229,7 +229,7 @@ export default function App() {
   const isAdmin = user && isAdminEmail(user.email, adminEmails);
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!user || !accessAllowed) {
       setStudioRooms([]);
       return;
     }
@@ -243,7 +243,7 @@ export default function App() {
       active = false;
       window.removeEventListener("studio-rooms-changed", loadRooms);
     };
-  }, [isAdmin]);
+  }, [user, accessAllowed]);
 
 
 
