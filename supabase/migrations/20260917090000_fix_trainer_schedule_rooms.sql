@@ -88,9 +88,12 @@ as $function$
       exists (
         select 1
         from public.trainers t
-        where t.id::text = rb.trainer_id::text
-          and t.auth_user_id = auth.uid()
-          and coalesce(t.is_active, true) = true
+        where t.auth_user_id = auth.uid()
+          and (
+            rb.trainer_id::text = auth.uid()::text
+            or t.id::text = rb.trainer_id::text
+          )
+          and t.is_active is true
           and t.archived_at is null
           and t.access_disabled_at is null
       ) as is_owner
