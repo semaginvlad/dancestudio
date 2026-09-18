@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  HOME_SECTION_DEFAULT_ENABLED,
+  HOME_SECTION_FIELDS,
+  HOME_SECTION_ORDER,
+  normalizeHomeSection,
+  normalizeHomeSections,
   normalizeSiteDirectionContent,
   normalizeSitePageContent,
   SITE_PAGE_CONTENT_FIELDS,
@@ -12,6 +17,7 @@ const migrationPath = new URL('../supabase/migrations/20260915090000_site_page_a
 const logoMigrationPath = new URL('../supabase/migrations/20260915120000_site_header_logo.sql', import.meta.url);
 const brandingMigrationPath = new URL('../supabase/migrations/20260915150000_site_branding_independent_of_home_publication.sql', import.meta.url);
 const brandingChecksPath = new URL('../supabase/tests/site_branding_checks.sql', import.meta.url);
+const homeSectionsMigrationPath = new URL('../supabase/migrations/20260918120000_home_page_sections.sql', import.meta.url);
 
 test('page text is trimmed and retained for saving', () => {
   assert.deepEqual(normalizeSitePageContent('schedule', {
@@ -77,5 +83,53 @@ test('public RPC is additive, whitelists content and preserves the V1 config con
 test('site-text migration does not touch groups, schedules, payments or attendance', async () => {
   const sql = await readFile(migrationPath, 'utf8');
   assert.doesNotMatch(sql, /(?:alter|update|insert into|delete from)\s+(?:public\.)?(?:groups|trainer_groups|payments|subscriptions|attendance)\b/i);
+  assert.doesNotMatch(sql, /create or replace function public\.fetch_public_schedule/i);
+});
+
+test('home sections have a fixed contract and default visibility', () => {
+  assert.deepEqual(HOME_SECTION_ORDER, ['hero', 'directions', 'schedule', 'team', 'join_cta', 'brand_metrics', 'open_groups', 'week_pulse']);
+  assert.deepEqual(HOME_SECTION_ORDER.map((id) => HOME_SECTION_DEFAULT_ENABLED[id]), [true, true, true, true, true, false, false, false]);
+  for (const sectionId of HOME_SECTION_ORDER) assert.ok(HOME_SECTION_FIELDS[sectionId].includes('enabled'));
+});
+
+test('home section normalization preserves booleans, trims text and drops unknown fields', () => {
+  assert.deepEqual(normalizeHomeSection('hero', { enabled: false, title: '  Танцюй  ', description: ' ', url: 'https://example.test', style: 'red', campaign_signals: {} }), { enabled: false, title: 'Танцюй' });
+  assert.deepEqual(normalizeHomeSection('team', { enabled: true }), { enabled: true });
+  assert.deepEqual(normalizeHomeSection('week_pulse', { title: ' Pulse ' }), { title: 'Pulse' });
+  assert.throws(() => normalizeHomeSection('hero', { enabled: 'false' }), /логічним/);
+  for (const sectionId of ['campaign_signals', 'hero_brand_frame', 'brand_notes', 'featured_routes', 'directions_campaign_slot', 'directions_logic', 'schedule_focus_notes']) {
+    assert.throws(() => normalizeHomeSection(sectionId, {}), /Невідома/);
+  }
+  assert.deepEqual(normalizeHomeSections({ hero: { title: 'Hero' }, brand_notes: { title: 'private' } }), { hero: { title: 'Hero' } });
+  assert.deepEqual(normalizeHomeSections({ hero: { enabled: 'false' }, team: { title: ' Team ' } }), { team: { title: 'Team' } });
+});
+
+test('home section CTA targets and featured limits are strict', () => {
+  for (const pageKey of ['schedule', 'directions', 'coaches', 'about', 'join', 'directions_quiz']) {
+    assert.deepEqual(normalizeHomeSection('hero', { primary_cta_page_key: pageKey }), { primary_cta_page_key: pageKey });
+  }
+  assert.deepEqual(normalizeHomeSection('hero', { secondary_cta_page_key: '' }), {});
+  assert.throws(() => normalizeHomeSection('hero', { primary_cta_page_key: 'https://example.test' }), /дозволену/);
+  assert.deepEqual(normalizeHomeSection('directions', { featured_limit: 1 }), { featured_limit: 1 });
+  assert.deepEqual(normalizeHomeSection('directions', { featured_limit: 6 }), { featured_limit: 6 });
+  for (const invalid of [0, 7, 1.5, '3']) assert.throws(() => normalizeHomeSection('directions', { featured_limit: invalid }), /цілим числом/);
+});
+
+test('sections are only accepted on home and legacy home content is retained', () => {
+  const home = normalizeSitePageContent('home', { logo_url: ' logo.png ', title: ' Legacy ', primaryCtaLabel: ' Join ', sections: { hero: { enabled: false } } });
+  assert.deepEqual(home, { logo_url: 'logo.png', title: 'Legacy', primaryCtaLabel: 'Join', sections: { hero: { enabled: false } } });
+  assert.deepEqual(normalizeSitePageContent('about', { title: 'About', sections: { hero: { enabled: false } } }), { title: 'About' });
+});
+
+test('home section migration is additive, atomic and keeps the public V1 contract', async () => {
+  const sql = await readFile(homeSectionsMigrationPath, 'utf8');
+  assert.match(sql, /admin_update_home_section\(p_section_id text, p_section_content jsonb\)/);
+  assert.match(sql, /for update/);
+  assert.match(sql, /jsonb_set\(v_content, '\{sections\}'/);
+  assert.match(sql, /'schema_version', 1/);
+  assert.match(sql, /revoke all on function public\.admin_update_home_section\(text, jsonb\) from public/);
+  assert.match(sql, /grant execute on function public\.admin_update_home_section\(text, jsonb\) to authenticated/);
+  assert.doesNotMatch(sql, /grant execute on function public\.admin_update_home_section[^;]+to anon/i);
+  assert.doesNotMatch(sql, /(?:alter|insert into|delete from)\s+(?:public\.)?(?:groups|payments|subscriptions|attendance)\b/i);
   assert.doesNotMatch(sql, /create or replace function public\.fetch_public_schedule/i);
 });
