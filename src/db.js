@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
-import { normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
+import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -605,6 +605,16 @@ export async function updateSitePageContent(pageKey, content) {
   return mapSitePage(data).content;
 }
 
+export async function updateHomeSection(sectionId, content) {
+  const sectionContent = normalizeHomeSection(sectionId, content);
+  const { data, error } = await supabase.rpc('admin_update_home_section', {
+    p_section_id: sectionId,
+    p_section_content: sectionContent,
+  });
+  if (error) throw error;
+  return normalizeSitePageContent('home', data || {});
+}
+
 const SITE_LOGO_BUCKET = 'site-assets';
 const SITE_LOGO_PATH = 'branding/header-logo.png';
 
@@ -614,19 +624,16 @@ export async function uploadSiteHeaderLogo(file) {
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from(SITE_LOGO_BUCKET).getPublicUrl(SITE_LOGO_PATH);
   const logoUrl = `${data.publicUrl}?v=${Date.now()}`;
-  const { data: page, error: readError } = await supabase.from('site_pages').select('content').eq('page_key', 'home').single();
-  if (readError) throw readError;
-  await updateSitePageContent('home', { ...(page.content || {}), logo_url: logoUrl });
+  const { error: updateError } = await supabase.rpc('admin_update_home_logo', { p_logo_url: logoUrl });
+  if (updateError) throw updateError;
   return logoUrl;
 }
 
 export async function removeSiteHeaderLogo() {
   const { error: removeError } = await supabase.storage.from(SITE_LOGO_BUCKET).remove([SITE_LOGO_PATH]);
   if (removeError) throw removeError;
-  const { data: page, error: readError } = await supabase.from('site_pages').select('content').eq('page_key', 'home').single();
-  if (readError) throw readError;
-  const { logo_url: _removed, ...content } = page.content || {};
-  await updateSitePageContent('home', content);
+  const { error: updateError } = await supabase.rpc('admin_update_home_logo', { p_logo_url: null });
+  if (updateError) throw updateError;
 }
 
 export async function updateSiteTrainerProfile(trainerId, patch = {}) {

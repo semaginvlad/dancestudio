@@ -3,7 +3,10 @@ import * as db from '../db';
 import { Badge, Pill } from './UI';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { normalizeSiteTrainerContent, SITE_TRAINER_CONTENT_FIELDS } from '../shared/siteTrainerContent';
-import { SITE_DIRECTION_CONTENT_FIELDS, SITE_PAGE_CONTENT_FIELDS, validateSiteLogo } from '../shared/sitePageContent';
+import {
+  HOME_SECTION_DEFAULT_ENABLED, HOME_SECTION_FIELDS, HOME_SECTION_LABELS, HOME_SECTION_ORDER,
+  SITE_CTA_PAGE_KEYS, SITE_DIRECTION_CONTENT_FIELDS, SITE_PAGE_CONTENT_FIELDS, validateSiteLogo,
+} from '../shared/sitePageContent';
 import { formatGroupScheduleLabel } from '../shared/groupLabels';
 import { formatGroupStartDate, getPublicGroupBlockers, isArchivedSiteGroup } from '../shared/siteGroups';
 
@@ -30,6 +33,13 @@ const TEXT_LABELS = {
   baseTitle: 'Назва BASE', baseLabel: 'Підпис BASE', baseDescription: 'Опис BASE',
   mixTitle: 'Назва MIX', mixLabel: 'Підпис MIX', mixDescription: 'Опис MIX',
   loadErrorMessage: 'Повідомлення при помилці завантаження', emptyScheduleMessage: 'Повідомлення, коли занять немає',
+};
+
+const SECTION_FIELD_LABELS = {
+  eyebrow: 'Верхній маленький підпис', title: 'Заголовок', description: 'Опис',
+  primary_cta_label: 'Текст основної CTA-кнопки', primary_cta_page_key: 'Сторінка основної CTA-кнопки',
+  secondary_cta_label: 'Текст другої CTA-кнопки', secondary_cta_page_key: 'Сторінка другої CTA-кнопки',
+  featured_limit: 'Кількість напрямків',
 };
 
 const Toggle = ({ checked, disabled, onChange, children }) => (
@@ -135,6 +145,34 @@ const TextContentEditor = ({ title, content, fields, onClose, onSave }) => {
   </div>;
 };
 
+const HomeSectionEditor = ({ sectionId, content, onClose, onSave }) => {
+  const fields = HOME_SECTION_FIELDS[sectionId].filter((field) => field !== 'enabled');
+  const [form, setForm] = useState(() => Object.fromEntries(fields.map((field) => [field, content?.[field] ?? ''])));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    setSaving(true); setError('');
+    try { await onSave({ ...content, ...form }); onClose(); }
+    catch (nextError) { setError(nextError?.message || 'Не вдалося зберегти секцію.'); }
+    finally { setSaving(false); }
+  };
+  return <div role="dialog" aria-modal="true" aria-label={`Секція: ${HOME_SECTION_LABELS[sectionId]}`} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,25,45,.55)', padding: 16, overflowY: 'auto' }}>
+    <div style={{ ...cardSt, maxWidth: 720, margin: '24px auto', display: 'grid', gap: 18 }}>
+      <div><h3 style={{ margin: 0 }}>Секція: {HOME_SECTION_LABELS[sectionId]}</h3><p style={{ color: theme.textMuted, marginBottom: 0 }}>Порожнє поле використовує базовий текст сайту.</p></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+        {fields.map((field) => {
+          const label = SECTION_FIELD_LABELS[field] || field;
+          if (field.endsWith('_page_key')) return <label key={field} style={{ fontSize: 13, fontWeight: 600 }}>{label}<select style={{ ...inputSt, marginTop: 6 }} value={form[field]} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))}><option value="">Базове посилання сайту</option>{SITE_CTA_PAGE_KEYS.map((pageKey) => <option key={pageKey} value={pageKey}>{PAGE_LABELS[pageKey]} ({pageKey})</option>)}</select></label>;
+          if (field === 'featured_limit') return <label key={field} style={{ fontSize: 13, fontWeight: 600 }}>{label}<select style={{ ...inputSt, marginTop: 6 }} value={form[field]} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value ? Number(event.target.value) : '' }))}><option value="">Базове значення сайту</option>{[1, 2, 3, 4, 5, 6].map((limit) => <option key={limit} value={limit}>{limit}</option>)}</select></label>;
+          return <label key={field} style={{ fontSize: 13, fontWeight: 600 }}>{label}<textarea rows={field === 'description' ? 3 : 1} style={{ ...inputSt, resize: 'vertical', marginTop: 6 }} value={form[field]} onChange={(event) => setForm((current) => ({ ...current, [field]: event.target.value }))} /></label>;
+        })}
+      </div>
+      {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><button type="button" style={btnS} disabled={saving} onClick={onClose}>Скасувати</button><button type="button" style={btnP} disabled={saving} onClick={save}>{saving ? 'Збереження…' : 'Зберегти секцію'}</button></div>
+    </div>
+  </div>;
+};
+
 export default function SiteTab() {
   const [data, setData] = useState({ pages: [], trainers: [], directions: [], groups: [] });
   const [loading, setLoading] = useState(true);
@@ -144,6 +182,7 @@ export default function SiteTab() {
   const [section, setSection] = useState('pages');
   const [editingTrainer, setEditingTrainer] = useState(null);
   const [editingText, setEditingText] = useState(null);
+  const [editingHomeSection, setEditingHomeSection] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -226,6 +265,18 @@ export default function SiteTab() {
         {data.pages.map((page) => <Row key={page.pageKey} title={PAGE_LABELS[page.pageKey] || page.pageKey}
           subtitle={Object.keys(page.content || {}).length ? `Заповнено полів: ${Object.keys(page.content).length}` : 'Використовуються чинні тексти сайту'}
           actions={<button type="button" style={btnS} disabled={busy} onClick={() => setEditingText({ type: 'page', item: page })}>Редагувати тексти</button>} />)}
+        {data.pages.find((page) => page.pageKey === 'home') && <section style={{ ...cardSt, display: 'grid', gap: 10 }}>
+          <div><h3 style={{ margin: 0 }}>Секції головної сторінки</h3><div style={{ color: theme.textMuted, fontSize: 12, marginTop: 5 }}>Порядок секцій фіксований. Відсутні налаштування використовують базові значення сайту.</div></div>
+          {HOME_SECTION_ORDER.map((sectionId) => {
+            const home = data.pages.find((page) => page.pageKey === 'home');
+            const sectionContent = home.content?.sections?.[sectionId];
+            const enabled = typeof sectionContent?.enabled === 'boolean' ? sectionContent.enabled : HOME_SECTION_DEFAULT_ENABLED[sectionId];
+            return <Row key={sectionId} title={HOME_SECTION_LABELS[sectionId]}
+              subtitle={sectionContent ? `ID: ${sectionId}` : `ID: ${sectionId} · використовується базовий текст сайту`}
+              status={<Badge color={enabled ? theme.success : theme.textMuted}>{enabled ? 'Показується' : 'Приховано'}</Badge>}
+              actions={<><Toggle checked={enabled} disabled={busy} onChange={(checked) => run(() => db.updateHomeSection(sectionId, { ...(sectionContent || {}), enabled: checked }))}>Показувати на сайті</Toggle><button type="button" style={btnS} disabled={busy} onClick={() => setEditingHomeSection({ sectionId, content: sectionContent || {} })}>Редагувати</button></>} />;
+          })}
+        </section>}
       </div>}
 
       {section === 'trainers' && <div style={{ display: 'grid', gap: 10 }}>
@@ -275,6 +326,9 @@ export default function SiteTab() {
           else await db.updateSiteDirectionProfileContent(editingText.item.directionId, content);
           await load(); setSuccess('Тексти сайту збережено.');
         }} />}
+      {editingHomeSection && <HomeSectionEditor sectionId={editingHomeSection.sectionId} content={editingHomeSection.content}
+        onClose={() => setEditingHomeSection(null)}
+        onSave={async (content) => { await db.updateHomeSection(editingHomeSection.sectionId, content); await load(); setSuccess('Секцію головної сторінки збережено.'); }} />}
     </div>
   );
 }
