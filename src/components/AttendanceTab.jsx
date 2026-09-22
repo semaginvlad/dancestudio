@@ -15,6 +15,7 @@ import {
 import { theme } from "../shared/constants";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrainer";
+import { canConvertTrialBooking } from "../shared/trialBookings";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -1300,6 +1301,7 @@ export default function AttendanceTab({
   const [savingLessonReport, setSavingLessonReport] = useState(false);
   const [lessonReportSaved, setLessonReportSaved] = useState(false);
   const [markingTrialId, setMarkingTrialId] = useState("");
+  const markingTrialIdRef = useRef("");
   const [localOrders, setLocalOrders] = useStickyState({}, "ds_attn_local_order_v1");
   const safeAttendanceScale = Math.min(130, Math.max(60, Number(attendanceScale) || 100));
   const [openMenuState, setOpenMenuState] = useState(null);
@@ -3007,8 +3009,13 @@ export default function AttendanceTab({
   }, {});
 
   const handleAddTrialBookingToGroup = async (booking) => {
+    if (!booking?.id) {
+      alert("Не вдалося додати в групу: Некоректні дані запису на пробне");
+      return;
+    }
+    if (booking.status !== "confirmed" || markingTrialIdRef.current) return;
+    markingTrialIdRef.current = String(booking.id);
     try {
-      if (!booking?.id) throw new Error("Некоректні дані запису на пробне");
       setMarkingTrialId(String(booking.id));
 
       const result = await db.convertTrialBookingToStudent(booking.id);
@@ -3037,6 +3044,10 @@ export default function AttendanceTab({
       if (updatedBooking && typeof setTrialBookings === "function") {
         setTrialBookings((prev) => (prev || []).map((row) => (String(row.id) === String(booking.id) ? updatedBooking : row)));
       }
+      setSelectedLessonPlanView((prev) => prev ? {
+        ...prev,
+        bookings: (prev.bookings || []).filter((row) => String(row.id) !== String(booking.id)),
+      } : prev);
 
       if (trialPopoverState?.dateStr && String(trialPopoverState.dateStr) === String(booking.trialDate)) {
         const remaining = (trialBookingsByDate[trialPopoverState.dateStr] || []).filter((row) => String(row.id) !== String(booking.id));
@@ -3045,6 +3056,7 @@ export default function AttendanceTab({
     } catch (e) {
       alert(`Не вдалося додати в групу: ${e?.message || e}`);
     } finally {
+      markingTrialIdRef.current = "";
       setMarkingTrialId("");
     }
   };
@@ -4311,6 +4323,18 @@ export default function AttendanceTab({
                             <span title={statusDisplay.title} aria-label={statusDisplay.title} style={{ ...styles.lessonPlanChip, ...statusTone, minHeight: 22, fontSize: 10.5, padding: "3px 7px", whiteSpace: "nowrap" }}>
                               {statusDisplay.label}
                             </span>
+                          </div>
+                          <div style={{ marginTop: 7 }}>
+                            <button
+                              type="button"
+                              title={booking.status === "confirmed" ? "Додати ученицю до цієї групи" : "Спочатку підтвердьте запис"}
+                              disabled={!canConvertTrialBooking(booking, markingTrialId)}
+                              onClick={() => handleAddTrialBookingToGroup(booking)}
+                              style={{ border: "none", borderRadius: 10, padding: "8px 11px", background: theme.primary, color: "#fff", fontSize: 11.5, fontWeight: 900, cursor: canConvertTrialBooking(booking, markingTrialId) ? "pointer" : "not-allowed", opacity: canConvertTrialBooking(booking, markingTrialId) ? 1 : 0.5 }}
+                            >
+                              {String(markingTrialId) === String(booking.id) ? "Додаємо…" : "Додати в групу"}
+                            </button>
+                            {booking.status !== "confirmed" ? <div style={{ marginTop: 4, color: theme.textLight, fontSize: 10.5 }}>Спочатку підтвердьте запис</div> : null}
                           </div>
                         </div>
                       );

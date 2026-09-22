@@ -1,6 +1,7 @@
 import React from "react";
 import * as db from "../db";
 import { getInternalGroupLabel } from "../shared/groupLabels";
+import { filterTrialBookings, getTrialDayMarker, groupAndSortTrialBookings, localDateKey } from "../shared/trialBookings";
 
 export default function StudentsCrmTab({
   theme,
@@ -45,16 +46,19 @@ export default function StudentsCrmTab({
   const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState(false);
   const [waitlistMode, setWaitlistMode] = React.useState("active");
   const [openWaitlistStatusId, setOpenWaitlistStatusId] = React.useState(null);
+  const [trialFilters, setTrialFilters] = React.useState({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" });
 
   const waitlistActiveStatuses = new Set(["waiting", "contacted", "offered"]);
   const waitlistCompletedStatuses = new Set(["joined", "declined", "removed"]);
   const getWaitlistStatus = (w) => String(w.status || "waiting");
   const activeWaitlist = waitlist.filter((w) => waitlistActiveStatuses.has(getWaitlistStatus(w)));
   const completedWaitlist = waitlist.filter((w) => waitlistCompletedStatuses.has(getWaitlistStatus(w)));
-  const activeTrialBookingStatuses = new Set(["new", "contacted", "confirmed"]);
-  const activeTrialBookings = trialBookings.filter((booking) => activeTrialBookingStatuses.has(String(booking.status || "new")));
-  const trialHistoryStatuses = new Set(["no_show", "declined", "cancelled", "came", "became_student"]);
-  const trialBookingsHistory = trialBookings.filter((booking) => trialHistoryStatuses.has(String(booking.status || "new")));
+  const todayKey = localDateKey();
+  const allTrialCategories = React.useMemo(() => groupAndSortTrialBookings(trialBookings, todayKey), [trialBookings, todayKey]);
+  const filteredTrialRows = React.useMemo(() => filterTrialBookings(trialBookings, trialFilters, groupMap), [trialBookings, trialFilters, groupMap]);
+  const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey), [filteredTrialRows, todayKey]);
+  const activeTrialBookings = [...allTrialCategories.overdue, ...allTrialCategories.today, ...allTrialCategories.upcoming];
+  const trialBookingsHistory = allTrialCategories.history;
 
   const updateWaitlistRow = (next) => {
     setWaitlist((prev) => prev.map((row) => (row.id === next.id ? next : row)));
@@ -423,8 +427,14 @@ export default function StudentsCrmTab({
     const st = studentMap[booking.studentId];
     const gr = groupMap[booking.groupId];
     const displayName = st ? getDisplayName(st) : (booking.name || "Новий контакт");
-    const displayContact = [booking.phone, booking.telegram, booking.instagram, booking.contact].filter(Boolean).join(" · ") || [st?.phone, st?.instagram, st?.telegram].filter(Boolean).join(" · ") || "контакт не вказано";
     const status = booking.status || "new";
+    const trialDate = booking.trialDate || booking.trial_date || "";
+    const formattedDate = trialDate ? new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${trialDate.slice(0, 10)}T12:00:00`)) : "Дата не вказана";
+    const phone = booking.phone || st?.phone;
+    const telegram = booking.telegram || st?.telegram;
+    const instagram = booking.instagram || st?.instagram;
+    const telegramName = String(telegram || "").replace(/^@/, "");
+    const instagramName = String(instagram || "").replace(/^@/, "");
 
     const statusHint = status === "cancelled"
       ? "Скасовано — запис скасували або він неактуальний."
@@ -444,29 +454,23 @@ export default function StudentsCrmTab({
         alignItems: "start",
       }}>
         <div className="student-trial-main" style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
-          <div className="student-trial-index" style={{
-            width: 30,
-            height: 30,
-            borderRadius: 10,
-            display: "grid",
-            placeItems: "center",
-            background: theme.input,
-            color: theme.primary,
-            fontSize: 13,
-            fontWeight: 900,
-            flex: "0 0 auto",
-          }}>{index + 1}</div>
           <div style={{ minWidth: 0 }}>
             <div className="student-trial-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
-            <div className="student-trial-contact" style={{ color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>{displayContact}</div>
+            <div className="student-trial-contact" style={{ display: "flex", gap: 8, flexWrap: "wrap", color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>
+              {phone ? <a style={{ color: "inherit" }} href={`tel:${String(phone).replace(/[^+\d]/g, "")}`}>{phone}</a> : null}
+              {telegram ? <a style={{ color: "inherit" }} href={`https://t.me/${telegramName}`} target="_blank" rel="noreferrer">{telegram}</a> : null}
+              {instagram ? <a style={{ color: "inherit" }} href={`https://instagram.com/${instagramName}`} target="_blank" rel="noreferrer">{instagram}</a> : null}
+              {!phone && !telegram && !instagram ? (booking.contact || "контакт не вказано") : null}
+            </div>
             {booking.note ? <div className="student-trial-note" style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
+            {booking.source ? <div style={{ color: theme.textLight, fontSize: 11, marginTop: 4 }}>Джерело: {booking.source}</div> : null}
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
           <div className="student-trial-meta-label" style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
-          <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr?.name || "Група не вказана"}</div>
-          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{booking.trialDate || "Дата не вказана"}</div>
-          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr?.name || "Група не вказана"} <span style={{ color: theme.textMuted }}>• {booking.trialDate || "Дата не вказана"}</span></div>
+          <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"}</div>
+          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{formattedDate} · {getTrialDayMarker(trialDate, todayKey)}</div>
+          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"} <span style={{ color: theme.textMuted }}>• {formattedDate} · {getTrialDayMarker(trialDate, todayKey)}</span></div>
         </div>
         <div className="student-trial-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
           <div className="student-trial-status-row" style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
@@ -728,6 +732,8 @@ export default function StudentsCrmTab({
           .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
           .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
           .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
+          .trial-filter-grid { grid-template-columns: 1fr !important; }
+          .trial-filter-grid > * { width: 100% !important; min-width: 0 !important; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
@@ -875,26 +881,38 @@ export default function StudentsCrmTab({
 
         {shouldShowTrialSection && (
           <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
-            {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Записи на пробне без автоматичного створення учениці або абонемента", theme.primary || "#2563eb")}
-            {activeTrialBookings.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {activeTrialBookings.map((booking, i) => renderTrialBookingCard(booking, i))}
-              </div>
-            ) : (selectedSummaryFilter === "trials" ? filterEmptyState : (
-              <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>Активних записів на пробне поки немає.</div>
-            ))}
+            {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Прострочені, сьогоднішні та заплановані записи", theme.primary || "#2563eb")}
+            <div className="trial-filter-grid" style={{ display: "grid", gridTemplateColumns: "2fr repeat(4, minmax(130px, 1fr)) auto", gap: 8, marginBottom: 14 }}>
+              <input aria-label="Пошук пробних" style={{ ...inputSt, minWidth: 0 }} placeholder="Ім’я, телефон, Telegram, Instagram" value={trialFilters.search} onChange={(e) => setTrialFilters((prev) => ({ ...prev, search: e.target.value }))} />
+              <select aria-label="Статус пробного" style={inputSt} value={trialFilters.status} onChange={(e) => setTrialFilters((prev) => ({ ...prev, status: e.target.value }))}><option value="all">Усі статуси</option>{Object.entries(trialStatusLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+              <GroupSelect groups={groups} directionsList={directionsList} value={trialFilters.groupId} onChange={(groupId) => setTrialFilters((prev) => ({ ...prev, groupId }))} allowAll />
+              <select aria-label="Напрямок пробного" style={inputSt} value={trialFilters.directionId} onChange={(e) => setTrialFilters((prev) => ({ ...prev, directionId: e.target.value }))}><option value="all">Усі напрямки</option>{directionsList.map((direction) => <option key={direction.id} value={direction.id}>{direction.name}</option>)}</select>
+              <select aria-label="Категорія пробного" style={inputSt} value={trialFilters.category} onChange={(e) => setTrialFilters((prev) => ({ ...prev, category: e.target.value }))}><option value="all">Усі категорії</option><option value="overdue">Потребують рішення</option><option value="today">Сьогодні</option><option value="upcoming">Заплановані</option><option value="history">Історія</option></select>
+              <button type="button" style={{ ...btnS, whiteSpace: "nowrap" }} onClick={() => setTrialFilters({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" })}>Скинути</button>
+            </div>
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
+              {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"], ["history", "Історія"]].map(([id, label]) => <span key={id} style={{ borderRadius: 999, padding: "5px 9px", background: theme.card, color: theme.textMuted, fontSize: 12, fontWeight: 850 }}>{label}: {allTrialCategories[id].length}</span>)}
+            </div>
+            {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"]]
+              .filter(([id]) => trialFilters.category === "all" || trialFilters.category === id)
+              .map(([id, label]) => (
+                <div key={id} style={{ marginTop: 14 }}>
+                  <h3 style={{ color: theme.textMain, fontSize: 15, margin: "0 0 8px" }}>{label} <span style={{ color: theme.textLight }}>· {trialCategories[id].length}</span></h3>
+                  {trialCategories[id].length ? <div style={{ display: "grid", gap: 10 }}>{trialCategories[id].map((booking, i) => renderTrialBookingCard(booking, i))}</div> : <div style={{ color: theme.textLight, fontSize: 13, padding: "8px 0" }}>Немає записів.</div>}
+                </div>
+              ))}
           </section>
         )}
 
-        {shouldShowTrialSection && (
+        {shouldShowTrialSection && ["all", "history"].includes(trialFilters.category) && (
           <section className="students-section" style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             <details>
               <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                {renderSectionHeader("Історія пробних", trialBookingsHistory.length, "Завершені та закриті записи на пробне", theme.textMuted)}
+                {renderSectionHeader("Історія пробних", allTrialCategories.history.length, "Завершені та закриті записи на пробне", theme.textMuted)}
               </summary>
-              {trialBookingsHistory.length > 0 ? (
+              {trialCategories.history.length > 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {trialBookingsHistory.map((booking, i) => renderTrialBookingCard(booking, i, { isHistory: true }))}
+                  {trialCategories.history.map((booking, i) => renderTrialBookingCard(booking, i, { isHistory: true }))}
                 </div>
               ) : (
                 <div style={{ background: theme.card, border: `1px dashed ${theme.border}`, borderRadius: 18, padding: 22, color: theme.textMuted, fontWeight: 800, textAlign: "center" }}>Історія пробних поки порожня.</div>
