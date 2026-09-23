@@ -56,6 +56,10 @@ export function filterTrialBookings(bookings = [], filters = {}, groupMap = {}) 
 export const canConvertTrialBooking = (booking, markingTrialId = "") =>
   String(booking?.status) === "confirmed" && String(markingTrialId) !== String(booking?.id);
 
+export const isTrialHistoryStatus = (status) => HISTORY_TRIAL_STATUSES.includes(String(status || ""));
+
+export const shouldExpandTrialHistory = (category) => category === "history";
+
 export function applyTrialConversion(state, bookingId, result = {}) {
   const students = [...(state.students || [])];
   const student = result.student;
@@ -72,7 +76,8 @@ export function applyTrialConversion(state, bookingId, result = {}) {
   return { students, studentGrps, trialBookings };
 }
 
-export function getTrialDayMarker(dateValue, todayKey = localDateKey()) {
+export function getTrialDayMarker(dateValue, todayKey = localDateKey(), status = "new") {
+  if (isTrialHistoryStatus(status)) return "";
   const date = localDateKey(dateValue);
   const asLocalNoon = (key) => new Date(`${key}T12:00:00`);
   const days = Math.round((asLocalNoon(date) - asLocalNoon(todayKey)) / 86400000);

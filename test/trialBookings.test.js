@@ -6,7 +6,9 @@ import {
   canConvertTrialBooking,
   getTrialCategory,
   groupAndSortTrialBookings,
+  getTrialDayMarker,
   localDateKey,
+  shouldExpandTrialHistory,
 } from "../src/shared/trialBookings.js";
 
 test("group select includes dynamic directions and directionless groups exactly once", () => {
@@ -81,4 +83,19 @@ test("conversion updates local collections without duplicate student or group li
   assert.equal(next.students[0].name, "Updated");
   assert.equal(next.studentGrps.length, 1);
   assert.equal(next.trialBookings[0].status, "became_student");
+});
+
+test("history expands when selected and collapses again when all categories are selected", () => {
+  assert.equal(shouldExpandTrialHistory("all"), false);
+  assert.equal(shouldExpandTrialHistory("history"), true);
+  assert.equal(shouldExpandTrialHistory("upcoming"), false);
+  assert.equal(shouldExpandTrialHistory("all"), false);
+});
+
+test("relative day markers are shown only for active trial statuses", () => {
+  const today = "2026-09-23";
+  assert.equal(getTrialDayMarker("2026-09-20", today, "confirmed"), "прострочено на 3 днів");
+  for (const status of ["came", "no_show", "became_student", "declined", "cancelled"]) {
+    assert.equal(getTrialDayMarker("2026-09-20", today, status), "", status);
+  }
 });

@@ -1,7 +1,7 @@
 import React from "react";
 import * as db from "../db";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { filterTrialBookings, getTrialDayMarker, groupAndSortTrialBookings, localDateKey } from "../shared/trialBookings";
+import { filterTrialBookings, getTrialDayMarker, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
 
 export default function StudentsCrmTab({
   theme,
@@ -435,6 +435,8 @@ export default function StudentsCrmTab({
     const instagram = booking.instagram || st?.instagram;
     const telegramName = String(telegram || "").replace(/^@/, "");
     const instagramName = String(instagram || "").replace(/^@/, "");
+    const dayMarker = getTrialDayMarker(trialDate, todayKey, status);
+    const displayDateWithMarker = [formattedDate, dayMarker].filter(Boolean).join(" · ");
 
     const statusHint = status === "cancelled"
       ? "Скасовано — запис скасували або він неактуальний."
@@ -469,8 +471,8 @@ export default function StudentsCrmTab({
         <div style={{ minWidth: 0 }}>
           <div className="student-trial-meta-label" style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
           <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"}</div>
-          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{formattedDate} · {getTrialDayMarker(trialDate, todayKey)}</div>
-          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"} <span style={{ color: theme.textMuted }}>• {formattedDate} · {getTrialDayMarker(trialDate, todayKey)}</span></div>
+          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{displayDateWithMarker}</div>
+          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"} <span style={{ color: theme.textMuted }}>• {displayDateWithMarker}</span></div>
         </div>
         <div className="student-trial-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
           <div className="student-trial-status-row" style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
@@ -906,7 +908,7 @@ export default function StudentsCrmTab({
 
         {shouldShowTrialSection && ["all", "history"].includes(trialFilters.category) && (
           <section className="students-section" style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
-            <details>
+            <details open={shouldExpandTrialHistory(trialFilters.category)}>
               <summary style={{ cursor: "pointer", listStyle: "none" }}>
                 {renderSectionHeader("Історія пробних", allTrialCategories.history.length, "Завершені та закриті записи на пробне", theme.textMuted)}
               </summary>
