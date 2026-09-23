@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { theme, DIRECTIONS, inputSt } from "../shared/constants";
 import { getDisplayName } from "../shared/utils";
 import { getInternalGroupLabel } from "../shared/groupLabels";
+import { buildGroupSelectSections } from "../shared/groupSelect";
 
 export function Modal({open, onClose, title, children, wide, variant}){
   if(!open) return null;
@@ -84,15 +85,16 @@ export function Pill({active, onClick, children, color}){
   return <button type="button" onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||theme.primary):theme.input, color:active?"#fff":theme.textMuted, border:"none", fontFamily:"inherit", transition:"all 0.2s"}}>{children}</button>;
 }
 
-export function GroupSelect({groups, historicalGroups = [], value, onChange, filterDir = "all", allowAll = false}) {
-  const filteredGroups = filterDir === "all" ? groups : groups.filter(g => g.directionId === filterDir);
+export function GroupSelect({groups, historicalGroups = [], directionsList = DIRECTIONS, value, onChange, filterDir = "all", allowAll = false, placeholder = "Оберіть групу"}) {
+  const sections = buildGroupSelectSections(groups, directionsList, filterDir);
   const filteredHistoricalGroups = filterDir === "all" ? historicalGroups : historicalGroups.filter(g => g.directionId === filterDir);
   return (
     <select style={{...inputSt, width:"auto", minWidth:200, cursor:"pointer"}} value={value} onChange={e=>onChange(e.target.value)}>
       {allowAll && <option value="all">Усі групи</option>}
-      {DIRECTIONS.filter(d => filterDir === "all" || d.id === filterDir).map(d=>(
+      {!allowAll && <option value="">{placeholder}</option>}
+      {sections.map(d=>(
         <optgroup key={d.id} label={d.name}>
-          {filteredGroups.filter(g=>g.directionId===d.id).map(g=><option key={g.id} value={g.id}>{getInternalGroupLabel(g)}</option>)}
+          {d.groups.map(g=><option key={g.id} value={g.id}>{getInternalGroupLabel(g)}</option>)}
         </optgroup>
       ))}
       {!!filteredHistoricalGroups.length && <optgroup label="Історичні">

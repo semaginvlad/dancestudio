@@ -294,7 +294,7 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
   );
 }
 
-export function TrialBookingForm({ initial, onDone, onCancel, students, groups, studentGrps }) {
+export function TrialBookingForm({ initial, onDone, onCancel, students, groups, studentGrps, directionsList }) {
   const [mode, setMode] = useState(initial?.studentId ? "existing" : "new");
   const [studentId, setStudentId] = useState(initial?.studentId || "");
   const [groupId, setGroupId] = useState(initial?.groupId || "");
@@ -342,7 +342,7 @@ export function TrialBookingForm({ initial, onDone, onCancel, students, groups, 
       </div>
 
       <div className="trial-booking-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+        <Field label="Група *"><GroupSelect groups={groups} directionsList={directionsList} value={groupId} onChange={setGroupId} placeholder="Оберіть групу" /></Field>
         <Field label="Дата пробного *"><input type="date" style={inputSt} value={trialDate} onChange={(e) => setTrialDate(e.target.value)} /></Field>
       </div>
       <Field label="Джерело"><input style={inputSt} value={source} onChange={(e) => setSource(e.target.value)} placeholder="Instagram, Telegram, рекомендація..." /></Field>
