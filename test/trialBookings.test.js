@@ -8,8 +8,46 @@ import {
   groupAndSortTrialBookings,
   getTrialDayMarker,
   localDateKey,
+  sortTrialBookings,
   shouldExpandTrialHistory,
 } from "../src/shared/trialBookings.js";
+
+const sortRows = [
+  { id: "3", name: "Яна", trialDate: "2026-09-25", status: "new", groupId: "b" },
+  { id: "2", name: "Анна", trialDate: "2026-09-24", status: "contacted", groupId: "a" },
+  { id: "1", name: "Анна", trialDate: "2026-09-24", status: "confirmed", groupId: "a" },
+];
+
+test("trial sorting supports every explicit mode", () => {
+  const groups = { a: { name: "Bachata" }, b: { name: "Zumba" } };
+  assert.deepEqual(sortTrialBookings(sortRows, "date_asc", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+  assert.deepEqual(sortTrialBookings(sortRows, "date_desc", "upcoming", groups).map(({ id }) => id), ["3", "1", "2"]);
+  assert.deepEqual(sortTrialBookings(sortRows, "name", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+  assert.deepEqual(sortTrialBookings(sortRows, "status", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+  assert.deepEqual(sortTrialBookings(sortRows, "group", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+  assert.deepEqual(sortTrialBookings(sortRows, "priority", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+});
+
+test("trial sorting uses date, name and id as deterministic tie breakers", () => {
+  const rows = [
+    { id: "b", name: "Оля", trialDate: "2026-10-02", status: "new" },
+    { id: "a", name: "Оля", trialDate: "2026-10-02", status: "new" },
+    { id: "c", name: "Аня", trialDate: "2026-10-01", status: "new" },
+  ];
+  assert.deepEqual(sortTrialBookings(rows, "status", "upcoming").map(({ id }) => id), ["c", "a", "b"]);
+});
+
+test("sorting remains scoped to category and completed statuses remain history", () => {
+  const grouped = groupAndSortTrialBookings([
+    { id: "future-z", name: "Яна", trialDate: "2026-10-02", status: "new" },
+    { id: "past", name: "Бета", trialDate: "2026-09-20", status: "confirmed" },
+    { id: "future-a", name: "Аня", trialDate: "2026-10-01", status: "contacted" },
+    { id: "done", name: "Віра", trialDate: "2026-10-03", status: "came" },
+  ], "2026-09-22", "name");
+  assert.deepEqual(grouped.upcoming.map(({ id }) => id), ["future-a", "future-z"]);
+  assert.deepEqual(grouped.overdue.map(({ id }) => id), ["past"]);
+  assert.deepEqual(grouped.history.map(({ id }) => id), ["done"]);
+});
 
 test("group select includes dynamic directions and directionless groups exactly once", () => {
   const groups = [
@@ -85,7 +123,7 @@ test("conversion updates local collections without duplicate student or group li
   assert.equal(next.trialBookings[0].status, "became_student");
 });
 
-test("history expands when selected and collapses again when all categories are selected", () => {
+test("category switching preserves history expansion across desktop and mobile layouts", () => {
   assert.equal(shouldExpandTrialHistory("all"), false);
   assert.equal(shouldExpandTrialHistory("history"), true);
   assert.equal(shouldExpandTrialHistory("upcoming"), false);

@@ -12,6 +12,39 @@ export const localDateKey = (value = new Date()) => {
 
 const dateNumber = (value) => Number(String(value || "").slice(0, 10).replaceAll("-", "")) || 0;
 
+export const TRIAL_SORT_MODES = ["priority", "date_asc", "date_desc", "name", "status", "group"];
+
+const textCompare = (a, b) => String(a || "").localeCompare(String(b || ""), "uk-UA", { sensitivity: "base", numeric: true });
+
+/** Pure, deterministic sorting for one trial category. */
+export function sortTrialBookings(bookings = [], mode = "priority", category = "upcoming", groupMap = {}) {
+  const selectedMode = TRIAL_SORT_MODES.includes(mode) ? mode : "priority";
+  const statusRank = { confirmed: 0, contacted: 1, new: 2, came: 3, became_student: 4, no_show: 5, declined: 6, cancelled: 7 };
+  return bookings.map((booking, index) => ({ booking, index })).sort((a, b) => {
+    const aDate = dateNumber(a.booking.trialDate || a.booking.trial_date);
+    const bDate = dateNumber(b.booking.trialDate || b.booking.trial_date);
+    let result = 0;
+    if (selectedMode === "priority") {
+      if (category === "today") result = (statusRank[a.booking.status] ?? 99) - (statusRank[b.booking.status] ?? 99);
+      else if (category === "upcoming") result = aDate - bDate;
+      else result = bDate - aDate;
+    } else if (selectedMode === "date_asc") result = aDate - bDate;
+    else if (selectedMode === "date_desc") result = bDate - aDate;
+    else if (selectedMode === "name") result = textCompare(a.booking.name, b.booking.name);
+    else if (selectedMode === "status") result = (statusRank[a.booking.status] ?? 99) - (statusRank[b.booking.status] ?? 99) || textCompare(a.booking.status, b.booking.status);
+    else if (selectedMode === "group") {
+      const aGroup = groupMap[a.booking.groupId]?.name || a.booking.groupName || "";
+      const bGroup = groupMap[b.booking.groupId]?.name || b.booking.groupName || "";
+      result = textCompare(aGroup, bGroup);
+    }
+    return result
+      || aDate - bDate
+      || textCompare(a.booking.name, b.booking.name)
+      || textCompare(a.booking.id, b.booking.id)
+      || a.index - b.index;
+  }).map(({ booking }) => booking);
+}
+
 export function getTrialCategory(booking, todayKey = localDateKey()) {
   const status = String(booking?.status || "new");
   if (HISTORY_TRIAL_STATUSES.includes(status)) return "history";
@@ -22,21 +55,11 @@ export function getTrialCategory(booking, todayKey = localDateKey()) {
   return "upcoming";
 }
 
-export function groupAndSortTrialBookings(bookings = [], todayKey = localDateKey()) {
+export function groupAndSortTrialBookings(bookings = [], todayKey = localDateKey(), mode = "priority", groupMap = {}) {
   const grouped = Object.fromEntries(TRIAL_CATEGORIES.map((category) => [category, []]));
-  bookings.forEach((booking, index) => grouped[getTrialCategory(booking, todayKey)].push({ booking, index }));
-  const statusRank = { confirmed: 0, contacted: 1, new: 2 };
+  bookings.forEach((booking) => grouped[getTrialCategory(booking, todayKey)].push(booking));
   TRIAL_CATEGORIES.forEach((category) => {
-    grouped[category].sort((a, b) => {
-      const aDate = dateNumber(a.booking.trialDate || a.booking.trial_date);
-      const bDate = dateNumber(b.booking.trialDate || b.booking.trial_date);
-      let result = 0;
-      if (category === "today") result = (statusRank[a.booking.status] ?? 9) - (statusRank[b.booking.status] ?? 9);
-      else if (category === "upcoming") result = aDate - bDate;
-      else result = bDate - aDate;
-      return result || a.index - b.index;
-    });
-    grouped[category] = grouped[category].map(({ booking }) => booking);
+    grouped[category] = sortTrialBookings(grouped[category], mode, category, groupMap);
   });
   return grouped;
 }
