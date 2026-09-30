@@ -12,6 +12,81 @@ export const localDateKey = (value = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+export const TRIAL_VIEW_MODES = ["list", "week", "month"];
+
+export const safeTrialViewMode = (value) => TRIAL_VIEW_MODES.includes(value) ? value : "list";
+
+/** Parse a calendar date without letting UTC move a date-only value to another day. */
+export function parseLocalDate(value) {
+  const key = localDateKey(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function addCalendarDays(value, amount) {
+  const date = parseLocalDate(value);
+  if (!date) return null;
+  date.setDate(date.getDate() + amount);
+  return date;
+}
+
+export function startOfMondayWeek(value = new Date()) {
+  const date = parseLocalDate(value);
+  if (!date) return null;
+  const weekday = date.getDay();
+  date.setDate(date.getDate() - (weekday === 0 ? 6 : weekday - 1));
+  return date;
+}
+
+export function buildWeekRange(value = new Date()) {
+  const start = startOfMondayWeek(value);
+  return start ? Array.from({ length: 7 }, (_, index) => addCalendarDays(start, index)) : [];
+}
+
+export function shiftCalendarMonth(value, amount) {
+  const date = parseLocalDate(value);
+  if (!date) return null;
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1, 12);
+}
+
+export function buildMonthRange(value = new Date()) {
+  const date = parseLocalDate(value);
+  if (!date) return [];
+  const first = new Date(date.getFullYear(), date.getMonth(), 1, 12);
+  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
+  const start = startOfMondayWeek(first);
+  const end = addCalendarDays(startOfMondayWeek(last), 6);
+  const days = [];
+  for (let cursor = start; cursor <= end; cursor = addCalendarDays(cursor, 1)) days.push(cursor);
+  return days;
+}
+
+export function getTrialEventTime(booking = {}, group = {}) {
+  const direct = booking.trialTime || booking.trial_time || booking.time;
+  if (direct) return String(direct).slice(0, 5);
+  const date = parseLocalDate(booking.trialDate || booking.trial_date);
+  if (!date) return "";
+  const slot = (group.schedule || []).find((item) => Number(item.day ?? item.dayOfWeek) === date.getDay());
+  return String(slot?.time || "").slice(0, 5);
+}
+
+export function groupTrialBookingsByDate(bookings = [], groupMap = {}, studentMap = {}, getDisplayName) {
+  return bookings.reduce((result, booking) => {
+    const key = localDateKey(booking.trialDate || booking.trial_date || "");
+    if (!parseLocalDate(key)) return result;
+    (result[key] ||= []).push(booking);
+    result[key].sort((a, b) => textCompare(getTrialEventTime(a, groupMap[a.groupId]), getTrialEventTime(b, groupMap[b.groupId]))
+      || textCompare(getInternalGroupLabel(groupMap[a.groupId] || { name: a.groupName || "" }), getInternalGroupLabel(groupMap[b.groupId] || { name: b.groupName || "" }))
+      || textCompare(getTrialDisplayName(a, studentMap, getDisplayName), getTrialDisplayName(b, studentMap, getDisplayName))
+      || textCompare(a.id, b.id));
+    return result;
+  }, {});
+}
+
+export const trialDayOverflow = (bookings = [], limit = 3) => ({ visible: bookings.slice(0, limit), hiddenCount: Math.max(0, bookings.length - limit) });
+
 const dateNumber = (value) => Number(String(value || "").slice(0, 10).replaceAll("-", "")) || 0;
 
 export const TRIAL_SORT_MODES = ["priority", "date_asc", "date_desc", "name", "status", "group"];

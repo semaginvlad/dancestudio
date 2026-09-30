@@ -1,7 +1,7 @@
 import React from "react";
 import * as db from "../db";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { filterTrialBookings, getTrialDayMarker, getTrialDisplayName, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
+import { addCalendarDays, buildMonthRange, buildWeekRange, filterTrialBookings, getTrialDayMarker, getTrialDisplayName, getTrialEventTime, groupAndSortTrialBookings, groupTrialBookingsByDate, localDateKey, safeTrialViewMode, shiftCalendarMonth, shouldExpandTrialHistory, trialDayOverflow } from "../shared/trialBookings";
 
 export default function StudentsCrmTab({
   theme,
@@ -50,6 +50,10 @@ export default function StudentsCrmTab({
   const [trialSort, setTrialSort] = React.useState("priority");
   const [trialFiltersOpen, setTrialFiltersOpen] = React.useState(false);
   const [openTrialMenu, setOpenTrialMenu] = React.useState(null);
+  const [trialView, setTrialViewState] = React.useState(() => safeTrialViewMode(typeof localStorage === "undefined" ? "list" : localStorage.getItem("trial-bookings-view")));
+  const [calendarAnchor, setCalendarAnchor] = React.useState(() => new Date());
+  const [selectedCalendarDay, setSelectedCalendarDay] = React.useState(null);
+  const [selectedTrialId, setSelectedTrialId] = React.useState(null);
 
   const waitlistActiveStatuses = new Set(["waiting", "contacted", "offered"]);
   const waitlistCompletedStatuses = new Set(["joined", "declined", "removed"]);
@@ -62,6 +66,15 @@ export default function StudentsCrmTab({
   const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName), [filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName]);
   const activeTrialBookings = [...allTrialCategories.overdue, ...allTrialCategories.today, ...allTrialCategories.upcoming];
   const trialBookingsHistory = allTrialCategories.history;
+  const calendarRows = React.useMemo(() => trialFilters.category === "all"
+    ? [...trialCategories.overdue, ...trialCategories.today, ...trialCategories.upcoming, ...trialCategories.history]
+    : trialCategories[trialFilters.category], [trialCategories, trialFilters.category]);
+  const calendarGroups = React.useMemo(() => groupTrialBookingsByDate(calendarRows, groupMap, studentMap, getDisplayName), [calendarRows, groupMap, studentMap, getDisplayName]);
+  const setTrialView = (view) => {
+    const safe = safeTrialViewMode(view);
+    setTrialViewState(safe);
+    if (typeof localStorage !== "undefined") localStorage.setItem("trial-bookings-view", safe);
+  };
 
   const updateWaitlistRow = (next) => {
     setWaitlist((prev) => prev.map((row) => (row.id === next.id ? next : row)));
@@ -487,6 +500,56 @@ export default function StudentsCrmTab({
     );
   };
 
+  const formatCalendarDate = (date, options) => new Intl.DateTimeFormat("uk-UA", options).format(date);
+  const shortGroupName = (booking) => groupMap[booking.groupId]?.name || dirMap[groupMap[booking.groupId]?.directionId]?.name || booking.groupName || "Група";
+  const statusColor = (status) => ({ new: theme.primary, contacted: theme.warning, confirmed: theme.success, came: theme.success, no_show: theme.danger, became_student: theme.secondary, declined: theme.textMuted, cancelled: theme.textLight }[status] || theme.textMuted);
+  const openCalendarBooking = (booking) => { setSelectedTrialId(booking.id); setSelectedCalendarDay(localDateKey(booking.trialDate || booking.trial_date)); };
+  const resetTrialFilters = () => { setTrialFilters({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" }); setTrialSort("priority"); };
+
+  const renderCalendarEvent = (booking, { month = false } = {}) => {
+    const time = getTrialEventTime(booking, groupMap[booking.groupId]) || "—";
+    const name = getTrialDisplayName(booking, studentMap, getDisplayName);
+    const fullGroup = groupMap[booking.groupId] ? getInternalGroupLabel(groupMap[booking.groupId]) : shortGroupName(booking);
+    return <button key={booking.id} type="button" className="trial-calendar-event" title={fullGroup} onClick={(event) => { event.stopPropagation(); openCalendarBooking(booking); }} style={{ width: "100%", border: `1px solid ${statusColor(booking.status)}44`, borderLeft: `3px solid ${statusColor(booking.status)}`, borderRadius: 8, padding: month ? "4px 5px" : "6px 7px", background: theme.card, color: theme.textMain, textAlign: "left", cursor: "pointer", minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 5, minWidth: 0, fontSize: month ? 10.5 : 11.5, fontWeight: 900 }}><span>{time}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span></div>
+      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: theme.textMuted, fontSize: 10.5, marginTop: 2 }}>{shortGroupName(booking)}</div>
+      {!month && <div style={{ color: statusColor(booking.status), fontSize: 10, fontWeight: 900, marginTop: 3 }}>● {trialStatusLabels[booking.status] || booking.status}</div>}
+    </button>;
+  };
+
+  const renderCalendarDetails = () => {
+    const dayRows = selectedCalendarDay ? (calendarGroups[selectedCalendarDay] || []) : [];
+    const chosen = dayRows.find((row) => String(row.id) === String(selectedTrialId));
+    if (!selectedCalendarDay) return null;
+    return <div className="trial-calendar-details" style={{ marginTop: 12, border: `1px solid ${theme.border}`, background: theme.bg, borderRadius: 16, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 9 }}><strong style={{ color: theme.textMain }}>{formatCalendarDate(new Date(`${selectedCalendarDay}T12:00:00`), { weekday: "long", day: "numeric", month: "long" })}</strong><button type="button" style={{ ...btnS, padding: "6px 10px" }} onClick={() => { setSelectedCalendarDay(null); setSelectedTrialId(null); }}>Закрити</button></div>
+      {dayRows.length ? <div style={{ display: "grid", gap: 7 }}>{chosen ? renderTrialBookingCard(chosen, 0, { isHistory: false }) : dayRows.map((row, index) => renderTrialBookingCard(row, index, { isHistory: false }))}</div> : <div style={{ color: theme.textMuted }}>На цей день немає записів за активними фільтрами.</div>}
+      {chosen && dayRows.length > 1 ? <button type="button" style={{ ...btnS, marginTop: 9 }} onClick={() => setSelectedTrialId(null)}>Показати всі за день ({dayRows.length})</button> : null}
+    </div>;
+  };
+
+  const renderTrialCalendar = () => {
+    const days = trialView === "week" ? buildWeekRange(calendarAnchor) : buildMonthRange(calendarAnchor);
+    const rangeRows = days.flatMap((day) => calendarGroups[localDateKey(day)] || []);
+    const title = trialView === "week"
+      ? `${formatCalendarDate(days[0], { day: "numeric", month: "short" })} — ${formatCalendarDate(days[6], { day: "numeric", month: "short", year: "numeric" })}`
+      : formatCalendarDate(calendarAnchor, { month: "long", year: "numeric" });
+    const move = (amount) => setCalendarAnchor((current) => trialView === "week" ? addCalendarDays(current, amount * 7) : shiftCalendarMonth(current, amount));
+    const activeDayKey = selectedCalendarDay && days.some((day) => localDateKey(day) === selectedCalendarDay) ? selectedCalendarDay : localDateKey(days.find((day) => localDateKey(day) === todayKey) || days[0]);
+    return <div>
+      <div className="trial-calendar-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6 }}><button type="button" style={btnS} onClick={() => setCalendarAnchor(new Date())}>Сьогодні</button><button aria-label="Попередній період" type="button" style={btnS} onClick={() => move(-1)}>←</button><button aria-label="Наступний період" type="button" style={btnS} onClick={() => move(1)}>→</button></div>
+        <strong style={{ color: theme.textMain, textTransform: "capitalize" }}>{title}</strong>
+      </div>
+      {trialView === "week" ? <>
+        <div className="trial-week-desktop" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden" }}>{days.map((day) => { const key = localDateKey(day); const rows = calendarGroups[key] || []; const today = key === todayKey; return <div key={key} style={{ minHeight: 220, padding: 7, borderLeft: key === localDateKey(days[0]) ? 0 : `1px solid ${theme.border}`, background: today ? `${theme.primary}0d` : theme.input }}><button type="button" onClick={() => { setSelectedCalendarDay(key); setSelectedTrialId(null); }} style={{ width: "100%", border: 0, background: "transparent", color: today ? theme.primary : theme.textMain, fontWeight: 900, padding: "5px 2px 9px", cursor: "pointer" }}>{formatCalendarDate(day, { weekday: "short", day: "numeric", month: "short" })}</button><div style={{ display: "grid", gap: 5 }}>{rows.map((row) => renderCalendarEvent(row))}</div></div>; })}</div>
+        <div className="trial-week-mobile"><div className="trial-week-strip" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(42px, 1fr))", gap: 4, overflowX: "auto" }}>{days.map((day) => { const key = localDateKey(day); const active = key === activeDayKey; return <button key={key} type="button" onClick={() => { setSelectedCalendarDay(key); setSelectedTrialId(null); }} style={{ minHeight: 52, border: `1px solid ${active ? theme.primary : theme.border}`, borderRadius: 10, background: active ? `${theme.primary}18` : theme.card, color: active ? theme.primary : theme.textMuted, fontWeight: 900 }}><small>{formatCalendarDate(day, { weekday: "short" })}</small><br />{day.getDate()}</button>; })}</div><div style={{ display: "grid", gap: 7, marginTop: 10 }}>{(calendarGroups[activeDayKey] || []).map((row) => renderCalendarEvent(row))}{!(calendarGroups[activeDayKey] || []).length && <div style={{ color: theme.textMuted, padding: 18, textAlign: "center" }}>Немає записів цього дня.</div>}</div></div>
+      </> : <div className="trial-month-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden" }}>{["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "НД"].map((label) => <div className="trial-month-weekday" key={label} style={{ padding: 7, textAlign: "center", color: theme.textMuted, fontSize: 11, fontWeight: 900, borderBottom: `1px solid ${theme.border}` }}>{label}</div>)}{days.map((day) => { const key = localDateKey(day); const rows = calendarGroups[key] || []; const overflow = trialDayOverflow(rows); const muted = day.getMonth() !== calendarAnchor.getMonth(); const today = key === todayKey; return <div key={key} role="group" className="trial-month-day" style={{ minHeight: 116, padding: 6, border: 0, borderRight: `1px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`, background: muted ? `${theme.textLight}0b` : today ? `${theme.primary}0d` : theme.input, color: muted ? theme.textLight : today ? theme.primary : theme.textMain, textAlign: "left" }}><button type="button" aria-label={`Відкрити ${key}`} onClick={() => { setSelectedCalendarDay(key); setSelectedTrialId(null); }} style={{ border: 0, padding: 0, background: "transparent", color: "inherit", cursor: "pointer" }}><strong className="trial-month-number" style={{ display: "inline-grid", placeItems: "center", width: 27, height: 27, borderRadius: 99, background: today ? theme.primary : "transparent", color: today ? "#fff" : "inherit" }}>{day.getDate()}</strong></button><div className="trial-month-events" style={{ display: "grid", gap: 3, marginTop: 3 }}>{overflow.visible.map((row) => renderCalendarEvent(row, { month: true }))}{overflow.hiddenCount ? <button type="button" onClick={() => { setSelectedCalendarDay(key); setSelectedTrialId(null); }} style={{ border: 0, padding: 0, background: "transparent", color: theme.primary, fontSize: 11, fontWeight: 900, textAlign: "left", cursor: "pointer" }}>+{overflow.hiddenCount} ще</button> : null}</div><button type="button" onClick={() => { setSelectedCalendarDay(key); setSelectedTrialId(null); }} className="trial-month-mobile-count" style={{ border: 0, background: "transparent", width: "100%", color: theme.primary, fontSize: 11, fontWeight: 900 }}>{rows.length ? `${rows.length} под.` : ""}</button></div>; })}</div>}
+      {!rangeRows.length ? <div style={{ marginTop: 12, padding: 22, border: `1px dashed ${theme.border}`, borderRadius: 14, textAlign: "center", color: theme.textMuted }}><strong style={{ display: "block", color: theme.textMain, marginBottom: 7 }}>У цьому періоді немає результатів</strong>Спробуйте інший період або скиньте активні фільтри.<br /><button type="button" style={{ ...btnS, marginTop: 10 }} onClick={resetTrialFilters}>Скинути фільтри</button></div> : null}
+      {renderCalendarDetails()}
+    </div>;
+  };
+
   const renderWaitlistStatusSelector = (w, status, variant) => {
     const meta = waitlistStatusById[status] || waitlistStatusById.waiting;
     const isOpen = openWaitlistStatusId === w.id;
@@ -659,6 +722,7 @@ export default function StudentsCrmTab({
         .students-mobile-only { display: none; }
         .student-trial-mobile-status, .trial-mobile-filter-button { display: none; }
         .student-trial-status-button:hover, .trial-category-chip:hover { filter: brightness(.97); }
+        .trial-week-mobile, .trial-month-mobile-count { display: none; }
         .student-trial-status-button:focus-visible, .trial-category-chip:focus-visible, .student-trial-actions button:focus-visible { outline: 2px solid ${theme.primary}; outline-offset: 2px; }
         @media (max-width: 768px) {
           .students-crm-root { gap: 12px !important; margin-left: -10px; margin-right: -10px; padding: 0 2px calc(24px + env(safe-area-inset-bottom, 0px)); }
@@ -717,6 +781,16 @@ export default function StudentsCrmTab({
           .trial-filter-grid .trial-extra-filter { display: none !important; }
           .trial-filter-grid.is-open .trial-extra-filter { display: block !important; grid-column: 1 / -1; }
           .trial-mobile-filter-button { display: block !important; width: auto !important; min-height: 42px; }
+          .trial-view-switch { width: 100% !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+          .trial-view-switch button { padding: 9px 6px !important; font-size: 12px; }
+          .trial-week-desktop { display: none !important; }
+          .trial-week-mobile { display: block !important; }
+          .trial-month-day { min-height: 58px !important; padding: 4px !important; }
+          .trial-month-weekday { padding: 5px 1px !important; font-size: 10px !important; }
+          .trial-month-number { width: 26px !important; height: 26px !important; }
+          .trial-month-events { display: none !important; }
+          .trial-month-mobile-count { display: block !important; text-align: center; }
+          .trial-calendar-toolbar { align-items: flex-start !important; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
@@ -865,6 +939,9 @@ export default function StudentsCrmTab({
         {shouldShowTrialSection && (
           <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Прострочені, сьогоднішні та заплановані записи", theme.primary || "#2563eb")}
+            <div className="trial-view-switch" role="group" aria-label="Вигляд пробних занять" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, auto))", width: "fit-content", maxWidth: "100%", padding: 4, gap: 3, borderRadius: 12, background: theme.card, border: `1px solid ${theme.border}`, marginBottom: 11 }}>
+              {[["list", "Список"], ["week", "Тиждень"], ["month", "Місяць"]].map(([id, label]) => <button key={id} type="button" aria-pressed={trialView === id} onClick={() => setTrialView(id)} style={{ border: 0, borderRadius: 9, padding: "8px 13px", background: trialView === id ? theme.primary : "transparent", color: trialView === id ? "#fff" : theme.textMuted, fontWeight: 900, cursor: "pointer", minWidth: 0 }}>{label}</button>)}
+            </div>
             <div className={`trial-filter-grid${trialFiltersOpen ? " is-open" : ""}`} style={{ display: "grid", gridTemplateColumns: "minmax(210px, 2fr) repeat(4, minmax(130px, 1fr)) auto", gap: 8, marginBottom: 11 }}>
               <input aria-label="Пошук пробних" style={{ ...inputSt, minWidth: 0 }} placeholder="Ім’я, телефон, Telegram, Instagram" value={trialFilters.search} onChange={(e) => setTrialFilters((prev) => ({ ...prev, search: e.target.value }))} />
               <button className="trial-mobile-filter-button" type="button" style={{ ...btnS, whiteSpace: "nowrap" }} aria-expanded={trialFiltersOpen} onClick={() => setTrialFiltersOpen((open) => !open)}>Фільтри{[trialFilters.status, trialFilters.groupId, trialFilters.directionId].filter((value) => value !== "all").length ? ` · ${[trialFilters.status, trialFilters.groupId, trialFilters.directionId].filter((value) => value !== "all").length}` : ""}</button>
@@ -880,18 +957,18 @@ export default function StudentsCrmTab({
                 return <button type="button" className="trial-category-chip" aria-pressed={selected} key={id} onClick={() => setTrialFilters((prev) => ({ ...prev, category: selected ? "all" : id }))} style={{ border: `1px solid ${selected ? theme.primary : theme.border}`, borderRadius: 999, padding: "6px 10px", background: selected ? `${theme.primary}18` : theme.card, color: selected ? theme.primary : theme.textMuted, fontSize: 12, fontWeight: 850, cursor: "pointer" }}>{label} <strong>{allTrialCategories[id].length}</strong></button>;
               })}
             </div>
-            {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"]]
+            {trialView === "list" ? [["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"]]
               .filter(([id]) => trialFilters.category === "all" || trialFilters.category === id)
               .map(([id, label]) => (
                 <div key={id} style={{ marginTop: 14 }}>
                   <h3 style={{ color: theme.textMain, fontSize: 15, margin: "0 0 8px" }}>{label} <span style={{ color: theme.textLight }}>· {trialCategories[id].length}</span></h3>
                   {trialCategories[id].length ? <div style={{ display: "grid", gap: 5 }}><div className="trial-column-header" style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.45fr) minmax(190px, 1.25fr) minmax(125px, .65fr) 42px", gap: 12, padding: "0 11px 2px", color: theme.textLight, fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}><span>Контакт</span><span>Група / дата</span><span>Статус</span><span>Дії</span></div>{trialCategories[id].map((booking, i) => renderTrialBookingCard(booking, i))}</div> : <div style={{ color: theme.textLight, fontSize: 13, padding: "8px 0" }}>Немає записів.</div>}
                 </div>
-              ))}
+              )) : renderTrialCalendar()}
           </section>
         )}
 
-        {shouldShowTrialSection && ["all", "history"].includes(trialFilters.category) && (
+        {shouldShowTrialSection && trialView === "list" && ["all", "history"].includes(trialFilters.category) && (
           <section className="students-section" style={{ background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             <details open={shouldExpandTrialHistory(trialFilters.category)}>
               <summary style={{ cursor: "pointer", listStyle: "none" }}>

@@ -4,13 +4,21 @@ import { buildGroupSelectSections } from "../src/shared/groupSelect.js";
 import {
   applyTrialConversion,
   canConvertTrialBooking,
+  buildMonthRange,
+  buildWeekRange,
+  filterTrialBookings,
   getTrialCategory,
   getTrialDisplayName,
+  groupTrialBookingsByDate,
   groupAndSortTrialBookings,
   getTrialDayMarker,
   localDateKey,
+  safeTrialViewMode,
+  shiftCalendarMonth,
   sortTrialBookings,
+  startOfMondayWeek,
   shouldExpandTrialHistory,
+  trialDayOverflow,
 } from "../src/shared/trialBookings.js";
 
 const sortRows = [
@@ -169,4 +177,58 @@ test("relative day markers are shown only for active trial statuses", () => {
   for (const status of ["came", "no_show", "became_student", "declined", "cancelled"]) {
     assert.equal(getTrialDayMarker("2026-09-20", today, status), "", status);
   }
+});
+
+test("calendar weeks start on Monday and contain seven local dates", () => {
+  assert.equal(localDateKey(startOfMondayWeek("2026-10-04")), "2026-09-28");
+  assert.deepEqual(buildWeekRange("2026-10-04").map(localDateKey), ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]);
+});
+
+test("month navigation crosses year boundaries", () => {
+  assert.equal(localDateKey(shiftCalendarMonth("2026-12-15", 1)), "2027-01-01");
+  assert.equal(localDateKey(shiftCalendarMonth("2026-01-15", -1)), "2025-12-01");
+});
+
+test("month range includes complete adjacent-month weeks", () => {
+  const days = buildMonthRange("2026-10-12").map(localDateKey);
+  assert.equal(days[0], "2026-09-28");
+  assert.equal(days.at(-1), "2026-11-01");
+  assert.equal(days.length % 7, 0);
+});
+
+test("calendar grouping sorts by time, group and current display name", () => {
+  const groups = { a: { name: "Alpha", schedule: [{ day: 4, time: "19:00" }] }, b: { name: "Beta", schedule: [{ day: 4, time: "18:00" }] } };
+  const rows = [
+    { id: "3", groupId: "a", name: "Аня", trialDate: "2026-10-01" },
+    { id: "2", groupId: "b", name: "Яна", trialDate: "2026-10-01" },
+    { id: "1", groupId: "b", name: "Віра", trialDate: "2026-10-01" },
+  ];
+  assert.deepEqual(groupTrialBookingsByDate(rows, groups)["2026-10-01"].map(({ id }) => id), ["1", "2", "3"]);
+});
+
+test("calendar source applies search, filters and category before date range", () => {
+  const rows = [
+    { id: "1", name: "Марія", status: "confirmed", groupId: "g", trialDate: "2026-10-02" },
+    { id: "2", name: "Оля", status: "new", groupId: "g", trialDate: "2026-10-03" },
+  ];
+  const filtered = filterTrialBookings(rows, { search: "мар", status: "confirmed", groupId: "g" }, { g: { directionId: "d" } });
+  const categorized = groupAndSortTrialBookings(filtered, "2026-10-01");
+  assert.deepEqual(categorized.upcoming.map(({ id }) => id), ["1"]);
+});
+
+test("date-only calendar values never shift through UTC parsing", () => {
+  assert.equal(localDateKey(buildWeekRange("2026-01-01")[3]), "2026-01-01");
+  assert.equal(localDateKey("2026-01-01T23:59:59-11:00"), "2026-01-01");
+});
+
+test("month cells expose three events and an overflow count", () => {
+  const result = trialDayOverflow([1, 2, 3, 4, 5]);
+  assert.deepEqual(result.visible, [1, 2, 3]);
+  assert.equal(result.hiddenCount, 2);
+});
+
+test("unknown persisted calendar view safely falls back to list", () => {
+  assert.equal(safeTrialViewMode("month"), "month");
+  assert.equal(safeTrialViewMode("timeline"), "list");
+  assert.equal(safeTrialViewMode(null), "list");
 });
