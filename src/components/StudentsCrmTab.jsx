@@ -1,7 +1,7 @@
 import React from "react";
 import * as db from "../db";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { filterTrialBookings, getTrialDayMarker, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
+import { filterTrialBookings, getTrialDayMarker, getTrialDisplayName, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
 
 export default function StudentsCrmTab({
   theme,
@@ -47,6 +47,9 @@ export default function StudentsCrmTab({
   const [waitlistMode, setWaitlistMode] = React.useState("active");
   const [openWaitlistStatusId, setOpenWaitlistStatusId] = React.useState(null);
   const [trialFilters, setTrialFilters] = React.useState({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" });
+  const [trialSort, setTrialSort] = React.useState("priority");
+  const [trialFiltersOpen, setTrialFiltersOpen] = React.useState(false);
+  const [openTrialMenu, setOpenTrialMenu] = React.useState(null);
 
   const waitlistActiveStatuses = new Set(["waiting", "contacted", "offered"]);
   const waitlistCompletedStatuses = new Set(["joined", "declined", "removed"]);
@@ -54,9 +57,9 @@ export default function StudentsCrmTab({
   const activeWaitlist = waitlist.filter((w) => waitlistActiveStatuses.has(getWaitlistStatus(w)));
   const completedWaitlist = waitlist.filter((w) => waitlistCompletedStatuses.has(getWaitlistStatus(w)));
   const todayKey = localDateKey();
-  const allTrialCategories = React.useMemo(() => groupAndSortTrialBookings(trialBookings, todayKey), [trialBookings, todayKey]);
+  const allTrialCategories = React.useMemo(() => groupAndSortTrialBookings(trialBookings, todayKey, trialSort, groupMap, studentMap, getDisplayName), [trialBookings, todayKey, trialSort, groupMap, studentMap, getDisplayName]);
   const filteredTrialRows = React.useMemo(() => filterTrialBookings(trialBookings, trialFilters, groupMap), [trialBookings, trialFilters, groupMap]);
-  const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey), [filteredTrialRows, todayKey]);
+  const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName), [filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName]);
   const activeTrialBookings = [...allTrialCategories.overdue, ...allTrialCategories.today, ...allTrialCategories.upcoming];
   const trialBookingsHistory = allTrialCategories.history;
 
@@ -426,83 +429,59 @@ export default function StudentsCrmTab({
   const renderTrialBookingCard = (booking, index, { isHistory = false } = {}) => {
     const st = studentMap[booking.studentId];
     const gr = groupMap[booking.groupId];
-    const displayName = st ? getDisplayName(st) : (booking.name || "Новий контакт");
+    const displayName = getTrialDisplayName(booking, studentMap, getDisplayName);
     const status = booking.status || "new";
     const trialDate = booking.trialDate || booking.trial_date || "";
-    const formattedDate = trialDate ? new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${trialDate.slice(0, 10)}T12:00:00`)) : "Дата не вказана";
+    const formattedDate = trialDate ? new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${trialDate.slice(0, 10)}T12:00:00`)) : "Дата не вказана";
     const phone = booking.phone || st?.phone;
+    const email = booking.email || st?.email;
     const telegram = booking.telegram || st?.telegram;
     const instagram = booking.instagram || st?.instagram;
     const telegramName = String(telegram || "").replace(/^@/, "");
     const instagramName = String(instagram || "").replace(/^@/, "");
     const dayMarker = getTrialDayMarker(trialDate, todayKey, status);
-    const displayDateWithMarker = [formattedDate, dayMarker].filter(Boolean).join(" · ");
-
-    const statusHint = status === "cancelled"
-      ? "Скасовано — запис скасували або він неактуальний."
-      : status === "declined"
-        ? "Відмова — людина відмовилась / передумала."
-        : "";
+    const groupLabel = gr ? getInternalGroupLabel(gr) : "Група не вказана";
+    const statusMenuOpen = openTrialMenu === `status:${booking.id}`;
+    const actionsMenuOpen = openTrialMenu === `actions:${booking.id}`;
+    const statusButton = (mobile = false) => (
+      <div className={mobile ? "student-trial-mobile-status" : "student-trial-desktop-status"} style={{ position: "relative" }}>
+        <button type="button" className="student-trial-status-button" aria-haspopup="menu" aria-expanded={statusMenuOpen} onClick={() => setOpenTrialMenu(statusMenuOpen ? null : `status:${booking.id}`)} style={{ border: `1px solid ${theme.primary}55`, background: `${theme.primary}18`, color: theme.primary, borderRadius: 999, padding: "6px 9px", fontSize: 11.5, fontWeight: 900, whiteSpace: "nowrap", cursor: "pointer", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {trialStatusLabels[status] || status} <span aria-hidden="true">▾</span>
+        </button>
+        {statusMenuOpen ? <div role="menu" className="student-trial-menu" style={{ position: "absolute", zIndex: 30, right: 0, top: "calc(100% + 5px)", width: 190, padding: 5, display: "grid", gap: 3, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 12, boxShadow: "0 16px 38px rgba(15,23,42,.2)" }}>
+          {trialStatusActions.map((action) => <button key={action.status} type="button" role="menuitemradio" aria-checked={action.status === status} disabled={action.status === status} onClick={() => { updateTrialBookingStatus(booking, action.status); setOpenTrialMenu(null); }} style={{ border: 0, borderRadius: 8, background: action.status === status ? theme.input : "transparent", color: theme.textMain, padding: "8px 9px", textAlign: "left", fontSize: 12, fontWeight: 800, cursor: action.status === status ? "default" : "pointer" }}>{action.status === status ? "✓ " : ""}{action.label}</button>)}
+        </div> : null}
+      </div>
+    );
 
     return (
-      <div key={booking.id} className="student-trial-card" style={{
-        background: theme.card,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 18,
-        padding: 16,
-        display: "grid",
-        gridTemplateColumns: "minmax(220px, 1.5fr) minmax(170px, 1fr) minmax(240px, 1.3fr)",
-        gap: 14,
-        alignItems: "start",
-      }}>
-        <div className="student-trial-main" style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="student-trial-name" style={{ color: theme.textMain, fontWeight: 900, fontSize: 16 }}>{displayName}</div>
-            <div className="student-trial-contact" style={{ display: "flex", gap: 8, flexWrap: "wrap", color: theme.textMuted, fontSize: 13, fontWeight: 650, marginTop: 5, overflowWrap: "anywhere" }}>
-              {phone ? <a style={{ color: "inherit" }} href={`tel:${String(phone).replace(/[^+\d]/g, "")}`}>{phone}</a> : null}
-              {telegram ? <a style={{ color: "inherit" }} href={`https://t.me/${telegramName}`} target="_blank" rel="noreferrer">{telegram}</a> : null}
-              {instagram ? <a style={{ color: "inherit" }} href={`https://instagram.com/${instagramName}`} target="_blank" rel="noreferrer">{instagram}</a> : null}
-              {!phone && !telegram && !instagram ? (booking.contact || "контакт не вказано") : null}
-            </div>
-            {booking.note ? <div className="student-trial-note" style={{ color: theme.textLight, fontSize: 12, marginTop: 7, lineHeight: 1.35 }}>Нотатка: {booking.note}</div> : null}
-            {booking.source ? <div style={{ color: theme.textLight, fontSize: 11, marginTop: 4 }}>Джерело: {booking.source}</div> : null}
+      <div key={booking.id} className="student-trial-card" style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 13, padding: "9px 11px", display: "grid", gridTemplateColumns: "minmax(210px, 1.45fr) minmax(190px, 1.25fr) minmax(125px, .65fr) 42px", gap: 12, alignItems: "center", minHeight: booking.note ? 82 : 66, overflow: (statusMenuOpen || actionsMenuOpen) ? "visible" : "hidden" }}>
+        <div className="student-trial-main" style={{ minWidth: 0 }}>
+          <div className="student-trial-name-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7 }}>
+            <div className="student-trial-name" title={displayName} style={{ color: theme.textMain, fontWeight: 900, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</div>
+            {statusButton(true)}
           </div>
+          <div className="student-trial-contact" style={{ display: "flex", gap: 7, color: theme.textMuted, fontSize: 11.5, fontWeight: 650, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden" }}>
+            {phone ? <a title={phone} style={{ color: "inherit", overflow: "hidden", textOverflow: "ellipsis" }} href={`tel:${String(phone).replace(/[^+\d]/g, "")}`}>{phone}</a> : null}
+            {email ? <a title={email} style={{ color: "inherit", overflow: "hidden", textOverflow: "ellipsis" }} href={`mailto:${email}`}>{email}</a> : null}
+            {telegram ? <a title={telegram} style={{ color: "inherit" }} href={`https://t.me/${telegramName}`} target="_blank" rel="noreferrer">TG</a> : null}
+            {instagram ? <a title={instagram} style={{ color: "inherit" }} href={`https://instagram.com/${instagramName}`} target="_blank" rel="noreferrer">IG</a> : null}
+            {!phone && !email && !telegram && !instagram ? (booking.contact || "контакт не вказано") : null}
+            {booking.source ? <span title={`Джерело: ${booking.source}`} style={{ color: theme.textLight, overflow: "hidden", textOverflow: "ellipsis" }}>· {booking.source}</span> : null}
+          </div>
+          {booking.note ? <div className="student-trial-note" title={booking.note} style={{ color: theme.textLight, fontSize: 11, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Нотатка: {booking.note}</div> : null}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div className="student-trial-meta-label" style={{ color: theme.textLight, fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>Пробне заняття</div>
-          <div className="student-trial-group" style={{ color: theme.secondary, fontWeight: 850, fontSize: 14, marginTop: 5 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"}</div>
-          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 800, fontSize: 13, marginTop: 5 }}>{displayDateWithMarker}</div>
-          <div className="student-trial-mobile-meta" style={{ display: "none", color: theme.secondary, fontWeight: 850 }}>{gr ? getInternalGroupLabel(gr) : "Група не вказана"} <span style={{ color: theme.textMuted }}>• {displayDateWithMarker}</span></div>
+        <div className="student-trial-lesson" style={{ minWidth: 0 }}>
+          <div className="student-trial-group" title={groupLabel} style={{ color: theme.secondary, fontWeight: 850, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{groupLabel}</div>
+          <div className="student-trial-date" style={{ color: theme.textMuted, fontWeight: 750, fontSize: 11.5, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formattedDate}{dayMarker ? <span style={{ color: theme.textLight }}> · {dayMarker}</span> : null}</div>
         </div>
-        <div className="student-trial-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "flex-start", minWidth: 0 }}>
-          <div className="student-trial-status-row" style={{ display: "grid", gap: 8, justifyItems: "end", width: "100%" }}>
-            <span style={{ display: "inline-flex", padding: "5px 9px", borderRadius: 999, background: "rgba(37, 99, 235, 0.14)", color: theme.primary, fontSize: 12, fontWeight: 900 }}>{trialStatusLabels[status] || status}</span>
-            {statusHint ? <div className="student-trial-status-hint" title={statusHint} style={{ color: theme.textLight, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{statusHint}</div> : null}
-          </div>
-          <label className="student-trial-status-label" style={{ display: "grid", gap: 6, justifyItems: "end", width: "100%", color: theme.textMuted, fontSize: 12, fontWeight: 800 }}>
-              Змінити статус
-              <select
-                value=""
-                onChange={(e) => {
-                  const nextStatus = e.target.value;
-                  if (!nextStatus) return;
-                  updateTrialBookingStatus(booking, nextStatus);
-                  e.target.value = "";
-                }}
-                style={{ ...inputSt, minWidth: 190, width: "100%", maxWidth: 260, height: 34, fontSize: 12, borderRadius: 10, padding: "0 10px" }}
-              >
-                <option value="">Оберіть статус...</option>
-                {trialStatusActions
-                  .filter((action) => action.status !== status)
-                  .map((action) => (
-                    <option key={action.status} value={action.status}>{action.label}</option>
-                  ))}
-              </select>
-            </label>
-          <div className="student-trial-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13 }} onClick={() => { setEditItem(booking); setModal("editTrialBooking"); }}>Редагувати</button>
-          <button style={{ ...btnS, padding: "10px 12px", fontSize: 13, color: theme.danger, background: theme.input }} onClick={() => deleteTrialBooking(booking)}>Видалити</button>
-          </div>
+        {statusButton(false)}
+        <div className="student-trial-actions" style={{ position: "relative", justifySelf: "end" }}>
+          <button type="button" aria-label={`Дії для ${displayName}`} aria-haspopup="menu" aria-expanded={actionsMenuOpen} onClick={() => setOpenTrialMenu(actionsMenuOpen ? null : `actions:${booking.id}`)} style={{ ...btnS, width: 38, height: 38, minHeight: 38, padding: 0, fontSize: 20, lineHeight: 1 }}>⋯</button>
+          {actionsMenuOpen ? <div role="menu" className="student-trial-menu" style={{ position: "absolute", zIndex: 30, right: 0, top: "calc(100% + 5px)", width: 150, padding: 5, display: "grid", gap: 3, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 12, boxShadow: "0 16px 38px rgba(15,23,42,.2)" }}>
+            <button type="button" role="menuitem" onClick={() => { setEditItem(booking); setModal("editTrialBooking"); setOpenTrialMenu(null); }} style={{ ...btnS, border: 0, justifyContent: "flex-start", padding: "8px 9px", fontSize: 12 }}>Редагувати</button>
+            <button type="button" role="menuitem" onClick={() => { setOpenTrialMenu(null); deleteTrialBooking(booking); }} style={{ ...btnS, border: 0, justifyContent: "flex-start", padding: "8px 9px", fontSize: 12, color: theme.danger }}>Видалити</button>
+          </div> : null}
         </div>
       </div>
     );
@@ -678,6 +657,9 @@ export default function StudentsCrmTab({
       <style>{`
         .students-crm-root, .students-crm-root * { box-sizing: border-box; }
         .students-mobile-only { display: none; }
+        .student-trial-mobile-status, .trial-mobile-filter-button { display: none; }
+        .student-trial-status-button:hover, .trial-category-chip:hover { filter: brightness(.97); }
+        .student-trial-status-button:focus-visible, .trial-category-chip:focus-visible, .student-trial-actions button:focus-visible { outline: 2px solid ${theme.primary}; outline-offset: 2px; }
         @media (max-width: 768px) {
           .students-crm-root { gap: 12px !important; margin-left: -10px; margin-right: -10px; padding: 0 2px calc(24px + env(safe-area-inset-bottom, 0px)); }
           .students-desktop-filters { display: none !important; }
@@ -718,24 +700,23 @@ export default function StudentsCrmTab({
           .student-waitlist-status { padding: 3px 7px !important; font-size: 11px !important; margin-top: 0 !important; }
           .student-waitlist-actions { justify-content: stretch !important; width: 100%; gap: 5px !important; min-width: 0 !important; }
           .student-waitlist-actions button { min-height: 36px !important; flex: 1 1 96px; min-width: 0 !important; padding: 6px 7px !important; font-size: 11.5px !important; line-height: 1.05 !important; white-space: normal !important; }
-          .student-trial-card { padding: 9px 10px !important; gap: 7px !important; align-items: start !important; }
-          .student-trial-main { gap: 8px !important; }
-          .student-trial-index { width: 26px !important; height: 26px !important; border-radius: 9px !important; font-size: 12px !important; }
+          .trial-column-header { display: none !important; }
+          .student-trial-card { grid-template-columns: minmax(0, 1fr) auto !important; padding: 10px !important; gap: 7px 9px !important; align-items: center !important; min-height: 0 !important; overflow: visible !important; }
+          .student-trial-main { grid-column: 1 / -1; min-width: 0 !important; }
+          .student-trial-mobile-status { display: block !important; flex: 0 0 auto; }
+          .student-trial-desktop-status { display: none !important; }
           .student-trial-name { font-size: 15px !important; line-height: 1.12 !important; }
-          .student-trial-contact { margin-top: 2px !important; font-size: 12px !important; line-height: 1.2 !important; }
-          .student-trial-note { margin-top: 4px !important; line-height: 1.25 !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-          .student-trial-meta-label, .student-trial-group, .student-trial-date { display: none !important; }
-          .student-trial-mobile-meta { display: block !important; font-size: 12.5px !important; line-height: 1.25 !important; margin-top: 1px !important; }
-          .student-trial-controls { gap: 6px !important; align-items: stretch !important; }
-          .student-trial-status-row { display: flex !important; gap: 6px !important; justify-content: space-between !important; align-items: center !important; width: 100%; }
-          .student-trial-status-row span { padding: 4px 8px !important; font-size: 11.5px !important; }
-          .student-trial-status-hint { display: none !important; }
-          .student-trial-status-label { gap: 4px !important; font-size: 11px !important; justify-items: stretch !important; }
-          .student-trial-status-label select { height: 40px !important; min-height: 40px !important; max-width: none !important; font-size: 12px !important; padding: 0 9px !important; }
-          .student-trial-actions { gap: 6px !important; justify-content: stretch !important; width: 100%; }
-          .student-trial-actions button { min-height: 40px !important; padding: 7px 10px !important; font-size: 12.5px !important; flex: 1 1 0; }
-          .trial-filter-grid { grid-template-columns: 1fr !important; }
+          .student-trial-contact { margin-top: 3px !important; font-size: 11.5px !important; }
+          .student-trial-note { margin-top: 3px !important; }
+          .student-trial-lesson { grid-column: 1; }
+          .student-trial-group { font-size: 12.5px !important; }
+          .student-trial-actions { grid-column: 2; grid-row: 2; }
+          .student-trial-actions > button { width: 42px !important; height: 42px !important; }
+          .trial-filter-grid { grid-template-columns: 1fr auto !important; }
           .trial-filter-grid > * { width: 100% !important; min-width: 0 !important; }
+          .trial-filter-grid .trial-extra-filter { display: none !important; }
+          .trial-filter-grid.is-open .trial-extra-filter { display: block !important; grid-column: 1 / -1; }
+          .trial-mobile-filter-button { display: block !important; width: auto !important; min-height: 42px; }
           .students-filter-sheet { position: fixed; inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px; z-index: 900; border-radius: 20px; max-height: min(76dvh, 620px); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15,23,42,.24); }
           .students-filter-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(15,23,42,.28); }
           .students-mobile-filter-grid { display: grid; gap: 10px; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
@@ -884,23 +865,27 @@ export default function StudentsCrmTab({
         {shouldShowTrialSection && (
           <section className="students-section" style={{ background: theme.input, border: `1px solid ${theme.border}`, borderRadius: 26, padding: 18 }}>
             {renderSectionHeader("Пробні заняття", activeTrialBookings.length, "Прострочені, сьогоднішні та заплановані записи", theme.primary || "#2563eb")}
-            <div className="trial-filter-grid" style={{ display: "grid", gridTemplateColumns: "2fr repeat(4, minmax(130px, 1fr)) auto", gap: 8, marginBottom: 14 }}>
+            <div className={`trial-filter-grid${trialFiltersOpen ? " is-open" : ""}`} style={{ display: "grid", gridTemplateColumns: "minmax(210px, 2fr) repeat(4, minmax(130px, 1fr)) auto", gap: 8, marginBottom: 11 }}>
               <input aria-label="Пошук пробних" style={{ ...inputSt, minWidth: 0 }} placeholder="Ім’я, телефон, Telegram, Instagram" value={trialFilters.search} onChange={(e) => setTrialFilters((prev) => ({ ...prev, search: e.target.value }))} />
-              <select aria-label="Статус пробного" style={inputSt} value={trialFilters.status} onChange={(e) => setTrialFilters((prev) => ({ ...prev, status: e.target.value }))}><option value="all">Усі статуси</option>{Object.entries(trialStatusLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
-              <GroupSelect groups={groups} directionsList={directionsList} value={trialFilters.groupId} onChange={(groupId) => setTrialFilters((prev) => ({ ...prev, groupId }))} allowAll />
-              <select aria-label="Напрямок пробного" style={inputSt} value={trialFilters.directionId} onChange={(e) => setTrialFilters((prev) => ({ ...prev, directionId: e.target.value }))}><option value="all">Усі напрямки</option>{directionsList.map((direction) => <option key={direction.id} value={direction.id}>{direction.name}</option>)}</select>
-              <select aria-label="Категорія пробного" style={inputSt} value={trialFilters.category} onChange={(e) => setTrialFilters((prev) => ({ ...prev, category: e.target.value }))}><option value="all">Усі категорії</option><option value="overdue">Потребують рішення</option><option value="today">Сьогодні</option><option value="upcoming">Заплановані</option><option value="history">Історія</option></select>
-              <button type="button" style={{ ...btnS, whiteSpace: "nowrap" }} onClick={() => setTrialFilters({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" })}>Скинути</button>
+              <button className="trial-mobile-filter-button" type="button" style={{ ...btnS, whiteSpace: "nowrap" }} aria-expanded={trialFiltersOpen} onClick={() => setTrialFiltersOpen((open) => !open)}>Фільтри{[trialFilters.status, trialFilters.groupId, trialFilters.directionId].filter((value) => value !== "all").length ? ` · ${[trialFilters.status, trialFilters.groupId, trialFilters.directionId].filter((value) => value !== "all").length}` : ""}</button>
+              <select className="trial-extra-filter" aria-label="Статус пробного" style={inputSt} value={trialFilters.status} onChange={(e) => setTrialFilters((prev) => ({ ...prev, status: e.target.value }))}><option value="all">Усі статуси</option>{Object.entries(trialStatusLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+              <div className="trial-extra-filter"><GroupSelect groups={groups} directionsList={directionsList} value={trialFilters.groupId} onChange={(groupId) => setTrialFilters((prev) => ({ ...prev, groupId }))} allowAll /></div>
+              <select className="trial-extra-filter" aria-label="Напрямок пробного" style={inputSt} value={trialFilters.directionId} onChange={(e) => setTrialFilters((prev) => ({ ...prev, directionId: e.target.value }))}><option value="all">Усі напрямки</option>{directionsList.map((direction) => <option key={direction.id} value={direction.id}>{direction.name}</option>)}</select>
+              <select className="trial-extra-filter" aria-label="Сортування" style={inputSt} value={trialSort} onChange={(e) => setTrialSort(e.target.value)}><option value="priority">Сортування: За пріоритетом</option><option value="date_asc">Дата: спочатку найближчі</option><option value="date_desc">Дата: спочатку нові</option><option value="name">Ім’я: А–Я</option><option value="status">За статусом</option><option value="group">За групою</option></select>
+              <button className="trial-extra-filter" type="button" style={{ ...btnS, whiteSpace: "nowrap" }} onClick={() => { setTrialFilters({ search: "", status: "all", groupId: "all", directionId: "all", category: "all" }); setTrialSort("priority"); }}>Скинути</button>
             </div>
-            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
-              {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"], ["history", "Історія"]].map(([id, label]) => <span key={id} style={{ borderRadius: 999, padding: "5px 9px", background: theme.card, color: theme.textMuted, fontSize: 12, fontWeight: 850 }}>{label}: {allTrialCategories[id].length}</span>)}
+            <div role="group" aria-label="Категорії пробних" style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
+              {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"], ["history", "Історія"]].map(([id, label]) => {
+                const selected = trialFilters.category === id;
+                return <button type="button" className="trial-category-chip" aria-pressed={selected} key={id} onClick={() => setTrialFilters((prev) => ({ ...prev, category: selected ? "all" : id }))} style={{ border: `1px solid ${selected ? theme.primary : theme.border}`, borderRadius: 999, padding: "6px 10px", background: selected ? `${theme.primary}18` : theme.card, color: selected ? theme.primary : theme.textMuted, fontSize: 12, fontWeight: 850, cursor: "pointer" }}>{label} <strong>{allTrialCategories[id].length}</strong></button>;
+              })}
             </div>
             {[["overdue", "Потребують рішення"], ["today", "Сьогодні"], ["upcoming", "Заплановані"]]
               .filter(([id]) => trialFilters.category === "all" || trialFilters.category === id)
               .map(([id, label]) => (
                 <div key={id} style={{ marginTop: 14 }}>
                   <h3 style={{ color: theme.textMain, fontSize: 15, margin: "0 0 8px" }}>{label} <span style={{ color: theme.textLight }}>· {trialCategories[id].length}</span></h3>
-                  {trialCategories[id].length ? <div style={{ display: "grid", gap: 10 }}>{trialCategories[id].map((booking, i) => renderTrialBookingCard(booking, i))}</div> : <div style={{ color: theme.textLight, fontSize: 13, padding: "8px 0" }}>Немає записів.</div>}
+                  {trialCategories[id].length ? <div style={{ display: "grid", gap: 5 }}><div className="trial-column-header" style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.45fr) minmax(190px, 1.25fr) minmax(125px, .65fr) 42px", gap: 12, padding: "0 11px 2px", color: theme.textLight, fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}><span>Контакт</span><span>Група / дата</span><span>Статус</span><span>Дії</span></div>{trialCategories[id].map((booking, i) => renderTrialBookingCard(booking, i))}</div> : <div style={{ color: theme.textLight, fontSize: 13, padding: "8px 0" }}>Немає записів.</div>}
                 </div>
               ))}
           </section>
@@ -913,7 +898,8 @@ export default function StudentsCrmTab({
                 {renderSectionHeader("Історія пробних", allTrialCategories.history.length, "Завершені та закриті записи на пробне", theme.textMuted)}
               </summary>
               {trialCategories.history.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "grid", gap: 5 }}>
+                  <div className="trial-column-header" style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.45fr) minmax(190px, 1.25fr) minmax(125px, .65fr) 42px", gap: 12, padding: "0 11px 2px", color: theme.textLight, fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}><span>Контакт</span><span>Група / дата</span><span>Статус</span><span>Дії</span></div>
                   {trialCategories.history.map((booking, i) => renderTrialBookingCard(booking, i, { isHistory: true }))}
                 </div>
               ) : (
