@@ -100,6 +100,24 @@ export const weekEventLayout = (events) => {
   });
 };
 
+export const collisionTilePreview = (events, { durationMinutes = 0, isMobile = false } = {}) => {
+  const columns = isMobile ? 2 : events.length >= 8 ? 3 : 2;
+  const estimatedHeight = Math.max(42, Number(durationMinutes) * 0.9);
+  const rows = Math.max(1, Math.floor(estimatedHeight / 24));
+  const capacity = Math.max(2, columns * rows);
+  const visibleCount = events.length > capacity ? capacity - 1 : Math.min(events.length, capacity);
+  return {
+    columns,
+    visible: events.slice(0, visibleCount),
+    overflow: Math.max(0, events.length - visibleCount),
+  };
+};
+
+export const requireScheduleSaveResult = (result, message = "Зміни не були збережені") => {
+  if (result === null || result === undefined || result === false) throw new Error(message);
+  return result;
+};
+
 export const recurringActionLabels = (recurring) => recurring
   ? ["Видалити лише цю подію", "Видалити всю серію", "Скасувати лише цю подію", "Скасувати всю серію"]
   : ["Видалити подію", "Скасувати подію"];

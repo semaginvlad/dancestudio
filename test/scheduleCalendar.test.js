@@ -128,3 +128,38 @@ test("lesson plan details expose only one add-plan action", async () => {
   const details = source.slice(source.indexOf("{selectedEventDetails &&"), source.indexOf("{bulkPlanSetup &&"));
   assert.equal((details.match(/Додати план/g) || []).length, 1);
 });
+
+test("collision tile preview keeps visible content and deterministic overflow", async () => {
+  const { collisionTilePreview } = await import("../src/scheduleCalendar.js");
+  const events = Array.from({ length: 12 }, (_, id) => ({ id }));
+  assert.deepEqual(collisionTilePreview(events.slice(0, 2), { durationMinutes: 60 }), { columns: 2, visible: events.slice(0, 2), overflow: 0 });
+  assert.equal(collisionTilePreview(events.slice(0, 4), { durationMinutes: 60 }).visible.length, 4);
+  const short = collisionTilePreview(events, { durationMinutes: 20 });
+  assert.equal(short.visible.length, 2);
+  assert.equal(short.overflow, 10);
+  const long = collisionTilePreview(events, { durationMinutes: 300 });
+  assert.equal(long.visible.length, 12);
+  assert.equal(long.overflow, 0);
+  assert.equal(collisionTilePreview(events.slice(0, 10), { durationMinutes: 120, isMobile: true }).columns, 2);
+});
+
+test("schedule save result rejects silent permission and callback failures", async () => {
+  const { requireScheduleSaveResult } = await import("../src/scheduleCalendar.js");
+  assert.throws(() => requireScheduleSaveResult(undefined), /не були збережені/);
+  assert.throws(() => requireScheduleSaveResult(null, "Немає доступу"), /Немає доступу/);
+  assert.deepEqual(requireScheduleSaveResult({ id: "saved" }), { id: "saved" });
+});
+
+test("all schedule edit paths expose guarded async save state", async () => {
+  const fs = await import("node:fs/promises");
+  const schedule = await fs.readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const app = await fs.readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(schedule, /bookingSaving \? "Зберігаємо…"/);
+  assert.match(schedule, /groupOverrideEdit\.saving \? "Зберігаємо…"/);
+  assert.match(schedule, /groupSlotEdit\.saving \? "Зберігаємо…"/);
+  assert.match(schedule, /await onUpdateBooking\?\.\(editingId, payload\)/);
+  assert.match(schedule, /await onUpdateGroupLessonOverride\?\.\(groupOverrideEdit\.overrideId, payload\)/);
+  assert.match(schedule, /await onUpdateGroupSchedule\(groupSlotEdit\.groupId, nextSchedule\)/);
+  assert.match(app, /const updateRoomBookingAction[\s\S]*?return updated;/);
+  assert.match(app, /const updateGroupScheduleAction[\s\S]*?return updated;/);
+});
