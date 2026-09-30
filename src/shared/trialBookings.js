@@ -1,3 +1,5 @@
+import { getInternalGroupLabel } from "./groupLabels.js";
+
 export const ACTIVE_TRIAL_STATUSES = ["new", "contacted", "confirmed"];
 export const HISTORY_TRIAL_STATUSES = ["came", "no_show", "became_student", "declined", "cancelled"];
 export const TRIAL_CATEGORIES = ["overdue", "today", "upcoming", "history"];
@@ -16,8 +18,13 @@ export const TRIAL_SORT_MODES = ["priority", "date_asc", "date_desc", "name", "s
 
 const textCompare = (a, b) => String(a || "").localeCompare(String(b || ""), "uk-UA", { sensitivity: "base", numeric: true });
 
+export function getTrialDisplayName(booking = {}, studentMap = {}, getDisplayName = (student) => student?.name) {
+  const student = studentMap[booking.studentId];
+  return (student && getDisplayName(student)) || booking.name || "Новий контакт";
+}
+
 /** Pure, deterministic sorting for one trial category. */
-export function sortTrialBookings(bookings = [], mode = "priority", category = "upcoming", groupMap = {}) {
+export function sortTrialBookings(bookings = [], mode = "priority", category = "upcoming", groupMap = {}, studentMap = {}, getDisplayName) {
   const selectedMode = TRIAL_SORT_MODES.includes(mode) ? mode : "priority";
   const statusRank = { confirmed: 0, contacted: 1, new: 2, came: 3, became_student: 4, no_show: 5, declined: 6, cancelled: 7 };
   return bookings.map((booking, index) => ({ booking, index })).sort((a, b) => {
@@ -30,16 +37,17 @@ export function sortTrialBookings(bookings = [], mode = "priority", category = "
       else result = bDate - aDate;
     } else if (selectedMode === "date_asc") result = aDate - bDate;
     else if (selectedMode === "date_desc") result = bDate - aDate;
-    else if (selectedMode === "name") result = textCompare(a.booking.name, b.booking.name);
+    else if (selectedMode === "name") result = textCompare(getTrialDisplayName(a.booking, studentMap, getDisplayName), getTrialDisplayName(b.booking, studentMap, getDisplayName));
     else if (selectedMode === "status") result = (statusRank[a.booking.status] ?? 99) - (statusRank[b.booking.status] ?? 99) || textCompare(a.booking.status, b.booking.status);
     else if (selectedMode === "group") {
-      const aGroup = groupMap[a.booking.groupId]?.name || a.booking.groupName || "";
-      const bGroup = groupMap[b.booking.groupId]?.name || b.booking.groupName || "";
+      const aGroup = groupMap[a.booking.groupId] ? getInternalGroupLabel(groupMap[a.booking.groupId]) : (a.booking.groupName || "");
+      const bGroup = groupMap[b.booking.groupId] ? getInternalGroupLabel(groupMap[b.booking.groupId]) : (b.booking.groupName || "");
       result = textCompare(aGroup, bGroup);
+      if (!result) result = textCompare(a.booking.groupId, b.booking.groupId);
     }
     return result
       || aDate - bDate
-      || textCompare(a.booking.name, b.booking.name)
+      || textCompare(getTrialDisplayName(a.booking, studentMap, getDisplayName), getTrialDisplayName(b.booking, studentMap, getDisplayName))
       || textCompare(a.booking.id, b.booking.id)
       || a.index - b.index;
   }).map(({ booking }) => booking);
@@ -55,11 +63,11 @@ export function getTrialCategory(booking, todayKey = localDateKey()) {
   return "upcoming";
 }
 
-export function groupAndSortTrialBookings(bookings = [], todayKey = localDateKey(), mode = "priority", groupMap = {}) {
+export function groupAndSortTrialBookings(bookings = [], todayKey = localDateKey(), mode = "priority", groupMap = {}, studentMap = {}, getDisplayName) {
   const grouped = Object.fromEntries(TRIAL_CATEGORIES.map((category) => [category, []]));
   bookings.forEach((booking) => grouped[getTrialCategory(booking, todayKey)].push(booking));
   TRIAL_CATEGORIES.forEach((category) => {
-    grouped[category] = sortTrialBookings(grouped[category], mode, category, groupMap);
+    grouped[category] = sortTrialBookings(grouped[category], mode, category, groupMap, studentMap, getDisplayName);
   });
   return grouped;
 }

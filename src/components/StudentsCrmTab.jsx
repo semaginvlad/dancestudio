@@ -1,7 +1,7 @@
 import React from "react";
 import * as db from "../db";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { filterTrialBookings, getTrialDayMarker, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
+import { filterTrialBookings, getTrialDayMarker, getTrialDisplayName, groupAndSortTrialBookings, localDateKey, shouldExpandTrialHistory } from "../shared/trialBookings";
 
 export default function StudentsCrmTab({
   theme,
@@ -57,9 +57,9 @@ export default function StudentsCrmTab({
   const activeWaitlist = waitlist.filter((w) => waitlistActiveStatuses.has(getWaitlistStatus(w)));
   const completedWaitlist = waitlist.filter((w) => waitlistCompletedStatuses.has(getWaitlistStatus(w)));
   const todayKey = localDateKey();
-  const allTrialCategories = React.useMemo(() => groupAndSortTrialBookings(trialBookings, todayKey, trialSort, groupMap), [trialBookings, todayKey, trialSort, groupMap]);
+  const allTrialCategories = React.useMemo(() => groupAndSortTrialBookings(trialBookings, todayKey, trialSort, groupMap, studentMap, getDisplayName), [trialBookings, todayKey, trialSort, groupMap, studentMap, getDisplayName]);
   const filteredTrialRows = React.useMemo(() => filterTrialBookings(trialBookings, trialFilters, groupMap), [trialBookings, trialFilters, groupMap]);
-  const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey, trialSort, groupMap), [filteredTrialRows, todayKey, trialSort, groupMap]);
+  const trialCategories = React.useMemo(() => groupAndSortTrialBookings(filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName), [filteredTrialRows, todayKey, trialSort, groupMap, studentMap, getDisplayName]);
   const activeTrialBookings = [...allTrialCategories.overdue, ...allTrialCategories.today, ...allTrialCategories.upcoming];
   const trialBookingsHistory = allTrialCategories.history;
 
@@ -429,7 +429,7 @@ export default function StudentsCrmTab({
   const renderTrialBookingCard = (booking, index, { isHistory = false } = {}) => {
     const st = studentMap[booking.studentId];
     const gr = groupMap[booking.groupId];
-    const displayName = st ? getDisplayName(st) : (booking.name || "Новий контакт");
+    const displayName = getTrialDisplayName(booking, studentMap, getDisplayName);
     const status = booking.status || "new";
     const trialDate = booking.trialDate || booking.trial_date || "";
     const formattedDate = trialDate ? new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${trialDate.slice(0, 10)}T12:00:00`)) : "Дата не вказана";

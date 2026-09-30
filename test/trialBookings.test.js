@@ -5,6 +5,7 @@ import {
   applyTrialConversion,
   canConvertTrialBooking,
   getTrialCategory,
+  getTrialDisplayName,
   groupAndSortTrialBookings,
   getTrialDayMarker,
   localDateKey,
@@ -26,6 +27,38 @@ test("trial sorting supports every explicit mode", () => {
   assert.deepEqual(sortTrialBookings(sortRows, "status", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
   assert.deepEqual(sortTrialBookings(sortRows, "group", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
   assert.deepEqual(sortTrialBookings(sortRows, "priority", "upcoming", groups).map(({ id }) => id), ["1", "2", "3"]);
+});
+
+test("name sorting uses the same current profile display name as the row", () => {
+  const rows = [
+    { id: "1", studentId: "student-1", name: "Аліна стара", trialDate: "2026-09-24" },
+    { id: "2", studentId: "student-2", name: "Яна стара", trialDate: "2026-09-24" },
+    { id: "3", name: "Віра без профілю", trialDate: "2026-09-24" },
+  ];
+  const students = {
+    "student-1": { firstName: "Яна актуальна" },
+    "student-2": { firstName: "Анна актуальна" },
+  };
+  const displayName = (student) => student.firstName;
+  assert.equal(getTrialDisplayName(rows[0], students, displayName), "Яна актуальна");
+  assert.equal(getTrialDisplayName(rows[2], students, displayName), "Віра без профілю");
+  assert.deepEqual(sortTrialBookings(rows, "name", "upcoming", {}, students, displayName).map(({ id }) => id), ["2", "3", "1"]);
+});
+
+test("group sorting uses full internal labels and group id before date for identical labels", () => {
+  const groups = {
+    advanced: { id: "advanced", name: "Heels", publicLevel: "mix", ageCategory: "teens_under_16", schedule: [{ day: 2, time: "19:00" }] },
+    base: { id: "base", name: "Heels", publicLevel: "base", ageCategory: "adults_16_plus", schedule: [{ day: 1, time: "18:00" }] },
+    same_b: { id: "same_b", name: "Jazz", publicLevel: "base", ageCategory: "adults_16_plus", schedule: [{ day: 3, time: "20:00" }] },
+    same_a: { id: "same_a", name: "Jazz", publicLevel: "base", ageCategory: "adults_16_plus", schedule: [{ day: 3, time: "20:00" }] },
+  };
+  const rows = [
+    { id: "advanced-row", groupId: "advanced", name: "A", trialDate: "2026-09-24" },
+    { id: "base-row", groupId: "base", name: "B", trialDate: "2026-09-24" },
+    { id: "same-b-row", groupId: "same_b", name: "C", trialDate: "2026-09-20" },
+    { id: "same-a-row", groupId: "same_a", name: "D", trialDate: "2026-09-25" },
+  ];
+  assert.deepEqual(sortTrialBookings(rows, "group", "upcoming", groups).map(({ id }) => id), ["base-row", "advanced-row", "same-a-row", "same-b-row"]);
 });
 
 test("trial sorting uses date, name and id as deterministic tie breakers", () => {
