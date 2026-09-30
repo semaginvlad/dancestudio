@@ -47,16 +47,64 @@ test("month previews expose three events and a deterministic remainder", () => {
   assert.equal(result.remaining, 2);
 });
 
-test("simultaneous week events keep one real-time coordinate and remain accessible", () => {
-  for (const count of [2, 3, 6, 9]) {
-    const events = Array.from({length: count}, (_, id) => ({ id, startMin: 600, colIndex: id }));
+test("week collision clusters use real interval overlap and preserve every event", () => {
+  const cluster = (events) => weekEventLayout(events).find((event) => event.isRepresentative);
+
+  const sameStart = cluster([{ id: "a", startMin: 600, endMin: 630 }, { id: "b", startMin: 600, endMin: 660 }]);
+  assert.deepEqual(sameStart.simultaneous.map((event) => event.id), ["a", "b"]);
+  assert.equal(sameStart.clusterStartMin, 600);
+  assert.equal(sameStart.clusterEndMin, 660);
+
+  const staggered = cluster([{ id: "early", startMin: 590, endMin: 650 }, { id: "later", startMin: 600, endMin: 660 }]);
+  assert.deepEqual(staggered.simultaneous.map((event) => event.id), ["early", "later"]);
+  assert.equal(staggered.timeCoordinate, 590);
+  assert.equal(staggered.clusterEndMin, 660);
+
+  const nested = cluster([{ id: "outer", startMin: 600, endMin: 720 }, { id: "inner", startMin: 660, endMin: 690 }]);
+  assert.deepEqual(nested.simultaneous.map((event) => event.id), ["outer", "inner"]);
+
+  const transitive = cluster([
+    { id: "first", startMin: 600, endMin: 660 },
+    { id: "second", startMin: 630, endMin: 690 },
+    { id: "third", startMin: 675, endMin: 720 },
+  ]);
+  assert.deepEqual(transitive.simultaneous.map((event) => event.id), ["first", "second", "third"]);
+  assert.equal(transitive.clusterEndMin, 720);
+
+  const adjacentLayout = weekEventLayout([{ id: "before", startMin: 600, endMin: 660 }, { id: "after", startMin: 660, endMin: 720 }]);
+  assert.equal(adjacentLayout.filter((event) => event.isRepresentative).length, 2);
+  assert.ok(adjacentLayout.every((event) => event.simultaneous.length === 1));
+
+  for (const count of [6, 9]) {
+    const events = Array.from({ length: count }, (_, index) => ({ id: `event-${index}`, startMin: 600 + index, endMin: 700 + index }));
     const layout = weekEventLayout(events);
-    assert.equal(layout.length, count);
-    assert.deepEqual(new Set(layout.map(x => x.timeCoordinate)), new Set([600]));
-    assert.equal(layout.filter(x => x.isRepresentative).length, 1);
-    assert.equal(layout[0].overflowCount, count - 1);
-    assert.equal(layout[0].simultaneous.length, count);
+    const summary = layout.find((event) => event.isRepresentative);
+    assert.equal(summary.simultaneous.length, count);
+    assert.deepEqual(new Set(layout.map((event) => event.id)), new Set(events.map((event) => event.id)));
   }
+});
+
+test("collision representative may be shortest without limiting the cluster range", () => {
+  const layout = weekEventLayout([
+    { id: "long", title: "Long", startMin: 600, endMin: 720 },
+    { id: "short", title: "Short", startMin: 600, endMin: 615 },
+  ]);
+  const representative = layout.find((event) => event.isRepresentative);
+  assert.equal(representative.id, "short");
+  assert.equal(representative.clusterEndMin, 720);
+  assert.equal(representative.simultaneous.length, 2);
+});
+
+test("collision list sorting is stable by start, end, title and id", () => {
+  const events = [
+    { id: "z", title: "Бета", startMin: 600, endMin: 690 },
+    { id: "b", title: "Альфа", startMin: 600, endMin: 660 },
+    { id: "a", title: "Альфа", startMin: 600, endMin: 660 },
+    { id: "early", title: "Початок", startMin: 590, endMin: 650 },
+  ];
+  const representative = weekEventLayout(events).find((event) => event.isRepresentative);
+  assert.deepEqual(representative.simultaneous.map((event) => event.id), ["early", "a", "b", "z"]);
+  assert.deepEqual(new Set(representative.simultaneous.map((event) => event.id)), new Set(events.map((event) => event.id)));
 });
 
 test("recurring destructive actions always carry their context", () => {
@@ -70,6 +118,8 @@ test("critical calendar controls retain keyboard and ARIA affordances", async ()
   assert.match(source, /aria-label=\{`Дії: \$\{e\.title\}, \$\{e\.date\}, \$\{e\.startTime\}`\}/);
   assert.match(source, /role="button"[\s\S]{0,100}tabIndex=\{0\}/);
   assert.match(source, /role="dialog" aria-modal="true" aria-labelledby="schedule-event-details-title"/);
+  assert.match(source, /ref=\{concurrentDialogRef\} role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" tabIndex=\{-1\}/);
+  assert.match(source, /concurrentTriggerRef\.current\?\.focus/);
   assert.doesNotMatch(source, /<button key=\{key\}[\s\S]{0,3000}role="button"/);
 });
 

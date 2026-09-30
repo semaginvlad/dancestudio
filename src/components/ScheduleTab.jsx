@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
@@ -494,6 +494,8 @@ export default function ScheduleTab({
   const [bulkPlanEdit, setBulkPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [concurrentEvents, setConcurrentEvents] = useState(null);
+  const concurrentDialogRef = useRef(null);
+  const concurrentTriggerRef = useRef(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
@@ -1917,9 +1919,13 @@ export default function ScheduleTab({
 
   useEffect(() => {
     if (!concurrentEvents) return undefined;
+    concurrentDialogRef.current?.focus();
     const onEscape = (event) => { if (event.key === "Escape") setConcurrentEvents(null); };
     document.addEventListener("keydown", onEscape);
-    return () => document.removeEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("keydown", onEscape);
+      concurrentTriggerRef.current?.focus?.();
+    };
   }, [concurrentEvents]);
 
   useEffect(() => {
@@ -3369,6 +3375,28 @@ export default function ScheduleTab({
                     const c = e.color
                       ? { bg: `${e.color}22`, border: e.color }
                       : palette[colorKey(e)] || palette.default;
+                    if (useConcurrentSummary) {
+                      const clusterTop = ((e.clusterStartMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
+                      const clusterHeight = Math.max(42, ((e.clusterEndMin - e.clusterStartMin) / 60) * weekHourPx);
+                      const clusterRange = `${minToHHMM(e.clusterStartMin)}–${minToHHMM(e.clusterEndMin)}`;
+                      return (
+                        <button
+                          key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`}
+                          type="button"
+                          aria-label={`Відкрити ${e.simultaneous.length} конфліктних подій, ${clusterRange}`}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            concurrentTriggerRef.current = event.currentTarget;
+                            setConcurrentEvents(e.simultaneous);
+                          }}
+                          style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, minHeight: 42, zIndex: 5, border: `2px solid ${c.border}`, borderRadius: 9, background: c.bg, color: theme.text, padding: "4px 7px", display: "grid", alignContent: "center", justifyItems: "start", overflow: "hidden", cursor: "pointer", textAlign: "left" }}
+                        >
+                          <b style={{ fontSize: 11, lineHeight: 1.1 }}>{e.simultaneous.length} події одночасно</b>
+                          <span style={{ fontSize: 10.5, lineHeight: 1.1 }}>{clusterRange} · Відкрити список</span>
+                        </button>
+                      );
+                    }
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
                     const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
@@ -3432,7 +3460,6 @@ export default function ScheduleTab({
                             <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
                           {selectedRoom === "all" ? <div style={{ marginTop: 2, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>⌂ {e.roomName || UNKNOWN_ROOM_NAME}</div> : null}
-                          {useConcurrentSummary ? <button type="button" aria-label={`Показати ${e.simultaneous.length} одночасних подій о ${e.startTime}`} style={{ ...btnS, marginTop: 3, minHeight: 22, padding: "1px 6px", fontSize: 10, position: "relative", zIndex: 30 }} onClick={(ev) => { ev.stopPropagation(); setConcurrentEvents(e.simultaneous); }}>+{e.overflowCount} одночасно</button> : null}
                           {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
@@ -3634,14 +3661,14 @@ export default function ScheduleTab({
 
       {concurrentEvents?.length ? (
         <div style={{ ...modalOverlaySt, zIndex: 5050, display: "grid", placeItems: "center", padding: 12 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setConcurrentEvents(null); }}>
-          <div role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" style={{ ...plannerPanelSt, width: "min(520px,94vw)", maxHeight: "80vh", overflow: "auto", borderRadius: 18 }}>
+          <div ref={concurrentDialogRef} role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" tabIndex={-1} style={{ ...plannerPanelSt, outline: `3px solid ${theme.primary}55`, width: "min(520px,94vw)", maxHeight: "80vh", overflow: "auto", borderRadius: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <b id="concurrent-events-title">Одночасні події · {concurrentEvents[0]?.startTime}</b>
+              <b id="concurrent-events-title">Конфліктні події · {concurrentEvents[0]?.startTime}</b>
               <button type="button" aria-label="Закрити список одночасних подій" style={editorBtnSt} onClick={() => setConcurrentEvents(null)}>✕</button>
             </div>
             <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
               {concurrentEvents.map((event) => (
-                <button key={event.id} type="button" style={{ ...editorBtnSt, minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
+                <button key={event.id} type="button" onFocus={(ev) => { ev.currentTarget.style.outline = `3px solid ${theme.primary}`; }} onBlur={(ev) => { ev.currentTarget.style.outline = "none"; }} style={{ ...editorBtnSt, outline: "none", minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
                   <b>{event.title}</b>
                   <span>{event.startTime}–{event.endTime} · {event.roomName || UNKNOWN_ROOM_NAME}</span>
                   <span style={{ color: theme.textLight }}>{event.trainer || event.trainerName || "Тренера не вказано"} · {getEventTypeLabel(event.eventType)}</span>

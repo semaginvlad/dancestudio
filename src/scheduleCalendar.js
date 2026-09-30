@@ -65,20 +65,37 @@ export const buildEventDetails = (event = {}) => {
 export const monthPreview = (events, limit = 3) => ({ visible: events.slice(0, limit), remaining: Math.max(0, events.length - limit) });
 
 export const weekEventLayout = (events) => {
-  const groups = new Map();
-  events.forEach((event) => {
-    const key = Number(event.startMin);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(event);
+  const compareEvents = (a, b) =>
+    Number(a.startMin) - Number(b.startMin) ||
+    Number(a.endMin) - Number(b.endMin) ||
+    String(a.title || "").localeCompare(String(b.title || ""), "uk") ||
+    String(a.id || "").localeCompare(String(b.id || ""));
+  const sorted = [...events].sort(compareEvents);
+  const clusters = [];
+  sorted.forEach((event) => {
+    const start = Number(event.startMin);
+    const end = Number(event.endMin);
+    const current = clusters.at(-1);
+    // Strict comparison intentionally keeps adjacent intervals in separate clusters.
+    if (!current || start >= current.endMin) {
+      clusters.push({ startMin: start, endMin: end, events: [event] });
+      return;
+    }
+    current.events.push(event);
+    current.endMin = Math.max(current.endMin, end);
   });
+  const clusterByEvent = new Map();
+  clusters.forEach((cluster) => cluster.events.forEach((event) => clusterByEvent.set(event, cluster)));
   return events.map((event) => {
-    const simultaneous = groups.get(Number(event.startMin)) || [event];
+    const cluster = clusterByEvent.get(event) || { startMin: Number(event.startMin), endMin: Number(event.endMin), events: [event] };
     return {
       ...event,
-      timeCoordinate: Number(event.startMin),
-      simultaneous,
-      isRepresentative: simultaneous[0] === event,
-      overflowCount: Math.max(0, simultaneous.length - 1),
+      timeCoordinate: cluster.startMin,
+      clusterStartMin: cluster.startMin,
+      clusterEndMin: cluster.endMin,
+      simultaneous: cluster.events,
+      isRepresentative: cluster.events[0] === event,
+      overflowCount: Math.max(0, cluster.events.length - 1),
     };
   });
 };
