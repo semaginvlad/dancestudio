@@ -7,13 +7,16 @@ import {
   buildMonthRange,
   buildWeekRange,
   filterTrialBookings,
+  formatTrialCalendarEventAriaLabel,
   getTrialCategory,
   getTrialDisplayName,
   groupTrialBookingsByDate,
   groupAndSortTrialBookings,
   getTrialDayMarker,
   localDateKey,
+  resolveTrialCalendarSelection,
   safeTrialViewMode,
+  selectTrialCalendarRows,
   shiftCalendarMonth,
   sortTrialBookings,
   startOfMondayWeek,
@@ -231,4 +234,36 @@ test("unknown persisted calendar view safely falls back to list", () => {
   assert.equal(safeTrialViewMode("month"), "month");
   assert.equal(safeTrialViewMode("timeline"), "list");
   assert.equal(safeTrialViewMode(null), "list");
+});
+
+test("selection from an old week is not exposed after week navigation", () => {
+  const nextWeek = buildWeekRange("2026-10-12");
+  assert.deepEqual(resolveTrialCalendarSelection(nextWeek, "2026-10-05", "old", { "2026-10-05": [{ id: "old" }] }), { day: null, trialId: null });
+});
+
+test("selection from an old month is not exposed after month navigation", () => {
+  const november = buildMonthRange("2026-11-10");
+  assert.deepEqual(resolveTrialCalendarSelection(november, "2026-10-15", "old", { "2026-10-15": [{ id: "old" }] }), { day: null, trialId: null });
+});
+
+test("switching week and month cannot retain a trial outside the new range", () => {
+  const month = buildMonthRange("2026-12-10");
+  assert.deepEqual(resolveTrialCalendarSelection(month, "2026-10-08", "trial-1", { "2026-10-08": [{ id: "trial-1" }] }), { day: null, trialId: null });
+});
+
+test("a selected trial removed by filters is cleared from calendar details", () => {
+  const days = buildWeekRange("2026-10-05");
+  assert.deepEqual(resolveTrialCalendarSelection(days, "2026-10-08", "hidden", { "2026-10-08": [{ id: "visible" }] }), { day: "2026-10-08", trialId: null });
+});
+
+test("month event accessible label includes name, group, time and textual status", () => {
+  assert.equal(formatTrialCalendarEventAriaLabel({ name: "Марія", group: "Heels BASE", time: "19:00", status: "Підтвердила" }), "Марія, Heels BASE, 19:00, статус: Підтвердила");
+});
+
+test("calendar counter follows all rows, a selected category and filtered categories", () => {
+  const categories = { overdue: [{ id: "o" }], today: [{ id: "t" }], upcoming: [{ id: "u1" }, { id: "u2" }], history: [{ id: "h" }] };
+  assert.equal(selectTrialCalendarRows(categories, "all").length, 5);
+  assert.equal(selectTrialCalendarRows(categories, "history").length, 1);
+  const filteredCategories = { ...categories, overdue: [], upcoming: [{ id: "u2" }], history: [] };
+  assert.equal(selectTrialCalendarRows(filteredCategories, "all").length, 2);
 });

@@ -87,6 +87,23 @@ export function groupTrialBookingsByDate(bookings = [], groupMap = {}, studentMa
 
 export const trialDayOverflow = (bookings = [], limit = 3) => ({ visible: bookings.slice(0, limit), hiddenCount: Math.max(0, bookings.length - limit) });
 
+export function selectTrialCalendarRows(categories = {}, category = "all") {
+  if (TRIAL_CATEGORIES.includes(category)) return categories[category] || [];
+  return TRIAL_CATEGORIES.flatMap((key) => categories[key] || []);
+}
+
+/** Keep calendar details scoped to the rendered range and filtered source. */
+export function resolveTrialCalendarSelection(days = [], selectedDay = null, selectedTrialId = null, bookingsByDate = {}) {
+  const visibleKeys = new Set(days.map(localDateKey));
+  const day = selectedDay && visibleKeys.has(selectedDay) ? selectedDay : null;
+  const rows = day ? (bookingsByDate[day] || []) : [];
+  const trialId = selectedTrialId && rows.some((booking) => String(booking.id) === String(selectedTrialId)) ? selectedTrialId : null;
+  return { day, trialId };
+}
+
+export const formatTrialCalendarEventAriaLabel = ({ name, group, time, status }) =>
+  `${name || "Новий контакт"}, ${group || "Група"}, ${time || "час не вказано"}, статус: ${status || "не вказано"}`;
+
 const dateNumber = (value) => Number(String(value || "").slice(0, 10).replaceAll("-", "")) || 0;
 
 export const TRIAL_SORT_MODES = ["priority", "date_asc", "date_desc", "name", "status", "group"];
