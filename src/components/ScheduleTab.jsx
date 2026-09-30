@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, weekEventLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -493,6 +493,7 @@ export default function ScheduleTab({
   const [bulkPlanSetup, setBulkPlanSetup] = useState(null);
   const [bulkPlanEdit, setBulkPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
+  const [concurrentEvents, setConcurrentEvents] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
@@ -1915,6 +1916,13 @@ export default function ScheduleTab({
   
 
   useEffect(() => {
+    if (!concurrentEvents) return undefined;
+    const onEscape = (event) => { if (event.key === "Escape") setConcurrentEvents(null); };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [concurrentEvents]);
+
+  useEffect(() => {
     if (!selectedEventDetails) return undefined;
     const previousFocus = document.activeElement;
     const dialog = document.querySelector('[aria-labelledby="schedule-event-details-title"]');
@@ -3053,7 +3061,7 @@ export default function ScheduleTab({
               <div key={d} style={{ fontSize: 12, color: theme.textLight, textAlign: "center", fontWeight: 700 }}>{d}</div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gridAutoRows: isMobile ? 58 : undefined, gap: isMobile ? 4 : 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gridAutoRows: isMobile ? 92 : undefined, gap: isMobile ? 4 : 6 }}>
             {monthCells.map((d) => {
               const key = toLocalDateKey(d);
               const monthDayEvents = monthEventsByDay.get(key) || [];
@@ -3062,42 +3070,24 @@ export default function ScheduleTab({
                 : monthDayEvents.filter((e) => (e.roomName || UNKNOWN_ROOM_NAME) === selectedRoom);
               const inMonth = d.getMonth() === monthStart.getMonth();
               const sortedItems = items.slice().sort((a, b) => a.startMin - b.startMin);
-              const { visible: previewItems, remaining } = monthPreview(sortedItems, selectedRoom === "all" ? 3 : 2);
+              const { visible: previewItems, remaining } = monthPreview(sortedItems, isMobile ? 1 : (selectedRoom === "all" ? 3 : 2));
               return (
-                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 58 : 116, height: isMobile ? 58 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
-                  <div style={{ fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</div>
-                  {isMobile && items.length > 0 && selectedRoom === "all" ? (
-                    <>
-                      <div
-                        onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }}
-                        style={{ fontSize: isMobile ? 10 : 11.5, color: theme.textLight, fontWeight: 700, lineHeight: 1.1 }}
-                      >
-                        {items.length} подій
-                      </div>
-                      <div
-                        onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }}
-                        style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}
-                      >
-                        {Array.from(new Set(items.map((ev) => colorKey(ev)))).slice(0, 4).map((tone) => {
-                          const c = palette[tone] || palette.default;
-                          return <span key={tone} style={{ width: isMobile ? 6 : 12, height: isMobile ? 6 : 4, borderRadius: 999, background: c.border, opacity: 0.65 }} />;
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-                  {!isMobile ? previewItems.map((e) => {
+                <div key={key} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 92 : 116, height: isMobile ? 92 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
+                  <button type="button" aria-label={`Відкрити день ${key}`} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }} style={{ ...btnS, minHeight: 24, justifyContent: "flex-start", padding: 0, border: 0, background: "transparent", fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</button>
+                  {previewItems.map((e) => {
                     const c = e.color ? { bg: `${e.color}18`, border: `${e.color}99` } : palette[colorKey(e)] || palette.default;
                     const hasPlan = hasLessonPlanForEvent(e);
                     const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
-                      <div key={e.id} role="button" tabIndex={0} title={`${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); setSelectedEventDetails(e); } }} onClick={(ev) => { ev.stopPropagation(); setSelectedEventDetails(e); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
+                      <button type="button" key={e.id} title={`${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onClick={() => setSelectedEventDetails(e)} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
                         {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", minWidth: planSeriesLabel ? 28 : 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto", padding: planSeriesLabel ? "0 4px" : 0 }}>✓{planSeriesLabel ? ` ${planSeriesLabel}` : ""}</span> : null}
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}{selectedRoom === "all" ? ` · ${e.roomName || UNKNOWN_ROOM_NAME}` : ""}</span>
-                      </div>
+                      </button>
                     );
-                  }) : null}
-                  {!isMobile && remaining > 0 ? <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 700, opacity: 0.85 }}>+{remaining} ще</div> : null}
-                </button>
+                  })}
+                  {remaining > 0 ? <button type="button" style={{ ...btnS, minHeight: 22, padding: 0, border: 0, background: "transparent", fontSize: 11, color: theme.textLight, fontWeight: 700, justifyContent: "flex-start" }} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }}>+{remaining} ще</button> : null}
+                  <button type="button" aria-label={`Відкрити вільну область дня ${key}`} style={{ minHeight: 12, border: 0, background: "transparent" }} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }} />
+                </div>
               );
             })}
           </div>
@@ -3362,7 +3352,7 @@ export default function ScheduleTab({
                       />
                     ),
                   )}
-                  {dayEvents.map((e) => {
+                  {weekEventLayout(dayEvents).map((e) => {
                     const dur = Math.max(0, e.endMin - e.startMin);
                     const top =
                       ((e.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
@@ -3372,10 +3362,10 @@ export default function ScheduleTab({
                     );
                     const gap = 2;
                     const available = 94;
-                    const useReadableStack = selectedRoom === "all" && e.colCount > 1;
-                    const width = useReadableStack ? available : (e.colCount > 1 ? (available - gap * (e.colCount - 1)) / e.colCount : available);
-                    const left = useReadableStack ? 3 : 3 + e.colIndex * (width + gap);
-                    const readableTop = useReadableStack ? top + e.colIndex * 30 : top;
+                    const useConcurrentSummary = selectedRoom === "all" && e.simultaneous.length > 1;
+                    if (useConcurrentSummary && !e.isRepresentative) return null;
+                    const width = useConcurrentSummary ? available : (e.colCount > 1 ? (available - gap * (e.colCount - 1)) / e.colCount : available);
+                    const left = useConcurrentSummary ? 3 : 3 + e.colIndex * (width + gap);
                     const c = e.color
                       ? { bg: `${e.color}22`, border: e.color }
                       : palette[colorKey(e)] || palette.default;
@@ -3414,10 +3404,10 @@ export default function ScheduleTab({
                         }}
                         style={{
                           position: "absolute",
-                          top: readableTop,
+                          top,
                           left: `${left}%`,
                           width: `${width}%`,
-                          height: useReadableStack ? Math.max(54, height) : height,
+                          height,
                           border: `1px solid ${c.border}`,
                           background: c.bg,
                           opacity: stView.opacity,
@@ -3442,6 +3432,7 @@ export default function ScheduleTab({
                             <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
                           {selectedRoom === "all" ? <div style={{ marginTop: 2, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>⌂ {e.roomName || UNKNOWN_ROOM_NAME}</div> : null}
+                          {useConcurrentSummary ? <button type="button" aria-label={`Показати ${e.simultaneous.length} одночасних подій о ${e.startTime}`} style={{ ...btnS, marginTop: 3, minHeight: 22, padding: "1px 6px", fontSize: 10, position: "relative", zIndex: 30 }} onClick={(ev) => { ev.stopPropagation(); setConcurrentEvents(e.simultaneous); }}>+{e.overflowCount} одночасно</button> : null}
                           {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
@@ -3640,6 +3631,26 @@ export default function ScheduleTab({
       ) : null}
 
       
+
+      {concurrentEvents?.length ? (
+        <div style={{ ...modalOverlaySt, zIndex: 5050, display: "grid", placeItems: "center", padding: 12 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setConcurrentEvents(null); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" style={{ ...plannerPanelSt, width: "min(520px,94vw)", maxHeight: "80vh", overflow: "auto", borderRadius: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <b id="concurrent-events-title">Одночасні події · {concurrentEvents[0]?.startTime}</b>
+              <button type="button" aria-label="Закрити список одночасних подій" style={editorBtnSt} onClick={() => setConcurrentEvents(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {concurrentEvents.map((event) => (
+                <button key={event.id} type="button" style={{ ...editorBtnSt, minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
+                  <b>{event.title}</b>
+                  <span>{event.startTime}–{event.endTime} · {event.roomName || UNKNOWN_ROOM_NAME}</span>
+                  <span style={{ color: theme.textLight }}>{event.trainer || event.trainerName || "Тренера не вказано"} · {getEventTypeLabel(event.eventType)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
