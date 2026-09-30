@@ -1,4 +1,5 @@
 import { getInternalGroupLabel } from "./groupLabels.js";
+import { getScheduleSlotStartTime } from "./groupSchedule.js";
 
 export const ACTIVE_TRIAL_STATUSES = ["new", "contacted", "confirmed"];
 export const HISTORY_TRIAL_STATUSES = ["came", "no_show", "became_student", "declined", "cancelled"];
@@ -64,12 +65,14 @@ export function buildMonthRange(value = new Date()) {
 }
 
 export function getTrialEventTime(booking = {}, group = {}) {
-  const direct = booking.trialTime || booking.trial_time || booking.time;
-  if (direct) return String(direct).slice(0, 5);
+  const direct = [booking.trialTime, booking.trial_time, booking.time]
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (direct) return direct.slice(0, 5);
   const date = parseLocalDate(booking.trialDate || booking.trial_date);
   if (!date) return "";
   const slot = (group.schedule || []).find((item) => Number(item.day ?? item.dayOfWeek) === date.getDay());
-  return String(slot?.time || "").slice(0, 5);
+  return getScheduleSlotStartTime(slot).slice(0, 5);
 }
 
 export function groupTrialBookingsByDate(bookings = [], groupMap = {}, studentMap = {}, getDisplayName) {

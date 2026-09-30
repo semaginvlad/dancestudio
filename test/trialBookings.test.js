@@ -10,6 +10,7 @@ import {
   formatTrialCalendarEventAriaLabel,
   getTrialCategory,
   getTrialDisplayName,
+  getTrialEventTime,
   groupTrialBookingsByDate,
   groupAndSortTrialBookings,
   getTrialDayMarker,
@@ -207,6 +208,36 @@ test("calendar grouping sorts by time, group and current display name", () => {
     { id: "1", groupId: "b", name: "Віра", trialDate: "2026-10-01" },
   ];
   assert.deepEqual(groupTrialBookingsByDate(rows, groups)["2026-10-01"].map(({ id }) => id), ["1", "2", "3"]);
+});
+
+test("trial event time prefers canonical group startTime over conflicting legacy time", () => {
+  const booking = { trialDate: "2026-10-01" };
+  const group = { schedule: [{ day: 4, time: "18:30", startTime: "18:00" }] };
+  assert.equal(getTrialEventTime(booking, group), "18:00");
+});
+
+test("trial event time keeps supporting a legacy group time", () => {
+  const booking = { trialDate: "2026-10-01" };
+  const group = { schedule: [{ day: 4, time: "18:30" }] };
+  assert.equal(getTrialEventTime(booking, group), "18:30");
+});
+
+test("an explicit trial booking time takes priority over the group schedule", () => {
+  const booking = { trialDate: "2026-10-01", trialTime: "17:45" };
+  const group = { schedule: [{ day: 4, time: "18:30", startTime: "18:00" }] };
+  assert.equal(getTrialEventTime(booking, group), "17:45");
+});
+
+test("same-day trial events sort by canonical group start time", () => {
+  const groups = {
+    early: { name: "Early", schedule: [{ day: 4, time: "19:30", startTime: "17:00" }] },
+    late: { name: "Late", schedule: [{ day: 4, time: "18:00", startTime: "19:00" }] },
+  };
+  const rows = [
+    { id: "late", groupId: "late", name: "Б", trialDate: "2026-10-01" },
+    { id: "early", groupId: "early", name: "А", trialDate: "2026-10-01" },
+  ];
+  assert.deepEqual(groupTrialBookingsByDate(rows, groups)["2026-10-01"].map(({ id }) => id), ["early", "late"]);
 });
 
 test("calendar source applies search, filters and category before date range", () => {
