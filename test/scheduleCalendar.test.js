@@ -371,19 +371,18 @@ test("compact mobile week preview sorts chronologically and exposes deterministi
   assert.equal(preview.remaining, 1);
 });
 
-test("mobile week agenda has seven filtered vertical sections, statuses, details and day transition", async () => {
+test("mobile week overview is a seven-column mini time grid using filtered room lanes", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
-  assert.match(source, /Огляд тижня/);
-  assert.match(source, /Обраний день/);
-  assert.match(overview, /display: "grid"/);
+  assert.match(overview, /overflowX: "hidden"/);
+  assert.match(overview, /gridTemplateColumns: "32px repeat\(7,minmax\(0,1fr\)\)"/);
+  assert.match(overview, /const miniHourPx = 28/);
   assert.match(overview, /weekDays\.map/);
-  assert.match(overview, /data-mobile-agenda-day=\{date\}/);
-  assert.match(overview, /sortCalendarEvents\(roomFilteredEventsByDay\.get\(date\) \|\| \[\]\)/);
+  assert.match(overview, /roomFilteredEventsByDay\.get\(date\) \|\| \[\]/);
+  assert.match(overview, /roomLaneLayout\(events, canonicalRooms, UNKNOWN_ROOM_NAME\)/);
   assert.match(overview, /setSelectedDate\(date\); setMobileWeekMode\("day"\)/);
-  assert.match(overview, /onClick=\{\(\) => setSelectedEventDetails\(event\)\}/);
   assert.match(overview, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
-  assert.doesNotMatch(overview, /compactDayPreview|preview\.remaining|\+\{preview/);
+  assert.doesNotMatch(overview, /data-mobile-agenda-day|agendaEvents|preview\.remaining|\+\{preview/);
 });
 
 test("week cards retain all compact event type marks", async () => {
@@ -409,22 +408,22 @@ test("short desktop and mobile-day room cards always render type and available i
   const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
   assert.match(roomCards, /const typeMark = getEventTypeMark\(event\)/);
   assert.match(roomCards, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
-  assert.match(roomCards, /height < 24 \? 7 : 8/);
+  assert.match(roomCards, /height < 24 \? 6 : 7/);
   assert.doesNotMatch(roomCards, /height >= 42 \? \(getEventTrainerInitials/);
   assert.match(roomCards, /\{typeMark \? <span aria-hidden="true"/);
   assert.match(roomCards, /\{trainerInitials \? <span aria-hidden="true"/);
 });
 
-test("mobile week agenda shows type, initials, time, wrapping title and room", async () => {
+test("mobile week mini-grid positions every event by time and stable room mini-lanes", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
-  assert.doesNotMatch(overview, /width: 116|flex: "0 0 116px"/);
-  assert.match(overview, /const typeMark = getEventTypeMark\(event\)/);
-  assert.match(overview, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
-  assert.match(overview, /\{event\.startTime\}<\/span>/);
-  assert.match(overview, /WebkitLineClamp: 2/);
-  assert.match(overview, /overflowWrap: "anywhere"/);
-  assert.match(overview, /event\.roomName \|\| UNKNOWN_ROOM_NAME/);
+  assert.match(overview, /weekEventGeometry\(event\.startMin, event\.endMin, miniHourPx, DAY_START_HOUR\)/);
+  assert.match(overview, /roomWidth = 100 \/ Math\.max\(1, lanes\.length\)/);
+  assert.match(overview, /left = laneIndex \* roomWidth \+ conflictIndex \* eventWidth/);
+  assert.match(overview, /lanes\.map\(\(lane, laneIndex\) => lane\.events\.map/);
+  assert.match(overview, /height: geometry\.height/);
+  assert.match(overview, /event\.hasRoomConflict \? 2 : 1/);
+  assert.match(overview, /pointerEvents: "none"/);
 });
 
 test("week card accessible labels retain full type, trainer, title, time, room and status", async () => {
@@ -434,14 +433,15 @@ test("week card accessible labels retain full type, trainer, title, time, room a
   assert.match(source, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
 });
 
-test("time-grid cards devote visible content to markers and wrapping title only", async () => {
+test("time-grid cards use a compact meta column with start time and a wrapping title", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
   const visibleCard = roomCards.slice(roomCards.indexOf('<button type="button" data-event-card="1"'), roomCards.indexOf('</button>'));
-  assert.doesNotMatch(visibleCard, /event\.startTime|event\.endTime|getEventTypeLabel/);
+  assert.match(visibleCard, /gridTemplateColumns: `\$\{isMobile \? 34 : 40\}px minmax\(0,1fr\)`/);
   assert.match(visibleCard, /\{typeMark \? <span/);
   assert.match(visibleCard, /\{trainerInitials \? <span/);
-  assert.match(visibleCard, /flex: "1 1 auto"/);
+  assert.match(visibleCard, /\{event\.startTime\}<\/span>/);
+  assert.doesNotMatch(visibleCard, /event\.endTime|getEventTypeLabel/);
   assert.match(visibleCard, /overflowWrap: "anywhere"/);
   assert.match(visibleCard, /WebkitLineClamp: titleLineCount/);
   assert.match(roomCards, /const accessibleLabel = `\$\{fullType\}[\s\S]*?\$\{event\.startTime\}–\$\{event\.endTime\}/);
