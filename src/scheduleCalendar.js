@@ -100,6 +100,34 @@ export const weekEventLayout = (events) => {
   });
 };
 
+// Week columns are deliberately partitioned by the canonical room name before
+// collision detection. This prevents a chain of unrelated, parallel rooms from
+// becoming one large transitive cluster.
+export const roomLaneLayout = (events = [], roomNames = [], unknownRoomName = "Зала не вказана") => {
+  const normalizedRoom = (event) => String(event?.roomName || unknownRoomName).trim() || unknownRoomName;
+  const eventRooms = events.map(normalizedRoom);
+  const orderedRooms = [...new Set([
+    ...roomNames.map((name) => String(name || "").trim()).filter(Boolean),
+    ...eventRooms.filter((name) => name !== unknownRoomName),
+    ...(eventRooms.includes(unknownRoomName) ? [unknownRoomName] : []),
+  ])];
+
+  return orderedRooms.map((roomName) => {
+    const roomEvents = events.filter((event) => normalizedRoom(event) === roomName);
+    const laidOut = weekEventLayout(roomEvents);
+    return {
+      roomName,
+      events: laidOut.map((event) => ({
+        ...event,
+        // The visual coordinate is always the event's own real start, even for
+        // a true same-room conflict.
+        timeCoordinate: Number(event.startMin),
+        hasRoomConflict: event.simultaneous.length > 1,
+      })),
+    };
+  });
+};
+
 export const collisionTilePreview = (events, { availableHeightPx = 42, isMobile = false } = {}) => {
   const columns = isMobile ? 2 : events.length >= 8 ? 3 : 2;
   const usableHeight = Math.max(0, Number(availableHeightPx) - 6);

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionClusterGeometry, collisionStatusPresentation, collisionTilePreview, EVENT_STATUS_STYLES, isEventCardKeyboardActivation, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionStatusPresentation, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -2630,6 +2630,14 @@ export default function ScheduleTab({
                 <React.Fragment key={field.label}><dt style={{ color: theme.textLight }}>{field.label}</dt><dd style={{ margin: 0 }}>{field.value}</dd></React.Fragment>
               ))}
             </dl>
+            {canEditCollisionEvent(selectedEventDetails, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson }) ? (
+              <button type="button" style={{ ...btnP, marginTop: 14 }} onClick={() => {
+                const event = selectedEventDetails;
+                setSelectedEventDetails(null);
+                if (event.kind === "booking") startEdit(event);
+                else openGroupOverrideEditor(event);
+              }}>Редагувати</button>
+            ) : null}
             {selectedEventDetails.kind === "group" ? (() => {
               const plan = getLessonPlanForEvent(selectedEventDetails);
               const fields = normalizeLessonPlanFields(plan || {});
@@ -3252,442 +3260,68 @@ export default function ScheduleTab({
       ) : null}
 
       {viewMode === "week" ? (
-      <div
-        style={{
-          ...cardSt,
-          ...mobileCalendarBleedSt,
-          border: `1px solid ${theme.border}`,
-          padding: 0,
-          overflowX: "auto",
-          overflowY: "hidden",
-        }}
-      >
-        <div style={{ minWidth: weekMinWidth }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
-              borderBottom: `1px solid ${theme.border}`,
-              minHeight: 56,
-            }}
-          >
-            <div />
-            {weekDays.map((d) => (
-              <div
-                key={toLocalDateKey(d)}
-                style={{ padding: 8, borderLeft: `1px solid ${theme.border}` }}
-              >
-                <b>{d.toLocaleDateString("uk-UA", { weekday: "short" })}</b>
-                <div style={{ fontSize: 12, color: theme.textLight }}>
-                  {toLocalDateKey(d)}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `${weekTimeColumnWidth}px repeat(7,1fr)`,
-              minHeight: (DAY_END_HOUR - DAY_START_HOUR) * weekHourPx,
-            }}
-          >
-            <div
-              style={{
-                position: "relative",
-                borderRight: `1px solid ${theme.border}`,
-              }}
-            >
-              {Array.from(
-                { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
-                (_, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      position: "absolute",
-                      top: i * weekHourPx - 8,
-                      left: 8,
-                      fontSize: 11,
-                      color: theme.textLight,
-                    }}
-                  >
-                    {String(DAY_START_HOUR + i).padStart(2, "0")}:00
-                  </div>
-                ),
-              )}
+        <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: 0, overflow: "hidden" }}>
+          {isMobile ? (
+            <div aria-label="Оберіть день тижня" style={{ display: "flex", gap: 6, padding: 8, overflowX: "auto", borderBottom: `1px solid ${theme.border}` }}>
+              {weekDays.map((day) => {
+                const key = toLocalDateKey(day);
+                return <button key={key} type="button" onClick={() => setSelectedDate(key)} style={key === selectedDate ? toolbarActiveSt : editorBtnSt}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "numeric" })}</button>;
+              })}
             </div>
-            {weekDays.map((d) => {
-              const date = toLocalDateKey(d);
-              const dayEvents = roomFilteredEventsByDay.get(date) || [];
-              return (
-                <div
-                  key={date}
-                  style={{
-                    position: "relative",
-                    borderLeft: `1px solid ${theme.border}`,
-                  }}
-                >
-                  {canManageBookings ? (
-                    <div
-                      style={{ position: "absolute", inset: 0, zIndex: 1, cursor: "crosshair" }}
-                      onMouseDown={(ev) => {
-                        const rect = ev.currentTarget.getBoundingClientRect();
-                        const y = ev.clientY - rect.top;
-                        const mins = minuteFromY(y);
-                        setSelection({ date, startMinute: mins, endMinute: mins, x: ev.clientX, y: ev.clientY, dragging: true });
-                      }}
-                      onMouseMove={(ev) => {
-                        const rect = ev.currentTarget.getBoundingClientRect();
-                        const y = ev.clientY - rect.top;
-                        const mins = minuteFromY(y);
-                        setHoverSlot({ date, minute: mins });
-                        setSelection((p) => (p?.dragging && p.date === date ? { ...p, endMinute: mins, x: ev.clientX, y: ev.clientY } : p));
-                      }}
-                      onMouseLeave={() => {
-                        setHoverSlot(null);
-                        setSelection((p) => (p?.dragging && p.date === date ? { ...p, dragging: false } : p));
-                      }}
-                      onMouseUp={(ev) => {
-                        ev.stopPropagation();
-                        const rect = ev.currentTarget.getBoundingClientRect();
-                        const y = ev.clientY - rect.top;
-                        const mins = minuteFromY(y);
-                        const cur = selection && selection.date === date ? selection : { startMinute: mins, endMinute: mins };
-                        const startMinute = Math.min(cur.startMinute, mins);
-                        const endRaw = Math.max(cur.startMinute, mins);
-                        const endMinute = endRaw - startMinute < 15 ? startMinute + 60 : endRaw;
-                        openCreateAt(date, startMinute, ev, endMinute);
-                        setSelection(null);
-                      }}
-                    />
-                  ) : null}
-                  {canManageBookings && hoverSlot?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} />
-                  ) : null}
-                  {canManageBookings && selection?.date === date ? (
-                    <div style={{ position: "absolute", left: 0, right: 0, top: ((Math.min(selection.startMinute, selection.endMinute) - DAY_START_HOUR * 60) / 60) * weekHourPx, height: (Math.max(15, Math.abs(selection.endMinute - selection.startMinute)) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} />
-                  ) : null}
-                  {Array.from(
-                    { length: DAY_END_HOUR - DAY_START_HOUR + 1 },
-                    (_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          position: "absolute",
-                          top: i * weekHourPx,
-                          left: 0,
-                          right: 0,
-                          borderTop: `1px solid ${theme.border}`,
-                          opacity: 0.35,
-                        }}
-                      />
-                    ),
-                  )}
-                  {weekEventLayout(dayEvents).map((e) => {
-                    const dur = Math.max(0, e.endMin - e.startMin);
-                    const top =
-                      ((e.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
-                    const height = Math.max(
-                      scheduleMinEventHeight,
-                      (dur / 60) * weekHourPx,
-                    );
-                    const gap = 2;
-                    const available = 94;
-                    const useConcurrentSummary = selectedRoom === "all" && e.simultaneous.length > 1;
-                    if (useConcurrentSummary && !e.isRepresentative) return null;
-                    const width = useConcurrentSummary ? available : (e.colCount > 1 ? (available - gap * (e.colCount - 1)) / e.colCount : available);
-                    const left = useConcurrentSummary ? 3 : 3 + e.colIndex * (width + gap);
-                    const c = e.color
-                      ? { bg: `${e.color}22`, border: e.color }
-                      : palette[colorKey(e)] || palette.default;
-                    if (useConcurrentSummary) {
-                      const { top: clusterTop, height: clusterHeight } = collisionClusterGeometry(e.clusterStartMin, e.clusterEndMin, weekHourPx, DAY_START_HOUR);
-                      const clusterRange = `${minToHHMM(e.clusterStartMin)}–${minToHHMM(e.clusterEndMin)}`;
-                      const tilePreview = collisionTilePreview(e.simultaneous, { availableHeightPx: clusterHeight, isMobile });
-                      return (
-                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, zIndex: 5, border: `1px solid ${theme.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)", gap: 3, overflow: "hidden" }}>
-                          {tilePreview.visible.map((event) => {
-                            const eventMark = getEventTypeMark(event);
-                            const eventTitle = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${event.trainer || event.trainerName || "Без тренера"} · ${getEventTypeLabel(event.eventType)}`;
-                            const eventColor = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
-                            const eventStatus = collisionStatusPresentation(event.status);
-                            const eventAccessibleTitle = `${eventTitle} · Статус: ${eventStatus.text}`;
-                            const canOpenActions = canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson });
-                            return (
-                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${eventColor.border}`, borderRadius: 6, background: eventColor.bg, opacity: eventStatus.opacity, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
-                                <button type="button" title={eventAccessibleTitle} aria-label={eventAccessibleTitle} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ border: 0, background: "transparent", color: theme.text, padding: "3px 4px", minWidth: 0, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
-                                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eventMark ? `${eventMark} · ` : ""}<span style={{ textDecoration: eventStatus.textDecoration || "none" }}>{event.title}</span>{eventStatus.showLabel ? <span style={{ marginLeft: 3, fontSize: 8, fontWeight: 900 }}>· {eventStatus.text}</span> : null}</span>
-                                  <span style={{ display: "block", fontSize: 8.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: theme.textLight }}>⌂ {event.roomName || UNKNOWN_ROOM_NAME}{event.startMin !== e.clusterStartMin ? ` · ${event.startTime}` : ""}</span>
-                                </button>
-                                {canOpenActions ? <button type="button" aria-label={`Редагувати: ${event.title}, ${event.date}, ${event.startTime}`} style={{ border: 0, borderLeft: `1px solid ${theme.border}`, background: "transparent", color: theme.text, cursor: "pointer", padding: 0 }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson })) return; if (event.kind === "booking") startEdit(event); else openGroupOverrideEditor(event); }}>✎</button> : null}
-                              </div>
-                            );
-                          })}
-                          {tilePreview.overflow > 0 ? <button type="button" aria-label={`Показати ще ${tilePreview.overflow} подій у діапазоні ${clusterRange}`} onClick={(event) => { event.stopPropagation(); concurrentTriggerRef.current = event.currentTarget; setConcurrentEvents(e.simultaneous); }} style={{ border: `1px dashed ${c.border}`, borderRadius: 6, background: theme.card, color: theme.text, fontWeight: 900, cursor: "pointer", minHeight: 28 }}>+{tilePreview.overflow}</button> : null}
-                        </div>
-                      );
-                    }
-                    const stView = statusStyles[e.status] || statusStyles.active;
-                    const canMutateThisEvent = canMutateEvent(e);
-                    const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
-                    const typeMark = getEventTypeMark(e);
-                    const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
-                    const extraLine = height >= 96 && e.kind === "booking"
-                      ? (e.status && e.status !== "active" ? stView.text : (e.peopleCount ? `${e.peopleCount} ос.` : ""))
-                      : "";
-                    const markSize = isMobile ? 14 : 16;
-                    const typeMarkBg = typeMark === "Г" ? GROUP_TYPE_BADGE_BG : typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : c.border;
-                    const typeMarkSt = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: markSize, height: markSize, borderRadius: 999, background: typeMarkBg, color: "#fff", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, lineHeight: 1, flex: "0 0 auto" };
-                    const trainerMarkSt = { ...typeMarkSt, background: isDarkTheme ? "#7c3aed" : "#6d28d9", fontSize: isMobile ? 7.5 : 8.5, fontWeight: 900 };
-                    const hasPlan = hasLessonPlanForEvent(e);
-                    const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
-                    return (
-                      <div
-                        key={e.id}
-                        data-event-card="1"
-                        role="button"
-                        tabIndex={0}
-                        title={`${e.title} · ${e.startTime}–${e.endTime} · ${e.roomName || UNKNOWN_ROOM_NAME} · ${e.trainer || e.trainerName || "Без тренера"} · ${getEventTypeLabel(e.eventType)}`}
-                        onKeyDown={(ev) => { if (isEventCardKeyboardActivation(ev)) { ev.preventDefault(); setSelectedEventDetails(e); } }}
-                        onMouseDown={(ev) => ev.stopPropagation()}
-                        onMouseUp={(ev) => ev.stopPropagation()}
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          if (e.kind === "booking") {
-                            if (canMutateThisEvent) startEdit(e);
-                            else setSelectedEventDetails(e);
-                          } else {
-                            setSelectedEventDetails(e);
-                          }
-                        }}
-                        style={{
-                          position: "absolute",
-                          top,
-                          left: `${left}%`,
-                          width: `${width}%`,
-                          height,
-                          border: `1px solid ${c.border}`,
-                          background: c.bg,
-                          opacity: stView.opacity,
-                          borderRadius: isMobile ? 8 : 10,
-                          padding: isMobile ? 4 : 6,
-                          fontSize: isMobile ? 10 : 11,
-                          overflow: "hidden",
-                          zIndex: openMenuState?.eventId === e.id ? 2000 : 5,
-                        }}
-                      >
-                        {hasPlan ? <span title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: isMobile ? 4 : 6, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 24 : 30) : (isMobile ? 4 : 6), zIndex: 20, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
-                        {planSeriesLabel ? <span title={`Порядок плану ${planSeriesLabel}`} style={{ position: "absolute", top: isMobile ? 20 : 25, right: (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 22 : 28) : (isMobile ? 3 : 4), zIndex: 20, display: "inline-grid", placeItems: "center", minWidth: isMobile ? 22 : 26, height: isMobile ? 12 : 14, borderRadius: 999, padding: "0 4px", background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(255,255,255,.86)", color: isDarkTheme ? "#99f6e4" : "#0f766e", border: `1px solid ${isDarkTheme ? "rgba(153,246,228,.25)" : "rgba(15,118,110,.18)"}`, fontSize: isMobile ? 8 : 9, fontWeight: 900, lineHeight: 1 }}>{planSeriesLabel}</span> : null}
-                        <div style={{ minWidth: 0, paddingRight: textRightPadding + (hasPlan ? 18 : 0) }}>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
-                            {typeMark ? <span style={typeMarkSt}>{typeMark}</span> : null}
-                            {trainerInitials ? <span style={trainerMarkSt}>{trainerInitials}</span> : null}
-                            <div style={{ fontWeight: 800, lineHeight: "1.15em", display: "-webkit-box", WebkitLineClamp: height > 46 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", minWidth: 0, wordBreak: "break-word" }}>
-                              {e.title}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
-                            <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
-                          </div>
-                          {selectedRoom === "all" ? <div style={{ marginTop: 2, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>⌂ {e.roomName || UNKNOWN_ROOM_NAME}</div> : null}
-                          {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
-                          {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
-                            <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
-                              <button
-                                type="button"
-                                aria-label={`Дії: ${e.title}, ${e.date}, ${e.startTime}`}
-                                onKeyDown={(ev) => ev.stopPropagation()}
-                                style={{
-                                  ...btnS,
-                                  padding: isMobile ? "0 4px" : "0 6px",
-                                  fontSize: isMobile ? 10 : 12,
-                                  lineHeight: isMobile ? "14px" : "16px",
-                                  position: "relative",
-                                  zIndex: 2200,
-                                }}
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  const rect = ev.currentTarget.getBoundingClientRect();
-                                  setOpenMenuState((prev) =>
-                                    prev?.eventId === e.id
-                                      ? null
-                                      : {
-                                          eventId: e.id,
-                                          top: rect.bottom + 6,
-                                          left: rect.right - 190,
-                                        },
-                                  );
-                                }}
-                              >
-                                ⋮
-                              </button>
-                              {openMenuState?.eventId === e.id &&
-                                createPortal(
-                                  <div
-                                    onClick={(ev) => ev.stopPropagation()}
-                                    style={{
-                                      position: "fixed",
-                                      left: scheduleMenuLeft,
-                                      top: scheduleMenuTop,
-                                      zIndex: 3000,
-                                      width: isMobile ? 176 : 196,
-                                      maxHeight: scheduleMenuMaxHeight,
-                                      overflowY: "auto",
-                                      overscrollBehavior: "contain",
-                                      background: theme.card,
-                                      border: `1px solid ${theme.border}`,
-                                      borderRadius: 9,
-                                      padding: 4,
-                                      display: "grid",
-                                      gap: 3,
-                                      boxShadow: "0 10px 28px rgba(0,0,0,.25)",
-                                    }}
-                                  >
-                                  {e.kind === "booking" ? (
-                                    <>
-                                      <button
-                                        style={menuActionBtnSt}
-                                        onClick={() => {
-                                          setOpenMenuState(null);
-                                          setSelectedEventDetails(e);
-                                        }}
-                                      >
-                                        Деталі події
-                                      </button>
-                                      {canMutateThisEvent ? (
-                                        <>
-                                          <button
-                                            style={menuActionBtnSt}
-                                            onClick={() => {
-                                              setOpenMenuState(null);
-                                              startEdit(e);
-                                            }}
-                                          >
-                                            Редагувати
-                                          </button>
-                                          <button
-                                            style={menuActionBtnSt}
-                                            onClick={() => {
-                                              setOpenMenuState(null);
-                                              duplicateBookingLikeEvent(e);
-                                            }}
-                                          >
-                                            Дублювати
-                                          </button>
-                                          {isRecurringBookingEvent(e) ? (
-                                            <>
-                                              <div style={menuSectionLabelSt}>Видалити</div>
-                                              <div style={menuChoiceRowSt}>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "occurrence"); }}>Видалити лише цю подію</button>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Видалити всю серію</button>
-                                              </div>
-                                            </>
-                                          ) : (
-                                            <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Видалити</button>
-                                          )}
-                                          <div style={menuSectionLabelSt}>Статус події</div>
-                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Позначити як попереднє бронювання</button>
-                                          {isRecurringBookingEvent(e) ? (
-                                            <>
-                                              <div style={menuSectionLabelSt}>Скасувати</div>
-                                              <div style={menuChoiceRowSt}>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "occurrence"); }}>Скасувати лише цю подію</button>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Скасувати всю серію</button>
-                                              </div>
-                                            </>
-                                          ) : (
-                                            <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Скасована</button>
-                                          )}
-                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "active" }); }}>Активна</button>
-                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { color: null }); }}>Без кольору</button>
-                                          <div style={menuHintSt}>Статус не видаляє подію.</div>
-                                        </>
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <button
-                                        style={menuActionBtnSt}
-                                        onClick={() => {
-                                          setOpenMenuState(null);
-                                          setSelectedEventDetails(e);
-                                        }}
-                                      >
-                                        Деталі заняття
-                                      </button>
-                                      {canEditGroupSingleLesson(e) ? (
-                                        <button
-                                          style={menuActionBtnSt}
-                                          onClick={() => {
-                                            setOpenMenuState(null);
-                                            openLessonPlanEditor(e);
-                                          }}
-                                        >
-                                          План заняття
-                                        </button>
-                                      ) : null}
-                                      {canEditGroupSingleLesson(e) ? (
-                                        <button
-                                          style={menuActionBtnSt}
-                                          onClick={() => {
-                                            setOpenMenuState(null);
-                                            openGroupOverrideEditor(e);
-                                          }}
-                                        >
-                                          Змінити тільки це заняття
-                                        </button>
-                                      ) : null}
-                                      {canEditGroupSingleLesson(e) ? (
-                                        <button
-                                          style={menuActionBtnSt}
-                                          onClick={() => {
-                                            setOpenMenuState(null);
-                                            cancelSingleGroupLesson(e);
-                                          }}
-                                        >
-                                          Скасувати заняття
-                                        </button>
-                                      ) : null}
-                                      {isAdmin && (
-                                        <>
-                                          <button
-                                            style={menuActionBtnSt}
-                                            onClick={() => {
-                                              setOpenMenuState(null);
-                                              openGroupSlotEditor(e);
-                                            }}
-                                          >
-                                            Змінити регулярний графік
-                                          </button>
-                                          <div style={{ fontSize: 10, color: theme.textLight, padding: "0 4px" }}>
-                                            Це змінить усі повторювані заняття цього слоту, не лише обрану дату.
-                                          </div>
-                                        </>
-                                      )}
-                                    </>
-                                  )}
-                                  </div>,
-                                  document.body,
-                                )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+          ) : null}
+          <div style={{ overflowX: "auto", overflowY: "hidden", position: "relative" }}>
+            {(() => {
+              const shownDays = isMobile ? weekDays.filter((day) => toLocalDateKey(day) === selectedDate) : weekDays;
+              const canonicalRooms = selectedRoom === "all" ? activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean) : [selectedRoom];
+              const dayLayouts = shownDays.map((day) => {
+                const date = toLocalDateKey(day);
+                return { day, date, lanes: roomLaneLayout(roomFilteredEventsByDay.get(date) || [], canonicalRooms, UNKNOWN_ROOM_NAME) };
+              });
+              const laneWidth = selectedRoom === "all" ? (isMobile ? 220 : 84) : (isMobile ? 280 : 180);
+              const dayWidths = dayLayouts.map(({ lanes }) => Math.max(laneWidth, Math.max(1, lanes.length) * laneWidth));
+              const calendarWidth = weekTimeColumnWidth + dayWidths.reduce((sum, width) => sum + width, 0);
+              const calendarHeight = (DAY_END_HOUR - DAY_START_HOUR) * weekHourPx;
+              return <div data-testid="week-room-lane-calendar" style={{ minWidth: isMobile ? calendarWidth : Math.max(980, calendarWidth), width: "max-content" }}>
+                <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 30, minHeight: 76, background: theme.card, borderBottom: `1px solid ${theme.border}` }}>
+                  <div style={{ width: weekTimeColumnWidth, flex: "0 0 auto", position: "sticky", left: 0, zIndex: 32, background: theme.card }} />
+                  {dayLayouts.map(({ day, date, lanes }, index) => <div key={date} style={{ width: dayWidths[index], flex: "0 0 auto", borderLeft: `1px solid ${theme.border}` }}>
+                    <div style={{ padding: "6px 8px", fontWeight: 900 }}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })}</div>
+                    {selectedRoom === "all" ? <div style={{ display: "flex" }}>{lanes.map((lane) => <div key={lane.roomName} title={lane.roomName} style={{ width: laneWidth, flex: "0 0 auto", padding: "4px 5px", borderTop: `1px solid ${theme.border}`, borderLeft: `1px solid ${theme.border}`, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane.roomName}</div>)}</div> : null}
+                  </div>)}
                 </div>
-              );
-            })}
+                <div style={{ display: "flex", height: calendarHeight }}>
+                  <div style={{ position: "sticky", left: 0, zIndex: 20, width: weekTimeColumnWidth, flex: "0 0 auto", background: theme.card, borderRight: `1px solid ${theme.border}` }}>
+                    {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * weekHourPx - 7, left: 7, fontSize: 10, color: theme.textLight }}>{String(DAY_START_HOUR + i).padStart(2, "0")}:00</div>)}
+                  </div>
+                  {dayLayouts.map(({ date, lanes }, dayIndex) => <div key={date} style={{ width: dayWidths[dayIndex], flex: "0 0 auto", display: "flex", borderLeft: `1px solid ${theme.border}` }}>
+                    {lanes.map((lane) => <div key={lane.roomName} data-room-lane={lane.roomName} style={{ position: "relative", width: laneWidth, flex: "0 0 auto", borderLeft: `1px solid ${theme.border}` }}>
+                      {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * weekHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: .35 }} />)}
+                      {lane.events.map((event) => {
+                        const top = ((event.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
+                        const height = Math.max(scheduleMinEventHeight, ((event.endMin - event.startMin) / 60) * weekHourPx);
+                        const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
+                        const color = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
+                        const conflictIndex = event.simultaneous.findIndex((item) => item.id === event.id);
+                        const conflictCount = event.hasRoomConflict ? event.simultaneous.length : 1;
+                        const width = 100 / conflictCount;
+                        const accessibleLabel = `${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · ${getEventTypeLabel(event.eventType)} · Статус: ${status.text}`;
+                        return <button key={event.id} type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: "4px 5px", border: `1px solid ${color.border}`, borderRadius: 7, background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
+                          <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 10.5, lineHeight: 1.1, fontWeight: 900, textDecoration: status.textDecoration || "none", wordBreak: "break-word" }}>{event.title}</span>
+                          <span style={{ display: "block", marginTop: 2, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>{event.startTime}–{event.endTime}</span>
+                          {height >= 42 ? <span style={{ display: "block", fontSize: 9, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{getEventTypeLabel(event.eventType)}{status.showLabel ? ` · ${status.text}` : ""}</span> : null}
+                          {event.hasRoomConflict && height >= 58 ? <span onClick={(clickEvent) => { clickEvent.stopPropagation(); concurrentTriggerRef.current = clickEvent.currentTarget; setConcurrentEvents(event.simultaneous); }} style={{ display: "block", marginTop: 2, color: "#b91c1c", fontSize: 8.5, fontWeight: 900 }}>⚠ Конфлікт зали ({conflictCount})</span> : null}
+                        </button>;
+                      })}
+                    </div>)}
+                  </div>)}
+                </div>
+              </div>;
+            })()}
           </div>
+          {!weekHasEvents ? <div style={{ margin: 8, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>{mobileFilterEmptyText}</div> : null}
         </div>
-        {!weekHasEvents ? (
-          <div style={{ margin: isMobile ? 6 : 10, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>
-            {mobileFilterEmptyText}
-          </div>
-        ) : null}
-      </div>
       ) : null}
 
-      
 
       {concurrentEvents?.length ? (
         <div style={{ ...modalOverlaySt, zIndex: 5050, display: "grid", placeItems: "center", padding: 12 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setConcurrentEvents(null); }}>

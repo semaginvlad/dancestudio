@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -115,8 +115,8 @@ test("critical calendar controls retain keyboard and ARIA affordances", async ()
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /aria-label=\{periodNavigationLabels\.previous\}/);
   assert.match(source, /aria-label="Фільтр за залою"/);
-  assert.match(source, /aria-label=\{`Дії: \$\{e\.title\}, \$\{e\.date\}, \$\{e\.startTime\}`\}/);
-  assert.match(source, /role="button"[\s\S]{0,100}tabIndex=\{0\}/);
+  assert.match(source, /data-testid="week-room-lane-calendar"/);
+  assert.match(source, /type="button" data-event-card="1" aria-label=\{accessibleLabel\}/);
   assert.match(source, /role="dialog" aria-modal="true" aria-labelledby="schedule-event-details-title"/);
   assert.match(source, /ref=\{concurrentDialogRef\} role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" tabIndex=\{-1\}/);
   assert.match(source, /concurrentTriggerRef\.current\?\.focus/);
@@ -215,9 +215,56 @@ test("week card keyboard activation ignores nested action controls", async () =>
   assert.equal(isEventCardKeyboardActivation({ key: "Enter", target: action, currentTarget: card }), false);
   assert.equal(isEventCardKeyboardActivation({ key: " ", target: action, currentTarget: card }), false);
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
-  assert.match(source, /onKeyDown=\{\(ev\) => \{ if \(isEventCardKeyboardActivation\(ev\)\)/);
-  assert.match(source, /onClick=\{\(ev\) => \{\s*ev\.stopPropagation\(\);\s*const rect = ev\.currentTarget\.getBoundingClientRect\(\)/);
-  assert.match(source, /aria-label=\{`Дії:[\s\S]*?onKeyDown=\{\(ev\) => ev\.stopPropagation\(\)\}/);
+  assert.match(source, /type="button" data-event-card="1"/);
+  assert.doesNotMatch(source, /aria-label=\{`Редагувати: \$\{event\.title\}/);
+});
+
+test("room lanes isolate simultaneous and transitive overlaps by room", () => {
+  const events = [
+    { id: "a", roomName: "Зал 1", startMin: 990, endMin: 1050 },
+    { id: "b", roomName: "Зал 2", startMin: 990, endMin: 1080 },
+    { id: "c", roomName: "Зал 3", startMin: 1020, endMin: 1110 },
+    { id: "d", roomName: "Зал 1", startMin: 1050, endMin: 1140 },
+  ];
+  const lanes = roomLaneLayout(events, ["Зал 1", "Зал 2", "Зал 3"]);
+  assert.equal(lanes.length, 3);
+  assert.deepEqual(lanes.map((lane) => lane.events.length), [2, 1, 1]);
+  assert.ok(lanes.flatMap((lane) => lane.events).every((event) => event.simultaneous.every((peer) => peer.roomName === event.roomName)));
+  assert.ok(lanes.flatMap((lane) => lane.events).every((event) => event.timeCoordinate === event.startMin));
+});
+
+test("dense evening room lanes retain all twelve real time coordinates", () => {
+  const events = Array.from({ length: 12 }, (_, index) => ({
+    id: String(index), roomName: `Зал ${(index % 3) + 1}`,
+    startMin: 990 + index * 25, endMin: 1035 + index * 25,
+  }));
+  const laidOut = roomLaneLayout(events, ["Зал 1", "Зал 2", "Зал 3"]).flatMap((lane) => lane.events);
+  assert.equal(laidOut.length, 12);
+  assert.deepEqual(laidOut.map((event) => event.timeCoordinate).sort((a, b) => a - b), events.map((event) => event.startMin));
+});
+
+test("only a real same-room overlap is marked as a booking conflict", () => {
+  const lanes = roomLaneLayout([
+    { id: "same-a", roomName: "Зал 1", startMin: 1080, endMin: 1140 },
+    { id: "same-b", roomName: "Зал 1", startMin: 1110, endMin: 1170 },
+    { id: "other", roomName: "Зал 2", startMin: 1110, endMin: 1170 },
+  ], ["Зал 1", "Зал 2"]);
+  assert.ok(lanes[0].events.every((event) => event.hasRoomConflict));
+  assert.equal(lanes[1].events[0].hasRoomConflict, false);
+});
+
+test("unknown room is appended only when unknown events exist", () => {
+  assert.deepEqual(roomLaneLayout([{ id: "x", startMin: 600, endMin: 660 }], ["Зал 1"]).map((lane) => lane.roomName), ["Зал 1", "Зала не вказана"]);
+  assert.deepEqual(roomLaneLayout([], ["Зал 1"]).map((lane) => lane.roomName), ["Зал 1"]);
+});
+
+test("specific room and mobile week UI keep one wide lane and a day selector", async () => {
+  const lanes = roomLaneLayout([{ id: "x", roomName: "Нова назва", startMin: 600, endMin: 660 }], ["Нова назва"]);
+  assert.equal(lanes.length, 1);
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /aria-label="Оберіть день тижня"/);
+  assert.match(source, /selectedRoom === "all" \? \(isMobile \? 220 : 84\) : \(isMobile \? 280 : 180\)/);
+  assert.match(source, /canEditCollisionEvent\(selectedEventDetails/);
 });
 
 test("collision overflow and details use canonical booking status", async () => {
