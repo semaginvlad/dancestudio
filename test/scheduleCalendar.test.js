@@ -205,3 +205,27 @@ test("short adjacent collision clusters retain exact scaled time geometry", asyn
   assert.equal(shortMobile.visible.length, 0);
   assert.equal(shortMobile.overflow, 4);
 });
+
+test("week card keyboard activation ignores nested action controls", async () => {
+  const { isEventCardKeyboardActivation } = await import("../src/scheduleCalendar.js");
+  const card = {};
+  const action = {};
+  assert.equal(isEventCardKeyboardActivation({ key: "Enter", target: card, currentTarget: card }), true);
+  assert.equal(isEventCardKeyboardActivation({ key: " ", target: card, currentTarget: card }), true);
+  assert.equal(isEventCardKeyboardActivation({ key: "Enter", target: action, currentTarget: card }), false);
+  assert.equal(isEventCardKeyboardActivation({ key: " ", target: action, currentTarget: card }), false);
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /onKeyDown=\{\(ev\) => \{ if \(isEventCardKeyboardActivation\(ev\)\)/);
+  assert.match(source, /onClick=\{\(ev\) => \{\s*ev\.stopPropagation\(\);\s*const rect = ev\.currentTarget\.getBoundingClientRect\(\)/);
+});
+
+test("collision overflow and details use canonical booking status", async () => {
+  const { collisionStatusPresentation } = await import("../src/scheduleCalendar.js");
+  assert.equal(collisionStatusPresentation("active").showLabel, false);
+  assert.equal(collisionStatusPresentation("tentative").text, "Попередньо");
+  assert.equal(collisionStatusPresentation("cancelled").text, "Скасовано");
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /concurrentEvents\.map[\s\S]*?collisionStatusPresentation\(event\.status\)/);
+  assert.match(source, /aria-label=\{accessibleLabel\}/);
+  assert.match(source, /selectedEventDetails\.status \|\| \(selectedEventDetails\.cancelled \? "cancelled" : "active"\)/);
+});

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionClusterGeometry, collisionStatusPresentation, collisionTilePreview, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionClusterGeometry, collisionStatusPresentation, collisionTilePreview, EVENT_STATUS_STYLES, isEventCardKeyboardActivation, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -2620,7 +2620,10 @@ export default function ScheduleTab({
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>📅 {selectedEventDetails.date}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>⌂ {selectedEventDetails.roomName || UNKNOWN_ROOM_NAME}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>{getEventTypeLabel(selectedEventDetails.eventType)}</span>
-              {selectedEventDetails.cancelled ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", color: theme.danger }}>Скасовано</span> : null}
+              {(() => {
+                const detailStatus = collisionStatusPresentation(selectedEventDetails.status || (selectedEventDetails.cancelled ? "cancelled" : "active"));
+                return detailStatus.showLabel ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", opacity: detailStatus.opacity, color: detailStatus.status === "cancelled" ? theme.danger : theme.text }}>{detailStatus.text}</span> : null;
+              })()}
             </div>
             <dl style={{ marginTop: 12, display: "grid", gridTemplateColumns: "max-content 1fr", gap: "8px 14px", fontSize: 13 }}>
               {buildEventDetails(selectedEventDetails).map((field) => (
@@ -3444,7 +3447,7 @@ export default function ScheduleTab({
                         role="button"
                         tabIndex={0}
                         title={`${e.title} · ${e.startTime}–${e.endTime} · ${e.roomName || UNKNOWN_ROOM_NAME} · ${e.trainer || e.trainerName || "Без тренера"} · ${getEventTypeLabel(e.eventType)}`}
-                        onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setSelectedEventDetails(e); } }}
+                        onKeyDown={(ev) => { if (isEventCardKeyboardActivation(ev)) { ev.preventDefault(); setSelectedEventDetails(e); } }}
                         onMouseDown={(ev) => ev.stopPropagation()}
                         onMouseUp={(ev) => ev.stopPropagation()}
                         onClick={(ev) => {
@@ -3693,13 +3696,17 @@ export default function ScheduleTab({
               <button type="button" aria-label="Закрити список одночасних подій" style={editorBtnSt} onClick={() => setConcurrentEvents(null)}>✕</button>
             </div>
             <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-              {concurrentEvents.map((event) => (
-                <button key={event.id} type="button" onFocus={(ev) => { ev.currentTarget.style.outline = `3px solid ${theme.primary}`; }} onBlur={(ev) => { ev.currentTarget.style.outline = "none"; }} style={{ ...editorBtnSt, outline: "none", minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
-                  <b>{event.title}</b>
-                  <span>{event.startTime}–{event.endTime} · {event.roomName || UNKNOWN_ROOM_NAME}</span>
-                  <span style={{ color: theme.textLight }}>{event.trainer || event.trainerName || "Тренера не вказано"} · {getEventTypeLabel(event.eventType)}</span>
-                </button>
-              ))}
+              {concurrentEvents.map((event) => {
+                const eventStatus = collisionStatusPresentation(event.status);
+                const accessibleLabel = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${getEventTypeLabel(event.eventType)} · Статус: ${eventStatus.text}`;
+                return (
+                  <button key={event.id} type="button" aria-label={accessibleLabel} onFocus={(ev) => { ev.currentTarget.style.outline = `3px solid ${theme.primary}`; }} onBlur={(ev) => { ev.currentTarget.style.outline = "none"; }} style={{ ...editorBtnSt, outline: "none", opacity: eventStatus.opacity, minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
+                    <b style={{ textDecoration: eventStatus.textDecoration || "none" }}>{event.title}</b>
+                    <span>{event.startTime}–{event.endTime} · {event.roomName || UNKNOWN_ROOM_NAME}</span>
+                    <span style={{ color: theme.textLight }}>{event.trainer || event.trainerName || "Тренера не вказано"} · {getEventTypeLabel(event.eventType)}{eventStatus.showLabel ? ` · ${eventStatus.text}` : ""}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

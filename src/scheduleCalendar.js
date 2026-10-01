@@ -129,6 +129,9 @@ export const collisionStatusPresentation = (status) => {
   return { status: normalized, ...EVENT_STATUS_STYLES[normalized], showLabel: normalized !== "active" };
 };
 
+export const isEventCardKeyboardActivation = (event) =>
+  event?.target === event?.currentTarget && (event?.key === "Enter" || event?.key === " ");
+
 export const requireScheduleSaveResult = (result, message = "Зміни не були збережені") => {
   if (result === null || result === undefined || result === false) throw new Error(message);
   return result;
