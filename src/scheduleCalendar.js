@@ -128,6 +128,28 @@ export const roomLaneLayout = (events = [], roomNames = [], unknownRoomName = "Ð
   });
 };
 
+export const weekEventGeometry = (startMin, endMin, hourPx, dayStartHour = 8) => ({
+  top: ((Number(startMin) - dayStartHour * 60) / 60) * Number(hourPx),
+  // Never inflate the outer box: doing so makes adjacent short bookings look
+  // as though they overlap. Compact content is handled inside the card.
+  height: Math.max(0, ((Number(endMin) - Number(startMin)) / 60) * Number(hourPx)),
+});
+
+export const weekLaneSelection = ({ date, roomName, startY, endY, hourPx, dayStartHour = 8, dayEndHour = 22 }) => {
+  const toQuarter = (y) => Math.round((dayStartHour * 60 + (Number(y) / Number(hourPx)) * 60) / 15) * 15;
+  const min = dayStartHour * 60;
+  const max = dayEndHour * 60;
+  const first = Math.min(max, Math.max(min, toQuarter(startY)));
+  const last = Math.min(max, Math.max(min, toQuarter(endY)));
+  const startMinute = Math.min(max - 15, Math.min(first, last));
+  return {
+    date,
+    roomName,
+    startMinute,
+    endMinute: Math.min(max, Math.max(startMinute + 15, Math.max(first, last))),
+  };
+};
+
 export const collisionTilePreview = (events, { availableHeightPx = 42, isMobile = false } = {}) => {
   const columns = isMobile ? 2 : events.length >= 8 ? 3 : 2;
   const usableHeight = Math.max(0, Number(availableHeightPx) - 6);

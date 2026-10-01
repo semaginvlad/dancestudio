@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -264,7 +264,7 @@ test("specific room and mobile week UI keep one wide lane and a day selector", a
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /aria-label="Оберіть день тижня"/);
   assert.match(source, /selectedRoom === "all" \? \(isMobile \? 220 : 84\) : \(isMobile \? 280 : 180\)/);
-  assert.match(source, /canEditCollisionEvent\(selectedEventDetails/);
+  assert.match(source, /aria-label={`Створити подію: \${date}, \${lane.roomName}`}/);
 });
 
 test("collision overflow and details use canonical booking status", async () => {
@@ -276,4 +276,63 @@ test("collision overflow and details use canonical booking status", async () => 
   assert.match(source, /concurrentEvents\.map[\s\S]*?collisionStatusPresentation\(event\.status\)/);
   assert.match(source, /aria-label=\{accessibleLabel\}/);
   assert.match(source, /selectedEventDetails\.status \|\| \(selectedEventDetails\.cancelled \? "cancelled" : "active"\)/);
+});
+
+test("week room-lane selection preserves date, room and real quarter-hour range", () => {
+  assert.deepEqual(weekLaneSelection({
+    date: "2026-10-01", roomName: "Зал 2", startY: 459, endY: 594,
+    hourPx: 54, dayStartHour: 8, dayEndHour: 22,
+  }), { date: "2026-10-01", roomName: "Зал 2", startMinute: 990, endMinute: 1140 });
+  const reverse = weekLaneSelection({ date: "2026-10-01", roomName: "Зал 3", startY: 270, endY: 216, hourPx: 54 });
+  assert.deepEqual(reverse, { date: "2026-10-01", roomName: "Зал 3", startMinute: 720, endMinute: 780 });
+});
+
+test("adjacent fifteen-minute week cards have exact non-overlapping geometry", () => {
+  for (const hourPx of [32, 54, 70]) {
+    const first = weekEventGeometry(600, 615, hourPx);
+    const second = weekEventGeometry(615, 630, hourPx);
+    assert.equal(first.top + first.height, second.top);
+    assert.equal(first.height, hourPx / 4);
+  }
+});
+
+test("room-lane creation remains available on desktop and mobile without covering cards", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /canManageBookings \? <div[\s\S]*?onPointerDown=[\s\S]*?onPointerMove=[\s\S]*?onPointerUp=/);
+  assert.match(source, /openCreateAt\(date, current\.startMinute, pointerEvent, current\.endMinute, lane\.roomName\)/);
+  assert.match(source, /aria-label=\{`Створити подію: \$\{date\}, \$\{lane\.roomName\}`\}/);
+  assert.match(source, /onKeyDown=\{\(pointerEvent\)[\s\S]*?openCreateAt\(date,[\s\S]*?lane\.roomName\)/);
+  assert.match(source, /style=\{\{ position: "absolute", inset: 0, zIndex: 1/);
+  assert.match(source, /data-event-card="1"[\s\S]*?zIndex: 5 \+ conflictIndex/);
+});
+
+test("booking details retain every mutation action and occurrence-series semantics", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const details = source.slice(source.indexOf('{selectedEventDetails &&'), source.indexOf('{bulkPlanSetup &&'));
+  assert.match(details, /selectedEventDetails\.kind === "booking" && canMutateEvent\(selectedEventDetails\)/);
+  for (const label of ["Редагувати", "Дублювати", "Видалити лише цю подію", "Видалити всю серію", "Позначити як попереднє бронювання", "Скасувати лише цю подію", "Скасувати всю серію", "Повернути active", "Скинути колір"]) assert.match(details, new RegExp(label));
+  assert.match(details, /deleteBookingEvent\(event, "occurrence"\)/);
+  assert.match(details, /deleteBookingEvent\(event, "series"\)/);
+  assert.match(details, /cancelBookingEvent\(event, "occurrence"\)/);
+  assert.match(details, /cancelBookingEvent\(event, "series"\)/);
+});
+
+test("group details retain permission-gated lesson actions and admin-only regular edit", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const details = source.slice(source.indexOf('{selectedEventDetails &&'), source.indexOf('{bulkPlanSetup &&'));
+  assert.match(details, /selectedEventDetails\.kind === "group" && canEditGroupSingleLesson\(selectedEventDetails\)/);
+  assert.match(details, /openLessonPlanEditor\(event\)/);
+  assert.match(details, /openGroupOverrideEditor\(event\)/);
+  assert.match(details, /cancelSingleGroupLesson\(event\)/);
+  assert.match(details, /\{isAdmin \? <button[\s\S]*?openGroupSlotEditor\(event\)/);
+});
+
+test("week plan and same-room conflict indicators are accessible sibling controls", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const hasPlan = hasLessonPlanForEvent\(event\)/);
+  assert.match(source, /getLessonPlanSeriesLabelForEvent\(event\)/);
+  assert.match(source, /aria-label=\{planSeriesLabel \? `Є план, порядок/);
+  assert.match(source, /<\/button>\s*\{event\.hasRoomConflict && event\.isRepresentative \? <button type="button" aria-label=\{`Відкрити конфлікт бронювання зали/);
+  assert.doesNotMatch(source, /<button[^>]*data-event-card="1"[\s\S]{0,2500}<span[^>]*onClick=/);
+  assert.match(source, /concurrentTriggerRef\.current = clickEvent\.currentTarget/);
 });
