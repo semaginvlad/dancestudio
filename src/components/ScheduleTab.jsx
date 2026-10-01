@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionTilePreview, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionClusterGeometry, collisionStatusPresentation, collisionTilePreview, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -328,7 +328,7 @@ const formatLessonPlanSeriesLabel = (series = null) => {
 };
 
 const DEBUG_QUICK_CREATE = false;
-const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
+const statusStyles = EVENT_STATUS_STYLES;
 const palette = {
   latin: { bg: "rgba(250,211,144,.24)", border: "#f59e0b" },
   bachata: { bg: "rgba(244,114,182,.22)", border: "#ec4899" },
@@ -3397,21 +3397,22 @@ export default function ScheduleTab({
                       ? { bg: `${e.color}22`, border: e.color }
                       : palette[colorKey(e)] || palette.default;
                     if (useConcurrentSummary) {
-                      const clusterTop = ((e.clusterStartMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
-                      const clusterHeight = Math.max(42, ((e.clusterEndMin - e.clusterStartMin) / 60) * weekHourPx);
+                      const { top: clusterTop, height: clusterHeight } = collisionClusterGeometry(e.clusterStartMin, e.clusterEndMin, weekHourPx, DAY_START_HOUR);
                       const clusterRange = `${minToHHMM(e.clusterStartMin)}–${minToHHMM(e.clusterEndMin)}`;
                       const tilePreview = collisionTilePreview(e.simultaneous, { availableHeightPx: clusterHeight, isMobile });
                       return (
-                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, minHeight: 42, zIndex: 5, border: `1px solid ${theme.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(22px, 1fr)", gap: 3, overflow: "hidden" }}>
+                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, zIndex: 5, border: `1px solid ${theme.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)", gap: 3, overflow: "hidden" }}>
                           {tilePreview.visible.map((event) => {
                             const eventMark = getEventTypeMark(event);
                             const eventTitle = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${event.trainer || event.trainerName || "Без тренера"} · ${getEventTypeLabel(event.eventType)}`;
                             const eventColor = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
+                            const eventStatus = collisionStatusPresentation(event.status);
+                            const eventAccessibleTitle = `${eventTitle} · Статус: ${eventStatus.text}`;
                             const canOpenActions = canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson });
                             return (
-                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${eventColor.border}`, borderRadius: 6, background: eventColor.bg, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
-                                <button type="button" title={eventTitle} aria-label={eventTitle} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ border: 0, background: "transparent", color: theme.text, padding: "3px 4px", minWidth: 0, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
-                                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eventMark ? `${eventMark} · ` : ""}{event.title}</span>
+                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${eventColor.border}`, borderRadius: 6, background: eventColor.bg, opacity: eventStatus.opacity, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
+                                <button type="button" title={eventAccessibleTitle} aria-label={eventAccessibleTitle} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ border: 0, background: "transparent", color: theme.text, padding: "3px 4px", minWidth: 0, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
+                                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eventMark ? `${eventMark} · ` : ""}<span style={{ textDecoration: eventStatus.textDecoration || "none" }}>{event.title}</span>{eventStatus.showLabel ? <span style={{ marginLeft: 3, fontSize: 8, fontWeight: 900 }}>· {eventStatus.text}</span> : null}</span>
                                   <span style={{ display: "block", fontSize: 8.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: theme.textLight }}>⌂ {event.roomName || UNKNOWN_ROOM_NAME}{event.startMin !== e.clusterStartMin ? ` · ${event.startTime}` : ""}</span>
                                 </button>
                                 {canOpenActions ? <button type="button" aria-label={`Редагувати: ${event.title}, ${event.date}, ${event.startTime}`} style={{ border: 0, borderLeft: `1px solid ${theme.border}`, background: "transparent", color: theme.text, cursor: "pointer", padding: 0 }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson })) return; if (event.kind === "booking") startEdit(event); else openGroupOverrideEditor(event); }}>✎</button> : null}

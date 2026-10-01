@@ -102,15 +102,31 @@ export const weekEventLayout = (events) => {
 
 export const collisionTilePreview = (events, { availableHeightPx = 42, isMobile = false } = {}) => {
   const columns = isMobile ? 2 : events.length >= 8 ? 3 : 2;
-  const usableHeight = Math.max(22, Number(availableHeightPx) - 6);
-  const rows = Math.max(1, Math.floor(usableHeight / 22));
-  const capacity = Math.max(2, columns * rows);
+  const usableHeight = Math.max(0, Number(availableHeightPx) - 6);
+  const rows = Math.floor(usableHeight / 18);
+  const capacity = rows > 0 ? columns * rows : 1;
   const visibleCount = events.length > capacity ? capacity - 1 : Math.min(events.length, capacity);
   return {
     columns,
     visible: events.slice(0, visibleCount),
     overflow: Math.max(0, events.length - visibleCount),
   };
+};
+
+export const collisionClusterGeometry = (startMin, endMin, weekHourPx, dayStartHour = 8) => ({
+  top: ((Number(startMin) - dayStartHour * 60) / 60) * Number(weekHourPx),
+  height: Math.max(0, ((Number(endMin) - Number(startMin)) / 60) * Number(weekHourPx)),
+});
+
+export const EVENT_STATUS_STYLES = {
+  active: { opacity: 1, text: "Активно" },
+  tentative: { opacity: 0.65, text: "Попередньо" },
+  cancelled: { opacity: 0.45, text: "Скасовано", textDecoration: "line-through" },
+};
+
+export const collisionStatusPresentation = (status) => {
+  const normalized = EVENT_STATUS_STYLES[status] ? status : "active";
+  return { status: normalized, ...EVENT_STATUS_STYLES[normalized], showLabel: normalized !== "active" };
 };
 
 export const requireScheduleSaveResult = (result, message = "Зміни не були збережені") => {

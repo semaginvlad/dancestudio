@@ -134,7 +134,7 @@ test("collision tile preview keeps visible content and deterministic overflow", 
   const events = Array.from({ length: 12 }, (_, id) => ({ id }));
   assert.deepEqual(collisionTilePreview(events.slice(0, 2), { availableHeightPx: 60 }), { columns: 2, visible: events.slice(0, 2), overflow: 0 });
   assert.equal(collisionTilePreview(events.slice(0, 4), { availableHeightPx: 60 }).visible.length, 4);
-  const short = collisionTilePreview(events, { availableHeightPx: 42 });
+  const short = collisionTilePreview(events, { availableHeightPx: 27 });
   assert.equal(short.visible.length, 2);
   assert.equal(short.overflow, 10);
   const long = collisionTilePreview(events, { availableHeightPx: 270 });
@@ -177,4 +177,31 @@ test("collision edit permission follows admin, booking ownership and group assig
   assert.equal(canEditCollisionEvent(booking, outsiderPolicy), false);
   assert.equal(canEditCollisionEvent(group, adminPolicy), true);
   assert.equal(canEditCollisionEvent(group, outsiderPolicy), false);
+});
+
+test("collision tile statuses distinguish active, tentative and cancelled", async () => {
+  const { collisionStatusPresentation } = await import("../src/scheduleCalendar.js");
+  assert.deepEqual(collisionStatusPresentation("active"), { status: "active", opacity: 1, text: "Активно", showLabel: false });
+  assert.equal(collisionStatusPresentation("tentative").text, "Попередньо");
+  assert.equal(collisionStatusPresentation("tentative").showLabel, true);
+  assert.equal(collisionStatusPresentation("cancelled").text, "Скасовано");
+  assert.equal(collisionStatusPresentation("cancelled").textDecoration, "line-through");
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /Статус: \$\{eventStatus\.text\}/);
+  assert.match(source, /eventStatus\.showLabel/);
+});
+
+test("short adjacent collision clusters retain exact scaled time geometry", async () => {
+  const { collisionClusterGeometry, collisionTilePreview } = await import("../src/scheduleCalendar.js");
+  for (const hourPx of [32, 54, 70]) {
+    const first = collisionClusterGeometry(600, 630, hourPx);
+    const second = collisionClusterGeometry(630, 660, hourPx);
+    assert.equal(first.top + first.height, second.top);
+    assert.equal(first.height, hourPx / 2);
+  }
+  const shortDesktop = collisionTilePreview([1, 2, 3, 4], { availableHeightPx: 27, isMobile: false });
+  const shortMobile = collisionTilePreview([1, 2, 3, 4], { availableHeightPx: 16, isMobile: true });
+  assert.ok(shortDesktop.visible.length >= 1);
+  assert.equal(shortMobile.visible.length, 0);
+  assert.equal(shortMobile.overflow, 4);
 });
