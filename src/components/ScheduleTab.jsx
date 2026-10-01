@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -473,6 +473,7 @@ export default function ScheduleTab({
   const [viewMode, setViewMode] = useState("week"); // month | week | day
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));
   const [selectedRoom, setSelectedRoom] = useState("all");
+  const [mobileWeekMode, setMobileWeekMode] = useState("day"); // overview | day
   const [dayRoomColumnLimit, setDayRoomColumnLimit] = useStickyState(
     typeof window !== "undefined" && window.innerWidth < 900 ? "1" : "all",
     "ds_day_room_column_limit_v1",
@@ -1980,6 +1981,8 @@ export default function ScheduleTab({
   const dayRoomMaxWidth = isMobile ? Math.max(200, Math.round(260 * scheduleScaleFactor)) : 260;
   const mobileCalendarBleedSt = isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : null;
   const isDarkTheme = String(theme.bg || "").toLowerCase() === "#0f131a";
+  const weekDayDividerColor = isDarkTheme ? "rgba(148,163,184,.42)" : "rgba(71,85,105,.32)";
+  const weekRoomDividerColor = isDarkTheme ? "rgba(148,163,184,.20)" : "rgba(148,163,184,.28)";
   const typeAccent = {
     group_lesson: { bg: "rgba(99,102,241,.12)", border: "#6366f1", text: isDarkTheme ? "#c7d2fe" : "#4338ca" },
     individual_training: { bg: "rgba(6,182,212,.14)", border: "#06b6d4", text: isDarkTheme ? "#a5f3fc" : "#0e7490" },
@@ -3278,15 +3281,42 @@ export default function ScheduleTab({
 
       {viewMode === "week" ? (
         <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: 0, overflow: "hidden" }}>
-          {isMobile ? (
-            <div aria-label="Оберіть день тижня" style={{ display: "flex", gap: 6, padding: 8, overflowX: "auto", borderBottom: `1px solid ${theme.border}` }}>
+          {isMobile ? <>
+            <div aria-label="Режим тижня" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, padding: 8, borderBottom: `1px solid ${theme.border}` }}>
+              <button type="button" style={mobileWeekMode === "overview" ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => setMobileWeekMode("overview")}>Огляд тижня</button>
+              <button type="button" style={mobileWeekMode === "day" ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => setMobileWeekMode("day")}>Обраний день</button>
+            </div>
+            {mobileWeekMode === "day" ? <div aria-label="Оберіть день тижня" style={{ display: "flex", gap: 6, padding: 8, overflowX: "auto", borderBottom: `1px solid ${theme.border}` }}>
               {weekDays.map((day) => {
                 const key = toLocalDateKey(day);
                 return <button key={key} type="button" onClick={() => setSelectedDate(key)} style={key === selectedDate ? toolbarActiveSt : editorBtnSt}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "numeric" })}</button>;
               })}
-            </div>
-          ) : null}
-          <div style={{ overflowX: "auto", overflowY: "hidden", position: "relative" }}>
+            </div> : <div data-testid="mobile-week-overview" style={{ display: "flex", gap: 7, padding: 8, overflowX: "auto", alignItems: "stretch" }}>
+              {weekDays.map((day) => {
+                const date = toLocalDateKey(day);
+                const preview = compactDayPreview(roomFilteredEventsByDay.get(date) || [], 5);
+                return <section key={date} style={{ width: 116, flex: "0 0 116px", minHeight: 170, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 5, background: date === toLocalDateKey(new Date()) ? `${theme.primary}0d` : theme.card }}>
+                  <button type="button" aria-label={`Відкрити день ${date}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ width: "100%", border: 0, background: "transparent", color: theme.text, textAlign: "left", padding: "2px 3px 6px", cursor: "pointer" }}>
+                    <b style={{ display: "block", fontSize: 12 }}>{day.toLocaleDateString("uk-UA", { weekday: "short" })}</b>
+                    <span style={{ fontSize: 10, color: theme.textLight }}>{day.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })}</span>
+                  </button>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {preview.visible.map((event) => {
+                      const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
+                      return <button key={event.id} type="button" aria-label={`${event.title}, ${event.startTime}, ${event.roomName || UNKNOWN_ROOM_NAME}, ${status.text}`} onClick={() => setSelectedEventDetails(event)} style={{ minHeight: 31, border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 4px", background: theme.card, color: theme.text, opacity: status.opacity, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
+                        <span style={{ display: "block", fontSize: 9, fontWeight: 900, whiteSpace: "nowrap" }}>{event.startTime}</span>
+                        <span style={{ display: "block", fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: status.textDecoration || "none" }}>{event.title}</span>
+                        <span style={{ display: "block", fontSize: 8, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.roomName || UNKNOWN_ROOM_NAME}</span>
+                      </button>;
+                    })}
+                    {preview.remaining > 0 ? <button type="button" aria-label={`Ще ${preview.remaining} подій, відкрити день ${date}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ ...mobileToolbarBtnSt, minHeight: 30, fontSize: 10 }}>+{preview.remaining}</button> : null}
+                    {!preview.visible.length ? <span style={{ padding: 4, fontSize: 9, color: theme.textLight }}>Немає подій</span> : null}
+                  </div>
+                </section>;
+              })}
+            </div>}
+          </> : null}
+          {(!isMobile || mobileWeekMode === "day") ? <div style={{ overflowX: "auto", overflowY: "hidden", position: "relative" }}>
             {(() => {
               const shownDays = isMobile ? weekDays.filter((day) => toLocalDateKey(day) === selectedDate) : weekDays;
               const canonicalRooms = selectedRoom === "all" ? activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean) : [selectedRoom];
@@ -3294,24 +3324,34 @@ export default function ScheduleTab({
                 const date = toLocalDateKey(day);
                 return { day, date, lanes: roomLaneLayout(roomFilteredEventsByDay.get(date) || [], canonicalRooms, UNKNOWN_ROOM_NAME) };
               });
-              const laneWidth = selectedRoom === "all" ? (isMobile ? 220 : 84) : (isMobile ? 280 : 180);
-              const dayWidths = dayLayouts.map(({ lanes }) => Math.max(laneWidth, Math.max(1, lanes.length) * laneWidth));
-              const calendarWidth = weekTimeColumnWidth + dayWidths.reduce((sum, width) => sum + width, 0);
+              const laneWidth = selectedRoom === "all" ? (isMobile ? "clamp(138px, 40vw, 156px)" : 84) : (isMobile ? 280 : 180);
+              const laneWidthEstimate = selectedRoom === "all" && isMobile ? 150 : Number(laneWidth);
+              const dayWidths = dayLayouts.map(({ lanes }) => isMobile && selectedRoom === "all"
+                ? `calc(${Math.max(1, lanes.length)} * clamp(138px, 40vw, 156px))`
+                : Math.max(laneWidthEstimate, Math.max(1, lanes.length) * laneWidthEstimate));
+              const calendarWidth = weekTimeColumnWidth + dayLayouts.reduce((sum, { lanes }) => sum + Math.max(1, lanes.length) * laneWidthEstimate, 0);
               const calendarHeight = (DAY_END_HOUR - DAY_START_HOUR) * weekHourPx;
               return <div data-testid="week-room-lane-calendar" style={{ minWidth: isMobile ? calendarWidth : Math.max(980, calendarWidth), width: "max-content" }}>
                 <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 30, minHeight: 76, background: theme.card, borderBottom: `1px solid ${theme.border}` }}>
                   <div style={{ width: weekTimeColumnWidth, flex: "0 0 auto", position: "sticky", left: 0, zIndex: 32, background: theme.card }} />
-                  {dayLayouts.map(({ day, date, lanes }, index) => <div key={date} style={{ width: dayWidths[index], flex: "0 0 auto", borderLeft: `1px solid ${theme.border}` }}>
-                    <div style={{ padding: "6px 8px", fontWeight: 900 }}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })}</div>
-                    {selectedRoom === "all" ? <div style={{ display: "flex" }}>{lanes.map((lane) => <div key={lane.roomName} title={lane.roomName} style={{ width: laneWidth, flex: "0 0 auto", padding: "4px 5px", borderTop: `1px solid ${theme.border}`, borderLeft: `1px solid ${theme.border}`, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane.roomName}</div>)}</div> : null}
-                  </div>)}
+                  {dayLayouts.map(({ day, date, lanes }, index) => {
+                    const isToday = date === toLocalDateKey(new Date());
+                    const divider = index > 0 ? `3px solid ${isToday ? theme.primary : weekDayDividerColor}` : `1px solid ${weekRoomDividerColor}`;
+                    return <div key={date} data-day-divider="header" style={{ width: dayWidths[index], flex: "0 0 auto", borderLeft: divider, background: index % 2 ? (isDarkTheme ? "rgba(148,163,184,.025)" : "rgba(148,163,184,.035)") : "transparent" }}>
+                      <div style={{ padding: "6px 8px", fontWeight: 900 }}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })}</div>
+                      {selectedRoom === "all" ? <div style={{ display: "flex" }}>{lanes.map((lane, laneIndex) => <div key={lane.roomName} data-room-divider="header" title={lane.roomName} style={{ width: laneWidth, flex: "0 0 auto", padding: "4px 5px", borderTop: `1px solid ${theme.border}`, borderLeft: laneIndex ? `1px solid ${weekRoomDividerColor}` : 0, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane.roomName}</div>)}</div> : null}
+                    </div>;
+                  })}
                 </div>
                 <div style={{ display: "flex", height: calendarHeight }}>
                   <div style={{ position: "sticky", left: 0, zIndex: 20, width: weekTimeColumnWidth, flex: "0 0 auto", background: theme.card, borderRight: `1px solid ${theme.border}` }}>
                     {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * weekHourPx - 7, left: 7, fontSize: 10, color: theme.textLight }}>{String(DAY_START_HOUR + i).padStart(2, "0")}:00</div>)}
                   </div>
-                  {dayLayouts.map(({ date, lanes }, dayIndex) => <div key={date} style={{ width: dayWidths[dayIndex], flex: "0 0 auto", display: "flex", borderLeft: `1px solid ${theme.border}` }}>
-                    {lanes.map((lane) => <div key={lane.roomName} data-room-lane={lane.roomName} style={{ position: "relative", width: laneWidth, flex: "0 0 auto", borderLeft: `1px solid ${theme.border}` }}>
+                  {dayLayouts.map(({ date, lanes }, dayIndex) => {
+                    const isToday = date === toLocalDateKey(new Date());
+                    const divider = dayIndex > 0 ? `3px solid ${isToday ? theme.primary : weekDayDividerColor}` : `1px solid ${weekRoomDividerColor}`;
+                    return <div key={date} data-day-divider="body" style={{ width: dayWidths[dayIndex], flex: "0 0 auto", display: "flex", borderLeft: divider, background: dayIndex % 2 ? (isDarkTheme ? "rgba(148,163,184,.025)" : "rgba(148,163,184,.035)") : "transparent" }}>
+                    {lanes.map((lane, laneIndex) => <div key={lane.roomName} data-room-lane={lane.roomName} data-room-divider="body" style={{ position: "relative", width: laneWidth, flex: "0 0 auto", borderLeft: laneIndex ? `1px solid ${weekRoomDividerColor}` : 0 }}>
                       {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * weekHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: .35 }} />)}
                       {canManageBookings ? <div
                         role="button"
@@ -3362,7 +3402,7 @@ export default function ScheduleTab({
                         const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(event) : "";
                         const accessibleLabel = `${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · ${getEventTypeLabel(event.eventType)} · Статус: ${status.text}`;
                         return <React.Fragment key={event.id}>
-                          <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: height < 24 ? "1px 4px" : "4px 5px", paddingRight: hasPlan ? 21 : 5, border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
+                          <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
                             {hasPlan ? <span aria-label={planSeriesLabel ? `Є план, порядок ${planSeriesLabel}` : "Є план"} title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: 2, right: 2, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 999, background: "#0f9f8f", color: "#fff", fontSize: 8, fontWeight: 900, display: "grid", placeItems: "center" }}>{planSeriesLabel || "✓"}</span> : null}
                             <span style={{ display: "-webkit-box", WebkitLineClamp: height >= 32 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: height < 24 ? 9 : 10.5, lineHeight: 1.1, fontWeight: 900, textDecoration: status.textDecoration || "none", wordBreak: "break-word" }}>{event.title}</span>
                             {height >= 24 ? <span style={{ display: "block", marginTop: 2, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>{event.startTime}–{event.endTime}</span> : null}
@@ -3372,11 +3412,12 @@ export default function ScheduleTab({
                         </React.Fragment>;
                       })}
                     </div>)}
-                  </div>)}
+                  </div>;
+                  })}
                 </div>
               </div>;
             })()}
-          </div>
+          </div> : null}
           {!weekHasEvents ? <div style={{ margin: 8, border: `1px dashed ${theme.border}`, borderRadius: 10, padding: 10, color: theme.textLight }}>{mobileFilterEmptyText}</div> : null}
         </div>
       ) : null}

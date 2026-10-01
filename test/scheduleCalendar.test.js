@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, compactDayPreview, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -263,7 +263,7 @@ test("specific room and mobile week UI keep one wide lane and a day selector", a
   assert.equal(lanes.length, 1);
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /aria-label="Оберіть день тижня"/);
-  assert.match(source, /selectedRoom === "all" \? \(isMobile \? 220 : 84\) : \(isMobile \? 280 : 180\)/);
+  assert.match(source, /selectedRoom === "all" \? \(isMobile \? "clamp\(138px, 40vw, 156px\)" : 84\) : \(isMobile \? 280 : 180\)/);
   assert.match(source, /aria-label={`Створити подію: \${date}, \${lane.roomName}`}/);
 });
 
@@ -335,4 +335,51 @@ test("week plan and same-room conflict indicators are accessible sibling control
   assert.match(source, /<\/button>\s*\{event\.hasRoomConflict && event\.isRepresentative \? <button type="button" aria-label=\{`Відкрити конфлікт бронювання зали/);
   assert.doesNotMatch(source, /<button[^>]*data-event-card="1"[\s\S]{0,2500}<span[^>]*onClick=/);
   assert.match(source, /concurrentTriggerRef\.current = clickEvent\.currentTarget/);
+});
+
+test("desktop week uses stronger matching day dividers and thin room dividers", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const divider = index > 0 \? `3px solid/);
+  assert.match(source, /const divider = dayIndex > 0 \? `3px solid/);
+  assert.match(source, /data-day-divider="header"[\s\S]*?borderLeft: divider/);
+  assert.match(source, /data-day-divider="body"[\s\S]*?borderLeft: divider/);
+  assert.match(source, /data-room-divider="header"[\s\S]*?`1px solid \$\{weekRoomDividerColor\}`/);
+  assert.match(source, /data-room-divider="body"[\s\S]*?`1px solid \$\{weekRoomDividerColor\}`/);
+});
+
+test("mobile all-room headers and lanes share a width that exposes two lanes at 390px", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const laneWidth = selectedRoom === "all" \? \(isMobile \? "clamp\(138px, 40vw, 156px\)" : 84\)/);
+  assert.match(source, /data-room-divider="header"[\s\S]*?width: laneWidth/);
+  assert.match(source, /data-room-lane=\{lane\.roomName\}[\s\S]*?width: laneWidth/);
+  const laneAt390 = Math.min(156, Math.max(138, 390 * .4));
+  assert.ok(laneAt390 * 2 + 44 <= 390);
+  assert.match(source, /selectedRoom === "all"[\s\S]*?: \(isMobile \? 280 : 180\)/);
+});
+
+test("compact mobile week preview sorts chronologically and exposes deterministic overflow", () => {
+  const events = [
+    { id: "late", startMin: 1140, endMin: 1200, title: "Пізня" },
+    { id: "early", startMin: 990, endMin: 1050, title: "Рання" },
+    { id: "middle", startMin: 1080, endMin: 1110, title: "Середня" },
+    { id: "four", startMin: 1200, endMin: 1230 },
+    { id: "five", startMin: 1230, endMin: 1260 },
+    { id: "six", startMin: 1260, endMin: 1290 },
+  ];
+  const preview = compactDayPreview(events, 5);
+  assert.deepEqual(preview.visible.map((event) => event.id), ["early", "middle", "late", "four", "five"]);
+  assert.equal(preview.remaining, 1);
+});
+
+test("mobile week overview has seven filtered day columns, status styling, details and day transition", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /Огляд тижня/);
+  assert.match(source, /Обраний день/);
+  assert.match(source, /data-testid="mobile-week-overview"[\s\S]*?weekDays\.map/);
+  assert.match(source, /compactDayPreview\(roomFilteredEventsByDay\.get\(date\) \|\| \[\], 5\)/);
+  assert.match(source, /setSelectedDate\(date\); setMobileWeekMode\("day"\)/);
+  assert.match(source, /onClick=\{\(\) => setSelectedEventDetails\(event\)\}/);
+  assert.match(source, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
+  assert.match(source, /\+\{preview\.remaining\}/);
+  assert.match(source, /\(!isMobile \|\| mobileWeekMode === "day"\)/);
 });

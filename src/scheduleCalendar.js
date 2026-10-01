@@ -64,6 +64,14 @@ export const buildEventDetails = (event = {}) => {
 
 export const monthPreview = (events, limit = 3) => ({ visible: events.slice(0, limit), remaining: Math.max(0, events.length - limit) });
 
+export const compactDayPreview = (events = [], limit = 5) => {
+  const sorted = [...events].sort((a, b) =>
+    Number(a.startMin) - Number(b.startMin) ||
+    Number(a.endMin) - Number(b.endMin) ||
+    String(a.title || "").localeCompare(String(b.title || ""), "uk"));
+  return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
+};
+
 export const weekEventLayout = (events) => {
   const compareEvents = (a, b) =>
     Number(a.startMin) - Number(b.startMin) ||
