@@ -100,10 +100,10 @@ export const weekEventLayout = (events) => {
   });
 };
 
-export const collisionTilePreview = (events, { durationMinutes = 0, isMobile = false } = {}) => {
+export const collisionTilePreview = (events, { availableHeightPx = 42, isMobile = false } = {}) => {
   const columns = isMobile ? 2 : events.length >= 8 ? 3 : 2;
-  const estimatedHeight = Math.max(42, Number(durationMinutes) * 0.9);
-  const rows = Math.max(1, Math.floor(estimatedHeight / 24));
+  const usableHeight = Math.max(22, Number(availableHeightPx) - 6);
+  const rows = Math.max(1, Math.floor(usableHeight / 22));
   const capacity = Math.max(2, columns * rows);
   const visibleCount = events.length > capacity ? capacity - 1 : Math.min(events.length, capacity);
   return {
@@ -117,6 +117,11 @@ export const requireScheduleSaveResult = (result, message = "Зміни не б�
   if (result === null || result === undefined || result === false) throw new Error(message);
   return result;
 };
+
+export const canEditCollisionEvent = (event, { canMutateEvent, canEditGroupLesson } = {}) =>
+  event?.kind === "booking"
+    ? Boolean(canMutateEvent?.(event))
+    : Boolean(canEditGroupLesson?.(event));
 
 export const recurringActionLabels = (recurring) => recurring
   ? ["Видалити лише цю подію", "Видалити всю серію", "Скасувати лише цю подію", "Скасувати всю серію"]

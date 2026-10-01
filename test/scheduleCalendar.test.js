@@ -132,15 +132,15 @@ test("lesson plan details expose only one add-plan action", async () => {
 test("collision tile preview keeps visible content and deterministic overflow", async () => {
   const { collisionTilePreview } = await import("../src/scheduleCalendar.js");
   const events = Array.from({ length: 12 }, (_, id) => ({ id }));
-  assert.deepEqual(collisionTilePreview(events.slice(0, 2), { durationMinutes: 60 }), { columns: 2, visible: events.slice(0, 2), overflow: 0 });
-  assert.equal(collisionTilePreview(events.slice(0, 4), { durationMinutes: 60 }).visible.length, 4);
-  const short = collisionTilePreview(events, { durationMinutes: 20 });
+  assert.deepEqual(collisionTilePreview(events.slice(0, 2), { availableHeightPx: 60 }), { columns: 2, visible: events.slice(0, 2), overflow: 0 });
+  assert.equal(collisionTilePreview(events.slice(0, 4), { availableHeightPx: 60 }).visible.length, 4);
+  const short = collisionTilePreview(events, { availableHeightPx: 42 });
   assert.equal(short.visible.length, 2);
   assert.equal(short.overflow, 10);
-  const long = collisionTilePreview(events, { durationMinutes: 300 });
+  const long = collisionTilePreview(events, { availableHeightPx: 270 });
   assert.equal(long.visible.length, 12);
   assert.equal(long.overflow, 0);
-  assert.equal(collisionTilePreview(events.slice(0, 10), { durationMinutes: 120, isMobile: true }).columns, 2);
+  assert.equal(collisionTilePreview(events.slice(0, 10), { availableHeightPx: 108, isMobile: true }).columns, 2);
 });
 
 test("schedule save result rejects silent permission and callback failures", async () => {
@@ -155,6 +155,7 @@ test("all schedule edit paths expose guarded async save state", async () => {
   const schedule = await fs.readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
   assert.match(schedule, /bookingSaving \? "Зберігаємо…"/);
+  assert.match(schedule, /formErrors\.save \? <div role="alert"/);
   assert.match(schedule, /groupOverrideEdit\.saving \? "Зберігаємо…"/);
   assert.match(schedule, /groupSlotEdit\.saving \? "Зберігаємо…"/);
   assert.match(schedule, /await onUpdateBooking\?\.\(editingId, payload\)/);
@@ -162,4 +163,18 @@ test("all schedule edit paths expose guarded async save state", async () => {
   assert.match(schedule, /await onUpdateGroupSchedule\(groupSlotEdit\.groupId, nextSchedule\)/);
   assert.match(app, /const updateRoomBookingAction[\s\S]*?return updated;/);
   assert.match(app, /const updateGroupScheduleAction[\s\S]*?return updated;/);
+});
+
+test("collision edit permission follows admin, booking ownership and group assignment", async () => {
+  const { canEditCollisionEvent } = await import("../src/scheduleCalendar.js");
+  const booking = { id: "booking", kind: "booking", trainerId: "owner" };
+  const group = { id: "group", kind: "group" };
+  const adminPolicy = { canMutateEvent: () => true, canEditGroupLesson: () => true };
+  const ownerPolicy = { canMutateEvent: (event) => event.trainerId === "owner", canEditGroupLesson: () => true };
+  const outsiderPolicy = { canMutateEvent: () => false, canEditGroupLesson: () => false };
+  assert.equal(canEditCollisionEvent(booking, adminPolicy), true);
+  assert.equal(canEditCollisionEvent(booking, ownerPolicy), true);
+  assert.equal(canEditCollisionEvent(booking, outsiderPolicy), false);
+  assert.equal(canEditCollisionEvent(group, adminPolicy), true);
+  assert.equal(canEditCollisionEvent(group, outsiderPolicy), false);
 });

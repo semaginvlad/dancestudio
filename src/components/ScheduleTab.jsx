@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionTilePreview, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionTilePreview, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -1074,6 +1074,7 @@ export default function ScheduleTab({
     const isRecurringOccurrence = Boolean(
       e.parentId && parentDate && e.date && parentDate !== e.date && e.recurrence !== "none",
     );
+    setFormErrors({});
     setEditingId(e.parentId || e.id);
     setFormMode("full");
     setShowForm(true);
@@ -1102,6 +1103,7 @@ export default function ScheduleTab({
   };
 
   const duplicateBookingLikeEvent = (e) => {
+    setFormErrors({});
     setEditingId(null);
     setFormMode("full");
     setShowForm(true);
@@ -2365,9 +2367,10 @@ export default function ScheduleTab({
                   <button
                     style={mobileToolbarActiveSt}
                     onClick={() => {
+                      setFormErrors({});
                       setEditingId(null);
                       setFormMode("full");
-                      setShowForm((v) => !v);
+                      setShowForm(true);
                     }}
                   >
                     + Додати
@@ -2409,9 +2412,10 @@ export default function ScheduleTab({
                 <button
                   style={{ ...toolbarActiveSt, minHeight: 40, padding: "0 16px" }}
                   onClick={() => {
+                    setFormErrors({});
                     setEditingId(null);
                     setFormMode("full");
-                    setShowForm((v) => !v);
+                    setShowForm(true);
                   }}
                 >
                   + Додати тренування / резерв
@@ -2580,6 +2584,7 @@ export default function ScheduleTab({
             <button type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 34 : 36 }} onClick={applyFullToCompactForm}>Сховати зайві поля</button>
             </> : null}
           </div>
+          {formErrors.save ? <div role="alert" style={{ marginTop: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${theme.danger}`, color: theme.danger, fontSize: 12, fontWeight: 700 }}>{formErrors.save}</div> : null}
           <div style={{ display: "flex", gap: 6, marginTop: 8, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))" }}>
             <button style={{ ...btnP, minHeight: isMobile ? 42 : 40, borderRadius: 999, padding: "0 16px" }} onClick={saveBooking} disabled={bookingSaving}>
               {bookingSaving ? "Зберігаємо…" : "Зберегти"}
@@ -3395,20 +3400,21 @@ export default function ScheduleTab({
                       const clusterTop = ((e.clusterStartMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
                       const clusterHeight = Math.max(42, ((e.clusterEndMin - e.clusterStartMin) / 60) * weekHourPx);
                       const clusterRange = `${minToHHMM(e.clusterStartMin)}–${minToHHMM(e.clusterEndMin)}`;
-                      const tilePreview = collisionTilePreview(e.simultaneous, { durationMinutes: e.clusterEndMin - e.clusterStartMin, isMobile });
+                      const tilePreview = collisionTilePreview(e.simultaneous, { availableHeightPx: clusterHeight, isMobile });
                       return (
-                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, minHeight: 42, zIndex: 5, border: `1px solid ${c.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(22px, 1fr)", gap: 3, overflow: "hidden" }}>
+                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, minHeight: 42, zIndex: 5, border: `1px solid ${theme.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(22px, 1fr)", gap: 3, overflow: "hidden" }}>
                           {tilePreview.visible.map((event) => {
                             const eventMark = getEventTypeMark(event);
                             const eventTitle = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${event.trainer || event.trainerName || "Без тренера"} · ${getEventTypeLabel(event.eventType)}`;
-                            const canOpenActions = isAdmin || event.kind === "booking" || canEditGroupSingleLesson(event);
+                            const eventColor = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
+                            const canOpenActions = canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson });
                             return (
-                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${c.border}`, borderRadius: 6, background: theme.card, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
+                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${eventColor.border}`, borderRadius: 6, background: eventColor.bg, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
                                 <button type="button" title={eventTitle} aria-label={eventTitle} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ border: 0, background: "transparent", color: theme.text, padding: "3px 4px", minWidth: 0, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
                                   <span style={{ display: "block", fontSize: 9.5, fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eventMark ? `${eventMark} · ` : ""}{event.title}</span>
                                   <span style={{ display: "block", fontSize: 8.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: theme.textLight }}>⌂ {event.roomName || UNKNOWN_ROOM_NAME}{event.startMin !== e.clusterStartMin ? ` · ${event.startTime}` : ""}</span>
                                 </button>
-                                {canOpenActions ? <button type="button" aria-label={`Редагувати: ${event.title}, ${event.date}, ${event.startTime}`} style={{ border: 0, borderLeft: `1px solid ${theme.border}`, background: "transparent", color: theme.text, cursor: "pointer", padding: 0 }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (event.kind === "booking") startEdit(event); else openGroupOverrideEditor(event); }}>✎</button> : null}
+                                {canOpenActions ? <button type="button" aria-label={`Редагувати: ${event.title}, ${event.date}, ${event.startTime}`} style={{ border: 0, borderLeft: `1px solid ${theme.border}`, background: "transparent", color: theme.text, cursor: "pointer", padding: 0 }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson })) return; if (event.kind === "booking") startEdit(event); else openGroupOverrideEditor(event); }}>✎</button> : null}
                               </div>
                             );
                           })}
