@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, compactDayPreview, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -382,4 +382,50 @@ test("mobile week overview has seven filtered day columns, status styling, detai
   assert.match(source, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
   assert.match(source, /\+\{preview\.remaining\}/);
   assert.match(source, /\(!isMobile \|\| mobileWeekMode === "day"\)/);
+});
+
+test("week cards retain all compact event type marks", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /group_lesson: "Г"/);
+  assert.match(source, /individual_training: "І"/);
+  assert.match(source, /room_booking: "Р"/);
+  assert.match(source, /cleaning: "П"/);
+  assert.match(source, /custom_admin_event: "П"/);
+});
+
+test("week cards resolve trainer and booking-owner initials without inventing missing names", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const getScheduleEventTrainerInitials = \(event = \{\}\) =>\s*getEventTrainerInitials\(event\) \|\| getTrainerInitials\(getTrainerNameById\(event\.trainerId \|\| event\.trainer_id\)\)/);
+  assert.equal(getTrainerInitials("Олена Коваль"), "ОК");
+  assert.equal(getTrainerInitials("Марія"), "М");
+  assert.equal(getTrainerInitials(""), "");
+  assert.equal(getTrainerInitials("—"), "");
+});
+
+test("short desktop and mobile-day room cards always render type and available initials", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
+  assert.match(roomCards, /const typeMark = getEventTypeMark\(event\)/);
+  assert.match(roomCards, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
+  assert.match(roomCards, /height < 24 \? 7 : 8/);
+  assert.doesNotMatch(roomCards, /height >= 42 \? \(getEventTrainerInitials/);
+  assert.match(roomCards, /\{typeMark \? <span aria-hidden="true"/);
+  assert.match(roomCards, /\{trainerInitials \? <span aria-hidden="true"/);
+});
+
+test("mobile week overview shows type and initials without widening its columns", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
+  assert.match(overview, /width: 116, flex: "0 0 116px"/);
+  assert.match(overview, /const typeMark = getEventTypeMark\(event\)/);
+  assert.match(overview, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
+  assert.match(overview, /\{typeMark \? <span aria-hidden="true"/);
+  assert.match(overview, /\{trainerInitials \? <span aria-hidden="true"/);
+});
+
+test("week card accessible labels retain full type, trainer, title, time, room and status", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const fullType = getEventTypeLabel\(event\.eventType\)/);
+  assert.match(source, /const accessibleLabel = `\$\{fullType\}\$\{trainerName \? ` · \$\{trainerName\}` : ""\} · \$\{event\.title\} · \$\{event\.startTime\}–\$\{event\.endTime\} · \$\{lane\.roomName\} · Статус: \$\{status\.text\}`/);
+  assert.match(source, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
 });

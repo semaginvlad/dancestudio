@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -135,19 +135,6 @@ const getEventTypeLabel = (value = "") => {
 const isMissingTrainerName = (name) => {
   const value = String(name ?? "").trim();
   return !value || value === "—" || value === "-";
-};
-const getTrainerInitials = (name = "") => {
-  if (isMissingTrainerName(name)) return "";
-  const parts = String(name || "")
-    .replace(/[()]/g, " ")
-    .split(/[\s-]+/)
-    .map((part) => part.trim())
-    .filter((part) => part && part !== "—");
-  if (!parts.length) return "";
-  return parts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
-    .join("");
 };
 const getEventTrainerInitials = (event) =>
   getTrainerInitials(event?.trainerName || event?.trainer_name || event?.trainerDisplayName || event?.trainer_display_name || event?.trainer || "");
@@ -593,6 +580,10 @@ export default function ScheduleTab({
   );
   const getTrainerNameById = (trainerId) =>
     trainerId ? trainerMap.get(String(trainerId)) || "" : "";
+  const getScheduleEventTrainerName = (event = {}) =>
+    String(event.trainerName || event.trainer_name || event.trainerDisplayName || event.trainer_display_name || event.trainer || getTrainerNameById(event.trainerId || event.trainer_id) || "").trim();
+  const getScheduleEventTrainerInitials = (event = {}) =>
+    getEventTrainerInitials(event) || getTrainerInitials(getTrainerNameById(event.trainerId || event.trainer_id));
   const getResolvedTrainerName = (trainerName, trainerId) => {
     const currentName = String(trainerName ?? "").trim();
     if (!isMissingTrainerName(currentName)) return currentName;
@@ -3303,9 +3294,18 @@ export default function ScheduleTab({
                   <div style={{ display: "grid", gap: 4 }}>
                     {preview.visible.map((event) => {
                       const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
-                      return <button key={event.id} type="button" aria-label={`${event.title}, ${event.startTime}, ${event.roomName || UNKNOWN_ROOM_NAME}, ${status.text}`} onClick={() => setSelectedEventDetails(event)} style={{ minHeight: 31, border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 4px", background: theme.card, color: theme.text, opacity: status.opacity, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
+                      const typeMark = getEventTypeMark(event);
+                      const trainerInitials = getScheduleEventTrainerInitials(event);
+                      const trainerName = getScheduleEventTrainerName(event);
+                      const fullType = getEventTypeLabel(event.eventType);
+                      const accessibleLabel = `${fullType}${trainerName ? `, ${trainerName}` : ""}, ${event.title}, ${event.startTime}–${event.endTime}, ${event.roomName || UNKNOWN_ROOM_NAME}, Статус: ${status.text}`;
+                      return <button key={event.id} type="button" aria-label={accessibleLabel} title={accessibleLabel} onClick={() => setSelectedEventDetails(event)} style={{ minHeight: 44, border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 4px", background: theme.card, color: theme.text, opacity: status.opacity, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
                         <span style={{ display: "block", fontSize: 9, fontWeight: 900, whiteSpace: "nowrap" }}>{event.startTime}</span>
-                        <span style={{ display: "block", fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: status.textDecoration || "none" }}>{event.title}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
+                          {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 8, lineHeight: "12px", minWidth: 12, height: 12, borderRadius: 999, textAlign: "center", background: "#2563eb", color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}
+                          {trainerInitials ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 7, lineHeight: "12px", minWidth: 12, height: 12, padding: "0 2px", borderRadius: 999, textAlign: "center", background: "#6d28d9", color: "#fff", fontWeight: 900 }}>{trainerInitials}</span> : null}
+                          <span style={{ minWidth: 0, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: status.textDecoration || "none" }}>{event.title}</span>
+                        </span>
                         <span style={{ display: "block", fontSize: 8, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.roomName || UNKNOWN_ROOM_NAME}</span>
                       </button>;
                     })}
@@ -3400,11 +3400,19 @@ export default function ScheduleTab({
                         const width = 100 / conflictCount;
                         const hasPlan = hasLessonPlanForEvent(event);
                         const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(event) : "";
-                        const accessibleLabel = `${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · ${getEventTypeLabel(event.eventType)} · Статус: ${status.text}`;
+                        const typeMark = getEventTypeMark(event);
+                        const trainerInitials = getScheduleEventTrainerInitials(event);
+                        const trainerName = getScheduleEventTrainerName(event);
+                        const fullType = getEventTypeLabel(event.eventType);
+                        const accessibleLabel = `${fullType}${trainerName ? ` · ${trainerName}` : ""} · ${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · Статус: ${status.text}`;
                         return <React.Fragment key={event.id}>
                           <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
                             {hasPlan ? <span aria-label={planSeriesLabel ? `Є план, порядок ${planSeriesLabel}` : "Є план"} title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: 2, right: 2, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 999, background: "#0f9f8f", color: "#fff", fontSize: 8, fontWeight: 900, display: "grid", placeItems: "center" }}>{planSeriesLabel || "✓"}</span> : null}
-                            <span style={{ display: "-webkit-box", WebkitLineClamp: height >= 32 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: height < 24 ? 9 : 10.5, lineHeight: 1.1, fontWeight: 900, textDecoration: status.textDecoration || "none", wordBreak: "break-word" }}>{event.title}</span>
+                            <span style={{ display: "flex", alignItems: "flex-start", gap: height < 24 ? 1 : 2, minWidth: 0 }}>
+                              {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: height < 24 ? 7 : 8, lineHeight: height < 24 ? "10px" : "13px", minWidth: height < 24 ? 10 : 13, height: height < 24 ? 10 : 13, borderRadius: 999, textAlign: "center", background: typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : typeMark === "Г" ? GROUP_TYPE_BADGE_BG : color.border, color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}
+                              {trainerInitials ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: height < 24 ? 6 : 7, lineHeight: height < 24 ? "10px" : "13px", minWidth: height < 24 ? 10 : 13, height: height < 24 ? 10 : 13, padding: "0 2px", borderRadius: 999, textAlign: "center", background: "#6d28d9", color: "#fff", fontWeight: 900 }}>{trainerInitials}</span> : null}
+                              <span style={{ minWidth: 0, display: "-webkit-box", WebkitLineClamp: height >= 32 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: height < 24 ? 8 : 10.5, lineHeight: 1.1, fontWeight: 900, textDecoration: status.textDecoration || "none", wordBreak: "break-word" }}>{event.title}</span>
+                            </span>
                             {height >= 24 ? <span style={{ display: "block", marginTop: 2, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>{event.startTime}–{event.endTime}</span> : null}
                             {height >= 42 ? <span style={{ display: "block", fontSize: 9, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{getEventTypeLabel(event.eventType)}{status.showLabel ? ` · ${status.text}` : ""}</span> : null}
                           </button>

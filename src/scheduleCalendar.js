@@ -9,6 +9,19 @@ const addDays = (date, amount) => {
   return next;
 };
 
+export const getTrainerInitials = (name = "") => {
+  const value = String(name ?? "").trim();
+  if (!value || value === "—" || value === "-") return "";
+  return value
+    .replace(/[()]/g, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "—")
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
+    .join("");
+};
+
 export const calendarStateForDate = (date) => {
   const selected = dateKey(date);
   const anchor = new Date(`${selected}T12:00:00`);
