@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -371,17 +371,19 @@ test("compact mobile week preview sorts chronologically and exposes deterministi
   assert.equal(preview.remaining, 1);
 });
 
-test("mobile week overview has seven filtered day columns, status styling, details and day transition", async () => {
+test("mobile week agenda has seven filtered vertical sections, statuses, details and day transition", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
   assert.match(source, /Огляд тижня/);
   assert.match(source, /Обраний день/);
-  assert.match(source, /data-testid="mobile-week-overview"[\s\S]*?weekDays\.map/);
-  assert.match(source, /compactDayPreview\(roomFilteredEventsByDay\.get\(date\) \|\| \[\], 5\)/);
-  assert.match(source, /setSelectedDate\(date\); setMobileWeekMode\("day"\)/);
-  assert.match(source, /onClick=\{\(\) => setSelectedEventDetails\(event\)\}/);
-  assert.match(source, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
-  assert.match(source, /\+\{preview\.remaining\}/);
-  assert.match(source, /\(!isMobile \|\| mobileWeekMode === "day"\)/);
+  assert.match(overview, /display: "grid"/);
+  assert.match(overview, /weekDays\.map/);
+  assert.match(overview, /data-mobile-agenda-day=\{date\}/);
+  assert.match(overview, /sortCalendarEvents\(roomFilteredEventsByDay\.get\(date\) \|\| \[\]\)/);
+  assert.match(overview, /setSelectedDate\(date\); setMobileWeekMode\("day"\)/);
+  assert.match(overview, /onClick=\{\(\) => setSelectedEventDetails\(event\)\}/);
+  assert.match(overview, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
+  assert.doesNotMatch(overview, /compactDayPreview|preview\.remaining|\+\{preview/);
 });
 
 test("week cards retain all compact event type marks", async () => {
@@ -413,14 +415,16 @@ test("short desktop and mobile-day room cards always render type and available i
   assert.match(roomCards, /\{trainerInitials \? <span aria-hidden="true"/);
 });
 
-test("mobile week overview shows type and initials without widening its columns", async () => {
+test("mobile week agenda shows type, initials, time, wrapping title and room", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
-  assert.match(overview, /width: 116, flex: "0 0 116px"/);
+  assert.doesNotMatch(overview, /width: 116|flex: "0 0 116px"/);
   assert.match(overview, /const typeMark = getEventTypeMark\(event\)/);
   assert.match(overview, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
-  assert.match(overview, /\{typeMark \? <span aria-hidden="true"/);
-  assert.match(overview, /\{trainerInitials \? <span aria-hidden="true"/);
+  assert.match(overview, /\{event\.startTime\}<\/span>/);
+  assert.match(overview, /WebkitLineClamp: 2/);
+  assert.match(overview, /overflowWrap: "anywhere"/);
+  assert.match(overview, /event\.roomName \|\| UNKNOWN_ROOM_NAME/);
 });
 
 test("week card accessible labels retain full type, trainer, title, time, room and status", async () => {
@@ -428,4 +432,25 @@ test("week card accessible labels retain full type, trainer, title, time, room a
   assert.match(source, /const fullType = getEventTypeLabel\(event\.eventType\)/);
   assert.match(source, /const accessibleLabel = `\$\{fullType\}\$\{trainerName \? ` · \$\{trainerName\}` : ""\} · \$\{event\.title\} · \$\{event\.startTime\}–\$\{event\.endTime\} · \$\{lane\.roomName\} · Статус: \$\{status\.text\}`/);
   assert.match(source, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
+});
+
+test("time-grid cards devote visible content to markers and wrapping title only", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
+  const visibleCard = roomCards.slice(roomCards.indexOf('<button type="button" data-event-card="1"'), roomCards.indexOf('</button>'));
+  assert.doesNotMatch(visibleCard, /event\.startTime|event\.endTime|getEventTypeLabel/);
+  assert.match(visibleCard, /\{typeMark \? <span/);
+  assert.match(visibleCard, /\{trainerInitials \? <span/);
+  assert.match(visibleCard, /flex: "1 1 auto"/);
+  assert.match(visibleCard, /overflowWrap: "anywhere"/);
+  assert.match(visibleCard, /WebkitLineClamp: titleLineCount/);
+  assert.match(roomCards, /const accessibleLabel = `\$\{fullType\}[\s\S]*?\$\{event\.startTime\}–\$\{event\.endTime\}/);
+  assert.match(roomCards, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
+});
+
+test("mobile agenda chronological sorting retains every filtered event", () => {
+  const events = Array.from({ length: 12 }, (_, index) => ({ id: String(index), startMin: 1200 - index * 15, endMin: 1230 - index * 15 }));
+  const sorted = sortCalendarEvents(events);
+  assert.equal(sorted.length, events.length);
+  assert.deepEqual(sorted.map((event) => event.startMin), events.map((event) => event.startMin).sort((a, b) => a - b));
 });

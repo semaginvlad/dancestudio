@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -3282,35 +3282,36 @@ export default function ScheduleTab({
                 const key = toLocalDateKey(day);
                 return <button key={key} type="button" onClick={() => setSelectedDate(key)} style={key === selectedDate ? toolbarActiveSt : editorBtnSt}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "numeric" })}</button>;
               })}
-            </div> : <div data-testid="mobile-week-overview" style={{ display: "flex", gap: 7, padding: 8, overflowX: "auto", alignItems: "stretch" }}>
+            </div> : <div data-testid="mobile-week-overview" style={{ display: "grid", gap: 8, padding: 8 }}>
               {weekDays.map((day) => {
                 const date = toLocalDateKey(day);
-                const preview = compactDayPreview(roomFilteredEventsByDay.get(date) || [], 5);
-                return <section key={date} style={{ width: 116, flex: "0 0 116px", minHeight: 170, border: `1px solid ${theme.border}`, borderRadius: 10, padding: 5, background: date === toLocalDateKey(new Date()) ? `${theme.primary}0d` : theme.card }}>
-                  <button type="button" aria-label={`Відкрити день ${date}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ width: "100%", border: 0, background: "transparent", color: theme.text, textAlign: "left", padding: "2px 3px 6px", cursor: "pointer" }}>
-                    <b style={{ display: "block", fontSize: 12 }}>{day.toLocaleDateString("uk-UA", { weekday: "short" })}</b>
-                    <span style={{ fontSize: 10, color: theme.textLight }}>{day.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })}</span>
+                const agendaEvents = sortCalendarEvents(roomFilteredEventsByDay.get(date) || []);
+                return <section key={date} data-mobile-agenda-day={date} style={{ border: `1px solid ${theme.border}`, borderRadius: 12, background: date === toLocalDateKey(new Date()) ? `${theme.primary}0d` : theme.card, overflow: "hidden" }}>
+                  <button type="button" aria-label={`Відкрити день ${date}, подій: ${agendaEvents.length}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ width: "100%", minHeight: 42, border: 0, borderBottom: `1px solid ${theme.border}`, background: "transparent", color: theme.text, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "7px 10px", textAlign: "left", cursor: "pointer" }}>
+                    <span><b style={{ textTransform: "uppercase" }}>{day.toLocaleDateString("uk-UA", { weekday: "short" })}</b> <span style={{ color: theme.textLight }}>{day.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })}</span></span>
+                    <span style={{ fontSize: 11, color: theme.textLight }}>{agendaEvents.length} подій</span>
                   </button>
-                  <div style={{ display: "grid", gap: 4 }}>
-                    {preview.visible.map((event) => {
+                  <div style={{ display: "grid" }}>
+                    {agendaEvents.map((event) => {
                       const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                       const typeMark = getEventTypeMark(event);
                       const trainerInitials = getScheduleEventTrainerInitials(event);
                       const trainerName = getScheduleEventTrainerName(event);
                       const fullType = getEventTypeLabel(event.eventType);
                       const accessibleLabel = `${fullType}${trainerName ? `, ${trainerName}` : ""}, ${event.title}, ${event.startTime}–${event.endTime}, ${event.roomName || UNKNOWN_ROOM_NAME}, Статус: ${status.text}`;
-                      return <button key={event.id} type="button" aria-label={accessibleLabel} title={accessibleLabel} onClick={() => setSelectedEventDetails(event)} style={{ minHeight: 44, border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 4px", background: theme.card, color: theme.text, opacity: status.opacity, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
-                        <span style={{ display: "block", fontSize: 9, fontWeight: 900, whiteSpace: "nowrap" }}>{event.startTime}</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
-                          {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 8, lineHeight: "12px", minWidth: 12, height: 12, borderRadius: 999, textAlign: "center", background: "#2563eb", color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}
-                          {trainerInitials ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 7, lineHeight: "12px", minWidth: 12, height: 12, padding: "0 2px", borderRadius: 999, textAlign: "center", background: "#6d28d9", color: "#fff", fontWeight: 900 }}>{trainerInitials}</span> : null}
-                          <span style={{ minWidth: 0, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: status.textDecoration || "none" }}>{event.title}</span>
+                      return <button key={event.id} type="button" aria-label={accessibleLabel} title={accessibleLabel} onClick={() => setSelectedEventDetails(event)} style={{ minHeight: 46, border: 0, borderBottom: `1px solid ${theme.border}`, padding: "5px 8px", background: "transparent", color: theme.text, opacity: status.opacity, display: "grid", gridTemplateColumns: "42px minmax(0,1fr)", gap: 6, alignItems: "center", textAlign: "left", cursor: "pointer" }}>
+                        <span style={{ alignSelf: "start", paddingTop: 2, fontSize: 10, fontWeight: 900, whiteSpace: "nowrap" }}>{event.startTime}</span>
+                        <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0 }}>
+                            {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 8, lineHeight: "13px", minWidth: 13, height: 13, borderRadius: 999, textAlign: "center", background: "#2563eb", color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}
+                            {trainerInitials ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 7, lineHeight: "13px", minWidth: 13, height: 13, padding: "0 2px", borderRadius: 999, textAlign: "center", background: "#6d28d9", color: "#fff", fontWeight: 900 }}>{trainerInitials}</span> : null}
+                            <span style={{ minWidth: 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere", fontSize: 11, lineHeight: 1.15, fontWeight: 850, textDecoration: status.textDecoration || "none" }}>{event.title}</span>
+                          </span>
+                          <span style={{ display: "block", fontSize: 9, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.roomName || UNKNOWN_ROOM_NAME}</span>
                         </span>
-                        <span style={{ display: "block", fontSize: 8, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.roomName || UNKNOWN_ROOM_NAME}</span>
                       </button>;
                     })}
-                    {preview.remaining > 0 ? <button type="button" aria-label={`Ще ${preview.remaining} подій, відкрити день ${date}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ ...mobileToolbarBtnSt, minHeight: 30, fontSize: 10 }}>+{preview.remaining}</button> : null}
-                    {!preview.visible.length ? <span style={{ padding: 4, fontSize: 9, color: theme.textLight }}>Немає подій</span> : null}
+                    {!agendaEvents.length ? <span style={{ padding: "9px 10px", fontSize: 10, color: theme.textLight }}>Немає подій</span> : null}
                   </div>
                 </section>;
               })}
@@ -3404,17 +3405,16 @@ export default function ScheduleTab({
                         const trainerInitials = getScheduleEventTrainerInitials(event);
                         const trainerName = getScheduleEventTrainerName(event);
                         const fullType = getEventTypeLabel(event.eventType);
+                        const titleLineCount = Math.max(1, Math.floor((height - (height < 24 ? 2 : 8)) / (height < 24 ? 9 : 12)));
                         const accessibleLabel = `${fullType}${trainerName ? ` · ${trainerName}` : ""} · ${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · Статус: ${status.text}`;
                         return <React.Fragment key={event.id}>
                           <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
                             {hasPlan ? <span aria-label={planSeriesLabel ? `Є план, порядок ${planSeriesLabel}` : "Є план"} title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: 2, right: 2, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 999, background: "#0f9f8f", color: "#fff", fontSize: 8, fontWeight: 900, display: "grid", placeItems: "center" }}>{planSeriesLabel || "✓"}</span> : null}
-                            <span style={{ display: "flex", alignItems: "flex-start", gap: height < 24 ? 1 : 2, minWidth: 0 }}>
+                            <span style={{ display: "flex", alignItems: "flex-start", gap: height < 24 ? 1 : 2, minWidth: 0, height: "100%" }}>
                               {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: height < 24 ? 7 : 8, lineHeight: height < 24 ? "10px" : "13px", minWidth: height < 24 ? 10 : 13, height: height < 24 ? 10 : 13, borderRadius: 999, textAlign: "center", background: typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : typeMark === "Г" ? GROUP_TYPE_BADGE_BG : color.border, color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}
                               {trainerInitials ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: height < 24 ? 6 : 7, lineHeight: height < 24 ? "10px" : "13px", minWidth: height < 24 ? 10 : 13, height: height < 24 ? 10 : 13, padding: "0 2px", borderRadius: 999, textAlign: "center", background: "#6d28d9", color: "#fff", fontWeight: 900 }}>{trainerInitials}</span> : null}
-                              <span style={{ minWidth: 0, display: "-webkit-box", WebkitLineClamp: height >= 32 ? 2 : 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: height < 24 ? 8 : 10.5, lineHeight: 1.1, fontWeight: 900, textDecoration: status.textDecoration || "none", wordBreak: "break-word" }}>{event.title}</span>
+                              <span style={{ minWidth: 0, flex: "1 1 auto", display: "-webkit-box", WebkitLineClamp: titleLineCount, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere", fontSize: height < 24 ? 8 : 10.5, lineHeight: height < 24 ? "9px" : "12px", fontWeight: 900, textDecoration: status.textDecoration || "none" }}>{event.title}</span>
                             </span>
-                            {height >= 24 ? <span style={{ display: "block", marginTop: 2, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>{event.startTime}–{event.endTime}</span> : null}
-                            {height >= 42 ? <span style={{ display: "block", fontSize: 9, color: theme.textLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{getEventTypeLabel(event.eventType)}{status.showLabel ? ` · ${status.text}` : ""}</span> : null}
                           </button>
                           {event.hasRoomConflict && event.isRepresentative ? <button type="button" aria-label={`Відкрити конфлікт бронювання зали ${lane.roomName}: ${conflictCount} події`} onClick={(clickEvent) => { clickEvent.stopPropagation(); concurrentTriggerRef.current = clickEvent.currentTarget; setConcurrentEvents(event.simultaneous); }} style={{ position: "absolute", top: top + Math.max(1, height - 18), right: 2, zIndex: 20, height: 17, minWidth: 17, padding: "0 3px", border: "1px solid #b91c1c", borderRadius: 5, background: theme.card, color: "#b91c1c", fontSize: 9, fontWeight: 900, cursor: "pointer" }}>⚠{conflictCount}</button> : null}
                         </React.Fragment>;
