@@ -2067,6 +2067,7 @@ export default function App() {
     const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
     const created = await db.insertRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
+    return created;
   };
 
   const deleteRoomBookingAction = async (id) => {
@@ -2083,8 +2084,7 @@ export default function App() {
   const updateRoomBookingAction = async (id, payload) => {
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
-      alert("Можна редагувати тільки власні резерви / індивідуальні тренування.");
-      return;
+      throw new Error("Можна редагувати тільки власні резерви / індивідуальні тренування.");
     }
     const safePayload = isAdmin
       ? payload
@@ -2095,6 +2095,7 @@ export default function App() {
         });
     const updated = await db.updateRoomBooking(id, safePayload);
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
+    return updated;
   };
 
 
@@ -2159,8 +2160,7 @@ export default function App() {
   const updateGroupLessonOverrideAction = async (id, patch) => {
     const existing = groupLessonOverrides.find((x) => String(x.id) === String(id));
     if (!canMutateGroupLessonOverride(existing?.groupId || patch?.groupId)) {
-      alert("Можна редагувати тільки заняття своїх груп.");
-      return null;
+      throw new Error("Можна редагувати тільки заняття своїх груп.");
     }
     const updated = await db.updateGroupLessonOverride(id, patch);
     setGroupLessonOverrides((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
@@ -2179,13 +2179,13 @@ export default function App() {
 
   const updateGroupScheduleAction = async (groupId, schedule) => {
     if (!isAdmin) {
-      alert("Редагування розкладу груп доступне тільки адміністратору.");
-      return;
+      throw new Error("Редагування розкладу груп доступне тільки адміністратору.");
     }
     const updated = await db.updateGroup(groupId, { schedule });
     setGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
     setScheduleGroups((prev) => prev.map((g) => (String(g.id) === String(groupId) ? { ...g, ...updated } : g)));
     await loadAllData();
+    return updated;
   };
 
   const clearSubscriptionWarningForStudent = async (groupId, studentId) => {

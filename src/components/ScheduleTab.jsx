@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canEditCollisionEvent, collisionClusterGeometry, collisionStatusPresentation, collisionTilePreview, EVENT_STATUS_STYLES, isEventCardKeyboardActivation, monthPreview, navigateCalendar, navigationLabels, requireScheduleSaveResult, weekEventLayout } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -327,7 +328,7 @@ const formatLessonPlanSeriesLabel = (series = null) => {
 };
 
 const DEBUG_QUICK_CREATE = false;
-const statusStyles = { active: { opacity: 1, text: "Активно" }, tentative: { opacity: 0.65, text: "Попередньо" }, cancelled: { opacity: 0.45, text: "Скасовано" } };
+const statusStyles = EVENT_STATUS_STYLES;
 const palette = {
   latin: { bg: "rgba(250,211,144,.24)", border: "#f59e0b" },
   bachata: { bg: "rgba(244,114,182,.22)", border: "#ec4899" },
@@ -492,9 +493,13 @@ export default function ScheduleTab({
   const [bulkPlanSetup, setBulkPlanSetup] = useState(null);
   const [bulkPlanEdit, setBulkPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
+  const [concurrentEvents, setConcurrentEvents] = useState(null);
+  const concurrentDialogRef = useRef(null);
+  const concurrentTriggerRef = useRef(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
+  const [bookingSaving, setBookingSaving] = useState(false);
   const [selection, setSelection] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
@@ -1037,7 +1042,7 @@ export default function ScheduleTab({
   };
 
   const saveBooking = async () => {
-    if (!canManageBookings) return;
+    if (!canManageBookings || bookingSaving) return;
     const { errors, hasErrors, normalizedTitle } = validateDraft(draft);
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
     setFormErrors(errors);
@@ -1048,17 +1053,28 @@ export default function ScheduleTab({
       title: normalizedTitle,
       roomName: fallbackRoomName,
     });
-    if (editingId) await onUpdateBooking(editingId, payload);
-    else await onAddBooking(payload);
-    setShowForm(false);
-    setEditingId(null);
-    setFormErrors({});
+    setBookingSaving(true);
+    try {
+      const saved = editingId
+        ? await onUpdateBooking?.(editingId, payload)
+        : await onAddBooking?.(payload);
+      requireScheduleSaveResult(saved, editingId ? "Бронювання не було оновлено. Перевірте права доступу." : "Подію не було створено.");
+      setShowForm(false);
+      setEditingId(null);
+      setFormErrors({});
+    } catch (error) {
+      console.error("Schedule booking save failed", error);
+      setFormErrors((previous) => ({ ...previous, save: error?.message || "Не вдалося зберегти подію" }));
+    } finally {
+      setBookingSaving(false);
+    }
   };
   const startEdit = (e) => {
     const parentDate = e.parentDate || e.date;
     const isRecurringOccurrence = Boolean(
       e.parentId && parentDate && e.date && parentDate !== e.date && e.recurrence !== "none",
     );
+    setFormErrors({});
     setEditingId(e.parentId || e.id);
     setFormMode("full");
     setShowForm(true);
@@ -1087,6 +1103,7 @@ export default function ScheduleTab({
   };
 
   const duplicateBookingLikeEvent = (e) => {
+    setFormErrors({});
     setEditingId(null);
     setFormMode("full");
     setShowForm(true);
@@ -1174,6 +1191,7 @@ export default function ScheduleTab({
 
   const deleteBookingEvent = async (event, scope = "series") => {
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
+      if (!window.confirm("Видалити лише цю подію?")) return;
       await removeSingleRecurringBookingOccurrence(event);
       return;
     }
@@ -1183,6 +1201,8 @@ export default function ScheduleTab({
   };
 
   const cancelBookingEvent = async (event, scope = "series") => {
+    const prompt = scope === "occurrence" && isRecurringBookingEvent(event) ? "Скасувати лише цю подію?" : (isRecurringBookingEvent(event) ? "Скасувати всю серію?" : "Скасувати подію?");
+    if (!window.confirm(prompt)) return;
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
       await removeSingleRecurringBookingOccurrence(event);
       return;
@@ -1776,7 +1796,7 @@ export default function ScheduleTab({
   };
 
   const saveGroupOverrideEdit = async () => {
-    if (!groupOverrideEdit) return;
+    if (!groupOverrideEdit || groupOverrideEdit.saving) return;
     const st = toMin(groupOverrideEdit.startTime);
     const en = toMin(groupOverrideEdit.endTime);
     if (st == null || en == null || en <= st) {
@@ -1797,13 +1817,16 @@ export default function ScheduleTab({
       note: groupOverrideEdit.note || null,
       status: "active",
     };
+    setGroupOverrideEdit((previous) => ({ ...previous, saving: true, error: "" }));
     try {
-      if (groupOverrideEdit.overrideId) await onUpdateGroupLessonOverride?.(groupOverrideEdit.overrideId, payload);
-      else await onAddGroupLessonOverride?.(payload);
+      const saved = groupOverrideEdit.overrideId
+        ? await onUpdateGroupLessonOverride?.(groupOverrideEdit.overrideId, payload)
+        : await onAddGroupLessonOverride?.(payload);
+      requireScheduleSaveResult(saved, "Зміни заняття не були збережені. Перевірте права доступу.");
       setGroupOverrideEdit(null);
     } catch (err) {
       console.error(err);
-      setGroupOverrideEdit((p) => ({ ...(p || {}), error: "Не вдалося зберегти зміни цього заняття" }));
+      setGroupOverrideEdit((p) => ({ ...(p || {}), saving: false, error: err?.message || "Не вдалося зберегти зміни цього заняття" }));
     }
   };
 
@@ -1845,7 +1868,7 @@ export default function ScheduleTab({
   };
 
   const saveGroupSlotEdit = async () => {
-    if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.error) return;
+    if (!groupSlotEdit || !onUpdateGroupSchedule || groupSlotEdit.saving) return;
     if (groupSlotEdit.groupId == null || groupSlotEdit.slotIndex == null) {
       setGroupSlotEdit((p) => ({ ...(p || {}), error: "Не вдалося визначити запис розкладу для редагування" }));
       return;
@@ -1886,12 +1909,14 @@ export default function ScheduleTab({
       next.note = note;
       return next;
     });
+    setGroupSlotEdit((previous) => ({ ...previous, saving: true, error: "" }));
     try {
-      await onUpdateGroupSchedule(groupSlotEdit.groupId, nextSchedule);
+      const saved = await onUpdateGroupSchedule(groupSlotEdit.groupId, nextSchedule);
+      requireScheduleSaveResult(saved, "Регулярний графік не було оновлено. Перевірте права адміністратора.");
       setGroupSlotEdit(null);
     } catch (err) {
       console.error(err);
-      alert("Не вдалося зберегти зміни розкладу");
+      setGroupSlotEdit((previous) => ({ ...(previous || {}), saving: false, error: err?.message || "Не вдалося зберегти зміни розкладу" }));
     }
   };
 
@@ -1909,6 +1934,27 @@ export default function ScheduleTab({
     };
   }, [openMenuState]);
   
+
+  useEffect(() => {
+    if (!concurrentEvents) return undefined;
+    concurrentDialogRef.current?.focus();
+    const onEscape = (event) => { if (event.key === "Escape") setConcurrentEvents(null); };
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("keydown", onEscape);
+      concurrentTriggerRef.current?.focus?.();
+    };
+  }, [concurrentEvents]);
+
+  useEffect(() => {
+    if (!selectedEventDetails) return undefined;
+    const previousFocus = document.activeElement;
+    const dialog = document.querySelector('[aria-labelledby="schedule-event-details-title"]');
+    dialog?.focus();
+    const onEscape = (event) => { if (event.key === "Escape") setSelectedEventDetails(null); };
+    document.addEventListener("keydown", onEscape);
+    return () => { document.removeEventListener("keydown", onEscape); previousFocus?.focus?.(); };
+  }, [selectedEventDetails]);
 
   const selectedDateObj = useMemo(() => new Date(`${selectedDate}T12:00:00`), [selectedDate]);
   const monthStart = useMemo(() => new Date(selectedDateObj.getFullYear(), selectedDateObj.getMonth(), 1), [selectedDateObj]);
@@ -2083,7 +2129,7 @@ export default function ScheduleTab({
     whiteSpace: "normal",
   };
   const menuHintSt = { fontSize: isMobile ? 9 : 10, color: theme.textLight, padding: "0 3px", lineHeight: 1.15 };
-  const menuChoiceRowSt = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 };
+  const menuChoiceRowSt = { display: "grid", gridTemplateColumns: "1fr", gap: 3 };
   const menuSectionLabelSt = { fontSize: isMobile ? 9.5 : 10, color: theme.textLight, padding: "1px 3px", lineHeight: 1.1 };
   const dayEventsByDay = useMemo(() => buildEventsByDayForDates([selectedDateObj]), [buildEventsByDayForDates, selectedDateObj]);
   const selectedDateEvents = useMemo(() => {
@@ -2131,7 +2177,17 @@ export default function ScheduleTab({
     return `${count * dayRoomMinWidth + Math.max(0, count - 1) * 6}px`;
   }, [isMobile, selectedRoom, dayRoomColumnLimit, dayRoomsToRender.length, dayRoomMinWidth]);
 
-  const shiftSelectedDate = (days) => setSelectedDate(toLocalDateKey(addDays(selectedDateObj, days)));
+  const applyCalendarState = (next) => {
+    setSelectedDate(next.selectedDate);
+    setWeekStart(next.weekStart);
+  };
+  const navigateActivePeriod = (direction) => applyCalendarState(navigateCalendar(viewMode, selectedDate, direction));
+  const changeViewMode = (nextMode) => {
+    applyCalendarState(calendarStateForDate(selectedDate));
+    setViewMode(nextMode);
+  };
+  const periodLabel = calendarPeriodLabel(viewMode, selectedDate, weekStart);
+  const periodNavigationLabels = navigationLabels(viewMode);
   const loadStudioRooms = async () => {
     try {
       const rooms = await fetchStudioRooms();
@@ -2265,13 +2321,13 @@ export default function ScheduleTab({
 
   return (
     <div style={{ display: "grid", gap: isMobile ? 10 : 12, ...(isMobile ? { marginLeft: -8, marginRight: -8, width: "calc(100% + 16px)" } : {}) }}>
-      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: "grid", gap: isMobile ? 5 : 10, padding: isMobile ? "5px 5px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
+      <div style={{ ...cardSt, border: `1px solid ${theme.border}`, display: isMobile ? "grid" : "flex", alignItems: isMobile ? undefined : "flex-end", flexWrap: isMobile ? undefined : "wrap", gap: isMobile ? 5 : 8, padding: isMobile ? "5px 5px" : cardSt.padding, background: isMobile ? (isDarkTheme ? "rgba(15,23,42,.42)" : "rgba(255,255,255,.62)") : cardSt.background, backdropFilter: isMobile ? "blur(12px)" : undefined }}>
         {isMobile ? (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 44px", gap: 4 }}>
-              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>←</button>
-              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
-              <button style={mobileToolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>→</button>
+              <button type="button" aria-label={periodNavigationLabels.previous} style={mobileToolbarBtnSt} onClick={() => navigateActivePeriod(-1)}>←</button>
+              <button type="button" style={mobileToolbarBtnSt} onClick={() => navigateActivePeriod(0)}>Сьогодні</button>
+              <button type="button" aria-label={periodNavigationLabels.next} style={mobileToolbarBtnSt} onClick={() => navigateActivePeriod(1)}>→</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 4 }}>
               {[
@@ -2279,13 +2335,13 @@ export default function ScheduleTab({
                 { id: "week", label: "Тиждень" },
                 { id: "day", label: "День" },
               ].map((m) => (
-                <button key={m.id} style={viewMode === m.id ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                <button key={m.id} style={viewMode === m.id ? mobileToolbarActiveSt : mobileToolbarBtnSt} onClick={() => changeViewMode(m.id)}>
                   {m.label}
                 </button>
               ))}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "minmax(0,1fr) 58px" : "minmax(0,1fr)", gap: 4, alignItems: "center" }}>
-              <select style={mobileToolbarSelectSt} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+              <select aria-label="Фільтр за залою" style={mobileToolbarSelectSt} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
                 <option value="all">Усі зали</option>
                 {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
               </select>
@@ -2311,9 +2367,10 @@ export default function ScheduleTab({
                   <button
                     style={mobileToolbarActiveSt}
                     onClick={() => {
+                      setFormErrors({});
                       setEditingId(null);
                       setFormMode("full");
-                      setShowForm((v) => !v);
+                      setShowForm(true);
                     }}
                   >
                     + Додати
@@ -2322,15 +2379,15 @@ export default function ScheduleTab({
               </div>
             ) : null}
             <div style={{ fontSize: 10.5, color: theme.textLight, textAlign: "center", lineHeight: 1.2 }}>
-              {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}
+              {periodLabel}
             </div>
           </>
         ) : (
           <>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, -7))}>← Попередній тиждень</button>
-              <button style={toolbarBtnSt} onClick={() => setWeekStart(startOfWeek(new Date()))}>Сьогодні</button>
-              <button style={toolbarBtnSt} onClick={() => setWeekStart((d) => addDays(d, 7))}>Наступний тиждень →</button>
+              <button type="button" aria-label={periodNavigationLabels.previous} style={toolbarBtnSt} onClick={() => navigateActivePeriod(-1)}>← {periodNavigationLabels.previous}</button>
+              <button type="button" style={toolbarBtnSt} onClick={() => navigateActivePeriod(0)}>Сьогодні</button>
+              <button type="button" aria-label={periodNavigationLabels.next} style={toolbarBtnSt} onClick={() => navigateActivePeriod(1)}>{periodNavigationLabels.next} →</button>
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {[
@@ -2338,26 +2395,27 @@ export default function ScheduleTab({
                 { id: "week", label: "Тиждень" },
                 { id: "day", label: "День" },
               ].map((m) => (
-                <button key={m.id} style={viewMode === m.id ? toolbarActiveSt : toolbarBtnSt} onClick={() => setViewMode(m.id)}>
+                <button key={m.id} style={{ ...(viewMode === m.id ? toolbarActiveSt : toolbarBtnSt), width: 94, height: 40, justifyContent: "center" }} onClick={() => changeViewMode(m.id)}>
                   {m.label}
                 </button>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <select style={{ ...editorInputSt, minHeight: 44, maxWidth: 210, borderRadius: 999 }} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
+              <label style={{ display: "grid", gap: 3, fontSize: 11, color: theme.textLight }}>Зала<select aria-label="Фільтр за залою" style={{ ...editorInputSt, minHeight: 44, maxWidth: 210, borderRadius: 999 }} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
                 <option value="all">Усі зали</option>
                 {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
-              </select>
+              </select></label>
               {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
               {canOpenBulkPlanner ? <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
-              <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>Тиждень: {toLocalDateKey(weekDays[0])} — {toLocalDateKey(weekDays[6])}</div>
+              <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>{periodLabel}</div>
               {canManageBookings && (
                 <button
                   style={{ ...toolbarActiveSt, minHeight: 40, padding: "0 16px" }}
                   onClick={() => {
+                    setFormErrors({});
                     setEditingId(null);
                     setFormMode("full");
-                    setShowForm((v) => !v);
+                    setShowForm(true);
                   }}
                 >
                   + Додати тренування / резерв
@@ -2366,6 +2424,13 @@ export default function ScheduleTab({
             </div>
           </>
         )}
+      </div>
+
+      <div aria-label="Легенда графіка" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "0 4px", fontSize: 11, color: theme.textLight }}>
+        {[
+          ["Г", "Групове"], ["І", "Індивідуальне"], ["Р", "Резерв"], ["П", "Прибирання / адмін"],
+        ].map(([mark, label]) => <span key={label}><b style={{ color: theme.text }}>{mark}</b> — {label}</span>)}
+        <span><b style={{ color: theme.text }}>Активно</b> · Попереднє бронювання · <s>Скасовано</s></span>
       </div>
 
       {canManageBookings && showForm && (
@@ -2519,9 +2584,10 @@ export default function ScheduleTab({
             <button type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 34 : 36 }} onClick={applyFullToCompactForm}>Сховати зайві поля</button>
             </> : null}
           </div>
+          {formErrors.save ? <div role="alert" style={{ marginTop: 8, padding: "8px 10px", borderRadius: 10, border: `1px solid ${theme.danger}`, color: theme.danger, fontSize: 12, fontWeight: 700 }}>{formErrors.save}</div> : null}
           <div style={{ display: "flex", gap: 6, marginTop: 8, position: "sticky", bottom: 0, background: isDarkTheme ? "rgba(2,6,23,.94)" : "rgba(255,255,255,.96)", borderTop: `1px solid ${theme.border}`, paddingTop: 8, paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))" }}>
-            <button style={{ ...btnP, minHeight: isMobile ? 42 : 40, borderRadius: 999, padding: "0 16px" }} onClick={saveBooking}>
-              Зберегти
+            <button style={{ ...btnP, minHeight: isMobile ? 42 : 40, borderRadius: 999, padding: "0 16px" }} onClick={saveBooking} disabled={bookingSaving}>
+              {bookingSaving ? "Зберігаємо…" : "Зберегти"}
             </button>
             <button
               style={{ ...editorBtnSt, minHeight: isMobile ? 42 : 40 }}
@@ -2541,27 +2607,29 @@ export default function ScheduleTab({
 
       {selectedEventDetails && (
         <div style={{ ...modalOverlaySt, zIndex: 5000, display: "grid", placeItems: "center", padding: 12 }}>
-          <div style={{ ...plannerPanelSt, width: "min(520px,94vw)", maxHeight: "86vh", overflow: "auto", borderRadius: 22 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="schedule-event-details-title" tabIndex={-1} style={{ ...plannerPanelSt, width: "min(520px,94vw)", maxHeight: "86vh", overflow: "auto", borderRadius: 22 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
               <div>
                 <div style={editorSectionLabelSt}>Деталі</div>
-                <b style={{ fontSize: 18 }}>{selectedEventDetails.title || selectedEventDetails.groupName || "Подія"}</b>
+                <b id="schedule-event-details-title" style={{ fontSize: 18 }}>{selectedEventDetails.title || selectedEventDetails.groupName || "Подія"}</b>
               </div>
-              <button style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setSelectedEventDetails(null)}>✕</button>
+              <button type="button" aria-label="Закрити деталі події" style={{ ...editorBtnSt, minHeight: 32, width: 34, padding: 0 }} onClick={() => setSelectedEventDetails(null)}>✕</button>
             </div>
             <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>🕒 {selectedEventDetails.startTime}–{selectedEventDetails.endTime}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>📅 {selectedEventDetails.date}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>⌂ {selectedEventDetails.roomName || UNKNOWN_ROOM_NAME}</span>
               <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px" }}>{getEventTypeLabel(selectedEventDetails.eventType)}</span>
-              {selectedEventDetails.cancelled ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", color: theme.danger }}>Скасовано</span> : null}
+              {(() => {
+                const detailStatus = collisionStatusPresentation(selectedEventDetails.status || (selectedEventDetails.cancelled ? "cancelled" : "active"));
+                return detailStatus.showLabel ? <span style={{ ...editorBtnSt, minHeight: 28, padding: "0 9px", opacity: detailStatus.opacity, color: detailStatus.status === "cancelled" ? theme.danger : theme.text }}>{detailStatus.text}</span> : null;
+              })()}
             </div>
-            <div style={{ marginTop: 12, display: "grid", gap: 8, fontSize: 13 }}>
-              <div style={{ color: theme.textLight }}>Група / клієнт</div>
-              <div>{selectedEventDetails.groupName || selectedEventDetails.title || "—"}</div>
-              <div style={{ color: theme.textLight }}>Напрямок · Тренер</div>
-              <div>{selectedEventDetails.direction || "—"} · {selectedEventDetails.trainer || "—"}</div>
-            </div>
+            <dl style={{ marginTop: 12, display: "grid", gridTemplateColumns: "max-content 1fr", gap: "8px 14px", fontSize: 13 }}>
+              {buildEventDetails(selectedEventDetails).map((field) => (
+                <React.Fragment key={field.label}><dt style={{ color: theme.textLight }}>{field.label}</dt><dd style={{ margin: 0 }}>{field.value}</dd></React.Fragment>
+              ))}
+            </dl>
             {selectedEventDetails.kind === "group" ? (() => {
               const plan = getLessonPlanForEvent(selectedEventDetails);
               const fields = normalizeLessonPlanFields(plan || {});
@@ -2604,7 +2672,6 @@ export default function ScheduleTab({
                   ) : (
                     <div style={{ fontSize: 13, color: theme.textLight, border: `1px dashed ${isDarkTheme ? "rgba(129,140,248,.38)" : "rgba(99,102,241,.32)"}`, borderRadius: 14, padding: "10px 12px", background: isDarkTheme ? "rgba(15,23,42,.28)" : "rgba(255,255,255,.58)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                       <span>Плану ще немає — додайте ціль і зміст для цього заняття.</span>
-                      {canEditGroupSingleLesson(selectedEventDetails) ? <button style={{ ...btnP, minHeight: 30, padding: "0 12px", borderRadius: 999 }} onClick={() => openLessonPlanEditor(selectedEventDetails)}>Додати план</button> : null}
                     </div>
                   )}
                 </div>
@@ -2899,21 +2966,21 @@ export default function ScheduleTab({
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               <div style={editorSectionLabelSt}>Назва і дата</div>
-              <input style={editorInputSt} placeholder={groupOverrideEdit.groupName || "Назва заняття"} value={groupOverrideEdit.title || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, title: e.target.value }))} />
+              <input style={editorInputSt} placeholder={groupOverrideEdit.groupName || "Назва заняття"} value={groupOverrideEdit.title || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, title: e.target.value, error: "" }))} />
               <input style={{ ...editorInputSt, opacity: 0.75 }} type="date" value={groupOverrideEdit.date || ""} readOnly />
               <div style={editorSectionLabelSt}>Час і місце</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
-                <input style={editorInputSt} type="time" value={groupOverrideEdit.startTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, startTime: e.target.value }))} />
-                <input style={editorInputSt} type="time" value={groupOverrideEdit.endTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, endTime: e.target.value }))} />
+                <input style={editorInputSt} type="time" value={groupOverrideEdit.startTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, startTime: e.target.value, error: "" }))} />
+                <input style={editorInputSt} type="time" value={groupOverrideEdit.endTime || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, endTime: e.target.value, error: "" }))} />
               </div>
-              <select style={editorInputSt} value={groupOverrideEdit.roomName || primaryRoomName} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, roomName: e.target.value }))}>
+              <select style={editorInputSt} value={groupOverrideEdit.roomName || primaryRoomName} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, roomName: e.target.value, error: "" }))}>
                 {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
               </select>
-              <select style={editorInputSt} value={groupOverrideEdit.trainerId || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, trainerId: e.target.value }))}>
+              <select style={editorInputSt} value={groupOverrideEdit.trainerId || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, trainerId: e.target.value, error: "" }))}>
                 <option value="">Без тренера</option>
                 {getOperationalTrainers(safeTrainers, groupOverrideEdit.trainerId).map((t) => <option key={t.id} value={t.id}>{getTrainerDisplayName(t) || t.email || t.id}</option>)}
               </select>
-              <input style={editorInputSt} placeholder="Нотатка" value={groupOverrideEdit.note || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, note: e.target.value }))} />
+              <input style={editorInputSt} placeholder="Нотатка" value={groupOverrideEdit.note || ""} onChange={(e) => setGroupOverrideEdit((p) => ({ ...p, note: e.target.value, error: "" }))} />
               <select style={editorInputSt} value="active" disabled>
                 <option value="active">Активно</option>
               </select>
@@ -2923,7 +2990,7 @@ export default function ScheduleTab({
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              <button style={btnP} onClick={saveGroupOverrideEdit}>Зберегти</button>
+              <button style={btnP} onClick={saveGroupOverrideEdit} disabled={!!groupOverrideEdit.saving}>{groupOverrideEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
               <button style={btnS} onClick={() => setGroupOverrideEdit(null)}>Скасувати</button>
               {groupOverrideEdit.overrideId ? <button style={{ ...btnS, color: theme.danger, marginLeft: "auto" }} onClick={resetGroupOverrideEdit}>Скинути зміни для цього заняття</button> : null}
             </div>
@@ -2966,7 +3033,7 @@ export default function ScheduleTab({
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.error}>Зберегти</button>
+              <button style={btnP} onClick={saveGroupSlotEdit} disabled={!!groupSlotEdit.saving}>{groupSlotEdit.saving ? "Зберігаємо…" : "Зберегти"}</button>
               <button style={btnS} onClick={() => setGroupSlotEdit(null)}>Скасувати</button>
             </div>
           </div>
@@ -3017,18 +3084,14 @@ export default function ScheduleTab({
             <b style={{ fontSize: 20, letterSpacing: "-0.01em" }}>
               {selectedDateObj.toLocaleDateString("uk-UA", { month: "long", year: "numeric" })}
             </b>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(addDays(monthStart, -1)))}>←</button>
-              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(new Date()))}>Сьогодні</button>
-              <button style={{ ...btnS, minHeight: 40 }} onClick={() => setSelectedDate(toLocalDateKey(addDays(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1), 0)))}>→</button>
-            </div>
+
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 6 }}>
             {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"].map((d) => (
               <div key={d} style={{ fontSize: 12, color: theme.textLight, textAlign: "center", fontWeight: 700 }}>{d}</div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gridAutoRows: isMobile ? 58 : undefined, gap: isMobile ? 4 : 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))", gridAutoRows: isMobile ? 92 : undefined, gap: isMobile ? 4 : 6 }}>
             {monthCells.map((d) => {
               const key = toLocalDateKey(d);
               const monthDayEvents = monthEventsByDay.get(key) || [];
@@ -3037,46 +3100,24 @@ export default function ScheduleTab({
                 : monthDayEvents.filter((e) => (e.roomName || UNKNOWN_ROOM_NAME) === selectedRoom);
               const inMonth = d.getMonth() === monthStart.getMonth();
               const sortedItems = items.slice().sort((a, b) => a.startMin - b.startMin);
-              const visibleMonthChipCount = selectedRoom === "all" ? 0 : 2;
-              const previewItems = selectedRoom === "all" ? sortedItems.slice(0, 3) : sortedItems.slice(0, visibleMonthChipCount);
-              const remaining = selectedRoom === "all"
-                ? Math.max(0, items.length - previewItems.length)
-                : Math.max(0, items.length - visibleMonthChipCount);
+              const { visible: previewItems, remaining } = monthPreview(sortedItems, isMobile ? 1 : (selectedRoom === "all" ? 3 : 2));
               return (
-                <button key={key} onClick={() => { setSelectedDate(key); setViewMode("day"); }} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 58 : 116, height: isMobile ? 58 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
-                  <div style={{ fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</div>
-                  {items.length > 0 && selectedRoom === "all" ? (
-                    <>
-                      <div
-                        onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }}
-                        style={{ fontSize: isMobile ? 10 : 11.5, color: theme.textLight, fontWeight: 700, lineHeight: 1.1 }}
-                      >
-                        {items.length} подій
-                      </div>
-                      <div
-                        onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }}
-                        style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}
-                      >
-                        {Array.from(new Set(items.map((ev) => colorKey(ev)))).slice(0, 4).map((tone) => {
-                          const c = palette[tone] || palette.default;
-                          return <span key={tone} style={{ width: isMobile ? 6 : 12, height: isMobile ? 6 : 4, borderRadius: 999, background: c.border, opacity: 0.65 }} />;
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-                  {!isMobile && selectedRoom !== "all" ? previewItems.slice(0, 2).map((e) => {
+                <div key={key} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 92 : 116, height: isMobile ? 92 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
+                  <button type="button" aria-label={`Відкрити день ${key}`} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }} style={{ ...btnS, minHeight: 24, justifyContent: "flex-start", padding: 0, border: 0, background: "transparent", fontWeight: 700, color: inMonth ? theme.text : theme.textLight }}>{d.getDate()}</button>
+                  {previewItems.map((e) => {
                     const c = e.color ? { bg: `${e.color}18`, border: `${e.color}99` } : palette[colorKey(e)] || palette.default;
                     const hasPlan = hasLessonPlanForEvent(e);
                     const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
-                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setSelectedDate(key); setViewMode("day"); }} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
+                      <button type="button" key={e.id} title={`${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onClick={() => setSelectedEventDetails(e)} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
                         {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", minWidth: planSeriesLabel ? 28 : 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto", padding: planSeriesLabel ? "0 4px" : 0 }}>✓{planSeriesLabel ? ` ${planSeriesLabel}` : ""}</span> : null}
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}</span>
-                      </div>
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}{selectedRoom === "all" ? ` · ${e.roomName || UNKNOWN_ROOM_NAME}` : ""}</span>
+                      </button>
                     );
-                  }) : null}
-                  {!isMobile && selectedRoom !== "all" && remaining > 0 ? <div style={{ fontSize: 11, color: theme.textLight, fontWeight: 700, opacity: 0.85 }}>+{remaining} ще</div> : null}
-                </button>
+                  })}
+                  {remaining > 0 ? <button type="button" style={{ ...btnS, minHeight: 22, padding: 0, border: 0, background: "transparent", fontSize: 11, color: theme.textLight, fontWeight: 700, justifyContent: "flex-start" }} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }}>+{remaining} ще</button> : null}
+                  <button type="button" aria-label={`Відкрити вільну область дня ${key}`} style={{ minHeight: 12, border: 0, background: "transparent" }} onClick={() => { applyCalendarState(calendarStateForDate(key)); setViewMode("day"); }} />
+                </div>
               );
             })}
           </div>
@@ -3091,9 +3132,7 @@ export default function ScheduleTab({
       {viewMode === "day" ? (
         <div style={{ ...cardSt, ...mobileCalendarBleedSt, border: `1px solid ${theme.border}`, padding: isMobile ? 3 : cardSt.padding, minWidth: 0, maxWidth: isMobile ? "calc(100% + 16px)" : "100%", background: isDarkTheme ? "linear-gradient(180deg, rgba(15,23,42,.36), rgba(2,6,23,.18))" : "linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.54))", boxShadow: isDarkTheme ? "0 12px 32px rgba(0,0,0,.24)" : "0 12px 28px rgba(15,23,42,.08)" }}>
           <div style={{ display: "flex", gap: isMobile ? 5 : 8, marginBottom: isMobile ? 6 : 10, flexWrap: "wrap", alignItems: "center", paddingBottom: isMobile ? 6 : 8, borderBottom: `1px solid ${theme.border}` }}>
-            <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(-1)}>←</button>
-            <input style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-            <button style={toolbarBtnSt} onClick={() => shiftSelectedDate(1)}>→</button>
+            <input aria-label="Обрана дата" style={{ ...editorInputSt, minHeight: isMobile ? 34 : 40, width: isMobile ? 136 : 170, borderRadius: 999 }} type="date" value={selectedDate} onChange={(e) => applyCalendarState(calendarStateForDate(e.target.value))} />
             <div style={{ fontSize: isMobile ? 10.5 : 12, color: theme.textLight, whiteSpace: "nowrap" }}>
               {selectedDateObj.toLocaleDateString("uk-UA", { weekday: isMobile ? "short" : "long", day: "numeric", month: "short" })}
             </div>
@@ -3343,7 +3382,7 @@ export default function ScheduleTab({
                       />
                     ),
                   )}
-                  {dayEvents.map((e) => {
+                  {weekEventLayout(dayEvents).map((e) => {
                     const dur = Math.max(0, e.endMin - e.startMin);
                     const top =
                       ((e.startMin - DAY_START_HOUR * 60) / 60) * weekHourPx;
@@ -3353,14 +3392,40 @@ export default function ScheduleTab({
                     );
                     const gap = 2;
                     const available = 94;
-                    const width =
-                      e.colCount > 1
-                        ? (available - gap * (e.colCount - 1)) / e.colCount
-                        : available;
-                    const left = 3 + e.colIndex * (width + gap);
+                    const useConcurrentSummary = selectedRoom === "all" && e.simultaneous.length > 1;
+                    if (useConcurrentSummary && !e.isRepresentative) return null;
+                    const width = useConcurrentSummary ? available : (e.colCount > 1 ? (available - gap * (e.colCount - 1)) / e.colCount : available);
+                    const left = useConcurrentSummary ? 3 : 3 + e.colIndex * (width + gap);
                     const c = e.color
                       ? { bg: `${e.color}22`, border: e.color }
                       : palette[colorKey(e)] || palette.default;
+                    if (useConcurrentSummary) {
+                      const { top: clusterTop, height: clusterHeight } = collisionClusterGeometry(e.clusterStartMin, e.clusterEndMin, weekHourPx, DAY_START_HOUR);
+                      const clusterRange = `${minToHHMM(e.clusterStartMin)}–${minToHHMM(e.clusterEndMin)}`;
+                      const tilePreview = collisionTilePreview(e.simultaneous, { availableHeightPx: clusterHeight, isMobile });
+                      return (
+                        <div key={`cluster-${date}-${e.clusterStartMin}-${e.clusterEndMin}`} aria-label={`Паралельні події, ${clusterRange}`} style={{ position: "absolute", top: clusterTop, left: "3%", width: "94%", height: clusterHeight, zIndex: 5, border: `1px solid ${theme.border}`, borderRadius: 9, background: c.bg, padding: 3, display: "grid", gridTemplateColumns: `repeat(${tilePreview.columns}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)", gap: 3, overflow: "hidden" }}>
+                          {tilePreview.visible.map((event) => {
+                            const eventMark = getEventTypeMark(event);
+                            const eventTitle = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${event.trainer || event.trainerName || "Без тренера"} · ${getEventTypeLabel(event.eventType)}`;
+                            const eventColor = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
+                            const eventStatus = collisionStatusPresentation(event.status);
+                            const eventAccessibleTitle = `${eventTitle} · Статус: ${eventStatus.text}`;
+                            const canOpenActions = canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson });
+                            return (
+                              <div key={event.id} style={{ position: "relative", minWidth: 0, border: `1px solid ${eventColor.border}`, borderRadius: 6, background: eventColor.bg, opacity: eventStatus.opacity, display: "grid", gridTemplateColumns: canOpenActions ? "minmax(0,1fr) 24px" : "1fr", overflow: "hidden" }}>
+                                <button type="button" title={eventAccessibleTitle} aria-label={eventAccessibleTitle} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ border: 0, background: "transparent", color: theme.text, padding: "3px 4px", minWidth: 0, textAlign: "left", overflow: "hidden", cursor: "pointer" }}>
+                                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eventMark ? `${eventMark} · ` : ""}<span style={{ textDecoration: eventStatus.textDecoration || "none" }}>{event.title}</span>{eventStatus.showLabel ? <span style={{ marginLeft: 3, fontSize: 8, fontWeight: 900 }}>· {eventStatus.text}</span> : null}</span>
+                                  <span style={{ display: "block", fontSize: 8.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: theme.textLight }}>⌂ {event.roomName || UNKNOWN_ROOM_NAME}{event.startMin !== e.clusterStartMin ? ` · ${event.startTime}` : ""}</span>
+                                </button>
+                                {canOpenActions ? <button type="button" aria-label={`Редагувати: ${event.title}, ${event.date}, ${event.startTime}`} style={{ border: 0, borderLeft: `1px solid ${theme.border}`, background: "transparent", color: theme.text, cursor: "pointer", padding: 0 }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!canEditCollisionEvent(event, { canMutateEvent, canEditGroupLesson: canEditGroupSingleLesson })) return; if (event.kind === "booking") startEdit(event); else openGroupOverrideEditor(event); }}>✎</button> : null}
+                              </div>
+                            );
+                          })}
+                          {tilePreview.overflow > 0 ? <button type="button" aria-label={`Показати ще ${tilePreview.overflow} подій у діапазоні ${clusterRange}`} onClick={(event) => { event.stopPropagation(); concurrentTriggerRef.current = event.currentTarget; setConcurrentEvents(e.simultaneous); }} style={{ border: `1px dashed ${c.border}`, borderRadius: 6, background: theme.card, color: theme.text, fontWeight: 900, cursor: "pointer", minHeight: 28 }}>+{tilePreview.overflow}</button> : null}
+                        </div>
+                      );
+                    }
                     const stView = statusStyles[e.status] || statusStyles.active;
                     const canMutateThisEvent = canMutateEvent(e);
                     const textRightPadding = (isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) ? (isMobile ? 18 : 26) : 0;
@@ -3379,6 +3444,10 @@ export default function ScheduleTab({
                       <div
                         key={e.id}
                         data-event-card="1"
+                        role="button"
+                        tabIndex={0}
+                        title={`${e.title} · ${e.startTime}–${e.endTime} · ${e.roomName || UNKNOWN_ROOM_NAME} · ${e.trainer || e.trainerName || "Без тренера"} · ${getEventTypeLabel(e.eventType)}`}
+                        onKeyDown={(ev) => { if (isEventCardKeyboardActivation(ev)) { ev.preventDefault(); setSelectedEventDetails(e); } }}
                         onMouseDown={(ev) => ev.stopPropagation()}
                         onMouseUp={(ev) => ev.stopPropagation()}
                         onClick={(ev) => {
@@ -3419,10 +3488,14 @@ export default function ScheduleTab({
                           <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, marginTop: 2 }}>
                             <span style={{ color: theme.text, fontSize: isMobile ? 10 : 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{e.startTime}–{e.endTime}</span>
                           </div>
+                          {selectedRoom === "all" ? <div style={{ marginTop: 2, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>⌂ {e.roomName || UNKNOWN_ROOM_NAME}</div> : null}
                           {extraLine ? <div style={{ marginTop: 2, fontSize: isMobile ? 9.5 : 10.5, color: theme.textLight, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{extraLine}</div> : null}
                           {(isAdmin || e.kind === "booking" || canEditGroupSingleLesson(e)) && (
                             <div style={{ position: "absolute", top: isMobile ? 4 : 6, right: isMobile ? 4 : 6, zIndex: 2100 }}>
                               <button
+                                type="button"
+                                aria-label={`Дії: ${e.title}, ${e.date}, ${e.startTime}`}
+                                onKeyDown={(ev) => ev.stopPropagation()}
                                 style={{
                                   ...btnS,
                                   padding: isMobile ? "0 4px" : "0 6px",
@@ -3504,21 +3577,21 @@ export default function ScheduleTab({
                                             <>
                                               <div style={menuSectionLabelSt}>Видалити</div>
                                               <div style={menuChoiceRowSt}>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "occurrence"); }}>Цю</button>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Серію</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "occurrence"); }}>Видалити лише цю подію</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Видалити всю серію</button>
                                               </div>
                                             </>
                                           ) : (
                                             <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await deleteBookingEvent(e, "series"); }}>Видалити</button>
                                           )}
                                           <div style={menuSectionLabelSt}>Статус події</div>
-                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Попередня</button>
+                                          <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await onUpdateBooking(e.parentId || e.id, { status: "tentative" }); }}>Позначити як попереднє бронювання</button>
                                           {isRecurringBookingEvent(e) ? (
                                             <>
                                               <div style={menuSectionLabelSt}>Скасувати</div>
                                               <div style={menuChoiceRowSt}>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "occurrence"); }}>Цю</button>
-                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Серію</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "occurrence"); }}>Скасувати лише цю подію</button>
+                                                <button style={menuActionBtnSt} onClick={async () => { setOpenMenuState(null); await cancelBookingEvent(e, "series"); }}>Скасувати всю серію</button>
                                               </div>
                                             </>
                                           ) : (
@@ -3615,6 +3688,30 @@ export default function ScheduleTab({
       ) : null}
 
       
+
+      {concurrentEvents?.length ? (
+        <div style={{ ...modalOverlaySt, zIndex: 5050, display: "grid", placeItems: "center", padding: 12 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setConcurrentEvents(null); }}>
+          <div ref={concurrentDialogRef} role="dialog" aria-modal="true" aria-labelledby="concurrent-events-title" tabIndex={-1} style={{ ...plannerPanelSt, outline: `3px solid ${theme.primary}55`, width: "min(520px,94vw)", maxHeight: "80vh", overflow: "auto", borderRadius: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <b id="concurrent-events-title">Конфліктні події · {concurrentEvents[0]?.startTime}</b>
+              <button type="button" aria-label="Закрити список одночасних подій" style={editorBtnSt} onClick={() => setConcurrentEvents(null)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {concurrentEvents.map((event) => {
+                const eventStatus = collisionStatusPresentation(event.status);
+                const accessibleLabel = `${event.title} · ${event.startTime}–${event.endTime} · ${event.roomName || UNKNOWN_ROOM_NAME} · ${getEventTypeLabel(event.eventType)} · Статус: ${eventStatus.text}`;
+                return (
+                  <button key={event.id} type="button" aria-label={accessibleLabel} onFocus={(ev) => { ev.currentTarget.style.outline = `3px solid ${theme.primary}`; }} onBlur={(ev) => { ev.currentTarget.style.outline = "none"; }} style={{ ...editorBtnSt, outline: "none", opacity: eventStatus.opacity, minHeight: 54, height: "auto", display: "grid", justifyItems: "start", padding: "8px 10px", textAlign: "left" }} onClick={() => { setConcurrentEvents(null); setSelectedEventDetails(event); }}>
+                    <b style={{ textDecoration: eventStatus.textDecoration || "none" }}>{event.title}</b>
+                    <span>{event.startTime}–{event.endTime} · {event.roomName || UNKNOWN_ROOM_NAME}</span>
+                    <span style={{ color: theme.textLight }}>{event.trainer || event.trainerName || "Тренера не вказано"} · {getEventTypeLabel(event.eventType)}{eventStatus.showLabel ? ` · ${eventStatus.text}` : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isAdmin && (
         <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
