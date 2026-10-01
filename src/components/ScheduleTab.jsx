@@ -3495,6 +3495,7 @@ export default function ScheduleTab({
                               <button
                                 type="button"
                                 aria-label={`Дії: ${e.title}, ${e.date}, ${e.startTime}`}
+                                onKeyDown={(ev) => ev.stopPropagation()}
                                 style={{
                                   ...btnS,
                                   padding: isMobile ? "0 4px" : "0 6px",

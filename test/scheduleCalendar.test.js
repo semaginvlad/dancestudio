@@ -217,6 +217,7 @@ test("week card keyboard activation ignores nested action controls", async () =>
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /onKeyDown=\{\(ev\) => \{ if \(isEventCardKeyboardActivation\(ev\)\)/);
   assert.match(source, /onClick=\{\(ev\) => \{\s*ev\.stopPropagation\(\);\s*const rect = ev\.currentTarget\.getBoundingClientRect\(\)/);
+  assert.match(source, /aria-label=\{`Дії:[\s\S]*?onKeyDown=\{\(ev\) => ev\.stopPropagation\(\)\}/);
 });
 
 test("collision overflow and details use canonical booking status", async () => {
