@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collision
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { expandBookingBlocks, findBookingBlockConflict, validateBookingBlock } from "../scheduleBookingBlocks";
+import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -813,7 +813,12 @@ export default function ScheduleTab({
     });
     const rangeKeys = normalizedDates.map(toLocalDateKey).sort();
     if (rangeKeys.length) {
-      expandBookingBlocks(safeBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], activeStudioRooms)
+      const canonicalBlockRooms = activeStudioRooms.length
+        ? activeStudioRooms
+        : Array.from(new Set(Array.from(map.values()).flat().map((event) => normalizeRoomName(event.roomName)).filter(Boolean)))
+          .map((name) => ({ id: `legacy:${name.toLocaleLowerCase("uk-UA")}`, name, isActive: true }));
+      const displayBlockRooms = canonicalBlockRooms.length ? canonicalBlockRooms : [{ id: "legacy:default", name: DEFAULT_ROOM, isActive: true }];
+      expandBookingBlocks(safeBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], displayBlockRooms)
         .forEach((event) => { if (map.has(event.date)) map.get(event.date).push(event); });
     }
     map.forEach((arr, k) => {
@@ -1085,11 +1090,12 @@ export default function ScheduleTab({
       title: normalizedTitle,
       roomName: fallbackRoomName,
     });
-    const blockConflict = findBookingBlockConflict(payload, safeBookingBlocks, activeStudioRooms);
+    const saveGuard = getBookingBlockSaveGuard(payload, safeBookingBlocks, activeStudioRooms, isAdmin);
+    const blockConflict = saveGuard.conflict;
     if (blockConflict) {
       const message = `Цей час закритий адміністратором: ${blockConflict.block.title} (${blockConflict.date}, ${blockConflict.block.startTime}–${blockConflict.block.endTime})`;
-      if (!isAdmin) { setFormErrors((previous) => ({ ...previous, save: message })); return; }
-      if (!window.confirm(`${message}\n\nСтворити бронювання поверх блокування?`)) return;
+      if (saveGuard.blocked) { setFormErrors((previous) => ({ ...previous, save: message })); return; }
+      if (saveGuard.requiresConfirmation && !window.confirm(`${message}\n\nСтворити бронювання поверх блокування?`)) return;
     }
     setBookingSaving(true);
     try {

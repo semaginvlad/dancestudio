@@ -110,19 +110,38 @@ language sql stable security definer set search_path=public as $$
  where public.crm_is_admin_session() or public.crm_is_active_trainer_session() group by b.id order by b.starts_on,b.start_time;
 $$;
 
+-- Candidate dates are generated only inside a block's finite date range. This
+-- keeps open-ended recurrences safe and makes monthly recurrence skip months
+-- that do not contain the original day (for example, January 31 -> March 31).
+create or replace function public.crm_schedule_booking_occurs_on(p_start date,p_candidate date,p_recurrence text)
+returns boolean language sql immutable set search_path=public as $$
+  select case lower(coalesce(p_recurrence,'none'))
+    when 'none' then p_candidate=p_start
+    when 'daily' then p_candidate>=p_start
+    when 'weekly' then p_candidate>=p_start and (p_candidate-p_start)%7=0
+    when 'monthly' then p_candidate>=p_start and extract(day from p_candidate)=extract(day from p_start)
+    else p_candidate=p_start
+  end
+$$;
+
 create or replace function public.crm_enforce_schedule_booking_blocks()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
 begin
   if public.crm_is_admin_session() or coalesce(new.status,'active')='cancelled' then return new; end if;
-  with recursive occurrences(d) as (
-    select new.date
-    union all select step.next_date
-    from occurrences cross join lateral (select case lower(coalesce(new.recurrence,'none')) when 'daily' then d+1 when 'weekly' then d+7 when 'monthly' then (d+interval '1 month')::date end next_date) step
-    where lower(coalesce(new.recurrence,'none')) in ('daily','weekly','monthly') and new.recurrence_until is not null and step.next_date <= new.recurrence_until
-  )
-  select b.title into v_title from occurrences o join public.schedule_booking_blocks b on b.is_active and o.d between b.starts_on and b.ends_on and extract(isodow from o.d)::smallint=any(b.weekdays) and new.start_time::time < b.end_time and b.start_time < new.end_time::time
-  where b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and lower(btrim(r.name))=lower(btrim(new.room_name))) limit 1;
+  select b.title into v_title
+  from public.schedule_booking_blocks b
+  cross join lateral generate_series(
+    greatest(new.date,b.starts_on),
+    least(coalesce(new.recurrence_until,b.ends_on),b.ends_on),
+    interval '1 day'
+  ) candidate
+  where b.is_active
+    and public.crm_schedule_booking_occurs_on(new.date,candidate::date,coalesce(new.recurrence,'none'))
+    and extract(isodow from candidate)::smallint=any(b.weekdays)
+    and new.start_time::time < b.end_time and b.start_time < new.end_time::time
+    and (b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and lower(btrim(r.name))=lower(btrim(new.room_name))))
+  limit 1;
   if v_title is not null then raise exception 'Цей час закритий адміністратором: %',v_title using errcode='P0001'; end if;
   return new;
 end $$;
@@ -133,6 +152,7 @@ create trigger trg_enforce_schedule_booking_blocks before insert or update of da
 revoke execute on function public.crm_validate_booking_block_input(text,text,date,date,time,time,boolean,smallint[],uuid[]) from public,anon,authenticated;
 revoke execute on function public.crm_valid_iso_weekdays(smallint[]) from public,anon,authenticated;
 revoke execute on function public.crm_enforce_schedule_booking_blocks() from public,anon,authenticated;
+revoke execute on function public.crm_schedule_booking_occurs_on(date,date,text) from public,anon,authenticated;
 revoke execute on function public.crm_fetch_schedule_booking_blocks() from public,anon;
 revoke execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;

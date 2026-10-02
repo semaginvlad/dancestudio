@@ -40,7 +40,8 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = formatDateOnly(date);
       if (!blockMatchesDate(block, key)) continue;
-      const matchingRooms = block.allRooms ? rooms.filter((room) => room.isActive !== false) : rooms.filter((room) => blockMatchesRoom(block, room));
+      const availableRooms = rooms.length ? rooms : [{ id: "legacy:default", name: "Основна зала", isActive: true }];
+      const matchingRooms = block.allRooms ? availableRooms.filter((room) => room.isActive !== false) : availableRooms.filter((room) => blockMatchesRoom(block, room));
       matchingRooms.forEach((room) => occurrences.push({ ...block, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: block.title, startTime: block.startTime, endTime: block.endTime, startMin: timeMinutes(block.startTime), endMin: timeMinutes(block.endTime), readOnly: true }));
     }
   }
@@ -51,20 +52,36 @@ export function findBookingBlockConflict(booking, blocks, rooms = []) {
   if (!booking || booking.status === "cancelled") return null;
   const room = rooms.find((item) => String(item.id) === String(booking.roomId)) || { id: booking.roomId, name: booking.roomName };
   const first = parseDateOnly(booking.date);
-  const until = parseDateOnly(booking.recurrenceUntil || booking.date) || first;
   if (!first) return null;
   const recurrence = ["daily", "weekly", "monthly"].includes(booking.recurrence) ? booking.recurrence : "none";
-  for (let occurrence = new Date(first); occurrence <= until;) {
-    const key = formatDateOnly(occurrence);
-    const conflict = (blocks || []).find((block) => blockMatchesDate(block, key) && blockMatchesRoom(block, room) && intervalsOverlap(booking.startTime, booking.endTime, block.startTime, block.endTime));
-    if (conflict) return { block: conflict, date: key };
-    if (recurrence === "none") break;
-    if (recurrence === "daily") occurrence.setDate(occurrence.getDate() + 1);
-    if (recurrence === "weekly") occurrence.setDate(occurrence.getDate() + 7);
-    if (recurrence === "monthly") occurrence.setMonth(occurrence.getMonth() + 1);
+  const explicitUntil = parseDateOnly(booking.recurrenceUntil);
+  for (const block of blocks || []) {
+    if (block?.isActive === false || !blockMatchesRoom(block, room) || !intervalsOverlap(booking.startTime, booking.endTime, block.startTime, block.endTime)) continue;
+    const blockStart = parseDateOnly(block.startsOn);
+    const blockEnd = parseDateOnly(block.endsOn);
+    if (!blockStart || !blockEnd) continue;
+    const rangeStart = new Date(Math.max(first.getTime(), blockStart.getTime()));
+    const rangeEnd = new Date(Math.min((explicitUntil || blockEnd).getTime(), blockEnd.getTime()));
+    for (let candidate = rangeStart; candidate <= rangeEnd; candidate.setDate(candidate.getDate() + 1)) {
+      const elapsedDays = Math.round((candidate.getTime() - first.getTime()) / 86400000);
+      const occurs = recurrence === "none"
+        ? elapsedDays === 0
+        : recurrence === "daily"
+          ? elapsedDays >= 0
+          : recurrence === "weekly"
+            ? elapsedDays >= 0 && elapsedDays % 7 === 0
+            : elapsedDays >= 0 && candidate.getDate() === first.getDate();
+      const key = formatDateOnly(candidate);
+      if (occurs && blockMatchesDate(block, key)) return { block, date: key };
+    }
   }
   return null;
 }
+
+export const getBookingBlockSaveGuard = (booking, blocks, rooms, isAdmin) => {
+  const conflict = findBookingBlockConflict(booking, blocks, rooms);
+  return { conflict, blocked: Boolean(conflict) && !isAdmin, requiresConfirmation: Boolean(conflict) && Boolean(isAdmin) };
+};
 
 export function validateBookingBlock(input) {
   const errors = {};

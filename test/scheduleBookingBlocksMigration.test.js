@@ -9,3 +9,5 @@ test("migration preserves access and trigger invariants", () => {
   for (const required of ["enable row level security", "crm_is_admin_session()", "crm_is_active_trainer_session()", "security definer", "set search_path", "before insert or update", "new.start_time::time < b.end_time", "b.start_time < new.end_time::time", "revoke all", "grant execute"]) assert.match(sql.toLowerCase(), new RegExp(required.replace(/[()]/g, "\\$&")));
   assert.doesNotMatch(sql, /service_role|ip_address|token|secret/i);
 });
+test("open-ended recurrence is bounded by each block and monthly matching is calendar based", () => { assert.match(sql, /coalesce\(new\.recurrence_until,b\.ends_on\)/i); assert.match(sql, /generate_series/i); assert.match(sql, /extract\(day from p_candidate\)=extract\(day from p_start\)/i); assert.doesNotMatch(sql, /interval '1 month'/i); });
+test("mutations reload canonical room links", () => { const db=readFileSync(new URL("../src/db.js",import.meta.url),"utf8"); assert.match(db,/fetchSavedScheduleBookingBlock/); assert.match(db,/blocks\.find\(\(block\).*saved\.id/); });

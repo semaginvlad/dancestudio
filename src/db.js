@@ -1507,6 +1507,13 @@ const mapScheduleBookingBlock = (row = {}) => ({
 
 const bookingBlockRpcPayload = (block) => ({ p_title: block.title, p_note: block.note || null, p_starts_on: block.startsOn, p_ends_on: block.endsOn, p_start_time: block.startTime, p_end_time: block.endTime, p_all_rooms: !!block.allRooms, p_weekdays: block.weekdays, p_room_ids: block.allRooms ? [] : block.roomIds, p_is_active: block.isActive !== false });
 const requireBlockId = (data, operation) => { if (!data?.id) throw new Error(`${operation}: сервер не повернув ID правила`); return mapScheduleBookingBlock(data); };
+const fetchSavedScheduleBookingBlock = async (data, operation) => {
+  const saved = requireBlockId(data, operation);
+  const blocks = await fetchScheduleBookingBlocks();
+  const full = blocks.find((block) => String(block.id) === String(saved.id));
+  if (!full?.id) throw new Error(`${operation}: не вдалося завантажити збережене правило`);
+  return full;
+};
 
 export async function fetchScheduleBookingBlocks() {
   const { data, error } = await supabase.rpc('crm_fetch_schedule_booking_blocks');
@@ -1516,12 +1523,12 @@ export async function fetchScheduleBookingBlocks() {
 export async function createScheduleBookingBlock(block) {
   const { data, error } = await supabase.rpc('crm_admin_create_schedule_booking_block', bookingBlockRpcPayload(block));
   if (error) throw error;
-  return requireBlockId(data, 'Створення');
+  return fetchSavedScheduleBookingBlock(data, 'Створення');
 }
 export async function updateScheduleBookingBlock(id, block) {
   const { data, error } = await supabase.rpc('crm_admin_update_schedule_booking_block', { p_id: id, ...bookingBlockRpcPayload(block) });
   if (error) throw error;
-  return requireBlockId(data, 'Оновлення');
+  return fetchSavedScheduleBookingBlock(data, 'Оновлення');
 }
 export const setScheduleBookingBlockActive = (block, isActive) => updateScheduleBookingBlock(block.id, { ...block, isActive });
 export async function deleteScheduleBookingBlock(id) {
