@@ -167,9 +167,41 @@ begin
   return false;
 end $$;
 
+create or replace function public.crm_schedule_booking_step_date(p_date date,p_recurrence text,p_direction integer)
+returns date language plpgsql immutable set search_path=public as $$
+declare v_month date; v_candidate date; i integer;
+begin
+  if p_direction not in (-1,1) then raise exception 'direction must be -1 or 1'; end if;
+  if lower(coalesce(p_recurrence,''))='daily' then return p_date+p_direction; end if;
+  if lower(coalesce(p_recurrence,''))='weekly' then return p_date+(7*p_direction); end if;
+  if lower(coalesce(p_recurrence,''))<>'monthly' then return null; end if;
+  v_month:=date_trunc('month',p_date)::date;
+  for i in 1..12 loop
+    v_month:=(v_month+(p_direction*interval '1 month'))::date;
+    v_candidate:=(v_month+(extract(day from p_date)::integer-1))::date;
+    if extract(day from v_candidate)=extract(day from p_date) then return v_candidate; end if;
+  end loop;
+  return null;
+end $$;
+
+create or replace function public.crm_schedule_booking_update_only_shrinks(old_start date,old_until date,new_start date,new_until date,p_recurrence text)
+returns boolean language sql immutable set search_path=public as $$
+  select lower(coalesce(p_recurrence,'')) in ('daily','weekly','monthly')
+    and new_start>=old_start
+    and public.crm_schedule_booking_occurs_on(old_start,new_start,p_recurrence)
+    and (old_until is null or (new_until is not null and new_until<=old_until))
+    and (new_until is null or new_start<=new_until)
+    and (new_start>old_start or (new_until is not null and (old_until is null or new_until<old_until)))
+$$;
+
 create or replace function public.crm_canonical_room_name(p_name text)
 returns text language sql immutable set search_path=public as $$
   select lower(btrim(regexp_replace(coalesce(p_name,''),'[[:space:]]+',' ','g')))
+$$;
+
+create or replace function public.crm_occurrence_removal_signature(p_date date,p_start text,p_end text,p_room text,p_recurrence text,p_until date,p_status text,p_trainer text)
+returns text language sql immutable set search_path=public as $$
+  select concat_ws('|',p_date::text,coalesce(p_start,''),coalesce(p_end,''),public.crm_canonical_room_name(p_room),lower(coalesce(p_recurrence,'none')),coalesce(p_until::text,''),coalesce(p_status,'active'),coalesce(p_trainer,''))
 $$;
 
 -- Replace the canonical rename RPC so its room-booking metadata cascade can
@@ -221,6 +253,17 @@ returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
 begin
   if coalesce(new.status,'active')='cancelled' then return new; end if;
+  if tg_op='INSERT' and current_setting('crm.occurrence_removal_continuation',true)='on'
+     and public.crm_occurrence_removal_signature(new.date,new.start_time,new.end_time,new.room_name,new.recurrence,new.recurrence_until,new.status,new.trainer_id::text)=current_setting('crm.occurrence_removal_signature',true)
+  then return new; end if;
+  if tg_op='UPDATE'
+     and new.start_time is not distinct from old.start_time
+     and new.end_time is not distinct from old.end_time
+     and public.crm_canonical_room_name(new.room_name)=public.crm_canonical_room_name(old.room_name)
+     and new.status is not distinct from old.status
+     and new.recurrence is not distinct from old.recurrence
+     and public.crm_schedule_booking_update_only_shrinks(old.date,old.recurrence_until,new.date,new.recurrence_until,new.recurrence)
+  then return new; end if;
   if tg_op='UPDATE' and public.crm_is_admin_session()
      and new.date is not distinct from old.date
      and new.start_time is not distinct from old.start_time
@@ -250,6 +293,54 @@ end $$;
 
 drop trigger if exists trg_enforce_schedule_booking_blocks on public.room_bookings;
 create trigger trg_enforce_schedule_booking_blocks before insert or update of date,start_time,end_time,room_name,status,recurrence,recurrence_until on public.room_bookings for each row execute function public.crm_enforce_schedule_booking_blocks();
+
+create or replace function public.crm_remove_room_booking_occurrence(p_id uuid,p_occurrence_date date)
+returns boolean language plpgsql security definer set search_path=public as $$
+declare
+  v_old public.room_bookings;
+  v_next date;
+  v_prev date;
+  v_previous_context text:=current_setting('crm.occurrence_removal_continuation',true);
+  v_previous_signature text:=current_setting('crm.occurrence_removal_signature',true);
+begin
+  select * into v_old from public.room_bookings where id=p_id for update;
+  if v_old.id is null then raise exception 'Бронювання не знайдено'; end if;
+  if not public.crm_is_admin_session() then
+    if not public.crm_is_active_trainer_session() or not exists(
+      select 1 from public.trainers t where t.auth_user_id=auth.uid() and t.is_active is true
+        and t.archived_at is null and t.access_disabled_at is null
+        and (v_old.trainer_id::text=auth.uid()::text or v_old.trainer_id::text=t.id::text)
+    ) then raise exception 'Немає права змінювати це бронювання' using errcode='42501'; end if;
+  end if;
+  if lower(coalesce(v_old.recurrence,'none')) not in ('daily','weekly','monthly')
+     or not public.crm_schedule_booking_occurs_on(v_old.date,p_occurrence_date,v_old.recurrence)
+     or p_occurrence_date<v_old.date
+     or (v_old.recurrence_until is not null and p_occurrence_date>v_old.recurrence_until)
+  then raise exception 'Occurrence не належить серії' using errcode='22023'; end if;
+  v_next:=public.crm_schedule_booking_step_date(p_occurrence_date,v_old.recurrence,1);
+  v_prev:=public.crm_schedule_booking_step_date(p_occurrence_date,v_old.recurrence,-1);
+  if p_occurrence_date=v_old.date then
+    if v_old.recurrence_until is not null and v_next>v_old.recurrence_until then delete from public.room_bookings where id=p_id;
+    else update public.room_bookings set date=v_next where id=p_id; end if;
+  elsif v_old.recurrence_until is not null and (v_next is null or v_next>v_old.recurrence_until) then
+    update public.room_bookings set recurrence_until=v_prev where id=p_id;
+  else
+    update public.room_bookings set recurrence_until=v_prev where id=p_id;
+    perform set_config('crm.occurrence_removal_continuation','on',true);
+    perform set_config('crm.occurrence_removal_signature',public.crm_occurrence_removal_signature(v_next,v_old.start_time,v_old.end_time,v_old.room_name,v_old.recurrence,v_old.recurrence_until,v_old.status,v_old.trainer_id::text),true);
+    begin
+      insert into public.room_bookings(date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,people_count,price,payment_method,event_type,note,color,recurrence,recurrence_until,description,status,room_name)
+      values(v_next,v_old.start_time,v_old.end_time,v_old.trainer_id,v_old.trainer_name,v_old.title,v_old.type,v_old.booking_type,v_old.people_count,v_old.price,v_old.payment_method,v_old.event_type,v_old.note,v_old.color,v_old.recurrence,v_old.recurrence_until,v_old.description,v_old.status,v_old.room_name);
+    exception when others then
+      perform set_config('crm.occurrence_removal_continuation',coalesce(v_previous_context,''),true);
+      perform set_config('crm.occurrence_removal_signature',coalesce(v_previous_signature,''),true);
+      raise;
+    end;
+    perform set_config('crm.occurrence_removal_continuation',coalesce(v_previous_context,''),true);
+    perform set_config('crm.occurrence_removal_signature',coalesce(v_previous_signature,''),true);
+  end if;
+  return true;
+end $$;
 
 -- The override is deliberately available only through these whitelisted,
 -- admin-checked writes. set_config(..., true) scopes the flag to this RPC's
@@ -295,7 +386,11 @@ revoke execute on function public.crm_valid_iso_weekdays(smallint[]) from public
 revoke execute on function public.crm_enforce_schedule_booking_blocks() from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_occurs_on(date,date,text) from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_recurrence_hits_block(date,date,text,date,date,smallint[]) from public,anon,authenticated;
+revoke execute on function public.crm_schedule_booking_step_date(date,text,integer) from public,anon,authenticated;
+revoke execute on function public.crm_schedule_booking_update_only_shrinks(date,date,date,date,text) from public,anon,authenticated;
 revoke execute on function public.crm_canonical_room_name(text) from public,anon,authenticated;
+revoke execute on function public.crm_occurrence_removal_signature(date,text,text,text,text,date,text,text) from public,anon,authenticated;
+revoke execute on function public.crm_remove_room_booking_occurrence(uuid,date) from public,anon;
 revoke execute on function public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) from public,anon;
 revoke execute on function public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) from public,anon;
 revoke execute on function public.crm_fetch_schedule_booking_blocks() from public,anon;
@@ -303,6 +398,7 @@ revoke execute on function public.crm_admin_create_schedule_booking_block(text,t
 revoke execute on function public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_delete_schedule_booking_block(uuid) from public,anon;
 grant execute on function public.crm_fetch_schedule_booking_blocks() to authenticated;
+grant execute on function public.crm_remove_room_booking_occurrence(uuid,date) to authenticated;
 grant execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean), public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean), public.crm_admin_delete_schedule_booking_block(uuid) to authenticated;
 grant execute on function public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text), public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) to authenticated;
 

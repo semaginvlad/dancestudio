@@ -211,16 +211,8 @@ const colorKey = (e) => {
   return "default";
 };
 const recurrenceModes = ["none", "daily", "weekly", "monthly"];
-const addRecurrenceDate = (dateKey, recurrence, step = 1) => {
-  const d = new Date(`${dateKey}T12:00:00`);
-  if (recurrence === "daily") d.setDate(d.getDate() + step);
-  else if (recurrence === "weekly") d.setDate(d.getDate() + step * 7);
-  else if (recurrence === "monthly") d.setMonth(d.getMonth() + step);
-  return toLocalDateKey(d);
-};
 const isRecurringBookingEvent = (event) =>
   event?.kind === "booking" && recurrenceModes.includes(String(event?.recurrence || "")) && String(event?.recurrence || "none") !== "none";
-const isDateOnOrBefore = (left, right) => !right || String(left || "") <= String(right || "");
 const LESSON_PLAN_TYPES = [
   { value: "choreography", label: "Хореографія" },
   { value: "technique", label: "Техніка" },
@@ -388,6 +380,7 @@ export default function ScheduleTab({
   onAddBooking,
   onDeleteBooking,
   onUpdateBooking,
+  onRemoveBookingOccurrence,
   onSaveBookingBlock,
   onToggleBookingBlock,
   onDeleteBookingBlock,
@@ -1116,18 +1109,20 @@ export default function ScheduleTab({
   };
 
   const bookingBlockMessage = (conflict) => `Цей час закритий адміністратором: ${conflict.block.title} (${conflict.date}, ${conflict.block.startTime}–${conflict.block.endTime})`;
-  const runBookingMutation = async (payload, persistBooking, setBusy = setBookingSaving) => {
+  const runBookingMutation = async (payload, persistBooking, setBusy = setBookingSaving, { removesOnlyOccurrences = false } = {}) => {
     if (bookingMutationRef.current) return { skipped: true };
     bookingMutationRef.current = true;
     setBusy(true);
     try {
-      const guard = await getFreshBookingBlockSaveGuard(
-        payload,
-        reconciledBookingBlocks,
-        studioRooms,
-        isAdmin,
-        async () => onRetryBookingBlocks?.(),
-      );
+      const guard = removesOnlyOccurrences
+        ? { conflict: null, blocked: false, requiresConfirmation: false }
+        : await getFreshBookingBlockSaveGuard(
+            payload,
+            reconciledBookingBlocks,
+            studioRooms,
+            isAdmin,
+            async () => onRetryBookingBlocks?.(),
+          );
       if (guard.conflict && !isAdmin) throw new Error(bookingBlockMessage(guard.conflict));
 
       let overrideBookingBlock = false;
@@ -1307,52 +1302,31 @@ export default function ScheduleTab({
   const removeSingleRecurringBookingOccurrence = async (event) => {
     if (!canMutateEvent(event)) return false;
     const parentId = event.parentId || event.id;
-    const recurrence = String(event.recurrence || "none");
     if (!parentId || !isRecurringBookingEvent(event)) return false;
     const occurrenceDate = String(event.date || "").slice(0, 10);
-    const parentDate = String(event.parentDate || event.date || "").slice(0, 10);
-    const recurrenceUntil = event.recurrenceUntil ? String(event.recurrenceUntil).slice(0, 10) : "";
-    const nextDate = addRecurrenceDate(occurrenceDate, recurrence, 1);
-    const prevDate = addRecurrenceDate(occurrenceDate, recurrence, -1);
-    const hasNextOccurrence = isDateOnOrBefore(nextDate, recurrenceUntil);
-    const isFirstOccurrence = occurrenceDate === parentDate;
-
-    if (isFirstOccurrence) {
-      if (hasNextOccurrence) {
-        await onUpdateBooking(parentId, { date: nextDate, recurrenceUntil: recurrenceUntil || null });
-      } else {
-        await onDeleteBooking(parentId);
-      }
-      return true;
-    }
-
-    if (hasNextOccurrence && !onAddBooking) {
-      alert("Не вдалося змінити лише цю подію: немає дії для продовження серії.");
-      return false;
-    }
-
-    await onUpdateBooking(parentId, { recurrenceUntil: prevDate });
-    if (hasNextOccurrence) {
-      try {
-        await onAddBooking(buildRecurringContinuationPayload(event, nextDate));
-      } catch (error) {
-        await onUpdateBooking(parentId, { recurrenceUntil: recurrenceUntil || null });
-        throw error;
-      }
-    }
+    const payload = normalizeBookingPayload(buildRecurringContinuationPayload(event, event.parentDate || event.date));
+    const result = await runBookingMutation(
+      payload,
+      () => onRemoveBookingOccurrence?.(parentId, occurrenceDate),
+      setDetailsMutationBusy,
+      { removesOnlyOccurrences: true },
+    );
+    if (result?.skipped || result?.cancelled) return false;
+    requireScheduleSaveResult(result?.value, "Occurrence не було видалено.");
     return true;
   };
 
   const deleteBookingEvent = async (event, scope = "series") => {
-    if (!canMutateEvent(event)) { setSelectedEventDetails(event); return; }
+    if (!canMutateEvent(event)) { setSelectedEventDetails(event); return false; }
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
-      if (!window.confirm("Видалити лише цю подію?")) return;
-      await removeSingleRecurringBookingOccurrence(event);
-      return;
+      if (!window.confirm("Видалити лише цю подію?")) return false;
+      return removeSingleRecurringBookingOccurrence(event);
     }
     if (window.confirm(isRecurringBookingEvent(event) ? "Видалити всю серію?" : "Видалити подію?")) {
       await onDeleteBooking(event.parentId || event.id);
+      return true;
     }
+    return false;
   };
 
   const cancelBookingEvent = async (event, scope = "series") => {
@@ -1373,6 +1347,11 @@ export default function ScheduleTab({
     try { return (await operation()) !== false; }
     catch (error) { setDetailsMutationError(error?.message || "Не вдалося виконати дію"); return false; }
     finally { bookingMutationRef.current = false; setDetailsMutationBusy(false); }
+  };
+  const captureGuardedDetailsOperation = async (operation) => {
+    setDetailsMutationError("");
+    try { return (await operation()) !== false; }
+    catch (error) { setDetailsMutationError(error?.message || "Не вдалося виконати дію"); return false; }
   };
 
   const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null, roomNameOverride = "") => {
@@ -2855,12 +2834,12 @@ export default function ScheduleTab({
                 <button type="button" style={btnP} disabled={detailsMutationBusy} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); startEdit(event); }}>Редагувати</button>
                 <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); duplicateBookingLikeEvent(event); }}>Дублювати</button>
                 {isRecurringBookingEvent(selectedEventDetails) ? <>
-                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "occurrence"); }}>Видалити лише цю подію</button>
-                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити всю серію</button>
-                </> : <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити</button>}
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await captureGuardedDetailsOperation(() => deleteBookingEvent(event, "occurrence"))) setSelectedEventDetails(null); }}>Видалити лише цю подію</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await runDetailsOperation(() => deleteBookingEvent(event, "series"))) setSelectedEventDetails(null); }}>Видалити всю серію</button>
+                </> : <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await runDetailsOperation(() => deleteBookingEvent(event, "series"))) setSelectedEventDetails(null); }}>Видалити</button>}
                 <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await updateBookingEventWithGuard(event, { status: "tentative" })) setSelectedEventDetails(null); }}>Позначити як попереднє бронювання</button>
                 {isRecurringBookingEvent(selectedEventDetails) ? <>
-                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await runDetailsOperation(() => cancelBookingEvent(event, "occurrence"))) setSelectedEventDetails(null); }}>Скасувати лише цю подію</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await captureGuardedDetailsOperation(() => cancelBookingEvent(event, "occurrence"))) setSelectedEventDetails(null); }}>Скасувати лише цю подію</button>
                   <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await cancelBookingEvent(event, "series")) setSelectedEventDetails(null); }}>Скасувати всю серію</button>
                 </> : <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await cancelBookingEvent(event, "series")) setSelectedEventDetails(null); }}>Скасувати подію</button>}
                 <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await updateBookingEventWithGuard(event, { status: "active" })) setSelectedEventDetails(null); }}>Повернути active</button>

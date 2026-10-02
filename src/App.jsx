@@ -2135,6 +2135,13 @@ export default function App() {
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
     return updated;
   };
+  const removeRoomBookingOccurrenceAction = async (id, occurrenceDate) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    await db.removeRoomBookingOccurrence(id, occurrenceDate);
+    try { await reloadScheduleRoomBookingsAction(); }
+    catch (error) { console.warn("Occurrence removed, but room bookings refresh failed", error); }
+    return true;
+  };
 
   const saveScheduleBookingBlockAction = async (block) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
@@ -2531,6 +2538,7 @@ export default function App() {
             onAddBooking={addRoomBookingAction}
             onDeleteBooking={deleteRoomBookingAction}
             onUpdateBooking={updateRoomBookingAction}
+            onRemoveBookingOccurrence={removeRoomBookingOccurrenceAction}
             {...(isAdmin ? { onSaveBookingBlock: saveScheduleBookingBlockAction, onToggleBookingBlock: toggleScheduleBookingBlockAction, onDeleteBookingBlock: deleteScheduleBookingBlockAction } : {})}
             onUpdateGroupSchedule={updateGroupScheduleAction}
             onAddGroupLessonOverride={addGroupLessonOverrideAction}

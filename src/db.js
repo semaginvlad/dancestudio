@@ -1514,6 +1514,16 @@ export async function adminOverrideUpdateRoomBooking(id, payload) {
   return mapRoomBooking(row);
 }
 
+export async function removeRoomBookingOccurrence(id, occurrenceDate) {
+  const { data, error } = await supabase.rpc('crm_remove_room_booking_occurrence', {
+    p_id: id,
+    p_occurrence_date: occurrenceDate,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error('Occurrence не було видалено');
+  return true;
+}
+
 export async function deleteRoomBooking(id) {
   const { error } = await supabase.from('room_bookings').delete().eq('id', id);
   if (error) throw error;

@@ -43,6 +43,11 @@ begin
   if has_function_privilege('anon','public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)','execute') then raise exception 'anon can call update override'; end if;
   if position('crm.room_rename_old_name' in pg_get_functiondef('public.rename_studio_room(uuid,text)'::regprocedure))=0 or position('crm.room_rename_new_name' in pg_get_functiondef('public.rename_studio_room(uuid,text)'::regprocedure))=0 then raise exception 'rename cascade context missing'; end if;
   if not exists(select 1 from pg_proc where oid='public.rename_studio_room(uuid,text)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=pg_catalog, public%') then raise exception 'rename RPC hardening missing'; end if;
+  if not public.crm_schedule_booking_update_only_shrinks('2026-10-01','2026-10-05','2026-10-02','2026-10-05','daily') then raise exception 'first occurrence shrink rejected'; end if;
+  if not public.crm_schedule_booking_update_only_shrinks('2026-10-01','2026-10-05','2026-10-01','2026-10-02','daily') then raise exception 'tail shrink rejected'; end if;
+  if public.crm_schedule_booking_update_only_shrinks('2026-10-01','2026-10-01','2026-10-01','2026-10-02','daily') then raise exception 'series expansion treated as shrink'; end if;
+  if public.crm_schedule_booking_step_date('2026-01-31','monthly',1)<>'2026-03-31' then raise exception 'monthly removal continuation drifted'; end if;
+  if not exists(select 1 from pg_proc where oid='public.crm_remove_room_booking_occurrence(uuid,date)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=public%') then raise exception 'occurrence removal RPC hardening missing'; end if;
   perform set_config('crm.booking_block_override','off',true);
   if current_setting('crm.booking_block_override',true)<>'off' then raise exception 'override context setup broken'; end if;
   perform set_config('crm.booking_block_override','on',true);

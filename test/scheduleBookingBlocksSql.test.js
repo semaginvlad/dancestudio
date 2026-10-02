@@ -27,6 +27,8 @@ test("booking-block trigger and explicit override RPC are transactionally author
         recurrence_until date,description text,status text default 'active',created_at timestamptz default now(),room_name text);
       create table public.group_lesson_overrides(id uuid primary key default gen_random_uuid(),room_name text);
       create table public.groups(id uuid primary key default gen_random_uuid(),schedule jsonb default '[]'::jsonb);
+      create table public.trainers(id uuid primary key,auth_user_id uuid,is_active boolean,archived_at timestamptz,access_disabled_at timestamptz);
+      insert into public.trainers values('30000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001',true,null,null);
     `);
     await db.exec(await readFile(migrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
@@ -39,6 +41,14 @@ test("booking-block trigger and explicit override RPC are transactionally author
       insert into room_bookings(date,start_time,end_time,title,room_name)
       values('2026-10-02','10:20','10:40','Legacy overlap','Зал 1'),
             ('2026-10-04','10:20','10:40','Legacy all-room overlap','Зал 1');
+      insert into room_bookings(date,start_time,end_time,trainer_id,title,room_name,recurrence,recurrence_until)
+      values('2026-10-01','10:20','10:40','30000000-0000-0000-0000-000000000001','Remove first','Зал 1','daily','2026-10-05'),
+            ('2026-10-01','10:20','10:40','30000000-0000-0000-0000-000000000001','Remove middle','Зал 1','daily','2026-10-05'),
+            ('2026-10-01','10:20','10:40','30000000-0000-0000-0000-000000000001','Remove last','Зал 1','daily','2026-10-05'),
+            ('2026-10-01','10:20','10:40','30000000-0000-0000-0000-000000000001','Expand denied','Зал 1','daily','2026-10-01'),
+            ('2026-10-01','10:20','10:40','other-trainer','Unauthorized removal','Зал 1','daily','2026-10-05'),
+            ('2026-10-01','10:20','10:40',null,'Admin removal','Зал 1','daily','2026-10-05'),
+            ('2026-10-01','10:20','10:40',null,'Whole series delete','Зал 1','daily','2026-10-05');
       insert into schedule_booking_blocks(id,title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
       values('${blockId}','Закрито','2026-10-02','2026-10-02','10:00','11:00',false,array[5]::smallint[],'00000000-0000-0000-0000-000000000001');
       insert into schedule_booking_block_rooms values('${blockId}','${roomId}');
@@ -63,6 +73,28 @@ test("booking-block trigger and explicit override RPC are transactionally author
       /Цей час закритий адміністратором/,
     );
     await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name,status) values('2026-10-02','10:15','10:45','Cancelled','Зал 1','cancelled')");
+
+    const seriesId = async (title) => (await db.query("select id from room_bookings where title=$1 order by created_at limit 1", [title])).rows[0].id;
+    await db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [await seriesId("Remove first"), "2026-10-01"]);
+    assert.equal((await db.query("select date::text from room_bookings where title='Remove first'")).rows[0].date, "2026-10-02");
+    await db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [await seriesId("Remove middle"), "2026-10-03"]);
+    assert.deepEqual((await db.query("select date::text,recurrence_until::text from room_bookings where title='Remove middle' order by date")).rows, [
+      { date: "2026-10-01", recurrence_until: "2026-10-02" },
+      { date: "2026-10-04", recurrence_until: "2026-10-05" },
+    ]);
+    assert.equal((await db.query("select current_setting('crm.occurrence_removal_continuation',true) as value")).rows[0]?.value || "", "");
+    assert.equal((await db.query("select current_setting('crm.occurrence_removal_signature',true) as value")).rows[0]?.value || "", "");
+    await db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [await seriesId("Remove last"), "2026-10-05"]);
+    assert.equal((await db.query("select recurrence_until::text from room_bookings where title='Remove last'")).rows[0].recurrence_until, "2026-10-04");
+    await expectDatabaseError(() => db.exec("update room_bookings set recurrence_until='2026-10-02' where title='Expand denied'"), /Цей час закритий адміністратором/);
+    const unauthorizedSeriesId = await seriesId("Unauthorized removal");
+    await expectDatabaseError(() => db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [unauthorizedSeriesId, "2026-10-03"]), /Немає права/);
+    await db.exec("delete from room_bookings where title='Cancelled'");
+
+    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    await db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [await seriesId("Admin removal"), "2026-10-03"]);
+    await db.exec("delete from room_bookings where title='Whole series delete'");
+    assert.equal((await db.query("select count(*)::int as count from room_bookings where title='Whole series delete'")).rows[0].count, 0);
 
     await db.exec(`
       select set_config('test.admin','on',false); select set_config('test.trainer','off',false);

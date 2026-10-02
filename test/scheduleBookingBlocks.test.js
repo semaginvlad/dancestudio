@@ -138,3 +138,18 @@ test("editor and status actions share explicit override and retain UI on failure
   assert.match(source,/if \(await updateBookingEventWithGuard[\s\S]*setSelectedEventDetails\(null\)/);
   assert.doesNotMatch(source,/setSelectedEventDetails\(null\); await onUpdateBooking\(event\.parentId \|\| event\.id, \{ status:/);
 });
+
+test("single-occurrence removal uses the guarded atomic RPC and keeps details open on failure", async () => {
+  const fs=await import("node:fs/promises");
+  const source=await fs.readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  const app=await fs.readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
+  const db=await fs.readFile(new URL("../src/db.js",import.meta.url),"utf8");
+  const removal=source.slice(source.indexOf("const removeSingleRecurringBookingOccurrence"),source.indexOf("const deleteBookingEvent"));
+  assert.match(removal,/runBookingMutation\([\s\S]*onRemoveBookingOccurrence\?\.\(parentId, occurrenceDate\)[\s\S]*removesOnlyOccurrences: true/);
+  assert.doesNotMatch(removal,/onUpdateBooking|onAddBooking|onDeleteBooking/);
+  assert.match(source,/captureGuardedDetailsOperation\(\(\) => deleteBookingEvent\(event, "occurrence"\)\)[\s\S]*setSelectedEventDetails\(null\)/);
+  assert.match(source,/captureGuardedDetailsOperation\(\(\) => cancelBookingEvent\(event, "occurrence"\)\)[\s\S]*setSelectedEventDetails\(null\)/);
+  assert.match(source,/detailsMutationBusy[\s\S]*detailsMutationError \? <div role="alert"/);
+  assert.match(app,/db\.removeRoomBookingOccurrence\(id, occurrenceDate\)[\s\S]*reloadScheduleRoomBookingsAction/);
+  assert.match(db,/crm_remove_room_booking_occurrence/);
+});
