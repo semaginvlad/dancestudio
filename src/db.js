@@ -1414,19 +1414,13 @@ const mapStudioRoom = (row) => ({
 
 export async function fetchRoomBookings() {
   const { data, error } = await supabase.from('room_bookings').select('*').order('date', { ascending: true }).order('start_time', { ascending: true });
-  if (error) {
-    console.warn('room_bookings:', error.message);
-    return [];
-  }
+  if (error) throw error;
   return (data || []).map(mapRoomBooking);
 }
 
 export async function fetchScheduleRoomBookings() {
   const { data, error } = await supabase.rpc('crm_fetch_schedule_room_bookings');
-  if (error) {
-    console.warn('crm_fetch_schedule_room_bookings:', error.message);
-    return [];
-  }
+  if (error) throw error;
   return (data || []).map(mapRoomBooking);
 }
 
@@ -1480,6 +1474,44 @@ export async function updateRoomBooking(id, payload) {
   const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
   if (error) throw error;
   return mapRoomBooking(data);
+}
+
+const roomBookingRpcParams = (payload = {}) => ({
+  p_date: payload.date,
+  p_start_time: payload.startTime,
+  p_end_time: payload.endTime,
+  p_trainer_id: payload.trainerId || null,
+  p_trainer_name: payload.trainerName || null,
+  p_title: payload.title,
+  p_type: payload.type || 'individual',
+  p_booking_type: payload.bookingType || payload.type || 'individual',
+  p_people_count: payload.peopleCount || null,
+  p_price: payload.price || null,
+  p_payment_method: payload.paymentMethod || null,
+  p_event_type: payload.eventType || null,
+  p_note: payload.note || null,
+  p_color: payload.color || null,
+  p_recurrence: payload.recurrence || 'none',
+  p_recurrence_until: payload.recurrenceUntil || null,
+  p_description: payload.description || null,
+  p_status: payload.status || 'active',
+  p_room_name: payload.roomName || 'Основна зала',
+});
+
+export async function adminOverrideInsertRoomBooking(payload) {
+  const { data, error } = await supabase.rpc('crm_admin_override_create_room_booking', roomBookingRpcParams(payload));
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error('Override RPC не повернув створене бронювання');
+  return mapRoomBooking(row);
+}
+
+export async function adminOverrideUpdateRoomBooking(id, payload) {
+  const { data, error } = await supabase.rpc('crm_admin_override_update_room_booking', { p_id: id, ...roomBookingRpcParams(payload) });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error('Override RPC не повернув оновлене бронювання');
+  return mapRoomBooking(row);
 }
 
 export async function deleteRoomBooking(id) {

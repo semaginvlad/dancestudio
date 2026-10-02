@@ -197,7 +197,7 @@ test("all schedule edit paths expose guarded async save state", async () => {
   assert.match(schedule, /formErrors\.save \? <div role="alert"/);
   assert.match(schedule, /groupOverrideEdit\.saving \? "Зберігаємо…"/);
   assert.match(schedule, /groupSlotEdit\.saving \? "Зберігаємо…"/);
-  assert.match(schedule, /await onUpdateBooking\?\.\(editingId, payload\)/);
+  assert.match(schedule, /onUpdateBooking\?\.\(editingId, payload, \{ overrideBookingBlock: override \}\)/);
   assert.match(schedule, /await onUpdateGroupLessonOverride\?\.\(groupOverrideEdit\.overrideId, payload\)/);
   assert.match(schedule, /await onUpdateGroupSchedule\(groupSlotEdit\.groupId, nextSchedule\)/);
   assert.match(app, /const updateRoomBookingAction[\s\S]*?return updated;/);

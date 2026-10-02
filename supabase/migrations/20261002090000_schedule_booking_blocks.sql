@@ -176,7 +176,7 @@ create or replace function public.crm_enforce_schedule_booking_blocks()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
 begin
-  if public.crm_is_admin_session() or coalesce(new.status,'active')='cancelled' then return new; end if;
+  if coalesce(new.status,'active')='cancelled' then return new; end if;
   select b.title into v_title
   from public.schedule_booking_blocks b
   where b.is_active
@@ -184,12 +184,55 @@ begin
     and new.start_time::time < b.end_time and b.start_time < new.end_time::time
     and (b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and public.crm_canonical_room_name(r.name)=public.crm_canonical_room_name(new.room_name)))
   limit 1;
-  if v_title is not null then raise exception 'Цей час закритий адміністратором: %',v_title using errcode='P0001'; end if;
+  if v_title is not null then
+    if public.crm_is_admin_session()
+       and current_setting('crm.booking_block_override',true)='on' then return new; end if;
+    raise exception 'Цей час закритий адміністратором: %',v_title using errcode='P0001';
+  end if;
   return new;
 end $$;
 
 drop trigger if exists trg_enforce_schedule_booking_blocks on public.room_bookings;
 create trigger trg_enforce_schedule_booking_blocks before insert or update of date,start_time,end_time,room_name,status,recurrence,recurrence_until on public.room_bookings for each row execute function public.crm_enforce_schedule_booking_blocks();
+
+-- The override is deliberately available only through these whitelisted,
+-- admin-checked writes. set_config(..., true) scopes the flag to this RPC's
+-- transaction, so a later ordinary request must pass the trigger again.
+create or replace function public.crm_admin_override_create_room_booking(
+  p_date date,p_start_time text,p_end_time text,p_trainer_id text,p_trainer_name text,
+  p_title text,p_type text,p_booking_type text,p_people_count integer,p_price integer,
+  p_payment_method text,p_event_type text,p_note text,p_color text,p_recurrence text,
+  p_recurrence_until date,p_description text,p_status text,p_room_name text)
+returns public.room_bookings language plpgsql security definer set search_path=public as $$
+declare v_row public.room_bookings;
+begin
+  if not public.crm_is_admin_session() then raise exception 'Лише адміністратор може підтвердити обхід закритих годин' using errcode='42501'; end if;
+  perform set_config('crm.booking_block_override','on',true);
+  insert into public.room_bookings(date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,people_count,price,payment_method,event_type,note,color,recurrence,recurrence_until,description,status,room_name)
+  values(p_date,p_start_time,p_end_time,p_trainer_id,p_trainer_name,p_title,coalesce(p_type,'individual'),p_booking_type,p_people_count,p_price,p_payment_method,p_event_type,p_note,p_color,coalesce(p_recurrence,'none'),p_recurrence_until,p_description,coalesce(p_status,'active'),p_room_name)
+  returning * into v_row;
+  return v_row;
+end $$;
+
+create or replace function public.crm_admin_override_update_room_booking(
+  p_id uuid,p_date date,p_start_time text,p_end_time text,p_trainer_id text,p_trainer_name text,
+  p_title text,p_type text,p_booking_type text,p_people_count integer,p_price integer,
+  p_payment_method text,p_event_type text,p_note text,p_color text,p_recurrence text,
+  p_recurrence_until date,p_description text,p_status text,p_room_name text)
+returns public.room_bookings language plpgsql security definer set search_path=public as $$
+declare v_row public.room_bookings;
+begin
+  if not public.crm_is_admin_session() then raise exception 'Лише адміністратор може підтвердити обхід закритих годин' using errcode='42501'; end if;
+  perform set_config('crm.booking_block_override','on',true);
+  update public.room_bookings set date=p_date,start_time=p_start_time,end_time=p_end_time,
+    trainer_id=p_trainer_id,trainer_name=p_trainer_name,title=p_title,type=coalesce(p_type,'individual'),
+    booking_type=p_booking_type,people_count=p_people_count,price=p_price,payment_method=p_payment_method,
+    event_type=p_event_type,note=p_note,color=p_color,recurrence=coalesce(p_recurrence,'none'),
+    recurrence_until=p_recurrence_until,description=p_description,status=coalesce(p_status,'active'),room_name=p_room_name
+  where id=p_id returning * into v_row;
+  if v_row.id is null then raise exception 'Бронювання не знайдено'; end if;
+  return v_row;
+end $$;
 
 revoke execute on function public.crm_validate_booking_block_input(text,text,date,date,time,time,boolean,smallint[],uuid[]) from public,anon,authenticated;
 revoke execute on function public.crm_valid_iso_weekdays(smallint[]) from public,anon,authenticated;
@@ -197,11 +240,14 @@ revoke execute on function public.crm_enforce_schedule_booking_blocks() from pub
 revoke execute on function public.crm_schedule_booking_occurs_on(date,date,text) from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_recurrence_hits_block(date,date,text,date,date,smallint[]) from public,anon,authenticated;
 revoke execute on function public.crm_canonical_room_name(text) from public,anon,authenticated;
+revoke execute on function public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) from public,anon;
+revoke execute on function public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) from public,anon;
 revoke execute on function public.crm_fetch_schedule_booking_blocks() from public,anon;
 revoke execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_delete_schedule_booking_block(uuid) from public,anon;
 grant execute on function public.crm_fetch_schedule_booking_blocks() to authenticated;
 grant execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean), public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean), public.crm_admin_delete_schedule_booking_block(uuid) to authenticated;
+grant execute on function public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text), public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text) to authenticated;
 
 commit;

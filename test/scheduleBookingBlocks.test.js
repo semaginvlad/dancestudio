@@ -52,8 +52,9 @@ test("booking-block mutation guard clears after failure and permits create/updat
 
 test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlocksReady\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
-  assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, \(\) => onSaveBookingBlock\?\.\(presentationDraft\)\)/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, async \(\) =>/);
+  assert.match(source,/return onSaveBookingBlock\?\.\(presentationDraft\)/);
   assert.match(source,/catch \(error\) \{ setBlockError/);
   assert.doesNotMatch(source,/catch \(error\) \{[^}]*setBlockDraft/);
 });
@@ -77,5 +78,31 @@ test("schedule UI distinguishes ready empty data from load failure and gates eve
   assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && canMutateScheduleEvent/);
   assert.match(source,/role=\{bookingBlocksLoadStatus === "error" \? "alert" : "status"\}/);
   assert.match(source,/onRetryBookingBlocks\(\)\.catch/);
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlocksReady\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}/);
+});
+
+test("room-booking loading fails closed and fresh rows drive block warnings", async () => {
+  const fs=await import("node:fs/promises");
+  const app=await fs.readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
+  const schedule=await fs.readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(app,/roomBookingsLoadStatusRef = useRef\("loading"\)/);
+  assert.match(app,/if \(rb\?\.ok\)[\s\S]*setRoomBookings\(rb\.data\)[\s\S]*roomBookingsLoadStatusRef\.current = "ready"[\s\S]*else[\s\S]*roomBookingsLoadStatusRef\.current = "error"/);
+  assert.doesNotMatch(app,/setRoomBookings\(rb \|\| \[\]\)/);
+  assert.match(app,/const bookings = await \(isAdmin \? db\.fetchRoomBookings\(\) : db\.fetchScheduleRoomBookings\(\)\)/);
+  assert.match(schedule,/const freshBookings = await onRetryRoomBookings\?\.\(\)/);
+  assert.match(schedule,/freshBookings\.some\(\(booking\) => findBookingBlockConflict/);
+  assert.match(schedule,/role=\{roomBookingsLoadStatus === "error" \? "alert" : "status"\}/);
+  assert.match(schedule,/if \(block\.isActive\) \{ await onToggleBookingBlock\?\.\(block\); return; \}/);
+});
+
+test("admin override is explicit and a newly discovered server conflict requires confirmation", async () => {
+  const fs=await import("node:fs/promises");
+  const app=await fs.readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
+  const schedule=await fs.readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  const db=await fs.readFile(new URL("../src/db.js",import.meta.url),"utf8");
+  assert.match(app,/options\.overrideBookingBlock[\s\S]*db\.adminOverrideInsertRoomBooking/);
+  assert.match(app,/options\.overrideBookingBlock[\s\S]*db\.adminOverrideUpdateRoomBooking/);
+  assert.match(schedule,/await onRetryBookingBlocks\?\.\(\);[\s\S]*Явно підтвердити обхід[\s\S]*persistBooking\(true\)/);
+  assert.match(db,/crm_admin_override_create_room_booking/);
+  assert.match(db,/crm_admin_override_update_room_booking/);
 });

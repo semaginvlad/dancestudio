@@ -35,5 +35,16 @@ begin
   if public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-10-01','monthly','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'monthly ignored recurrence end'; end if;
   if not (public.crm_canonical_room_name('Зал 1')=public.crm_canonical_room_name(' зал  1 ') and public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[5]::smallint[])) then raise exception 'selected-room stale-until bypass'; end if;
   if not (true and public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[5]::smallint[])) then raise exception 'all-room stale-until bypass'; end if;
+  if position('crm.booking_block_override' in pg_get_functiondef('public.crm_enforce_schedule_booking_blocks()'::regprocedure))=0 then raise exception 'trigger does not require explicit override context'; end if;
+  if position('crm_is_admin_session() or coalesce(new.status' in pg_get_functiondef('public.crm_enforce_schedule_booking_blocks()'::regprocedure))>0 then raise exception 'unconditional admin bypass remains'; end if;
+  if not exists(select 1 from pg_proc where oid='public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=public%') then raise exception 'create override RPC hardening missing'; end if;
+  if not exists(select 1 from pg_proc where oid='public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=public%') then raise exception 'update override RPC hardening missing'; end if;
+  if has_function_privilege('anon','public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)','execute') then raise exception 'anon can call create override'; end if;
+  if has_function_privilege('anon','public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)','execute') then raise exception 'anon can call update override'; end if;
+  perform set_config('crm.booking_block_override','off',true);
+  if current_setting('crm.booking_block_override',true)<>'off' then raise exception 'override context setup broken'; end if;
+  perform set_config('crm.booking_block_override','on',true);
+  if current_setting('crm.booking_block_override',true)<>'on' then raise exception 'transaction-local override unavailable'; end if;
+  perform set_config('crm.booking_block_override','off',true);
 end $$;
 rollback;
