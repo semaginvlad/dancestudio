@@ -47,8 +47,27 @@ test("booking-block mutation guard clears after failure and permits create/updat
 
 test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  assert.match(source,/disabled=\{blockSaving\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlocksReady\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
   assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, \(\) => onSaveBookingBlock\?\.\(presentationDraft\)\)/);
   assert.match(source,/catch \(error\) \{ setBlockError/);
   assert.doesNotMatch(source,/catch \(error\) \{[^}]*setBlockDraft/);
+});
+
+test("booking-block loading fails closed without erasing the last successful list", async () => {
+  const app=await (await import("node:fs/promises")).readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
+  assert.match(app,/useState\("loading"\)/);
+  assert.match(app,/if \(bookingBlocks\?\.ok\) \{[\s\S]*setScheduleBookingBlocks\(bookingBlocks\.data\);[\s\S]*setBookingBlocksLoadStatus\("ready"\);[\s\S]*\} else \{\s*setBookingBlocksLoadStatus\("error"\)/);
+  assert.doesNotMatch(app,/setScheduleBookingBlocks\(bookingBlocks \|\| \[\]\)/);
+  assert.match(app,/const blocks = await db\.fetchScheduleBookingBlocks\(\);\s*setScheduleBookingBlocks\(blocks\);\s*setBookingBlocksLoadStatus\("ready"\)/);
+  assert.match(app,/bookingBlocksLoadStatus !== "ready"[\s\S]*Зміни бронювань тимчасово вимкнені/);
+});
+
+test("schedule UI distinguishes ready empty data from load failure and gates every booking mutation", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/const bookingBlocksReady = bookingBlocksLoadStatus === "ready"/);
+  assert.match(source,/const canManageBookings = \(isAdmin \|\| allowBookingMutations\) && bookingBlocksReady/);
+  assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && canMutateScheduleEvent/);
+  assert.match(source,/role=\{bookingBlocksLoadStatus === "error" \? "alert" : "status"\}/);
+  assert.match(source,/onRetryBookingBlocks\(\)\.catch/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlocksReady\}/);
 });

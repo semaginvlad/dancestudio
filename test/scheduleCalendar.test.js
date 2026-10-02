@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, canMutateScheduleEvent, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, canMutateScheduleEvent, compactDayPreview, getTrainerInitials, isBookingBlockEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -15,6 +15,15 @@ test("booking-block identity is read-only even for administrators", () => {
   assert.equal(canMutateScheduleEvent({ readOnly: true, kind: "booking" }, { isAdmin: true }), false);
   assert.equal(canMutateScheduleEvent({ kind: "booking_block" }, { isAdmin: true }), false);
   assert.equal(canMutateScheduleEvent({ eventType: "booking_block" }, { isAdmin: true }), false);
+});
+
+test("booking-block identity is centralized for mobile filter bypass", async () => {
+  assert.equal(isBookingBlockEvent({ kind: "booking_block" }), true);
+  assert.equal(isBookingBlockEvent({ eventType: "booking_block" }), true);
+  assert.equal(isBookingBlockEvent({ kind: "booking", eventType: "room_booking" }), false);
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const matchesMobileScheduleFilter = \(event\) => \{\s*if \(isBookingBlockEvent\(event\)\) return true;/);
+  assert.match(source, /filter\(\(e\) => selectedRoom === "all" \|\| \(e\.roomName \|\| UNKNOWN_ROOM_NAME\) === selectedRoom\)\s*\.filter\(matchesMobileScheduleFilter\)/);
 });
 
 test("ordinary admin and owned trainer bookings remain mutable", () => {

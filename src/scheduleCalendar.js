@@ -76,8 +76,8 @@ export const buildEventDetails = (event = {}) => {
   return (byType[type] || byType.custom_admin_event).filter(Boolean);
 };
 
-export const isReadOnlyScheduleEvent = (event = {}) =>
-  event.readOnly === true || event.kind === "booking_block" || event.eventType === "booking_block";
+export const isBookingBlockEvent = (event = {}) => event.kind === "booking_block" || event.eventType === "booking_block";
+export const isReadOnlyScheduleEvent = (event = {}) => event.readOnly === true || isBookingBlockEvent(event);
 
 export const canMutateScheduleEvent = (event, { isAdmin = false, isAssignedToTrainer = false } = {}) => {
   if (isReadOnlyScheduleEvent(event)) return false;

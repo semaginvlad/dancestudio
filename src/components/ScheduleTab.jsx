@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutateScheduleEvent, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, isReadOnlyScheduleEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutateScheduleEvent, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, isBookingBlockEvent, isReadOnlyScheduleEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -379,6 +379,7 @@ export default function ScheduleTab({
   cancelled = [],
   roomBookings = [],
   bookingBlocks = [],
+  bookingBlocksLoadStatus = "loading",
   groupLessonOverrides = [],
   trainingLessonPlans = [],
   isAdmin = false,
@@ -389,6 +390,7 @@ export default function ScheduleTab({
   onSaveBookingBlock,
   onToggleBookingBlock,
   onDeleteBookingBlock,
+  onRetryBookingBlocks,
   onUpdateGroupSchedule,
   onAddGroupLessonOverride,
   onUpdateGroupLessonOverride,
@@ -407,7 +409,8 @@ export default function ScheduleTab({
   const safeBookingBlocks = Array.isArray(bookingBlocks) ? bookingBlocks : [];
   const safeGroupLessonOverrides = Array.isArray(groupLessonOverrides) ? groupLessonOverrides : [];
   const safeTrainingLessonPlans = Array.isArray(trainingLessonPlans) ? trainingLessonPlans : [];
-  const canManageBookings = isAdmin || allowBookingMutations;
+  const bookingBlocksReady = bookingBlocksLoadStatus === "ready";
+  const canManageBookings = (isAdmin || allowBookingMutations) && bookingBlocksReady;
   const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
   const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
@@ -940,6 +943,7 @@ export default function ScheduleTab({
     if (!currentMobileFilterOptions.some((option) => String(option.value) === String(mobileFilterValue))) setMobileFilterValue(firstValue);
   }, [mobileFilterType, mobileFilterValue, currentMobileFilterOptions, setMobileFilterValue]);
   const matchesMobileScheduleFilter = (event) => {
+    if (isBookingBlockEvent(event)) return true;
     if (!hasMobileScheduleFilter) return true;
     const wanted = String(effectiveMobileFilterValue);
     if (mobileFilterType === "trainer") {
@@ -969,7 +973,7 @@ export default function ScheduleTab({
     });
     return map;
   }, [eventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
-  const canMutateEvent = (event) => canMutateScheduleEvent(event, {
+  const canMutateEvent = (event) => bookingBlocksReady && canMutateScheduleEvent(event, {
     isAdmin,
     isAssignedToTrainer: isEventAssignedToCurrentTrainer(event),
   });
@@ -1074,6 +1078,7 @@ export default function ScheduleTab({
     setShowBlocksManager(true);
   };
   const saveBlock = async () => {
+    if (!bookingBlocksReady) { setBlockError("Правила недоступності ще не завантажені."); return; }
     if (blockSavingRef.current) return;
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
@@ -2519,13 +2524,18 @@ export default function ScheduleTab({
         <span><b style={{ color: theme.text }}>Активно</b> · Попереднє бронювання · <s>Скасовано</s></span>
       </div>
 
+      {bookingBlocksLoadStatus !== "ready" ? <div role={bookingBlocksLoadStatus === "error" ? "alert" : "status"} style={{ ...cardSt, border: `1px solid ${bookingBlocksLoadStatus === "error" ? theme.danger : theme.border}`, color: bookingBlocksLoadStatus === "error" ? theme.danger : theme.textLight, display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+        <span>{bookingBlocksLoadStatus === "error" ? "Правила недоступності не завантажилися. Зміни бронювань тимчасово вимкнені." : "Завантажуємо правила недоступності… Зміни бронювань тимчасово вимкнені."}</span>
+        {bookingBlocksLoadStatus === "error" && onRetryBookingBlocks ? <button type="button" style={btnS} onClick={() => onRetryBookingBlocks().catch((error) => setBlockError(error?.message || "Повторне завантаження не вдалося"))}>Спробувати ще раз</button> : null}
+      </div> : null}
+
       {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>🔒 Закриті години</b><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
         {(safeBookingBlocks || []).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
           <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span>
           <button style={btnS} onClick={() => setBlockDraft({...block})}>Редагувати</button>
-          <button style={btnS} onClick={() => onToggleBookingBlock?.(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
-          <button style={{...btnS,color:theme.danger}} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
+          <button style={btnS} disabled={!bookingBlocksReady} onClick={() => onToggleBookingBlock?.(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
+          <button style={{...btnS,color:theme.danger}} disabled={!bookingBlocksReady} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
         </div>)}
         {blockDraft ? <div style={{ display:"grid", gap:8, gridTemplateColumns:isMobile ? "1fr" : "repeat(2,minmax(0,1fr))" }}>
           <input style={inputSt} maxLength={120} value={blockDraft.title} onChange={e=>setBlockDraft(p=>({...p,title:e.target.value}))} placeholder="Назва / причина" />
@@ -2538,7 +2548,7 @@ export default function ScheduleTab({
           <label><input type="checkbox" checked={blockDraft.isActive} onChange={e=>setBlockDraft(p=>({...p,isActive:e.target.checked}))}/> Активне</label>
           <div><b>{blockDraft.title}</b> · {blockDraft.startsOn}—{blockDraft.endsOn} · {blockDraft.startTime}–{blockDraft.endTime}</div>
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
+          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlocksReady}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
         </div> : <button style={btnP} onClick={openNewBlock}>+ Нове правило</button>}
       </div> : null}
 

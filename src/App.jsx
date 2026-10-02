@@ -142,6 +142,7 @@ export default function App() {
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [scheduleBookingBlocks, setScheduleBookingBlocks] = useState([]);
+  const [bookingBlocksLoadStatus, setBookingBlocksLoadStatus] = useState("loading");
   const [studioRooms, setStudioRooms] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
   const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
@@ -558,6 +559,7 @@ export default function App() {
   const loadAllData = async (currentUser = user) => {
     console.info("[access guard] loadAllData", { email: currentUser?.email || null, isAdmin: currentUser ? isAdminEmail(currentUser.email, adminEmails) : false });
     setLoading(true);
+    setBookingBlocksLoadStatus("loading");
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
       const isCurrentAdmin = currentUser && isAdminEmail(currentUser.email, adminEmails);
@@ -617,7 +619,9 @@ export default function App() {
         safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans"),
         safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports"),
         safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations"),
-        safeFetch(db.fetchScheduleBookingBlocks, "fetchScheduleBookingBlocks")
+        db.fetchScheduleBookingBlocks()
+          .then((data) => ({ ok: true, data }))
+          .catch((error) => { console.warn("[loadAllData] fetchScheduleBookingBlocks failed", error); return { ok: false, error }; })
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -705,7 +709,12 @@ export default function App() {
       setTrainerGroups(currentTrainerGroupRows);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
-      setScheduleBookingBlocks(bookingBlocks || []);
+      if (bookingBlocks?.ok) {
+        setScheduleBookingBlocks(bookingBlocks.data);
+        setBookingBlocksLoadStatus("ready");
+      } else {
+        setBookingBlocksLoadStatus("error");
+      }
       setGroupLessonOverrides(glo || []);
       setTrainingLessonPlans(tlp || []);
       setTrainingLessonReports(tlr || []);
@@ -2067,6 +2076,7 @@ export default function App() {
   };
 
   const addRoomBookingAction = async (payload) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
     const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
     const created = await db.insertRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
@@ -2074,6 +2084,7 @@ export default function App() {
   };
 
   const deleteRoomBookingAction = async (id) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       alert("Можна видаляти тільки власні резерви / індивідуальні тренування.");
@@ -2085,6 +2096,7 @@ export default function App() {
   };
 
   const updateRoomBookingAction = async (id, payload) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       throw new Error("Можна редагувати тільки власні резерви / індивідуальні тренування.");
@@ -2102,18 +2114,33 @@ export default function App() {
   };
 
   const saveScheduleBookingBlockAction = async (block) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Список правил недоступності не завантажений.");
     const saved = block.id ? await db.updateScheduleBookingBlock(block.id, block) : await db.createScheduleBookingBlock(block);
     setScheduleBookingBlocks((previous) => block.id ? previous.map((item) => item.id === saved.id ? saved : item) : [...previous, saved]);
     return saved;
   };
   const toggleScheduleBookingBlockAction = async (block) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Список правил недоступності не завантажений.");
     const saved = await db.setScheduleBookingBlockActive(block, !block.isActive);
     setScheduleBookingBlocks((previous) => previous.map((item) => item.id === saved.id ? saved : item));
     return saved;
   };
   const deleteScheduleBookingBlockAction = async (id) => {
+    if (bookingBlocksLoadStatus !== "ready") throw new Error("Список правил недоступності не завантажений.");
     await db.deleteScheduleBookingBlock(id);
     setScheduleBookingBlocks((previous) => previous.filter((item) => item.id !== id));
+  };
+  const reloadScheduleBookingBlocksAction = async () => {
+    setBookingBlocksLoadStatus("loading");
+    try {
+      const blocks = await db.fetchScheduleBookingBlocks();
+      setScheduleBookingBlocks(blocks);
+      setBookingBlocksLoadStatus("ready");
+      return blocks;
+    } catch (error) {
+      setBookingBlocksLoadStatus("error");
+      throw error;
+    }
   };
 
 
@@ -2449,6 +2476,8 @@ export default function App() {
             cancelled={scheduleCancelled}
             roomBookings={roomBookings}
             bookingBlocks={scheduleBookingBlocks}
+            bookingBlocksLoadStatus={bookingBlocksLoadStatus}
+            onRetryBookingBlocks={reloadScheduleBookingBlocksAction}
             groupLessonOverrides={groupLessonOverrides}
             trainingLessonPlans={trainingLessonPlans}
             currentUser={user}
