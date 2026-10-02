@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutateScheduleEvent, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, isReadOnlyScheduleEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -967,8 +967,10 @@ export default function ScheduleTab({
     });
     return map;
   }, [eventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
-  const canMutateEvent = (event) =>
-    isAdmin || (event?.kind === "booking" && isEventAssignedToCurrentTrainer(event));
+  const canMutateEvent = (event) => canMutateScheduleEvent(event, {
+    isAdmin,
+    isAssignedToTrainer: isEventAssignedToCurrentTrainer(event),
+  });
   const normalizeBookingPayload = (source) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
@@ -1118,6 +1120,7 @@ export default function ScheduleTab({
     }
   };
   const startEdit = (e) => {
+    if (!canMutateEvent(e)) { setSelectedEventDetails(e); return; }
     const parentDate = e.parentDate || e.date;
     const isRecurringOccurrence = Boolean(
       e.parentId && parentDate && e.date && parentDate !== e.date && e.recurrence !== "none",
@@ -1151,6 +1154,7 @@ export default function ScheduleTab({
   };
 
   const duplicateBookingLikeEvent = (e) => {
+    if (!canMutateEvent(e)) { setSelectedEventDetails(e); return; }
     setFormErrors({});
     setEditingId(null);
     setFormMode("full");
@@ -1178,6 +1182,13 @@ export default function ScheduleTab({
       status: e.status || "active",
     }));
   };
+  const activateScheduleEvent = (event, { editMutable = false } = {}) => {
+    if (isReadOnlyScheduleEvent(event) || !editMutable || !canMutateEvent(event)) {
+      setSelectedEventDetails(event);
+      return;
+    }
+    startEdit(event);
+  };
   const buildRecurringContinuationPayload = (event, nextDate) => ({
     date: nextDate,
     startTime: event.startTime,
@@ -1200,6 +1211,7 @@ export default function ScheduleTab({
   });
 
   const removeSingleRecurringBookingOccurrence = async (event) => {
+    if (!canMutateEvent(event)) return false;
     const parentId = event.parentId || event.id;
     const recurrence = String(event.recurrence || "none");
     if (!parentId || !isRecurringBookingEvent(event)) return false;
@@ -1238,6 +1250,7 @@ export default function ScheduleTab({
   };
 
   const deleteBookingEvent = async (event, scope = "series") => {
+    if (!canMutateEvent(event)) { setSelectedEventDetails(event); return; }
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
       if (!window.confirm("Видалити лише цю подію?")) return;
       await removeSingleRecurringBookingOccurrence(event);
@@ -1249,6 +1262,7 @@ export default function ScheduleTab({
   };
 
   const cancelBookingEvent = async (event, scope = "series") => {
+    if (!canMutateEvent(event)) { setSelectedEventDetails(event); return; }
     const prompt = scope === "occurrence" && isRecurringBookingEvent(event) ? "Скасувати лише цю подію?" : (isRecurringBookingEvent(event) ? "Скасувати всю серію?" : "Скасувати подію?");
     if (!window.confirm(prompt)) return;
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
@@ -3327,13 +3341,15 @@ export default function ScheduleTab({
                       return (
                         <div
                           key={e.id}
+                          role="button"
+                          tabIndex={0}
                           onMouseDown={(ev) => { ev.stopPropagation(); }}
                           onClick={(ev) => {
                             ev.preventDefault();
                             ev.stopPropagation();
-                            if (canMutateEvent(e)) startEdit(e);
-                            else setSelectedEventDetails(e);
+                            activateScheduleEvent(e, { editMutable: true });
                           }}
+                          onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); activateScheduleEvent(e, { editMutable: true }); } }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
                           {hasPlan ? <span title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: isMobile ? 4 : 5, right: isMobile ? 4 : 5, zIndex: 6, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}

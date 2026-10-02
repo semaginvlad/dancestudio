@@ -71,8 +71,17 @@ export const buildEventDetails = (event = {}) => {
     room_booking: [present("Назва / клієнт", event.title), present("Кількість людей", event.peopleCount), present("Ціна", event.price), present("Спосіб оплати", event.paymentMethod), present("Примітка", event.note || event.description)],
     cleaning: [present("Примітка", event.note || event.description)],
     custom_admin_event: [present("Назва", event.title), present("Тренер", event.trainer || event.trainerName), present("Кількість людей", event.peopleCount), present("Примітка", event.note || event.description)],
+    booking_block: [present("Причина", event.title), present("Примітка", event.note)],
   };
   return (byType[type] || byType.custom_admin_event).filter(Boolean);
+};
+
+export const isReadOnlyScheduleEvent = (event = {}) =>
+  event.readOnly === true || event.kind === "booking_block" || event.eventType === "booking_block";
+
+export const canMutateScheduleEvent = (event, { isAdmin = false, isAssignedToTrainer = false } = {}) => {
+  if (isReadOnlyScheduleEvent(event)) return false;
+  return Boolean(isAdmin || (event?.kind === "booking" && isAssignedToTrainer));
 };
 
 export const monthPreview = (events, limit = 3) => ({ visible: events.slice(0, limit), remaining: Math.max(0, events.length - limit) });
