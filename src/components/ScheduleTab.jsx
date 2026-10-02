@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -618,6 +618,10 @@ export default function ScheduleTab({
         return aTs - bTs;
       });
   }, [studioRooms]);
+  const reconciledBookingBlocks = useMemo(
+    () => safeBookingBlocks.map((block) => reconcileBookingBlockRooms(block, studioRooms)),
+    [safeBookingBlocks, studioRooms],
+  );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
   const studioRoomNameById = useMemo(
     () => new Map(activeStudioRooms.map((room) => [String(room.id), normalizeRoomName(room.name)])),
@@ -820,10 +824,10 @@ export default function ScheduleTab({
     if (rangeKeys.length) {
       const displayBlockRooms = buildBookingBlockDisplayRooms(
         activeStudioRooms,
-        Array.from(map.values()).flat().map((event) => event.roomName).filter(Boolean),
+        [...Array.from(map.values()).flat().map((event) => event.roomName), ...reconciledBookingBlocks.flatMap((block) => block.roomNames || [])].filter(Boolean),
         DEFAULT_ROOM,
       );
-      expandBookingBlocks(safeBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], displayBlockRooms)
+      expandBookingBlocks(reconciledBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], displayBlockRooms)
         .forEach((event) => { if (map.has(event.date)) map.get(event.date).push(event); });
     }
     map.forEach((arr, k) => {
@@ -841,7 +845,7 @@ export default function ScheduleTab({
   }, [
     safeGroups,
     safeBookings,
-    safeBookingBlocks,
+    reconciledBookingBlocks,
     activeStudioRooms,
     dirMap,
     trainerMap,
@@ -1082,12 +1086,12 @@ export default function ScheduleTab({
     if (blockSavingRef.current) return;
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
-    const presentationDraft = resolveBookingBlockRooms(
+    const presentationDraft = reconcileBookingBlockRooms(
       blockDraft,
-      activeStudioRooms.map((room) => ({ ...room, name: normalizeRoomName(room.name) })),
+      studioRooms,
     );
     const conflictDraft = { ...presentationDraft, id: presentationDraft.id || "draft" };
-    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [conflictDraft], activeStudioRooms));
+    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [conflictDraft], studioRooms));
     if (overlapsExisting && !window.confirm("Правило перетинається з наявними бронюваннями. Вони не будуть скасовані. Продовжити?")) return;
     try {
       const result = await runBookingBlockMutation(blockSavingRef, setBlockSaving, () => onSaveBookingBlock?.(presentationDraft));
@@ -1110,7 +1114,7 @@ export default function ScheduleTab({
       title: normalizedTitle,
       roomName: fallbackRoomName,
     });
-    const saveGuard = getBookingBlockSaveGuard(payload, safeBookingBlocks, activeStudioRooms, isAdmin);
+    const saveGuard = getBookingBlockSaveGuard(payload, reconciledBookingBlocks, studioRooms, isAdmin);
     const blockConflict = saveGuard.conflict;
     if (blockConflict) {
       const message = `Цей час закритий адміністратором: ${blockConflict.block.title} (${blockConflict.date}, ${blockConflict.block.startTime}–${blockConflict.block.endTime})`;
@@ -2279,7 +2283,7 @@ export default function ScheduleTab({
   const periodNavigationLabels = navigationLabels(viewMode);
   const loadStudioRooms = async () => {
     try {
-      const rooms = await fetchStudioRooms();
+      const rooms = await fetchStudioRooms({ includeInactive: isAdmin });
       setStudioRooms(Array.isArray(rooms) ? rooms : []);
     } catch (error) {
       console.warn("Failed to load studio rooms:", error);
@@ -2325,10 +2329,17 @@ export default function ScheduleTab({
       return;
     }
     try {
-      await renameStudioRoom(room.id, room.name, nextName);
+      const renamedRoom = await renameStudioRoom(room.id, room.name, nextName);
+      setStudioRooms((previous) => previous.map((item) => String(item.id) === String(room.id)
+        ? { ...item, ...renamedRoom, name: normalizeRoomName(renamedRoom?.name || nextName) }
+        : item));
       window.dispatchEvent(new CustomEvent("studio-rooms-changed"));
       if (String(selectedRoom || "").toLowerCase() === normalizeRoomName(room.name).toLowerCase()) {
         setSelectedRoom(nextName);
+      }
+      if (onRetryBookingBlocks) {
+        try { await onRetryBookingBlocks(); }
+        catch (refreshError) { console.warn("Room renamed, but booking blocks refresh failed:", refreshError); }
       }
       await loadStudioRooms();
       cancelRenameRoom();
@@ -2531,7 +2542,7 @@ export default function ScheduleTab({
 
       {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>🔒 Закриті години</b><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
-        {(safeBookingBlocks || []).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
+        {reconciledBookingBlocks.map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
           <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span>
           <button style={btnS} onClick={() => setBlockDraft({...block})}>Редагувати</button>
           <button style={btnS} disabled={!bookingBlocksReady} onClick={() => onToggleBookingBlock?.(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>

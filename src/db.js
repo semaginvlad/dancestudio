@@ -1766,8 +1766,11 @@ export async function upsertTrainingLessonReport(report = {}) {
   return mapTrainingLessonReport(data);
 }
 
-export async function fetchStudioRooms() {
-  const { data, error } = await supabase.rpc('crm_fetch_active_studio_rooms');
+export async function fetchStudioRooms({ includeInactive = false } = {}) {
+  const request = includeInactive
+    ? supabase.from('studio_rooms').select('id,name,is_active,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
+    : supabase.rpc('crm_fetch_active_studio_rooms');
+  const { data, error } = await request;
   if (error) {
     console.warn('studio_rooms:', error.message);
     return [];

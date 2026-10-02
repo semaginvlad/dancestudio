@@ -28,21 +28,26 @@ export const blockMatchesRoom = (block, room = {}) => {
   if (room.id != null && ids.includes(String(room.id))) return true;
   return (block?.roomNames || []).some((name) => canonicalRoomName(name) === canonicalRoomName(room.name));
 };
-export const resolveBookingBlockRooms = (block = {}, rooms = []) => {
-  if (block.allRooms) return { ...block, roomNames: [] };
-  const selectedIds = new Set((block.roomIds || []).map(String));
+export function reconcileBookingBlockRooms(block = {}, studioRooms = []) {
+  if (block.allRooms) return { ...block, roomIds: [], roomNames: [] };
+  const roomIds = Array.isArray(block.roomIds) ? [...block.roomIds] : [];
+  const previousNames = Array.isArray(block.roomNames) ? [...block.roomNames] : [];
+  const canonicalById = new Map((studioRooms || []).filter((room) => room?.id != null).map((room) => [String(room.id), String(room.name || "").trim().replace(/\s+/g, " ")]));
   const roomNames = [];
-  const seenNames = new Set();
-  for (const room of rooms || []) {
-    if (!selectedIds.has(String(room?.id))) continue;
-    const name = String(room?.name || "").trim().replace(/\s+/g, " ");
-    const canonicalName = canonicalRoomName(name);
-    if (!canonicalName || seenNames.has(canonicalName)) continue;
-    seenNames.add(canonicalName);
-    roomNames.push(name);
-  }
-  return { ...block, roomNames };
-};
+  const seen = new Set();
+  const appendName = (name) => {
+    const normalized = String(name || "").trim().replace(/\s+/g, " ");
+    const canonical = canonicalRoomName(normalized);
+    if (!canonical || seen.has(canonical)) return;
+    seen.add(canonical);
+    roomNames.push(normalized);
+  };
+  roomIds.forEach((roomId, index) => appendName(canonicalById.get(String(roomId)) || previousNames[index]));
+  previousNames.slice(roomIds.length).forEach(appendName);
+  return { ...block, roomIds, roomNames };
+}
+// Backward-compatible entry point; room reconciliation has one implementation.
+export const resolveBookingBlockRooms = reconcileBookingBlockRooms;
 export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames = [], defaultRoom = "Основна зала") {
   const result = [];
   const seen = new Set();
