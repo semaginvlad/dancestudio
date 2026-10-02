@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -509,6 +509,9 @@ export default function ScheduleTab({
   const [formMode, setFormMode] = useState("compact");
   const [formErrors, setFormErrors] = useState({});
   const [bookingSaving, setBookingSaving] = useState(false);
+  const bookingMutationRef = useRef(false);
+  const [detailsMutationBusy, setDetailsMutationBusy] = useState(false);
+  const [detailsMutationError, setDetailsMutationError] = useState("");
   const [selection, setSelection] = useState(null);
   const [draft, setDraft] = useState({
     date: toLocalDateKey(new Date()),
@@ -1112,8 +1115,45 @@ export default function ScheduleTab({
     catch (error) { setBlockError(error?.message || "Не вдалося зберегти правило"); }
   };
 
+  const bookingBlockMessage = (conflict) => `Цей час закритий адміністратором: ${conflict.block.title} (${conflict.date}, ${conflict.block.startTime}–${conflict.block.endTime})`;
+  const runBookingMutation = async (payload, persistBooking, setBusy = setBookingSaving) => {
+    if (bookingMutationRef.current) return { skipped: true };
+    bookingMutationRef.current = true;
+    setBusy(true);
+    try {
+      const guard = await getFreshBookingBlockSaveGuard(
+        payload,
+        reconciledBookingBlocks,
+        studioRooms,
+        isAdmin,
+        async () => onRetryBookingBlocks?.(),
+      );
+      if (guard.conflict && !isAdmin) throw new Error(bookingBlockMessage(guard.conflict));
+
+      let overrideBookingBlock = false;
+      if (guard.conflict && isAdmin) {
+        const message = bookingBlockMessage(guard.conflict);
+        if (!window.confirm(`${message}\n\nЯвно підтвердити обхід блокування?`)) return { cancelled: true };
+        overrideBookingBlock = true;
+      }
+      try {
+        return { value: await persistBooking(overrideBookingBlock) };
+      } catch (error) {
+        const isServerBlockConflict = String(error?.message || "").includes("Цей час закритий адміністратором:");
+        if (!isServerBlockConflict || overrideBookingBlock) throw error;
+        await onRetryBookingBlocks?.();
+        if (!isAdmin) throw error;
+        if (!window.confirm(`${error.message}\n\nПравила оновлено. Явно підтвердити обхід і повторити збереження?`)) return { cancelled: true };
+        return { value: await persistBooking(true) };
+      }
+    } finally {
+      bookingMutationRef.current = false;
+      setBusy(false);
+    }
+  };
+
   const saveBooking = async () => {
-    if (!canManageBookings || bookingSaving) return;
+    if (!canManageBookings || bookingMutationRef.current) return;
     const { errors, hasErrors, normalizedTitle } = validateDraft(draft);
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
     setFormErrors(errors);
@@ -1124,41 +1164,18 @@ export default function ScheduleTab({
       title: normalizedTitle,
       roomName: fallbackRoomName,
     });
-    const saveGuard = getBookingBlockSaveGuard(payload, reconciledBookingBlocks, studioRooms, isAdmin);
-    const blockConflict = saveGuard.conflict;
-    let overrideBookingBlock = false;
-    if (blockConflict) {
-      const message = `Цей час закритий адміністратором: ${blockConflict.block.title} (${blockConflict.date}, ${blockConflict.block.startTime}–${blockConflict.block.endTime})`;
-      if (saveGuard.blocked) { setFormErrors((previous) => ({ ...previous, save: message })); return; }
-      if (saveGuard.requiresConfirmation) {
-        if (!window.confirm(`${message}\n\nСтворити бронювання поверх блокування?`)) return;
-        overrideBookingBlock = true;
-      }
-    }
-    setBookingSaving(true);
     try {
-      const persistBooking = (override = false) => editingId
+      const result = await runBookingMutation(payload, (override) => editingId
         ? onUpdateBooking?.(editingId, payload, { overrideBookingBlock: override })
-        : onAddBooking?.(payload, { overrideBookingBlock: override });
-      let saved;
-      try {
-        saved = await persistBooking(overrideBookingBlock);
-      } catch (error) {
-        const isServerBlockConflict = isAdmin && !overrideBookingBlock && String(error?.message || "").includes("Цей час закритий адміністратором:");
-        if (!isServerBlockConflict) throw error;
-        await onRetryBookingBlocks?.();
-        if (!window.confirm(`${error.message}\n\nПравила оновлено. Явно підтвердити обхід і повторити збереження?`)) throw error;
-        saved = await persistBooking(true);
-      }
-      requireScheduleSaveResult(saved, editingId ? "Бронювання не було оновлено. Перевірте права доступу." : "Подію не було створено.");
+        : onAddBooking?.(payload, { overrideBookingBlock: override }));
+      if (result?.skipped || result?.cancelled) return;
+      requireScheduleSaveResult(result?.value, editingId ? "Бронювання не було оновлено. Перевірте права доступу." : "Подію не було створено.");
       setShowForm(false);
       setEditingId(null);
       setFormErrors({});
     } catch (error) {
       console.error("Schedule booking save failed", error);
       setFormErrors((previous) => ({ ...previous, save: error?.message || "Не вдалося зберегти подію" }));
-    } finally {
-      setBookingSaving(false);
     }
   };
 
@@ -1265,6 +1282,28 @@ export default function ScheduleTab({
     status: event.status || "active",
   });
 
+  const updateBookingEventWithGuard = async (event, patch) => {
+    const id = event.parentId || event.id;
+    const payload = normalizeBookingPayload({
+      ...buildRecurringContinuationPayload(event, event.parentDate || event.date),
+      ...patch,
+    });
+    setDetailsMutationError("");
+    try {
+      const result = await runBookingMutation(
+        payload,
+        (override) => onUpdateBooking?.(id, payload, { overrideBookingBlock: override }),
+        setDetailsMutationBusy,
+      );
+      if (result?.skipped || result?.cancelled) return false;
+      requireScheduleSaveResult(result?.value, "Бронювання не було оновлено.");
+      return true;
+    } catch (error) {
+      setDetailsMutationError(error?.message || "Не вдалося оновити бронювання");
+      return false;
+    }
+  };
+
   const removeSingleRecurringBookingOccurrence = async (event) => {
     if (!canMutateEvent(event)) return false;
     const parentId = event.parentId || event.id;
@@ -1319,12 +1358,21 @@ export default function ScheduleTab({
   const cancelBookingEvent = async (event, scope = "series") => {
     if (!canMutateEvent(event)) { setSelectedEventDetails(event); return; }
     const prompt = scope === "occurrence" && isRecurringBookingEvent(event) ? "Скасувати лише цю подію?" : (isRecurringBookingEvent(event) ? "Скасувати всю серію?" : "Скасувати подію?");
-    if (!window.confirm(prompt)) return;
+    if (!window.confirm(prompt)) return false;
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
-      await removeSingleRecurringBookingOccurrence(event);
-      return;
+      return removeSingleRecurringBookingOccurrence(event);
     }
-    await onUpdateBooking(event.parentId || event.id, { status: "cancelled" });
+    return updateBookingEventWithGuard(event, { status: "cancelled" });
+  };
+
+  const runDetailsOperation = async (operation) => {
+    if (bookingMutationRef.current) return false;
+    bookingMutationRef.current = true;
+    setDetailsMutationBusy(true);
+    setDetailsMutationError("");
+    try { return (await operation()) !== false; }
+    catch (error) { setDetailsMutationError(error?.message || "Не вдалося виконати дію"); return false; }
+    finally { bookingMutationRef.current = false; setDetailsMutationBusy(false); }
   };
 
   const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null, roomNameOverride = "") => {
@@ -2804,19 +2852,20 @@ export default function ScheduleTab({
             </dl>
             {selectedEventDetails.kind === "booking" && canMutateEvent(selectedEventDetails) ? (
               <div aria-label="Дії бронювання" style={{ marginTop: 14, display: "flex", gap: 7, flexWrap: "wrap" }}>
-                <button type="button" style={btnP} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); startEdit(event); }}>Редагувати</button>
-                <button type="button" style={editorBtnSt} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); duplicateBookingLikeEvent(event); }}>Дублювати</button>
+                <button type="button" style={btnP} disabled={detailsMutationBusy} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); startEdit(event); }}>Редагувати</button>
+                <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); duplicateBookingLikeEvent(event); }}>Дублювати</button>
                 {isRecurringBookingEvent(selectedEventDetails) ? <>
-                  <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "occurrence"); }}>Видалити лише цю подію</button>
-                  <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити всю серію</button>
-                </> : <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити</button>}
-                <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await onUpdateBooking(event.parentId || event.id, { status: "tentative" }); }}>Позначити як попереднє бронювання</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "occurrence"); }}>Видалити лише цю подію</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити всю серію</button>
+                </> : <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await deleteBookingEvent(event, "series"); }}>Видалити</button>}
+                <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await updateBookingEventWithGuard(event, { status: "tentative" })) setSelectedEventDetails(null); }}>Позначити як попереднє бронювання</button>
                 {isRecurringBookingEvent(selectedEventDetails) ? <>
-                  <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await cancelBookingEvent(event, "occurrence"); }}>Скасувати лише цю подію</button>
-                  <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await cancelBookingEvent(event, "series"); }}>Скасувати всю серію</button>
-                </> : <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await cancelBookingEvent(event, "series"); }}>Скасувати подію</button>}
-                <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await onUpdateBooking(event.parentId || event.id, { status: "active" }); }}>Повернути active</button>
-                <button type="button" style={editorBtnSt} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await onUpdateBooking(event.parentId || event.id, { color: null }); }}>Скинути колір</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await runDetailsOperation(() => cancelBookingEvent(event, "occurrence"))) setSelectedEventDetails(null); }}>Скасувати лише цю подію</button>
+                  <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await cancelBookingEvent(event, "series")) setSelectedEventDetails(null); }}>Скасувати всю серію</button>
+                </> : <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await cancelBookingEvent(event, "series")) setSelectedEventDetails(null); }}>Скасувати подію</button>}
+                <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; if (await updateBookingEventWithGuard(event, { status: "active" })) setSelectedEventDetails(null); }}>Повернути active</button>
+                <button type="button" style={editorBtnSt} disabled={detailsMutationBusy} onClick={async () => { const event = selectedEventDetails; setSelectedEventDetails(null); await onUpdateBooking(event.parentId || event.id, { color: null }); }}>Скинути колір</button>
+                {detailsMutationError ? <div role="alert" style={{ flexBasis:"100%", color:theme.danger }}>{detailsMutationError}</div> : null}
               </div>
             ) : null}
             {selectedEventDetails.kind === "group" && canEditGroupSingleLesson(selectedEventDetails) ? (

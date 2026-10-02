@@ -41,6 +41,8 @@ begin
   if not exists(select 1 from pg_proc where oid='public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=public%') then raise exception 'update override RPC hardening missing'; end if;
   if has_function_privilege('anon','public.crm_admin_override_create_room_booking(date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)','execute') then raise exception 'anon can call create override'; end if;
   if has_function_privilege('anon','public.crm_admin_override_update_room_booking(uuid,date,text,text,text,text,text,text,text,integer,integer,text,text,text,text,text,date,text,text,text)','execute') then raise exception 'anon can call update override'; end if;
+  if position('crm.room_rename_old_name' in pg_get_functiondef('public.rename_studio_room(uuid,text)'::regprocedure))=0 or position('crm.room_rename_new_name' in pg_get_functiondef('public.rename_studio_room(uuid,text)'::regprocedure))=0 then raise exception 'rename cascade context missing'; end if;
+  if not exists(select 1 from pg_proc where oid='public.rename_studio_room(uuid,text)'::regprocedure and prosecdef and array_to_string(proconfig,',') like '%search_path=pg_catalog, public%') then raise exception 'rename RPC hardening missing'; end if;
   perform set_config('crm.booking_block_override','off',true);
   if current_setting('crm.booking_block_override',true)<>'off' then raise exception 'override context setup broken'; end if;
   perform set_config('crm.booking_block_override','on',true);

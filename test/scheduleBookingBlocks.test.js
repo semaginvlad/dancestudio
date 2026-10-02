@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
+import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
 
 const rooms = [{ id: "one", name: "Перша", isActive: true }, { id: "two", name: "Друга", isActive: true }];
 const base = { id: "b", title: "Закрито", startsOn: "2026-10-01", endsOn: "2026-10-07", startTime: "10:00", endTime: "11:00", weekdays: [1,2,3,4,5,6,7], allRooms: false, roomIds: ["one"], roomNames: ["Стара назва"], isActive: true };
@@ -105,4 +105,36 @@ test("admin override is explicit and a newly discovered server conflict requires
   assert.match(schedule,/await onRetryBookingBlocks\?\.\(\);[\s\S]*Явно підтвердити обхід[\s\S]*persistBooking\(true\)/);
   assert.match(db,/crm_admin_override_create_room_booking/);
   assert.match(db,/crm_admin_override_update_room_booking/);
+});
+
+test("trainer refreshes stale conflicting blocks before the shared mutation rejects", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/getFreshBookingBlockSaveGuard\([\s\S]*async \(\) => onRetryBookingBlocks\?\.\(\)/);
+  assert.match(source,/if \(guard\.conflict && !isAdmin\) throw new Error\(bookingBlockMessage\(guard\.conflict\)\)/);
+  assert.match(source,/bookingMutationRef\.current = true[\s\S]*finally \{[\s\S]*bookingMutationRef\.current = false/);
+  assert.match(source,/if \(!isAdmin\) throw error;[\s\S]*window\.confirm[\s\S]*persistBooking\(true\)/);
+});
+
+test("fresh trainer guard releases deleted blocks, retains active blocks, and fails closed", async () => {
+  const booking={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomId:"one"};
+  const released=await getFreshBookingBlockSaveGuard(booking,[base],rooms,false,async()=>[]);
+  assert.equal(released.conflict,null);
+  const retained=await getFreshBookingBlockSaveGuard(booking,[base],rooms,false,async()=>[base]);
+  assert.ok(retained.conflict);
+  await assert.rejects(getFreshBookingBlockSaveGuard(booking,[base],rooms,false,async()=>{throw new Error("refresh failed");}),/refresh failed/);
+  let refreshed=false;
+  const admin=await getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>{refreshed=true; return [];});
+  assert.equal(admin.requiresConfirmation,true);
+  assert.equal(refreshed,false);
+});
+
+test("editor and status actions share explicit override and retain UI on failure or declined confirmation", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/const updateBookingEventWithGuard = async[\s\S]*runBookingMutation\([\s\S]*overrideBookingBlock: override/);
+  assert.match(source,/updateBookingEventWithGuard\(event, \{ status: "tentative" \}\)/);
+  assert.match(source,/updateBookingEventWithGuard\(event, \{ status: "active" \}\)/);
+  assert.match(source,/return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
+  assert.match(source,/detailsMutationError \? <div role="alert"/);
+  assert.match(source,/if \(await updateBookingEventWithGuard[\s\S]*setSelectedEventDetails\(null\)/);
+  assert.doesNotMatch(source,/setSelectedEventDetails\(null\); await onUpdateBooking\(event\.parentId \|\| event\.id, \{ status:/);
 });

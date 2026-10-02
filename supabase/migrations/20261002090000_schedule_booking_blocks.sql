@@ -172,11 +172,67 @@ returns text language sql immutable set search_path=public as $$
   select lower(btrim(regexp_replace(coalesce(p_name,''),'[[:space:]]+',' ','g')))
 $$;
 
+-- Replace the canonical rename RPC so its room-booking metadata cascade can
+-- cross existing blocks without opening a general room_name bypass.
+create or replace function public.rename_studio_room(p_room_id uuid,p_new_name text)
+returns public.studio_rooms language plpgsql security definer set search_path=pg_catalog,public as $$
+declare
+  v_room public.studio_rooms;
+  v_old_name text;
+  v_previous_old text := current_setting('crm.room_rename_old_name',true);
+  v_previous_new text := current_setting('crm.room_rename_new_name',true);
+begin
+  if not public.crm_is_admin_session() then raise exception 'Лише адміністратор може перейменовувати зали' using errcode='42501'; end if;
+  if p_room_id is null or nullif(btrim(p_new_name),'') is null then raise exception 'room id and name are required' using errcode='22023'; end if;
+  select name into v_old_name from public.studio_rooms where id=p_room_id for update;
+  if not found then raise exception 'studio room not found' using errcode='P0002'; end if;
+  update public.studio_rooms set name=btrim(p_new_name) where id=p_room_id returning * into v_room;
+
+  perform set_config('crm.room_rename_old_name',public.crm_canonical_room_name(v_old_name),true);
+  perform set_config('crm.room_rename_new_name',public.crm_canonical_room_name(v_room.name),true);
+  begin
+    update public.room_bookings set room_name=v_room.name
+    where public.crm_canonical_room_name(room_name)=public.crm_canonical_room_name(v_old_name);
+  exception when others then
+    perform set_config('crm.room_rename_old_name',coalesce(v_previous_old,''),true);
+    perform set_config('crm.room_rename_new_name',coalesce(v_previous_new,''),true);
+    raise;
+  end;
+  perform set_config('crm.room_rename_old_name',coalesce(v_previous_old,''),true);
+  perform set_config('crm.room_rename_new_name',coalesce(v_previous_new,''),true);
+
+  update public.group_lesson_overrides set room_name=v_room.name
+  where public.crm_canonical_room_name(room_name)=public.crm_canonical_room_name(v_old_name);
+  with rewritten as (
+    select g.id,jsonb_agg(case when jsonb_typeof(slot.value)='object' and
+      (coalesce(slot.value->>'roomId',slot.value->>'room_id')=p_room_id::text or
+       (nullif(btrim(coalesce(slot.value->>'roomId',slot.value->>'room_id')),'') is null and
+        public.crm_canonical_room_name(coalesce(slot.value->>'roomName',slot.value->>'room_name',slot.value->>'room',slot.value->>'location',slot.value->>'hall',''))=public.crm_canonical_room_name(v_old_name)))
+      then (slot.value-'room_id'-'room_name'-'room'-'location'-'hall')||jsonb_build_object('roomId',p_room_id::text,'roomName',v_room.name)
+      else slot.value end order by slot.ordinality) schedule
+    from public.groups g cross join lateral jsonb_array_elements(case when jsonb_typeof(g.schedule)='array' then g.schedule else '[]'::jsonb end) with ordinality slot(value,ordinality)
+    where jsonb_typeof(g.schedule)='array' group by g.id)
+  update public.groups g set schedule=rewritten.schedule from rewritten where g.id=rewritten.id and rewritten.schedule is distinct from g.schedule;
+  return v_room;
+end $$;
+
 create or replace function public.crm_enforce_schedule_booking_blocks()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
 begin
   if coalesce(new.status,'active')='cancelled' then return new; end if;
+  if tg_op='UPDATE' and public.crm_is_admin_session()
+     and new.date is not distinct from old.date
+     and new.start_time is not distinct from old.start_time
+     and new.end_time is not distinct from old.end_time
+     and new.recurrence is not distinct from old.recurrence
+     and new.recurrence_until is not distinct from old.recurrence_until
+     and new.status is not distinct from old.status
+     and coalesce(current_setting('crm.room_rename_old_name',true),'')<>''
+     and coalesce(current_setting('crm.room_rename_new_name',true),'')<>''
+     and public.crm_canonical_room_name(old.room_name)=current_setting('crm.room_rename_old_name',true)
+     and public.crm_canonical_room_name(new.room_name)=current_setting('crm.room_rename_new_name',true)
+  then return new; end if;
   select b.title into v_title
   from public.schedule_booking_blocks b
   where b.is_active

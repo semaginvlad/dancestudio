@@ -25,6 +25,8 @@ test("booking-block trigger and explicit override RPC are transactionally author
         trainer_id text,trainer_name text,title text not null,type text not null default 'individual',booking_type text,
         people_count integer,price integer,payment_method text,event_type text,note text,color text,recurrence text,
         recurrence_until date,description text,status text default 'active',created_at timestamptz default now(),room_name text);
+      create table public.group_lesson_overrides(id uuid primary key default gen_random_uuid(),room_name text);
+      create table public.groups(id uuid primary key default gen_random_uuid(),schedule jsonb default '[]'::jsonb);
     `);
     await db.exec(await readFile(migrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
@@ -34,6 +36,9 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(`
       select set_config('test.admin','on',false);
       insert into studio_rooms(id,name) values('${roomId}','Зал 1');
+      insert into room_bookings(date,start_time,end_time,title,room_name)
+      values('2026-10-02','10:20','10:40','Legacy overlap','Зал 1'),
+            ('2026-10-04','10:20','10:40','Legacy all-room overlap','Зал 1');
       insert into schedule_booking_blocks(id,title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
       values('${blockId}','Закрито','2026-10-02','2026-10-02','10:00','11:00',false,array[5]::smallint[],'00000000-0000-0000-0000-000000000001');
       insert into schedule_booking_block_rooms values('${blockId}','${roomId}');
@@ -73,6 +78,18 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec("select set_config('test.admin','off',false); select set_config('test.trainer','on',false)");
     await expectDatabaseError(
       () => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-04','10:15','10:45','All rooms','Інша зала')"),
+      /Цей час закритий адміністратором/,
+    );
+
+    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    const renamed = await db.query(`select (public.rename_studio_room('${roomId}','Перейменована зала')).name as name`);
+    assert.equal(renamed.rows[0]?.name, "Перейменована зала");
+    const renamedBookings = await db.query("select count(*)::int as count from room_bookings where title like 'Legacy%' and room_name='Перейменована зала'");
+    assert.equal(renamedBookings.rows[0]?.count, 2);
+    assert.equal(await db.query("select current_setting('crm.room_rename_old_name',true) as value").then((result) => result.rows[0]?.value || ""), "");
+    await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-02','10:20','10:40','Move me','Інша зала')");
+    await expectDatabaseError(
+      () => db.exec("update room_bookings set room_name='Перейменована зала' where title='Move me'"),
       /Цей час закритий адміністратором/,
     );
   } finally {

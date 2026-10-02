@@ -154,6 +154,16 @@ export const getBookingBlockSaveGuard = (booking, blocks, rooms, isAdmin) => {
   return { conflict, blocked: Boolean(conflict) && !isAdmin, requiresConfirmation: Boolean(conflict) && Boolean(isAdmin) };
 };
 
+export async function getFreshBookingBlockSaveGuard(booking, blocks, rooms, isAdmin, refreshBlocks) {
+  let guard = getBookingBlockSaveGuard(booking, blocks, rooms, isAdmin);
+  if (!guard.conflict || isAdmin) return guard;
+  const freshBlocks = await refreshBlocks();
+  if (!Array.isArray(freshBlocks)) throw new Error("Не вдалося оновити правила недоступності.");
+  const reconciled = freshBlocks.map((block) => reconcileBookingBlockRooms(block, rooms));
+  guard = getBookingBlockSaveGuard(booking, reconciled, rooms, false);
+  return guard;
+}
+
 export async function runBookingBlockMutation(inFlightRef, setSaving, mutation) {
   if (inFlightRef.current) return { skipped: true };
   inFlightRef.current = true;
