@@ -26,5 +26,14 @@ begin
   if public.crm_canonical_room_name('Зал 1') = public.crm_canonical_room_name('Зал 2') then raise exception 'different rooms matched'; end if;
   if not (false or public.crm_canonical_room_name('Зал 1')=public.crm_canonical_room_name(' зал  1 ')) then raise exception 'selected-room canonical predicate failed'; end if;
   if not (true or public.crm_canonical_room_name('Зал 1')=public.crm_canonical_room_name('Інша')) then raise exception 'all-room predicate changed'; end if;
+  if not public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'stale until bypassed one-off block'; end if;
+  if not public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','crafted','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'unknown recurrence did not behave as one-off'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-10-01','2026-01-01','none','2026-10-02','2026-10-02',array[4]::smallint[]) then raise exception 'one-off outside block matched'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[1]::smallint[]) then raise exception 'one-off ignored block weekday'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-10-01','daily','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'daily ignored recurrence end'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-10-01','weekly','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'weekly ignored recurrence end'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-10-01','monthly','2026-10-02','2026-10-02',array[5]::smallint[]) then raise exception 'monthly ignored recurrence end'; end if;
+  if not (public.crm_canonical_room_name('Зал 1')=public.crm_canonical_room_name(' зал  1 ') and public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[5]::smallint[])) then raise exception 'selected-room stale-until bypass'; end if;
+  if not (true and public.crm_schedule_booking_recurrence_hits_block('2026-10-02','2026-01-01','none','2026-10-02','2026-10-02',array[5]::smallint[])) then raise exception 'all-room stale-until bypass'; end if;
 end $$;
 rollback;

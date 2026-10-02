@@ -130,18 +130,19 @@ returns boolean language plpgsql immutable set search_path=public as $$
 declare
   v_mode text := lower(coalesce(p_recurrence,'none'));
   v_from date := greatest(p_start,p_block_start);
-  v_to date := least(coalesce(p_until,p_block_end),p_block_end);
+  v_to date;
   v_candidate date;
   v_month date;
   v_offset integer;
   i integer;
 begin
-  if v_from > v_to then return false; end if;
   if v_mode not in ('daily','weekly','monthly') then
     return p_start between p_block_start and p_block_end
-      and (p_until is null or p_start <= p_until)
       and extract(isodow from p_start)::smallint=any(p_weekdays);
-  elsif v_mode='daily' then
+  end if;
+  v_to := least(coalesce(p_until,p_block_end),p_block_end);
+  if v_from > v_to then return false; end if;
+  if v_mode='daily' then
     -- Seven dates cover every possible ISO weekday, regardless of rule length.
     for i in 0..least(6,v_to-v_from) loop
       if extract(isodow from (v_from+i))::smallint=any(p_weekdays) then return true; end if;

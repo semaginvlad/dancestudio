@@ -80,14 +80,14 @@ export function bookingRecurrenceCandidates(booking, rangeStartKey, rangeEndKey)
   const first = parseDateOnly(booking?.date);
   const blockStart = parseDateOnly(rangeStartKey);
   const blockEnd = parseDateOnly(rangeEndKey);
-  const explicitUntil = parseDateOnly(booking?.recurrenceUntil);
   if (!first || !blockStart || !blockEnd) return [];
+  const recurrence = ["daily", "weekly", "monthly"].includes(booking?.recurrence) ? booking.recurrence : "none";
+  if (recurrence === "none") return first >= blockStart && first <= blockEnd ? [formatDateOnly(first)] : [];
+  const explicitUntil = parseDateOnly(booking?.recurrenceUntil);
   const from = parseDateOnly([formatDateOnly(first), formatDateOnly(blockStart)].sort().at(-1));
   const untilKey = explicitUntil ? formatDateOnly(explicitUntil) : formatDateOnly(blockEnd);
   const to = parseDateOnly([untilKey, formatDateOnly(blockEnd)].sort()[0]);
   if (!from || !to || from > to) return [];
-  const recurrence = ["daily", "weekly", "monthly"].includes(booking?.recurrence) ? booking.recurrence : "none";
-  if (recurrence === "none") return first >= blockStart && first <= to ? [formatDateOnly(first)] : [];
   if (recurrence === "daily") {
     const count = Math.min(7, calendarDayNumber(to) - calendarDayNumber(from) + 1);
     return Array.from({ length: count }, (_, index) => formatDateOnly(addCalendarDays(from, index)));
