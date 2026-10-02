@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockMatchesRoom, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, resolveBookingBlockRooms, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
+import { blockMatchesRoom, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
 
 const rooms = [{ id: "one", name: "Перша", isActive: true }, { id: "two", name: "Друга", isActive: true }];
 const base = { id: "b", title: "Закрито", startsOn: "2026-10-01", endsOn: "2026-10-07", startTime: "10:00", endTime: "11:00", weekdays: [1,2,3,4,5,6,7], allRooms: false, roomIds: ["one"], roomNames: ["Стара назва"], isActive: true };
@@ -18,3 +18,28 @@ test("trainer is blocked while admin must explicitly confirm override", () => { 
 test("selected-room draft resolves current canonical names before existing-booking checks", () => { const draft=resolveBookingBlockRooms({...base,roomIds:["one"],roomNames:undefined},[{id:"one",name:"  Перейменована   зала  "},{id:"two",name:"Друга"}]); assert.deepEqual(draft.roomNames,["Перейменована зала"]); const matching={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"перейменована ЗАЛА"}; const other={...matching,roomName:"Друга"}; assert.ok(findBookingBlockConflict(matching,[draft],rooms)); assert.equal(findBookingBlockConflict(other,[draft],rooms),null); });
 test("draft warning keeps all-room, adjacent and cancelled semantics", () => { const booking={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"Друга"}; assert.ok(findBookingBlockConflict(booking,[{...base,allRooms:true,roomIds:[],roomNames:[]}],rooms)); assert.equal(findBookingBlockConflict({...booking,startTime:"11:00",endTime:"12:00"},[{...base,allRooms:true}],rooms),null); assert.equal(findBookingBlockConflict({...booking,status:"cancelled"},[{...base,allRooms:true}],rooms),null); });
 test("client validation covers required fields and selected rooms", () => { assert.equal(validateBookingBlock({...base}).valid, true); assert.equal(validateBookingBlock({...base,title:"",roomIds:[]}).valid, false); });
+
+test("booking-block mutation guard drops a rapid duplicate and clears saving after success", async () => {
+  const guard={current:false}; const states=[]; let calls=0; let release;
+  const pending=new Promise(resolve=>{release=resolve;});
+  const first=runBookingBlockMutation(guard,value=>states.push(value),async()=>{calls+=1; await pending; return "saved";});
+  const second=await runBookingBlockMutation(guard,value=>states.push(value),async()=>{calls+=1;});
+  assert.deepEqual(second,{skipped:true}); assert.equal(calls,1); assert.equal(guard.current,true);
+  release(); assert.deepEqual(await first,{skipped:false,value:"saved"}); assert.equal(guard.current,false); assert.deepEqual(states,[true,false]);
+});
+
+test("booking-block mutation guard clears after failure and permits create/update retry", async () => {
+  const guard={current:false}; const states=[]; let calls=0;
+  await assert.rejects(runBookingBlockMutation(guard,value=>states.push(value),async()=>{calls+=1; throw new Error("RPC failed");}),/RPC failed/);
+  assert.equal(guard.current,false);
+  const retry=await runBookingBlockMutation(guard,value=>states.push(value),async()=>{calls+=1; return {id:"updated"};});
+  assert.equal(calls,2); assert.equal(retry.value.id,"updated"); assert.deepEqual(states,[true,false,true,false]);
+});
+
+test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/disabled=\{blockSaving\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, \(\) => onSaveBookingBlock\?\.\(presentationDraft\)\)/);
+  assert.match(source,/catch \(error\) \{ setBlockError/);
+  assert.doesNotMatch(source,/catch \(error\) \{[^}]*setBlockDraft/);
+});

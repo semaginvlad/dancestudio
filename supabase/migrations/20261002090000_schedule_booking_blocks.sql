@@ -124,6 +124,48 @@ returns boolean language sql immutable set search_path=public as $$
   end
 $$;
 
+create or replace function public.crm_schedule_booking_recurrence_hits_block(
+  p_start date,p_until date,p_recurrence text,p_block_start date,p_block_end date,p_weekdays smallint[])
+returns boolean language plpgsql immutable set search_path=public as $$
+declare
+  v_mode text := lower(coalesce(p_recurrence,'none'));
+  v_from date := greatest(p_start,p_block_start);
+  v_to date := least(coalesce(p_until,p_block_end),p_block_end);
+  v_candidate date;
+  v_month date;
+  v_offset integer;
+  i integer;
+begin
+  if v_from > v_to then return false; end if;
+  if v_mode not in ('daily','weekly','monthly') then
+    return p_start between p_block_start and p_block_end
+      and (p_until is null or p_start <= p_until)
+      and extract(isodow from p_start)::smallint=any(p_weekdays);
+  elsif v_mode='daily' then
+    -- Seven dates cover every possible ISO weekday, regardless of rule length.
+    for i in 0..least(6,v_to-v_from) loop
+      if extract(isodow from (v_from+i))::smallint=any(p_weekdays) then return true; end if;
+    end loop;
+    return false;
+  elsif v_mode='weekly' then
+    v_offset := v_from-p_start;
+    v_candidate := p_start + (((v_offset+6)/7)*7);
+    return v_candidate <= v_to and extract(isodow from v_candidate)::smallint=any(p_weekdays);
+  end if;
+
+  -- Monthly work scales by months, never days; invalid dates such as February
+  -- 31 roll forward and are rejected by the day equality check.
+  v_month := date_trunc('month',v_from)::date;
+  while v_month <= date_trunc('month',v_to)::date loop
+    v_candidate := (v_month + (extract(day from p_start)::integer-1))::date;
+    if extract(day from v_candidate)=extract(day from p_start)
+       and v_candidate between v_from and v_to
+       and extract(isodow from v_candidate)::smallint=any(p_weekdays) then return true; end if;
+    v_month := (v_month+interval '1 month')::date;
+  end loop;
+  return false;
+end $$;
+
 create or replace function public.crm_enforce_schedule_booking_blocks()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
@@ -131,14 +173,8 @@ begin
   if public.crm_is_admin_session() or coalesce(new.status,'active')='cancelled' then return new; end if;
   select b.title into v_title
   from public.schedule_booking_blocks b
-  cross join lateral generate_series(
-    greatest(new.date,b.starts_on),
-    least(coalesce(new.recurrence_until,b.ends_on),b.ends_on),
-    interval '1 day'
-  ) candidate
   where b.is_active
-    and public.crm_schedule_booking_occurs_on(new.date,candidate::date,coalesce(new.recurrence,'none'))
-    and extract(isodow from candidate)::smallint=any(b.weekdays)
+    and public.crm_schedule_booking_recurrence_hits_block(new.date,new.recurrence_until,new.recurrence,b.starts_on,b.ends_on,b.weekdays)
     and new.start_time::time < b.end_time and b.start_time < new.end_time::time
     and (b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and lower(btrim(r.name))=lower(btrim(new.room_name))))
   limit 1;
@@ -153,6 +189,7 @@ revoke execute on function public.crm_validate_booking_block_input(text,text,dat
 revoke execute on function public.crm_valid_iso_weekdays(smallint[]) from public,anon,authenticated;
 revoke execute on function public.crm_enforce_schedule_booking_blocks() from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_occurs_on(date,date,text) from public,anon,authenticated;
+revoke execute on function public.crm_schedule_booking_recurrence_hits_block(date,date,text,date,date,smallint[]) from public,anon,authenticated;
 revoke execute on function public.crm_fetch_schedule_booking_blocks() from public,anon;
 revoke execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;

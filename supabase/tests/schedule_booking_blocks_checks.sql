@@ -15,5 +15,11 @@ begin
   if not public.crm_schedule_booking_occurs_on('2026-01-01','2027-01-01','daily') then raise exception 'open-ended daily semantics broken'; end if;
   if not public.crm_schedule_booking_occurs_on('2026-01-01','2026-12-31','weekly') then raise exception 'open-ended weekly semantics broken'; end if;
   if public.crm_schedule_booking_occurs_on('2026-01-31','2026-02-28','monthly') or not public.crm_schedule_booking_occurs_on('2026-01-31','2026-03-31','monthly') then raise exception 'month-end recurrence shifted'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-01-01',null,'none','9000-01-01','9999-12-31',array[1,2,3,4,5,6,7]::smallint[]) then raise exception 'one-off scanned a future block'; end if;
+  if not public.crm_schedule_booking_recurrence_hits_block('2026-01-01',null,'daily','9000-01-01','9999-12-31',array[1]::smallint[]) then raise exception 'long daily recurrence missed'; end if;
+  if not public.crm_schedule_booking_recurrence_hits_block('2026-01-01',null,'weekly','9000-01-01','9999-12-31',array[4]::smallint[]) then raise exception 'long weekly recurrence missed'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-01-31',null,'monthly','2026-02-28','2026-02-28',array[6]::smallint[]) then raise exception 'January 31 drifted into February'; end if;
+  if not public.crm_schedule_booking_recurrence_hits_block('2026-01-31',null,'monthly','2026-03-31','2026-03-31',array[2]::smallint[]) then raise exception 'March 31 occurrence missed'; end if;
+  if public.crm_schedule_booking_recurrence_hits_block('2026-01-01','2026-02-01','daily','2027-01-01','2027-12-31',array[1,2,3,4,5,6,7]::smallint[]) then raise exception 'disjoint finite recurrence matched'; end if;
 end $$;
 rollback;

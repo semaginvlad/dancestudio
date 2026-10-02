@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
+import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -479,6 +479,8 @@ export default function ScheduleTab({
   const [showBlocksManager, setShowBlocksManager] = useState(false);
   const [blockError, setBlockError] = useState("");
   const [blockDraft, setBlockDraft] = useState(null);
+  const [blockSaving, setBlockSaving] = useState(false);
+  const blockSavingRef = useRef(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
@@ -1072,6 +1074,7 @@ export default function ScheduleTab({
     setShowBlocksManager(true);
   };
   const saveBlock = async () => {
+    if (blockSavingRef.current) return;
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
     const presentationDraft = resolveBookingBlockRooms(
@@ -1080,7 +1083,12 @@ export default function ScheduleTab({
     );
     const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [presentationDraft], activeStudioRooms));
     if (overlapsExisting && !window.confirm("Правило перетинається з наявними бронюваннями. Вони не будуть скасовані. Продовжити?")) return;
-    try { await onSaveBookingBlock?.(presentationDraft); setBlockDraft(null); setBlockError(""); }
+    try {
+      const result = await runBookingBlockMutation(blockSavingRef, setBlockSaving, () => onSaveBookingBlock?.(presentationDraft));
+      if (result.skipped) return;
+      setBlockDraft(null);
+      setBlockError("");
+    }
     catch (error) { setBlockError(error?.message || "Не вдалося зберегти правило"); }
   };
 
@@ -2529,7 +2537,7 @@ export default function ScheduleTab({
           <label><input type="checkbox" checked={blockDraft.isActive} onChange={e=>setBlockDraft(p=>({...p,isActive:e.target.checked}))}/> Активне</label>
           <div><b>{blockDraft.title}</b> · {blockDraft.startsOn}—{blockDraft.endsOn} · {blockDraft.startTime}–{blockDraft.endTime}</div>
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock}>Зберегти</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
+          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
         </div> : <button style={btnP} onClick={openNewBlock}>+ Нове правило</button>}
       </div> : null}
 

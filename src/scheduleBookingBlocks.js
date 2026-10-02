@@ -98,6 +98,18 @@ export const getBookingBlockSaveGuard = (booking, blocks, rooms, isAdmin) => {
   return { conflict, blocked: Boolean(conflict) && !isAdmin, requiresConfirmation: Boolean(conflict) && Boolean(isAdmin) };
 };
 
+export async function runBookingBlockMutation(inFlightRef, setSaving, mutation) {
+  if (inFlightRef.current) return { skipped: true };
+  inFlightRef.current = true;
+  setSaving(true);
+  try {
+    return { skipped: false, value: await mutation() };
+  } finally {
+    inFlightRef.current = false;
+    setSaving(false);
+  }
+}
+
 export function validateBookingBlock(input) {
   const errors = {};
   if (!String(input?.title || "").trim()) errors.title = "Вкажіть назву";
