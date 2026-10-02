@@ -115,6 +115,15 @@ export const overlapEventLayout = (events = []) => {
   });
 };
 
+export const resolveWeekRoomNames = ({ selectedRoom, activeRoomNames = [], knownRoomNames = [], defaultRoom }) => {
+  if (selectedRoom !== "all") return [selectedRoom];
+  const active = [...new Set(activeRoomNames.filter(Boolean))];
+  if (active.length) return active;
+  const known = [...new Set(knownRoomNames.filter(Boolean))];
+  if (known.length) return known;
+  return defaultRoom ? [defaultRoom] : [];
+};
+
 export const compactDayPreview = (events = [], limit = 5) => {
   const sorted = sortCalendarEvents(events);
   return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
@@ -170,7 +179,7 @@ export const roomLaneLayout = (events = [], roomNames = [], unknownRoomName = "Ð
 
   return orderedRooms.map((roomName) => {
     const roomEvents = events.filter((event) => normalizedRoom(event) === roomName);
-    const laidOut = weekEventLayout(roomEvents);
+    const laidOut = overlapEventLayout(weekEventLayout(roomEvents));
     return {
       roomName,
       events: laidOut.map((event) => ({

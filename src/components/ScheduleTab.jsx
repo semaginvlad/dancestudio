@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
 import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
-import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
+import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
@@ -849,6 +849,12 @@ export default function ScheduleTab({
     if (!set.size) set.add(DEFAULT_ROOM);
     return Array.from(set);
   }, [activeStudioRooms, eventsByDay]);
+  const weekCanonicalRooms = useMemo(() => resolveWeekRoomNames({
+    selectedRoom,
+    activeRoomNames: activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean),
+    knownRoomNames: allKnownRooms.map(normalizeRoomName).filter(Boolean),
+    defaultRoom: DEFAULT_ROOM,
+  }), [selectedRoom, activeStudioRooms, allKnownRooms]);
   const mobileFilterTypes = [
     { value: "all", label: "Усі" },
     { value: "trainer", label: "Тренер" },
@@ -3302,7 +3308,7 @@ export default function ScheduleTab({
                 const overviewDays = weekDays.map((day) => {
                   const date = toLocalDateKey(day);
                   const events = roomFilteredEventsByDay.get(date) || [];
-                  const sameRoomConflictIds = new Set(roomLaneLayout(events, activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean), UNKNOWN_ROOM_NAME).flatMap((lane) => lane.events.filter((event) => event.hasRoomConflict).map((event) => event.id)));
+                  const sameRoomConflictIds = new Set(roomLaneLayout(events, weekCanonicalRooms, UNKNOWN_ROOM_NAME).flatMap((lane) => lane.events.filter((event) => event.hasRoomConflict).map((event) => event.id)));
                   return { day, date, events: overlapEventLayout(events), sameRoomConflictIds };
                 });
                 const gridColumns = `32px repeat(7, ${dayWidth})`;
@@ -3340,10 +3346,9 @@ export default function ScheduleTab({
           {(!isMobile || mobileWeekMode === "day") ? <div style={{ overflowX: "auto", overflowY: "hidden", position: "relative" }}>
             {(() => {
               const shownDays = isMobile ? weekDays.filter((day) => toLocalDateKey(day) === selectedDate) : weekDays;
-              const canonicalRooms = selectedRoom === "all" ? activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean) : [selectedRoom];
               const dayLayouts = shownDays.map((day) => {
                 const date = toLocalDateKey(day);
-                return { day, date, lanes: roomLaneLayout(roomFilteredEventsByDay.get(date) || [], canonicalRooms, UNKNOWN_ROOM_NAME) };
+                return { day, date, lanes: roomLaneLayout(roomFilteredEventsByDay.get(date) || [], weekCanonicalRooms, UNKNOWN_ROOM_NAME) };
               });
               const laneWidth = selectedRoom === "all" ? (isMobile ? "clamp(138px, 40vw, 156px)" : 84) : (isMobile ? 280 : 180);
               const laneWidthEstimate = selectedRoom === "all" && isMobile ? 150 : Number(laneWidth);
@@ -3416,9 +3421,9 @@ export default function ScheduleTab({
                         const { top, height } = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR);
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
-                        const conflictIndex = event.simultaneous.findIndex((item) => item.id === event.id);
                         const conflictCount = event.hasRoomConflict ? event.simultaneous.length : 1;
-                        const width = 100 / conflictCount;
+                        const width = 100 / event.colCount;
+                        const left = event.colIndex * width;
                         const hasPlan = hasLessonPlanForEvent(event);
                         const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(event) : "";
                         const typeMark = getEventTypeMark(event);
@@ -3428,7 +3433,7 @@ export default function ScheduleTab({
                         const titleLineCount = Math.max(1, Math.floor((height - 23) / 12));
                         const accessibleLabel = `${fullType}${trainerName ? ` · ${trainerName}` : ""} · ${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · Статус: ${status.text}`;
                         return <React.Fragment key={event.id}>
-                          <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${conflictIndex * width}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + conflictIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
+                          <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${left}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + event.colIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
                             {hasPlan ? <span aria-label={planSeriesLabel ? `Є план, порядок ${planSeriesLabel}` : "Є план"} title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: 2, right: 2, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 999, background: "#0f9f8f", color: "#fff", fontSize: 8, fontWeight: 900, display: "grid", placeItems: "center" }}>{planSeriesLabel || "✓"}</span> : null}
                             {height < 24 ? <span style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, height: "100%" }}>
                               {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 6, lineHeight: "9px", minWidth: 9, height: 9, borderRadius: 999, textAlign: "center", background: typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : typeMark === "Г" ? GROUP_TYPE_BADGE_BG : color.border, color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}

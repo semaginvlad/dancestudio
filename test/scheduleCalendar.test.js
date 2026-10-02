@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -303,7 +303,7 @@ test("room-lane creation remains available on desktop and mobile without coverin
   assert.match(source, /aria-label=\{`Створити подію: \$\{date\}, \$\{lane\.roomName\}`\}/);
   assert.match(source, /onKeyDown=\{\(pointerEvent\)[\s\S]*?openCreateAt\(date,[\s\S]*?lane\.roomName\)/);
   assert.match(source, /style=\{\{ position: "absolute", inset: 0, zIndex: 1/);
-  assert.match(source, /data-event-card="1"[\s\S]*?zIndex: 5 \+ conflictIndex/);
+  assert.match(source, /data-event-card="1"[\s\S]*?zIndex: 5 \+ event\.colIndex/);
 });
 
 test("booking details retain every mutation action and occurrence-series semantics", async () => {
@@ -479,4 +479,62 @@ test("mobile overview initially scrolls to selected date with a safe fallback", 
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /mobileWeekOverviewRef\.current\?\.querySelector\(`\[data-week-date="\$\{target\}"\]`\)\?\.scrollIntoView/);
   assert.match(source, /weekKeys\.includes\(selectedDate\) \? selectedDate : \(weekKeys\.includes\(today\) \? today : weekKeys\[0\]\)/);
+});
+
+test("week room resolution preserves active, fallback and specific-room lanes", () => {
+  assert.deepEqual(resolveWeekRoomNames({ selectedRoom: "all", activeRoomNames: [], knownRoomNames: [], defaultRoom: "Основна зала" }), ["Основна зала"]);
+  assert.deepEqual(resolveWeekRoomNames({ selectedRoom: "all", activeRoomNames: [], knownRoomNames: ["Архівна зала"], defaultRoom: "Основна зала" }), ["Архівна зала"]);
+  assert.deepEqual(resolveWeekRoomNames({ selectedRoom: "all", activeRoomNames: ["Зал 1", "Зал 2"], knownRoomNames: ["Legacy"], defaultRoom: "Основна зала" }), ["Зал 1", "Зал 2"]);
+  assert.deepEqual(resolveWeekRoomNames({ selectedRoom: "Зал 2", activeRoomNames: [], knownRoomNames: [], defaultRoom: "Основна зала" }), ["Зал 2"]);
+  const emptyDayLanes = roomLaneLayout([], resolveWeekRoomNames({ selectedRoom: "all", defaultRoom: "Основна зала" }));
+  assert.deepEqual(emptyDayLanes.map((lane) => lane.roomName), ["Основна зала"]);
+});
+
+test("empty week fallback lanes keep creation bound to the fallback room", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const weekCanonicalRooms = useMemo\(\(\) => resolveWeekRoomNames/);
+  assert.match(source, /knownRoomNames: allKnownRooms\.map\(normalizeRoomName\)\.filter\(Boolean\)/);
+  assert.match(source, /defaultRoom: DEFAULT_ROOM/);
+  assert.match(source, /roomLaneLayout\(roomFilteredEventsByDay\.get\(date\) \|\| \[\], weekCanonicalRooms, UNKNOWN_ROOM_NAME\)/);
+  assert.match(source, /aria-label=\{`Створити подію: \$\{date\}, \$\{lane\.roomName\}`\}/);
+  assert.match(source, /openCreateAt\(date, current\.startMinute, pointerEvent, current\.endMinute, lane\.roomName\)/);
+});
+
+test("same-room transitive conflicts reuse columns without shrinking the conflict list", () => {
+  const events = [
+    { id: "A", roomName: "Зал 1", startMin: 540, endMin: 600 },
+    { id: "B", roomName: "Зал 1", startMin: 570, endMin: 630 },
+    { id: "C", roomName: "Зал 1", startMin: 600, endMin: 660 },
+  ];
+  const laidOut = roomLaneLayout(events, ["Зал 1"])[0].events;
+  assert.deepEqual(laidOut.map(({ id, colIndex, colCount }) => ({ id, colIndex, colCount })), [
+    { id: "A", colIndex: 0, colCount: 2 },
+    { id: "B", colIndex: 1, colCount: 2 },
+    { id: "C", colIndex: 0, colCount: 2 },
+  ]);
+  assert.ok(laidOut.every((event) => event.simultaneous.length === 3));
+  assert.deepEqual(new Set(laidOut.map((event) => event.id)), new Set(["A", "B", "C"]));
+});
+
+test("room lanes use three columns only for a true triple overlap and one for adjacent events", () => {
+  const triple = roomLaneLayout([
+    { id: "A", roomName: "Зал 1", startMin: 540, endMin: 630 },
+    { id: "B", roomName: "Зал 1", startMin: 550, endMin: 620 },
+    { id: "C", roomName: "Зал 1", startMin: 560, endMin: 610 },
+  ], ["Зал 1"])[0].events;
+  assert.ok(triple.every((event) => event.colCount === 3));
+  const adjacent = roomLaneLayout([
+    { id: "A", roomName: "Зал 1", startMin: 540, endMin: 600 },
+    { id: "B", roomName: "Зал 1", startMin: 600, endMin: 660 },
+  ], ["Зал 1"])[0].events;
+  assert.ok(adjacent.every((event) => event.colIndex === 0 && event.colCount === 1));
+});
+
+test("desktop and mobile selected-day room cards use shared overlap column metadata", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
+  assert.match(roomCards, /const width = 100 \/ event\.colCount/);
+  assert.match(roomCards, /const left = event\.colIndex \* width/);
+  assert.doesNotMatch(roomCards, /simultaneous\.length[^\n]*width|findIndex\(\(item\) => item\.id === event\.id\)/);
+  assert.match(roomCards, /setConcurrentEvents\(event\.simultaneous\)/);
 });
