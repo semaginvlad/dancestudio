@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, recurringActionLabels, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -371,17 +371,19 @@ test("compact mobile week preview sorts chronologically and exposes deterministi
   assert.equal(preview.remaining, 1);
 });
 
-test("mobile week overview is a seven-column mini time grid using filtered room lanes", async () => {
+test("mobile week overview is a horizontally snapping seven-day time grid", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
-  assert.match(overview, /overflowX: "hidden"/);
-  assert.match(overview, /gridTemplateColumns: "32px repeat\(7,minmax\(0,1fr\)\)"/);
+  assert.match(overview, /overflowX: "auto"/);
+  assert.match(overview, /scrollSnapType: "x proximity"/);
+  assert.match(overview, /const dayWidth = "clamp\(118px, 34vw, 136px\)"/);
+  assert.match(overview, /repeat\(7, \$\{dayWidth\}\)/);
+  assert.match(overview, /scrollSnapAlign: "start"/);
+  assert.match(overview, /position: "sticky", left: 0/);
   assert.match(overview, /const miniHourPx = 28/);
   assert.match(overview, /weekDays\.map/);
   assert.match(overview, /roomFilteredEventsByDay\.get\(date\) \|\| \[\]/);
-  assert.match(overview, /roomLaneLayout\(events, canonicalRooms, UNKNOWN_ROOM_NAME\)/);
   assert.match(overview, /setSelectedDate\(date\); setMobileWeekMode\("day"\)/);
-  assert.match(overview, /collisionStatusPresentation\(event\.status \|\| \(event\.cancelled \? "cancelled" : "active"\)\)/);
   assert.doesNotMatch(overview, /data-mobile-agenda-day|agendaEvents|preview\.remaining|\+\{preview/);
 });
 
@@ -408,22 +410,25 @@ test("short desktop and mobile-day room cards always render type and available i
   const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
   assert.match(roomCards, /const typeMark = getEventTypeMark\(event\)/);
   assert.match(roomCards, /const trainerInitials = getScheduleEventTrainerInitials\(event\)/);
-  assert.match(roomCards, /height < 24 \? 6 : 7/);
+  assert.match(roomCards, /fontSize: 6, lineHeight: "9px"/);
   assert.doesNotMatch(roomCards, /height >= 42 \? \(getEventTrainerInitials/);
   assert.match(roomCards, /\{typeMark \? <span aria-hidden="true"/);
   assert.match(roomCards, /\{trainerInitials \? <span aria-hidden="true"/);
 });
 
-test("mobile week mini-grid positions every event by time and stable room mini-lanes", async () => {
+test("mobile week mini-grid uses dynamic overlap columns and exact geometry", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
+  assert.match(overview, /events: overlapEventLayout\(events\)/);
   assert.match(overview, /weekEventGeometry\(event\.startMin, event\.endMin, miniHourPx, DAY_START_HOUR\)/);
-  assert.match(overview, /roomWidth = 100 \/ Math\.max\(1, lanes\.length\)/);
-  assert.match(overview, /left = laneIndex \* roomWidth \+ conflictIndex \* eventWidth/);
-  assert.match(overview, /lanes\.map\(\(lane, laneIndex\) => lane\.events\.map/);
+  assert.match(overview, /const width = 100 \/ event\.colCount/);
+  assert.match(overview, /const left = event\.colIndex \* width/);
   assert.match(overview, /height: geometry\.height/);
-  assert.match(overview, /event\.hasRoomConflict \? 2 : 1/);
+  assert.match(overview, /sameRoomConflictIds\.has\(event\.id\)/);
   assert.match(overview, /pointerEvents: "none"/);
+  const blocks = overview.slice(overview.indexOf('return <span key={event.id}'), overview.indexOf('</span>;'));
+  assert.match(blocks, /\{event\.title\}/);
+  assert.doesNotMatch(blocks, /typeMark|trainerInitials|event\.startTime|event\.roomName/);
 });
 
 test("week card accessible labels retain full type, trainer, title, time, room and status", async () => {
@@ -433,24 +438,45 @@ test("week card accessible labels retain full type, trainer, title, time, room a
   assert.match(source, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
 });
 
-test("time-grid cards use a compact meta column with start time and a wrapping title", async () => {
+test("time-grid cards use a full-width stacked header and title", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
   const visibleCard = roomCards.slice(roomCards.indexOf('<button type="button" data-event-card="1"'), roomCards.indexOf('</button>'));
-  assert.match(visibleCard, /gridTemplateColumns: `\$\{isMobile \? 34 : 40\}px minmax\(0,1fr\)`/);
+  assert.doesNotMatch(visibleCard, /gridTemplateColumns|borderRight/);
+  assert.match(visibleCard, /gridTemplateRows: "13px minmax\(0,1fr\)"/);
   assert.match(visibleCard, /\{typeMark \? <span/);
   assert.match(visibleCard, /\{trainerInitials \? <span/);
   assert.match(visibleCard, /\{event\.startTime\}<\/span>/);
+  assert.match(visibleCard, /height < 24 \? <span style=\{\{ display: "flex"/);
+  assert.match(visibleCard, /<span aria-hidden="true" style=\{\{ fontSize: 7 \}\}>·<\/span>/);
   assert.doesNotMatch(visibleCard, /event\.endTime|getEventTypeLabel/);
+  assert.match(visibleCard, /width: "100%"/);
   assert.match(visibleCard, /overflowWrap: "anywhere"/);
-  assert.match(visibleCard, /WebkitLineClamp: titleLineCount/);
   assert.match(roomCards, /const accessibleLabel = `\$\{fullType\}[\s\S]*?\$\{event\.startTime\}–\$\{event\.endTime\}/);
-  assert.match(roomCards, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
 });
 
-test("mobile agenda chronological sorting retains every filtered event", () => {
+test("calendar sorting retains every filtered event", () => {
   const events = Array.from({ length: 12 }, (_, index) => ({ id: String(index), startMin: 1200 - index * 15, endMin: 1230 - index * 15 }));
   const sorted = sortCalendarEvents(events);
   assert.equal(sorted.length, events.length);
   assert.deepEqual(sorted.map((event) => event.startMin), events.map((event) => event.startMin).sort((a, b) => a - b));
+});
+
+test("dynamic overlap layout restores full width after a conflict ends", () => {
+  const events = [
+    { id: "a", startMin: 600, endMin: 630 },
+    { id: "b", startMin: 600, endMin: 630 },
+    { id: "c", startMin: 630, endMin: 660 },
+  ];
+  const layout = overlapEventLayout(events);
+  assert.deepEqual(layout.slice(0, 2).map((event) => event.colCount), [2, 2]);
+  assert.equal(layout[2].colCount, 1);
+  assert.equal(layout[2].colIndex, 0);
+  assert.deepEqual(layout.map(({ id, startMin, endMin }) => ({ id, startMin, endMin })), events);
+});
+
+test("mobile overview initially scrolls to selected date with a safe fallback", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /mobileWeekOverviewRef\.current\?\.querySelector\(`\[data-week-date="\$\{target\}"\]`\)\?\.scrollIntoView/);
+  assert.match(source, /weekKeys\.includes\(selectedDate\) \? selectedDate : \(weekKeys\.includes\(today\) \? today : weekKeys\[0\]\)/);
 });

@@ -83,6 +83,38 @@ export const sortCalendarEvents = (events = []) =>
     Number(a.endMin) - Number(b.endMin) ||
     String(a.title || "").localeCompare(String(b.title || ""), "uk"));
 
+export const overlapEventLayout = (events = []) => {
+  const sorted = sortCalendarEvents(events);
+  const clusters = [];
+  let current = [];
+  let clusterEnd = -1;
+  sorted.forEach((event) => {
+    if (!current.length || Number(event.startMin) < clusterEnd) {
+      current.push(event);
+      clusterEnd = Math.max(clusterEnd, Number(event.endMin));
+    } else {
+      clusters.push(current);
+      current = [event];
+      clusterEnd = Number(event.endMin);
+    }
+  });
+  if (current.length) clusters.push(current);
+
+  return clusters.flatMap((cluster) => {
+    const columnEnds = [];
+    const positioned = cluster.map((event) => {
+      let colIndex = columnEnds.findIndex((end) => end <= Number(event.startMin));
+      if (colIndex === -1) {
+        colIndex = columnEnds.length;
+        columnEnds.push(Number(event.endMin));
+      } else columnEnds[colIndex] = Number(event.endMin);
+      return { ...event, colIndex };
+    });
+    const colCount = Math.max(1, columnEnds.length);
+    return positioned.map((event) => ({ ...event, colCount }));
+  });
+};
+
 export const compactDayPreview = (events = [], limit = 5) => {
   const sorted = sortCalendarEvents(events);
   return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
