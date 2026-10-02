@@ -45,6 +45,51 @@ export const resolveBookingBlockRooms = (block = {}, rooms = []) => {
 };
 export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.weekdays || []).map(Number).includes(isoWeekday(date));
 
+const MS_PER_DAY = 86400000;
+const calendarDayNumber = (date) => Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / MS_PER_DAY);
+const addCalendarDays = (date, days) => {
+  const utc = new Date((calendarDayNumber(date) + days) * MS_PER_DAY);
+  return parseDateOnly(`${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`);
+};
+
+export function bookingRecurrenceCandidates(booking, rangeStartKey, rangeEndKey) {
+  const first = parseDateOnly(booking?.date);
+  const blockStart = parseDateOnly(rangeStartKey);
+  const blockEnd = parseDateOnly(rangeEndKey);
+  const explicitUntil = parseDateOnly(booking?.recurrenceUntil);
+  if (!first || !blockStart || !blockEnd) return [];
+  const from = parseDateOnly([formatDateOnly(first), formatDateOnly(blockStart)].sort().at(-1));
+  const untilKey = explicitUntil ? formatDateOnly(explicitUntil) : formatDateOnly(blockEnd);
+  const to = parseDateOnly([untilKey, formatDateOnly(blockEnd)].sort()[0]);
+  if (!from || !to || from > to) return [];
+  const recurrence = ["daily", "weekly", "monthly"].includes(booking?.recurrence) ? booking.recurrence : "none";
+  if (recurrence === "none") return first >= blockStart && first <= to ? [formatDateOnly(first)] : [];
+  if (recurrence === "daily") {
+    const count = Math.min(7, calendarDayNumber(to) - calendarDayNumber(from) + 1);
+    return Array.from({ length: count }, (_, index) => formatDateOnly(addCalendarDays(from, index)));
+  }
+  if (recurrence === "weekly") {
+    const offset = calendarDayNumber(from) - calendarDayNumber(first);
+    const candidate = addCalendarDays(first, Math.ceil(offset / 7) * 7);
+    return candidate && candidate <= to ? [formatDateOnly(candidate)] : [];
+  }
+
+  // Gregorian dates and weekdays repeat every 400 years. Scanning at most
+  // 4,800 monthly candidates is sufficient even for a block ending in 9999.
+  const firstDay = first.getDate();
+  const startMonth = from.getFullYear() * 12 + from.getMonth();
+  const endMonth = Math.min(to.getFullYear() * 12 + to.getMonth(), startMonth + 4799);
+  const candidates = [];
+  for (let monthIndex = startMonth; monthIndex <= endMonth; monthIndex += 1) {
+    const year = Math.floor(monthIndex / 12);
+    const month = monthIndex % 12;
+    const candidate = new Date(year, month, firstDay, 12);
+    if (candidate.getFullYear() !== year || candidate.getMonth() !== month || candidate.getDate() !== firstDay) continue;
+    if (candidate >= from && candidate <= to) candidates.push(formatDateOnly(candidate));
+  }
+  return candidates;
+}
+
 export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
   const start = parseDateOnly(rangeStart);
   const end = parseDateOnly(rangeEnd);
@@ -66,29 +111,11 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
 export function findBookingBlockConflict(booking, blocks, rooms = []) {
   if (!booking || booking.status === "cancelled") return null;
   const room = rooms.find((item) => String(item.id) === String(booking.roomId)) || { id: booking.roomId, name: booking.roomName };
-  const first = parseDateOnly(booking.date);
-  if (!first) return null;
-  const recurrence = ["daily", "weekly", "monthly"].includes(booking.recurrence) ? booking.recurrence : "none";
-  const explicitUntil = parseDateOnly(booking.recurrenceUntil);
+  if (!parseDateOnly(booking.date)) return null;
   for (const block of blocks || []) {
     if (block?.isActive === false || !blockMatchesRoom(block, room) || !intervalsOverlap(booking.startTime, booking.endTime, block.startTime, block.endTime)) continue;
-    const blockStart = parseDateOnly(block.startsOn);
-    const blockEnd = parseDateOnly(block.endsOn);
-    if (!blockStart || !blockEnd) continue;
-    const rangeStart = new Date(Math.max(first.getTime(), blockStart.getTime()));
-    const rangeEnd = new Date(Math.min((explicitUntil || blockEnd).getTime(), blockEnd.getTime()));
-    for (let candidate = rangeStart; candidate <= rangeEnd; candidate.setDate(candidate.getDate() + 1)) {
-      const elapsedDays = Math.round((candidate.getTime() - first.getTime()) / 86400000);
-      const occurs = recurrence === "none"
-        ? elapsedDays === 0
-        : recurrence === "daily"
-          ? elapsedDays >= 0
-          : recurrence === "weekly"
-            ? elapsedDays >= 0 && elapsedDays % 7 === 0
-            : elapsedDays >= 0 && candidate.getDate() === first.getDate();
-      const key = formatDateOnly(candidate);
-      if (occurs && blockMatchesDate(block, key)) return { block, date: key };
-    }
+    const conflictDate = bookingRecurrenceCandidates(booking, block.startsOn, block.endsOn).find((date) => blockMatchesDate(block, date));
+    if (conflictDate) return { block, date: conflictDate };
   }
   return null;
 }
