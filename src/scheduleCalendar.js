@@ -9,6 +9,19 @@ const addDays = (date, amount) => {
   return next;
 };
 
+export const getTrainerInitials = (name = "") => {
+  const value = String(name ?? "").trim();
+  if (!value || value === "—" || value === "-") return "";
+  return value
+    .replace(/[()]/g, " ")
+    .split(/[\s-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "—")
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toLocaleUpperCase("uk-UA"))
+    .join("");
+};
+
 export const calendarStateForDate = (date) => {
   const selected = dateKey(date);
   const anchor = new Date(`${selected}T12:00:00`);
@@ -64,6 +77,58 @@ export const buildEventDetails = (event = {}) => {
 
 export const monthPreview = (events, limit = 3) => ({ visible: events.slice(0, limit), remaining: Math.max(0, events.length - limit) });
 
+export const sortCalendarEvents = (events = []) =>
+  [...events].sort((a, b) =>
+    Number(a.startMin) - Number(b.startMin) ||
+    Number(a.endMin) - Number(b.endMin) ||
+    String(a.title || "").localeCompare(String(b.title || ""), "uk"));
+
+export const overlapEventLayout = (events = []) => {
+  const sorted = sortCalendarEvents(events);
+  const clusters = [];
+  let current = [];
+  let clusterEnd = -1;
+  sorted.forEach((event) => {
+    if (!current.length || Number(event.startMin) < clusterEnd) {
+      current.push(event);
+      clusterEnd = Math.max(clusterEnd, Number(event.endMin));
+    } else {
+      clusters.push(current);
+      current = [event];
+      clusterEnd = Number(event.endMin);
+    }
+  });
+  if (current.length) clusters.push(current);
+
+  return clusters.flatMap((cluster) => {
+    const columnEnds = [];
+    const positioned = cluster.map((event) => {
+      let colIndex = columnEnds.findIndex((end) => end <= Number(event.startMin));
+      if (colIndex === -1) {
+        colIndex = columnEnds.length;
+        columnEnds.push(Number(event.endMin));
+      } else columnEnds[colIndex] = Number(event.endMin);
+      return { ...event, colIndex };
+    });
+    const colCount = Math.max(1, columnEnds.length);
+    return positioned.map((event) => ({ ...event, colCount }));
+  });
+};
+
+export const resolveWeekRoomNames = ({ selectedRoom, activeRoomNames = [], knownRoomNames = [], defaultRoom }) => {
+  if (selectedRoom !== "all") return [selectedRoom];
+  const active = [...new Set(activeRoomNames.filter(Boolean))];
+  if (active.length) return active;
+  const known = [...new Set(knownRoomNames.filter(Boolean))];
+  if (known.length) return known;
+  return defaultRoom ? [defaultRoom] : [];
+};
+
+export const compactDayPreview = (events = [], limit = 5) => {
+  const sorted = sortCalendarEvents(events);
+  return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
+};
+
 export const weekEventLayout = (events) => {
   const compareEvents = (a, b) =>
     Number(a.startMin) - Number(b.startMin) ||
@@ -98,6 +163,56 @@ export const weekEventLayout = (events) => {
       overflowCount: Math.max(0, cluster.events.length - 1),
     };
   });
+};
+
+// Week columns are deliberately partitioned by the canonical room name before
+// collision detection. This prevents a chain of unrelated, parallel rooms from
+// becoming one large transitive cluster.
+export const roomLaneLayout = (events = [], roomNames = [], unknownRoomName = "Зала не вказана") => {
+  const normalizedRoom = (event) => String(event?.roomName || unknownRoomName).trim() || unknownRoomName;
+  const eventRooms = events.map(normalizedRoom);
+  const orderedRooms = [...new Set([
+    ...roomNames.map((name) => String(name || "").trim()).filter(Boolean),
+    ...eventRooms.filter((name) => name !== unknownRoomName),
+    ...(eventRooms.includes(unknownRoomName) ? [unknownRoomName] : []),
+  ])];
+
+  return orderedRooms.map((roomName) => {
+    const roomEvents = events.filter((event) => normalizedRoom(event) === roomName);
+    const laidOut = overlapEventLayout(weekEventLayout(roomEvents));
+    return {
+      roomName,
+      events: laidOut.map((event) => ({
+        ...event,
+        // The visual coordinate is always the event's own real start, even for
+        // a true same-room conflict.
+        timeCoordinate: Number(event.startMin),
+        hasRoomConflict: event.simultaneous.length > 1,
+      })),
+    };
+  });
+};
+
+export const weekEventGeometry = (startMin, endMin, hourPx, dayStartHour = 8) => ({
+  top: ((Number(startMin) - dayStartHour * 60) / 60) * Number(hourPx),
+  // Never inflate the outer box: doing so makes adjacent short bookings look
+  // as though they overlap. Compact content is handled inside the card.
+  height: Math.max(0, ((Number(endMin) - Number(startMin)) / 60) * Number(hourPx)),
+});
+
+export const weekLaneSelection = ({ date, roomName, startY, endY, hourPx, dayStartHour = 8, dayEndHour = 22 }) => {
+  const toQuarter = (y) => Math.round((dayStartHour * 60 + (Number(y) / Number(hourPx)) * 60) / 15) * 15;
+  const min = dayStartHour * 60;
+  const max = dayEndHour * 60;
+  const first = Math.min(max, Math.max(min, toQuarter(startY)));
+  const last = Math.min(max, Math.max(min, toQuarter(endY)));
+  const startMinute = Math.min(max - 15, Math.min(first, last));
+  return {
+    date,
+    roomName,
+    startMinute,
+    endMinute: Math.min(max, Math.max(startMinute + 15, Math.max(first, last))),
+  };
 };
 
 export const collisionTilePreview = (events, { availableHeightPx = 42, isMobile = false } = {}) => {
