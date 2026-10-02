@@ -28,6 +28,21 @@ export const blockMatchesRoom = (block, room = {}) => {
   if (room.id != null && ids.includes(String(room.id))) return true;
   return (block?.roomNames || []).some((name) => canonicalRoomName(name) === canonicalRoomName(room.name));
 };
+export const resolveBookingBlockRooms = (block = {}, rooms = []) => {
+  if (block.allRooms) return { ...block, roomNames: [] };
+  const selectedIds = new Set((block.roomIds || []).map(String));
+  const roomNames = [];
+  const seenNames = new Set();
+  for (const room of rooms || []) {
+    if (!selectedIds.has(String(room?.id))) continue;
+    const name = String(room?.name || "").trim().replace(/\s+/g, " ");
+    const canonicalName = canonicalRoomName(name);
+    if (!canonicalName || seenNames.has(canonicalName)) continue;
+    seenNames.add(canonicalName);
+    roomNames.push(name);
+  }
+  return { ...block, roomNames };
+};
 export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.weekdays || []).map(Number).includes(isoWeekday(date));
 
 export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {

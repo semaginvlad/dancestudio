@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, collision
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, validateBookingBlock } from "../scheduleBookingBlocks";
+import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -1072,9 +1072,13 @@ export default function ScheduleTab({
   const saveBlock = async () => {
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
-    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [{ ...blockDraft, id: blockDraft.id || "draft" }], activeStudioRooms));
+    const presentationDraft = resolveBookingBlockRooms(
+      { ...blockDraft, id: blockDraft.id || "draft" },
+      activeStudioRooms.map((room) => ({ ...room, name: normalizeRoomName(room.name) })),
+    );
+    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [presentationDraft], activeStudioRooms));
     if (overlapsExisting && !window.confirm("Правило перетинається з наявними бронюваннями. Вони не будуть скасовані. Продовжити?")) return;
-    try { await onSaveBookingBlock?.(blockDraft); setBlockDraft(null); setBlockError(""); }
+    try { await onSaveBookingBlock?.(presentationDraft); setBlockDraft(null); setBlockError(""); }
     catch (error) { setBlockError(error?.message || "Не вдалося зберегти правило"); }
   };
 
