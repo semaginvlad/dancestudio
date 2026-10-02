@@ -141,6 +141,7 @@ export default function App() {
   const [trainers, setTrainers] = useState([]);
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
+  const [scheduleBookingBlocks, setScheduleBookingBlocks] = useState([]);
   const [studioRooms, setStudioRooms] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
   const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
@@ -606,7 +607,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -615,7 +616,8 @@ export default function App() {
         safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
         safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans"),
         safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports"),
-        safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations")
+        safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations"),
+        safeFetch(db.fetchScheduleBookingBlocks, "fetchScheduleBookingBlocks")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -703,6 +705,7 @@ export default function App() {
       setTrainerGroups(currentTrainerGroupRows);
       setDirections(dirs || []);
       setRoomBookings(rb || []);
+      setScheduleBookingBlocks(bookingBlocks || []);
       setGroupLessonOverrides(glo || []);
       setTrainingLessonPlans(tlp || []);
       setTrainingLessonReports(tlr || []);
@@ -2098,6 +2101,21 @@ export default function App() {
     return updated;
   };
 
+  const saveScheduleBookingBlockAction = async (block) => {
+    const saved = block.id ? await db.updateScheduleBookingBlock(block.id, block) : await db.createScheduleBookingBlock(block);
+    setScheduleBookingBlocks((previous) => block.id ? previous.map((item) => item.id === saved.id ? saved : item) : [...previous, saved]);
+    return saved;
+  };
+  const toggleScheduleBookingBlockAction = async (block) => {
+    const saved = await db.setScheduleBookingBlockActive(block, !block.isActive);
+    setScheduleBookingBlocks((previous) => previous.map((item) => item.id === saved.id ? saved : item));
+    return saved;
+  };
+  const deleteScheduleBookingBlockAction = async (id) => {
+    await db.deleteScheduleBookingBlock(id);
+    setScheduleBookingBlocks((previous) => previous.filter((item) => item.id !== id));
+  };
+
 
   const canMutateGroupLessonOverride = (groupId) => {
     if (isAdmin) return true;
@@ -2413,6 +2431,7 @@ export default function App() {
             trainerGroups={trainerGroups}
             cancelled={cancelled}
             roomBookings={roomBookings}
+            bookingBlocks={scheduleBookingBlocks}
             groupLessonOverrides={groupLessonOverrides}
             isAdmin={!!isAdmin}
             aiInsightsContext={{
@@ -2429,6 +2448,7 @@ export default function App() {
             trainers={trainers}
             cancelled={scheduleCancelled}
             roomBookings={roomBookings}
+            bookingBlocks={scheduleBookingBlocks}
             groupLessonOverrides={groupLessonOverrides}
             trainingLessonPlans={trainingLessonPlans}
             currentUser={user}
@@ -2437,6 +2457,7 @@ export default function App() {
             onAddBooking={addRoomBookingAction}
             onDeleteBooking={deleteRoomBookingAction}
             onUpdateBooking={updateRoomBookingAction}
+            {...(isAdmin ? { onSaveBookingBlock: saveScheduleBookingBlockAction, onToggleBookingBlock: toggleScheduleBookingBlockAction, onDeleteBookingBlock: deleteScheduleBookingBlockAction } : {})}
             onUpdateGroupSchedule={updateGroupScheduleAction}
             onAddGroupLessonOverride={addGroupLessonOverrideAction}
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}

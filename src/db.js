@@ -1487,6 +1487,50 @@ export async function deleteRoomBooking(id) {
   if (error) throw error;
 }
 
+const mapScheduleBookingBlock = (row = {}) => ({
+  id: row.id,
+  title: row.title || '',
+  note: row.note || '',
+  startsOn: String(row.starts_on || '').slice(0, 10),
+  endsOn: String(row.ends_on || '').slice(0, 10),
+  startTime: String(row.start_time || '').slice(0, 5),
+  endTime: String(row.end_time || '').slice(0, 5),
+  allRooms: row.all_rooms === true,
+  weekdays: (row.weekdays || []).map(Number),
+  isActive: row.is_active !== false,
+  roomIds: row.room_ids || [],
+  roomNames: row.room_names || [],
+  createdBy: row.created_by || null,
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+});
+
+const bookingBlockRpcPayload = (block) => ({ p_title: block.title, p_note: block.note || null, p_starts_on: block.startsOn, p_ends_on: block.endsOn, p_start_time: block.startTime, p_end_time: block.endTime, p_all_rooms: !!block.allRooms, p_weekdays: block.weekdays, p_room_ids: block.allRooms ? [] : block.roomIds, p_is_active: block.isActive !== false });
+const requireBlockId = (data, operation) => { if (!data?.id) throw new Error(`${operation}: сервер не повернув ID правила`); return mapScheduleBookingBlock(data); };
+
+export async function fetchScheduleBookingBlocks() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_booking_blocks');
+  if (error) throw error;
+  return (data || []).map(mapScheduleBookingBlock);
+}
+export async function createScheduleBookingBlock(block) {
+  const { data, error } = await supabase.rpc('crm_admin_create_schedule_booking_block', bookingBlockRpcPayload(block));
+  if (error) throw error;
+  return requireBlockId(data, 'Створення');
+}
+export async function updateScheduleBookingBlock(id, block) {
+  const { data, error } = await supabase.rpc('crm_admin_update_schedule_booking_block', { p_id: id, ...bookingBlockRpcPayload(block) });
+  if (error) throw error;
+  return requireBlockId(data, 'Оновлення');
+}
+export const setScheduleBookingBlockActive = (block, isActive) => updateScheduleBookingBlock(block.id, { ...block, isActive });
+export async function deleteScheduleBookingBlock(id) {
+  const { data, error } = await supabase.rpc('crm_admin_delete_schedule_booking_block', { p_id: id });
+  if (error) throw error;
+  if (!data) throw new Error('Видалення: сервер не повернув ID правила');
+  return data;
+}
+
 
 const mapGroupLessonOverride = (row = {}) => ({
   id: row.id,
