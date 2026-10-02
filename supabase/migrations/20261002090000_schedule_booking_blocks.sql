@@ -166,6 +166,11 @@ begin
   return false;
 end $$;
 
+create or replace function public.crm_canonical_room_name(p_name text)
+returns text language sql immutable set search_path=public as $$
+  select lower(btrim(regexp_replace(coalesce(p_name,''),'[[:space:]]+',' ','g')))
+$$;
+
 create or replace function public.crm_enforce_schedule_booking_blocks()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_title text;
@@ -176,7 +181,7 @@ begin
   where b.is_active
     and public.crm_schedule_booking_recurrence_hits_block(new.date,new.recurrence_until,new.recurrence,b.starts_on,b.ends_on,b.weekdays)
     and new.start_time::time < b.end_time and b.start_time < new.end_time::time
-    and (b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and lower(btrim(r.name))=lower(btrim(new.room_name))))
+    and (b.all_rooms or exists(select 1 from public.schedule_booking_block_rooms br join public.studio_rooms r on r.id=br.room_id where br.block_id=b.id and public.crm_canonical_room_name(r.name)=public.crm_canonical_room_name(new.room_name)))
   limit 1;
   if v_title is not null then raise exception 'Цей час закритий адміністратором: %',v_title using errcode='P0001'; end if;
   return new;
@@ -190,6 +195,7 @@ revoke execute on function public.crm_valid_iso_weekdays(smallint[]) from public
 revoke execute on function public.crm_enforce_schedule_booking_blocks() from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_occurs_on(date,date,text) from public,anon,authenticated;
 revoke execute on function public.crm_schedule_booking_recurrence_hits_block(date,date,text,date,date,smallint[]) from public,anon,authenticated;
+revoke execute on function public.crm_canonical_room_name(text) from public,anon,authenticated;
 revoke execute on function public.crm_fetch_schedule_booking_blocks() from public,anon;
 revoke execute on function public.crm_admin_create_schedule_booking_block(text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;
 revoke execute on function public.crm_admin_update_schedule_booking_block(uuid,text,text,date,date,time,time,boolean,smallint[],uuid[],boolean) from public,anon;

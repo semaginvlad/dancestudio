@@ -43,6 +43,30 @@ export const resolveBookingBlockRooms = (block = {}, rooms = []) => {
   }
   return { ...block, roomNames };
 };
+export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames = [], defaultRoom = "Основна зала") {
+  const result = [];
+  const seen = new Set();
+  const append = (room, canonical) => {
+    if (!canonical || seen.has(canonical)) return;
+    seen.add(canonical);
+    result.push(room);
+  };
+  for (const room of activeRooms || []) {
+    const name = String(room?.name || "").trim().replace(/\s+/g, " ");
+    const canonical = canonicalRoomName(name);
+    append({ ...room, name, isActive: room?.isActive !== false }, canonical);
+  }
+  for (const value of eventRoomNames || []) {
+    const name = String(typeof value === "string" ? value : value?.name || "").trim().replace(/\s+/g, " ");
+    const canonical = canonicalRoomName(name);
+    append({ id: `legacy:${canonical}`, name, isActive: true }, canonical);
+  }
+  if (!result.length) {
+    const name = String(defaultRoom || "").trim().replace(/\s+/g, " ");
+    if (name) result.push({ id: "legacy:default", name, isActive: true });
+  }
+  return result;
+}
 export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.weekdays || []).map(Number).includes(isoWeekday(date));
 
 const MS_PER_DAY = 86400000;

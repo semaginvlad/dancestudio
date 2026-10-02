@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -815,11 +815,11 @@ export default function ScheduleTab({
     });
     const rangeKeys = normalizedDates.map(toLocalDateKey).sort();
     if (rangeKeys.length) {
-      const canonicalBlockRooms = activeStudioRooms.length
-        ? activeStudioRooms
-        : Array.from(new Set(Array.from(map.values()).flat().map((event) => normalizeRoomName(event.roomName)).filter(Boolean)))
-          .map((name) => ({ id: `legacy:${name.toLocaleLowerCase("uk-UA")}`, name, isActive: true }));
-      const displayBlockRooms = canonicalBlockRooms.length ? canonicalBlockRooms : [{ id: "legacy:default", name: DEFAULT_ROOM, isActive: true }];
+      const displayBlockRooms = buildBookingBlockDisplayRooms(
+        activeStudioRooms,
+        Array.from(map.values()).flat().map((event) => event.roomName).filter(Boolean),
+        DEFAULT_ROOM,
+      );
       expandBookingBlocks(safeBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], displayBlockRooms)
         .forEach((event) => { if (map.has(event.date)) map.get(event.date).push(event); });
     }
@@ -1078,10 +1078,11 @@ export default function ScheduleTab({
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
     const presentationDraft = resolveBookingBlockRooms(
-      { ...blockDraft, id: blockDraft.id || "draft" },
+      blockDraft,
       activeStudioRooms.map((room) => ({ ...room, name: normalizeRoomName(room.name) })),
     );
-    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [presentationDraft], activeStudioRooms));
+    const conflictDraft = { ...presentationDraft, id: presentationDraft.id || "draft" };
+    const overlapsExisting = safeBookings.some((booking) => findBookingBlockConflict(booking, [conflictDraft], activeStudioRooms));
     if (overlapsExisting && !window.confirm("Правило перетинається з наявними бронюваннями. Вони не будуть скасовані. Продовжити?")) return;
     try {
       const result = await runBookingBlockMutation(blockSavingRef, setBlockSaving, () => onSaveBookingBlock?.(presentationDraft));
