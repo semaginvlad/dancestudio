@@ -17,8 +17,10 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(`
       create role anon; create role authenticated;
       create schema auth;
-      create function auth.uid() returns uuid language sql stable as $$ select '00000000-0000-0000-0000-000000000001'::uuid $$;
-      create function public.crm_is_admin_session() returns boolean language sql stable as $$ select coalesce(current_setting('test.admin',true),'')='on' $$;
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$;
+      create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('test.jwt',true),''),'{}')::jsonb $$;
+      create function public.rls_is_admin() returns boolean language sql stable security definer set search_path=public as $$ select coalesce(auth.jwt()->>'email','')='semagin.vlad@gmail.com' $$;
+      create function public.crm_is_admin_session() returns boolean language sql stable as $$ select coalesce(auth.jwt()->'user_metadata'->>'role','')='admin' $$;
       create function public.crm_is_active_trainer_session() returns boolean language sql stable as $$ select coalesce(current_setting('test.trainer',true),'')='on' $$;
       create table public.studio_rooms(id uuid primary key default gen_random_uuid(),name text not null,is_active boolean default true,sort_order int default 0,created_at timestamptz default now());
       create table public.room_bookings(
@@ -34,12 +36,36 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(await readFile(migrationUrl, "utf8"));
     await db.exec(await readFile(continuousMigrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
-
     const roomId = "10000000-0000-0000-0000-000000000001";
     const blockId = "20000000-0000-0000-0000-000000000001";
+
+    await db.exec(`select set_config('test.uid','',false); select set_config('test.jwt','{"email":"nobody@example.com","user_metadata":{"role":"admin"}}',false)`);
+    assert.equal((await db.query("select public.crm_is_admin_session() as allowed")).rows[0].allowed, false);
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000099',false); select set_config('test.jwt','{"email":"nobody@example.com","user_metadata":{"role":"admin"}}',false)`);
+    assert.equal((await db.query("select public.crm_is_admin_session() as allowed")).rows[0].allowed, false);
+
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    assert.equal((await db.query("select public.crm_is_admin_session() as allowed")).rows[0].allowed, false);
+    const blockRpcArgs = `'RPC block',null,'2026-11-01','2026-11-01','08:00','09:00',false,array[7]::smallint[],array['${roomId}']::uuid[],true`;
+    await expectDatabaseError(() => db.query(`select public.crm_admin_create_schedule_booking_block(${blockRpcArgs})`), /Лише адміністратор/);
+
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
+    assert.equal((await db.query("select public.rls_is_admin() as canonical, public.crm_is_admin_session() as allowed")).rows[0].canonical, true);
+    assert.equal((await db.query("select public.crm_is_admin_session() as allowed")).rows[0].allowed, true);
+    await db.exec(`insert into studio_rooms(id,name) values('${roomId}','Зал 1')`);
+    const rpcBlockId = (await db.query(`select (public.crm_admin_create_schedule_booking_block(${blockRpcArgs})).id as id`)).rows[0].id;
+    assert.ok(rpcBlockId);
+    assert.equal((await db.query(`select (public.crm_admin_update_schedule_booking_block('${rpcBlockId}','RPC block edited',null,'2026-11-01','2026-11-01','08:00','09:30',true,array[7]::smallint[],array[]::uuid[],true)).title as title`)).rows[0].title, "RPC block edited");
+    assert.equal((await db.query(`select public.crm_admin_delete_schedule_booking_block('${rpcBlockId}') as id`)).rows[0].id, rpcBlockId);
+    const protectedBlockId = (await db.query(`select (public.crm_admin_create_schedule_booking_block(${blockRpcArgs})).id as id`)).rows[0].id;
+    await db.exec(`select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    await expectDatabaseError(() => db.query(`select public.crm_admin_update_schedule_booking_block('${protectedBlockId}',${blockRpcArgs})`), /Лише адміністратор/);
+    await expectDatabaseError(() => db.query(`select public.crm_admin_delete_schedule_booking_block('${protectedBlockId}')`), /Лише адміністратор/);
+    await db.exec(`select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
+    await db.query(`select public.crm_admin_delete_schedule_booking_block('${protectedBlockId}')`);
+
     await db.exec(`
-      select set_config('test.admin','on',false);
-      insert into studio_rooms(id,name) values('${roomId}','Зал 1');
+      select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false);
       insert into room_bookings(date,start_time,end_time,title,room_name)
       values('2026-10-02','10:20','10:40','Legacy overlap','Зал 1'),
             ('2026-10-04','10:20','10:40','Legacy all-room overlap','Зал 1');
@@ -68,7 +94,7 @@ test("booking-block trigger and explicit override RPC are transactionally author
       /Цей час закритий адміністратором/,
     );
 
-    await db.exec("select set_config('test.admin','off',false); select set_config('test.trainer','on',false)");
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
     await expectDatabaseError(() => db.query(`select public.crm_admin_override_create_room_booking(${args})`), /Лише адміністратор/);
     await expectDatabaseError(
       () => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-02','10:15','10:45','Trainer','Зал 1')"),
@@ -93,13 +119,13 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await expectDatabaseError(() => db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [unauthorizedSeriesId, "2026-10-03"]), /Немає права/);
     await db.exec("delete from room_bookings where title='Cancelled'");
 
-    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
     await db.query("select public.crm_remove_room_booking_occurrence($1,$2)", [await seriesId("Admin removal"), "2026-10-03"]);
     await db.exec("delete from room_bookings where title='Whole series delete'");
     assert.equal((await db.query("select count(*)::int as count from room_bookings where title='Whole series delete'")).rows[0].count, 0);
 
     await db.exec(`
-      select set_config('test.admin','on',false); select set_config('test.trainer','off',false);
+      select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false);
       insert into schedule_booking_blocks(title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
       values('Усі зали','2026-10-04','2026-10-04','10:00','11:00',true,array[7]::smallint[],'00000000-0000-0000-0000-000000000001');
       insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-03','10:15','10:45','Update me','Зал 1');
@@ -109,13 +135,13 @@ test("booking-block trigger and explicit override RPC are transactionally author
     const updated = await db.query(`select (public.crm_admin_override_update_room_booking('${target}',${args})).id as id`);
     assert.equal(updated.rows[0]?.id, target);
 
-    await db.exec("select set_config('test.admin','off',false); select set_config('test.trainer','on',false)");
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
     await expectDatabaseError(
       () => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-04','10:15','10:45','All rooms','Інша зала')"),
       /Цей час закритий адміністратором/,
     );
 
-    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
     const renamed = await db.query(`select (public.rename_studio_room('${roomId}','Перейменована зала')).name as name`);
     assert.equal(renamed.rows[0]?.name, "Перейменована зала");
     const renamedBookings = await db.query("select count(*)::int as count from room_bookings where title like 'Legacy%' and room_name='Перейменована зала'");
@@ -128,15 +154,15 @@ test("booking-block trigger and explicit override RPC are transactionally author
     );
 
     await db.exec(`
-      select set_config('test.admin','on',false); select set_config('test.trainer','off',false);
+      select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false);
       insert into schedule_booking_blocks(title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
       values('Безперервно','2026-10-03','2026-10-04','16:00','12:30',true,array[1,2,3,4,5,6,7]::smallint[],'00000000-0000-0000-0000-000000000001');
-      select set_config('test.admin','off',false); select set_config('test.trainer','on',false);
+      select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false);
     `);
     await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-03','16:30','17:00','Continuous first','Перейменована зала')"), /Безперервно/);
     await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-04','11:30','12:00','Continuous last','Перейменована зала')"), /Безперервно/);
     await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-03','15:00','16:00','Adjacent before','Перейменована зала'),('2026-10-04','12:30','13:00','Adjacent after','Перейменована зала')");
-    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
     const continuousOverride = await db.query(`select (public.crm_admin_override_create_room_booking('2026-10-04','11:30','12:00',null,null,'Continuous override','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','Перейменована зала')).id as id`);
     assert.ok(continuousOverride.rows[0]?.id);
   } finally {

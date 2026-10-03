@@ -1,5 +1,21 @@
 begin;
 
+-- Keep the CRM helper aligned with the canonical server-side admin policy.
+-- auth.uid() makes an authenticated session mandatory; rls_is_admin() owns the
+-- actual allow-list decision and does not trust client payloads or role metadata.
+create or replace function public.crm_is_admin_session()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null and public.rls_is_admin();
+$$;
+
+revoke execute on function public.crm_is_admin_session() from public, anon;
+grant execute on function public.crm_is_admin_session() to authenticated;
+
 alter table public.schedule_booking_blocks drop constraint if exists schedule_booking_blocks_times_check;
 alter table public.schedule_booking_blocks add constraint schedule_booking_blocks_times_check
   check (starts_on < ends_on or start_time < end_time);
@@ -17,7 +33,7 @@ begin
   if cardinality(p_weekdays) is null or cardinality(p_weekdays)=0 or exists(select 1 from unnest(p_weekdays) d where d not between 1 and 7) or cardinality(p_weekdays)<>(select count(distinct d) from unnest(p_weekdays)d) then raise exception 'Дні тижня мають бути унікальними ISO 1–7'; end if;
   if coalesce(p_all_rooms,false)=false and coalesce(cardinality(p_room_ids),0)=0 then raise exception 'Оберіть хоча б одну залу'; end if;
   if coalesce(p_all_rooms,false) and coalesce(cardinality(p_room_ids),0)>0 then raise exception 'Для всіх зал room links не передаються'; end if;
-  if exists(select 1 from unnest(coalesce(p_room_ids,'{}')) id left join public.studio_rooms r on r.id=id where r.id is null) then raise exception 'Невідома зала'; end if;
+  if exists(select 1 from unnest(coalesce(p_room_ids,'{}')) as selected(room_id) left join public.studio_rooms r on r.id=selected.room_id where r.id is null) then raise exception 'Невідома зала'; end if;
 end $$;
 
 create or replace function public.crm_schedule_booking_recurrence_overlaps_continuous_block(

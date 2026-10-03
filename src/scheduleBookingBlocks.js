@@ -48,6 +48,25 @@ export function reconcileBookingBlockRooms(block = {}, studioRooms = []) {
 }
 // Backward-compatible entry point; room reconciliation has one implementation.
 export const resolveBookingBlockRooms = reconcileBookingBlockRooms;
+export function selectBookingBlockRooms(studioRooms = [], draft = {}) {
+  const selectedIds = new Set((draft?.roomIds || []).map(String));
+  const result = [];
+  const knownIds = new Set();
+  for (const room of studioRooms || []) {
+    if (room?.id == null) continue;
+    const id = String(room.id);
+    if (knownIds.has(id) || (room.isActive === false && !selectedIds.has(id))) continue;
+    knownIds.add(id);
+    result.push(room);
+  }
+  (draft?.roomIds || []).forEach((id, index) => {
+    const key = String(id);
+    if (knownIds.has(key)) return;
+    knownIds.add(key);
+    result.push({ id, name: draft?.roomNames?.[index] || `Зала ${id}`, isActive: false });
+  });
+  return result;
+}
 export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames = [], defaultRoom = "Основна зала") {
   const result = [];
   const seen = new Set();
@@ -152,7 +171,21 @@ export function findBookingBlockConflict(booking, blocks, rooms = []) {
   if (!parseDateOnly(booking.date)) return null;
   for (const block of blocks || []) {
     if (block?.isActive === false || !blockMatchesRoom(block, room)) continue;
-    const conflictDate = bookingRecurrenceCandidates(booking, block.startsOn, block.endsOn).find((date) => {
+    let candidates = bookingRecurrenceCandidates(booking, block.startsOn, block.endsOn);
+    if (isContinuousBookingBlock(block) && booking?.recurrence === "weekly") {
+      const blockStart = parseDateOnly(block.startsOn);
+      const blockEnd = parseDateOnly(block.endsOn);
+      const innerStart = blockStart && addCalendarDays(blockStart, 1);
+      const innerEnd = blockEnd && addCalendarDays(blockEnd, -1);
+      candidates = [
+        ...bookingRecurrenceCandidates(booking, block.startsOn, block.startsOn),
+        ...(innerStart && innerEnd && innerStart <= innerEnd
+          ? bookingRecurrenceCandidates(booking, formatDateOnly(innerStart), formatDateOnly(innerEnd))
+          : []),
+        ...bookingRecurrenceCandidates(booking, block.endsOn, block.endsOn),
+      ].filter((date, index, values) => values.indexOf(date) === index);
+    }
+    const conflictDate = candidates.find((date) => {
       const interval = bookingBlockIntervalForDate(block, date);
       return interval && intervalsOverlap(booking.startTime, booking.endTime, interval.startTime, interval.endTime);
     });

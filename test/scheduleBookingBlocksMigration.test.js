@@ -11,6 +11,13 @@ test("migration preserves access and trigger invariants", () => {
   for (const required of ["enable row level security", "crm_is_admin_session()", "crm_is_active_trainer_session()", "security definer", "set search_path", "before insert or update", "new.start_time::time < b.end_time", "b.start_time < new.end_time::time", "revoke all", "grant execute"]) assert.match(sql.toLowerCase(), new RegExp(required.replace(/[()]/g, "\\$&")));
   assert.doesNotMatch(sql, /service_role|ip_address|token|secret/i);
 });
+test("admin session delegates to the canonical authenticated server helper", () => {
+  const followUpSql=readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),"utf8");
+  assert.match(followUpSql,/create or replace function public\.crm_is_admin_session\(\)[\s\S]*security definer[\s\S]*set search_path = public[\s\S]*auth\.uid\(\) is not null and public\.rls_is_admin\(\)/i);
+  assert.doesNotMatch(followUpSql,/user_metadata|app_metadata|p_is_admin/i);
+  assert.match(followUpSql,/revoke execute on function public\.crm_is_admin_session\(\) from public, anon/i);
+  assert.match(followUpSql,/grant execute on function public\.crm_is_admin_session\(\) to authenticated/i);
+});
 test("open-ended recurrence uses bounded mode-specific candidates", () => { assert.match(sql, /crm_schedule_booking_recurrence_hits_block/); assert.match(sql, /for i in 0\.\.least\(6,v_to-v_from\)/i); assert.match(sql, /\(\(\(v_offset\+6\)\/7\)\*7\)/i); assert.match(sql, /while v_month <= date_trunc\('month',v_to\)/i); assert.doesNotMatch(sql, /generate_series\([\s\S]*interval '1 day'/i); });
 test("mutations preserve canonical room links without a failure-prone post-commit fetch", () => { const db=readFileSync(new URL("../src/db.js",import.meta.url),"utf8"); assert.doesNotMatch(db,/fetchSavedScheduleBookingBlock/); assert.match(db,/room_ids: block\.allRooms \? \[\] : block\.roomIds/); assert.match(db,/return requireBlockId\(data, 'Створення', block\)/); });
 test("trigger canonicalizes names and requires transaction-local explicit admin override", () => { assert.match(sql,/crm_canonical_room_name\(r\.name\)=public\.crm_canonical_room_name\(new\.room_name\)/); assert.match(sql,/regexp_replace\(coalesce\(p_name,''\),'\[\[:space:\]\]\+'/); assert.doesNotMatch(sql,/if public\.crm_is_admin_session\(\) or coalesce\(new\.status/); assert.match(sql,/current_setting\('crm\.booking_block_override',true\)='on'/); assert.match(sql,/set_config\('crm\.booking_block_override','on',true\)/); });

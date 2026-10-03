@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -624,14 +624,10 @@ export default function ScheduleTab({
     () => safeBookingBlocks.map((block) => reconcileBookingBlockRooms(block, studioRooms)),
     [safeBookingBlocks, studioRooms],
   );
-  const selectableBlockRooms = useMemo(() => {
-    const result = [...(Array.isArray(studioRooms) ? studioRooms : [])];
-    const known = new Set(result.map((room) => String(room.id)));
-    (blockDraft?.roomIds || []).forEach((id, index) => {
-      if (!known.has(String(id))) result.push({ id, name: blockDraft?.roomNames?.[index] || `Зала ${id}`, isActive: false });
-    });
-    return result;
-  }, [studioRooms, blockDraft?.roomIds, blockDraft?.roomNames]);
+  const selectableBlockRooms = useMemo(
+    () => selectBookingBlockRooms(studioRooms, blockDraft),
+    [studioRooms, blockDraft?.roomIds, blockDraft?.roomNames],
+  );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
   const studioRoomNameById = useMemo(
     () => new Map(activeStudioRooms.map((room) => [String(room.id), normalizeRoomName(room.name)])),
