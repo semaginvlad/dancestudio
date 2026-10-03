@@ -1414,19 +1414,13 @@ const mapStudioRoom = (row) => ({
 
 export async function fetchRoomBookings() {
   const { data, error } = await supabase.from('room_bookings').select('*').order('date', { ascending: true }).order('start_time', { ascending: true });
-  if (error) {
-    console.warn('room_bookings:', error.message);
-    return [];
-  }
+  if (error) throw error;
   return (data || []).map(mapRoomBooking);
 }
 
 export async function fetchScheduleRoomBookings() {
   const { data, error } = await supabase.rpc('crm_fetch_schedule_room_bookings');
-  if (error) {
-    console.warn('crm_fetch_schedule_room_bookings:', error.message);
-    return [];
-  }
+  if (error) throw error;
   return (data || []).map(mapRoomBooking);
 }
 
@@ -1482,9 +1476,108 @@ export async function updateRoomBooking(id, payload) {
   return mapRoomBooking(data);
 }
 
+const roomBookingRpcParams = (payload = {}) => ({
+  p_date: payload.date,
+  p_start_time: payload.startTime,
+  p_end_time: payload.endTime,
+  p_trainer_id: payload.trainerId || null,
+  p_trainer_name: payload.trainerName || null,
+  p_title: payload.title,
+  p_type: payload.type || 'individual',
+  p_booking_type: payload.bookingType || payload.type || 'individual',
+  p_people_count: payload.peopleCount || null,
+  p_price: payload.price || null,
+  p_payment_method: payload.paymentMethod || null,
+  p_event_type: payload.eventType || null,
+  p_note: payload.note || null,
+  p_color: payload.color || null,
+  p_recurrence: payload.recurrence || 'none',
+  p_recurrence_until: payload.recurrenceUntil || null,
+  p_description: payload.description || null,
+  p_status: payload.status || 'active',
+  p_room_name: payload.roomName || 'Основна зала',
+});
+
+export async function adminOverrideInsertRoomBooking(payload) {
+  const { data, error } = await supabase.rpc('crm_admin_override_create_room_booking', roomBookingRpcParams(payload));
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error('Override RPC не повернув створене бронювання');
+  return mapRoomBooking(row);
+}
+
+export async function adminOverrideUpdateRoomBooking(id, payload) {
+  const { data, error } = await supabase.rpc('crm_admin_override_update_room_booking', { p_id: id, ...roomBookingRpcParams(payload) });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error('Override RPC не повернув оновлене бронювання');
+  return mapRoomBooking(row);
+}
+
+export async function removeRoomBookingOccurrence(id, occurrenceDate) {
+  const { data, error } = await supabase.rpc('crm_remove_room_booking_occurrence', {
+    p_id: id,
+    p_occurrence_date: occurrenceDate,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error('Occurrence не було видалено');
+  return true;
+}
+
 export async function deleteRoomBooking(id) {
   const { error } = await supabase.from('room_bookings').delete().eq('id', id);
   if (error) throw error;
+}
+
+const mapScheduleBookingBlock = (row = {}) => ({
+  id: row.id,
+  title: row.title || '',
+  note: row.note || '',
+  startsOn: String(row.starts_on || '').slice(0, 10),
+  endsOn: String(row.ends_on || '').slice(0, 10),
+  startTime: String(row.start_time || '').slice(0, 5),
+  endTime: String(row.end_time || '').slice(0, 5),
+  allRooms: row.all_rooms === true,
+  weekdays: (row.weekdays || []).map(Number),
+  isActive: row.is_active !== false,
+  roomIds: row.room_ids || [],
+  roomNames: row.room_names || [],
+  createdBy: row.created_by || null,
+  createdAt: row.created_at || null,
+  updatedAt: row.updated_at || null,
+});
+
+const bookingBlockRpcPayload = (block) => ({ p_title: block.title, p_note: block.note || null, p_starts_on: block.startsOn, p_ends_on: block.endsOn, p_start_time: block.startTime, p_end_time: block.endTime, p_all_rooms: !!block.allRooms, p_weekdays: block.weekdays, p_room_ids: block.allRooms ? [] : block.roomIds, p_is_active: block.isActive !== false });
+const requireBlockId = (data, operation, block = {}) => {
+  if (!data?.id) throw new Error(`${operation}: сервер не повернув ID правила`);
+  return mapScheduleBookingBlock({
+    ...data,
+    room_ids: block.allRooms ? [] : block.roomIds || [],
+    room_names: block.allRooms ? [] : block.roomNames || [],
+  });
+};
+
+export async function fetchScheduleBookingBlocks() {
+  const { data, error } = await supabase.rpc('crm_fetch_schedule_booking_blocks');
+  if (error) throw error;
+  return (data || []).map(mapScheduleBookingBlock);
+}
+export async function createScheduleBookingBlock(block) {
+  const { data, error } = await supabase.rpc('crm_admin_create_schedule_booking_block', bookingBlockRpcPayload(block));
+  if (error) throw error;
+  return requireBlockId(data, 'Створення', block);
+}
+export async function updateScheduleBookingBlock(id, block) {
+  const { data, error } = await supabase.rpc('crm_admin_update_schedule_booking_block', { p_id: id, ...bookingBlockRpcPayload(block) });
+  if (error) throw error;
+  return requireBlockId(data, 'Оновлення', block);
+}
+export const setScheduleBookingBlockActive = (block, isActive) => updateScheduleBookingBlock(block.id, { ...block, isActive });
+export async function deleteScheduleBookingBlock(id) {
+  const { data, error } = await supabase.rpc('crm_admin_delete_schedule_booking_block', { p_id: id });
+  if (error) throw error;
+  if (!data) throw new Error('Видалення: сервер не повернув ID правила');
+  return data;
 }
 
 
@@ -1715,8 +1808,11 @@ export async function upsertTrainingLessonReport(report = {}) {
   return mapTrainingLessonReport(data);
 }
 
-export async function fetchStudioRooms() {
-  const { data, error } = await supabase.rpc('crm_fetch_active_studio_rooms');
+export async function fetchStudioRooms({ includeInactive = false } = {}) {
+  const request = includeInactive
+    ? supabase.from('studio_rooms').select('id,name,is_active,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
+    : supabase.rpc('crm_fetch_active_studio_rooms');
+  const { data, error } = await request;
   if (error) {
     console.warn('studio_rooms:', error.message);
     return [];
