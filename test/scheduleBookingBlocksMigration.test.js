@@ -2,12 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
-const name = "20261002090000_schedule_booking_blocks.sql";
-const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const baseName = "20261002090000_schedule_booking_blocks.sql";
+const name = "20261003090000_schedule_booking_blocks_continuous_periods.sql";
+const baseSql = readFileSync(new URL(`../supabase/migrations/${baseName}`, import.meta.url), "utf8");
+const sql = baseSql + "\n" + readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
 test("booking-block migration remains the latest timestamp", () => { assert.equal(readdirSync(new URL("../supabase/migrations", import.meta.url)).filter(x=>x.endsWith(".sql")).sort().at(-1), name); });
 test("migration preserves access and trigger invariants", () => {
   for (const required of ["enable row level security", "crm_is_admin_session()", "crm_is_active_trainer_session()", "security definer", "set search_path", "before insert or update", "new.start_time::time < b.end_time", "b.start_time < new.end_time::time", "revoke all", "grant execute"]) assert.match(sql.toLowerCase(), new RegExp(required.replace(/[()]/g, "\\$&")));
   assert.doesNotMatch(sql, /service_role|ip_address|token|secret/i);
+});
+test("admin session delegates to the canonical authenticated server helper", () => {
+  const followUpSql=readFileSync(new URL(`../supabase/migrations/${name}`,import.meta.url),"utf8");
+  assert.match(followUpSql,/create or replace function public\.crm_is_admin_session\(\)[\s\S]*security definer[\s\S]*set search_path = public[\s\S]*auth\.uid\(\) is not null and public\.rls_is_admin\(\)/i);
+  assert.doesNotMatch(followUpSql,/user_metadata|app_metadata|p_is_admin/i);
+  assert.match(followUpSql,/revoke execute on function public\.crm_is_admin_session\(\) from public, anon/i);
+  assert.match(followUpSql,/grant execute on function public\.crm_is_admin_session\(\) to authenticated/i);
 });
 test("open-ended recurrence uses bounded mode-specific candidates", () => { assert.match(sql, /crm_schedule_booking_recurrence_hits_block/); assert.match(sql, /for i in 0\.\.least\(6,v_to-v_from\)/i); assert.match(sql, /\(\(\(v_offset\+6\)\/7\)\*7\)/i); assert.match(sql, /while v_month <= date_trunc\('month',v_to\)/i); assert.doesNotMatch(sql, /generate_series\([\s\S]*interval '1 day'/i); });
 test("mutations preserve canonical room links without a failure-prone post-commit fetch", () => { const db=readFileSync(new URL("../src/db.js",import.meta.url),"utf8"); assert.doesNotMatch(db,/fetchSavedScheduleBookingBlock/); assert.match(db,/room_ids: block\.allRooms \? \[\] : block\.roomIds/); assert.match(db,/return requireBlockId\(data, 'Створення', block\)/); });

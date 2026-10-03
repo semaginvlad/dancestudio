@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
+import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
 
 const rooms = [{ id: "one", name: "Перша", isActive: true }, { id: "two", name: "Друга", isActive: true }];
 const base = { id: "b", title: "Закрито", startsOn: "2026-10-01", endsOn: "2026-10-07", startTime: "10:00", endTime: "11:00", weekdays: [1,2,3,4,5,6,7], allRooms: false, roomIds: ["one"], roomNames: ["Стара назва"], isActive: true };
@@ -24,6 +24,18 @@ test("trainer is blocked while admin must explicitly confirm override", () => { 
 test("selected-room draft resolves current canonical names before existing-booking checks", () => { const draft=resolveBookingBlockRooms({...base,roomIds:["one"],roomNames:undefined},[{id:"one",name:"  Перейменована   зала  "},{id:"two",name:"Друга"}]); assert.deepEqual(draft.roomNames,["Перейменована зала"]); const matching={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"перейменована ЗАЛА"}; const other={...matching,roomName:"Друга"}; assert.ok(findBookingBlockConflict(matching,[draft],rooms)); assert.equal(findBookingBlockConflict(other,[draft],rooms),null); });
 test("room reconciliation uses stable IDs and current names after rename", () => { const original={...base,roomNames:["Стара назва"]}; const reconciled=reconcileBookingBlockRooms(original,[{id:"one",name:" Нова   назва ",isActive:true}]); assert.notEqual(reconciled,original); assert.deepEqual(reconciled.roomIds,["one"]); assert.deepEqual(reconciled.roomNames,["Нова назва"]); assert.deepEqual(original.roomNames,["Стара назва"]); const booking={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"нова НАЗВА"}; assert.ok(findBookingBlockConflict(booking,[reconciled],rooms)); assert.equal(blockMatchesRoom(reconciled,{name:"Стара назва"}),false); });
 test("archived and partially unresolved room associations survive unrelated edits", () => { const block={...base,title:"Нова причина",roomIds:["one","archived"],roomNames:["Стара активна","Архівна зала"]}; const reconciled=reconcileBookingBlockRooms(block,[{id:"one",name:"Актуальна"}]); assert.deepEqual(reconciled.roomIds,["one","archived"]); assert.deepEqual(reconciled.roomNames,["Актуальна","Архівна зала"]); assert.equal(reconciled.title,"Нова причина"); assert.ok(findBookingBlockConflict({date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"архівна  ЗАЛА"},[reconciled],rooms)); });
+test("room picker offers active rooms and only archived rooms already bound to the draft", () => {
+  const studioRooms=[
+    {id:"active",name:"Активна",isActive:true},
+    {id:"kept",name:"Архівна чинна",isActive:false},
+    {id:"hidden",name:"Архівна інша",isActive:false},
+    {id:"active",name:"Дублікат",isActive:true},
+  ];
+  assert.deepEqual(selectBookingBlockRooms(studioRooms,{roomIds:[]}).map(room=>room.id),["active"]);
+  assert.deepEqual(selectBookingBlockRooms(studioRooms,{roomIds:["kept","missing"],roomNames:["Стара назва","Відсутня"]}).map(room=>[room.id,room.name]),[
+    ["active","Активна"], ["kept","Архівна чинна"], ["missing","Відсутня"],
+  ]);
+});
 test("reconciliation deduplicates names and clears associations for all-room rules", () => { const selected=reconcileBookingBlockRooms({...base,roomIds:["one","two"],roomNames:["OLD"," зал 1 "]},[{id:"one",name:"Зал 1"}]); assert.deepEqual(selected.roomIds,["one","two"]); assert.deepEqual(selected.roomNames,["Зал 1"]); const all=reconcileBookingBlockRooms({...base,allRooms:true,roomIds:["one"],roomNames:["Перша"]},rooms); assert.deepEqual(all.roomIds,[]); assert.deepEqual(all.roomNames,[]); });
 test("calendar expansion and save guard share the reconciled rule", () => { const canonicalRooms=[{id:"one",name:"Нова",isActive:true}]; const reconciled=reconcileBookingBlockRooms({...base,roomNames:["Стара"]},canonicalRooms); const display=buildBookingBlockDisplayRooms(canonicalRooms,[...reconciled.roomNames],"Основна зала"); assert.equal(expandBookingBlocks([reconciled],"2026-10-02","2026-10-02",display)[0].roomName,"Нова"); assert.ok(getBookingBlockSaveGuard({date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"Нова"},[reconciled],canonicalRooms,true).requiresConfirmation); });
 test("new mutation presentation has no placeholder id while edits retain their UUID", () => { const created=resolveBookingBlockRooms({...base,id:undefined,roomNames:undefined},rooms); const updated=resolveBookingBlockRooms({...base,id:"11111111-1111-1111-1111-111111111111",roomNames:undefined},rooms); assert.notEqual(created.id,"draft"); assert.equal(updated.id,"11111111-1111-1111-1111-111111111111"); assert.deepEqual(created.roomNames,["Перша"]); });
@@ -52,7 +64,7 @@ test("booking-block mutation guard clears after failure and permits create/updat
 
 test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady[\s\S]*?\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
   assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, async \(\) =>/);
   assert.match(source,/return onSaveBookingBlock\?\.\(presentationDraft\)/);
   assert.match(source,/catch \(error\) \{ setBlockError/);
@@ -78,7 +90,7 @@ test("schedule UI distinguishes ready empty data from load failure and gates eve
   assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady && canMutateScheduleEvent/);
   assert.match(source,/role=\{bookingBlocksLoadStatus === "error" \? "alert" : "status"\}/);
   assert.match(source,/onRetryBookingBlocks\(\)\.catch/);
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady/);
 });
 
 test("room-booking loading fails closed and fresh rows drive block warnings", async () => {
@@ -166,4 +178,39 @@ test("committed occurrence removal with refresh failure invalidates stale bookin
   assert.match(schedule,/const canManageBookings = \(isAdmin \|\| allowBookingMutations\) && bookingBlocksReady && roomBookingsReady/);
   assert.match(schedule,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady/);
   assert.match(schedule,/roomBookingsLoadNotice \|\| "Поточні бронювання не завантажилися/);
+});
+
+test("continuous multi-date block validates and expands across both boundary dates", () => {
+  const continuous={...base,startsOn:"2026-10-03",endsOn:"2026-10-04",startTime:"16:00",endTime:"12:30",allRooms:true};
+  assert.equal(validateBookingBlock(continuous).valid,true);
+  assert.equal(validateBookingBlock({...continuous,endsOn:"2026-10-03"}).valid,false);
+  const events=expandBookingBlocks([continuous],"2026-10-03","2026-10-04",[rooms[0]]);
+  assert.deepEqual(events.map(({date,startTime,endTime})=>({date,startTime,endTime})),[
+    {date:"2026-10-03",startTime:"16:00",endTime:"24:00"},
+    {date:"2026-10-04",startTime:"00:00",endTime:"12:30"},
+  ]);
+});
+
+test("continuous multi-date block conflicts on both ends but permits adjacent bookings", () => {
+  const block={...base,startsOn:"2026-10-03",endsOn:"2026-10-04",startTime:"16:00",endTime:"12:30",allRooms:true};
+  assert.ok(findBookingBlockConflict({date:"2026-10-03",startTime:"16:30",endTime:"17:00",roomName:"Перша"},[block],rooms));
+  assert.ok(findBookingBlockConflict({date:"2026-10-04",startTime:"11:30",endTime:"12:00",roomName:"Перша"},[block],rooms));
+  assert.equal(findBookingBlockConflict({date:"2026-10-03",startTime:"15:00",endTime:"16:00",roomName:"Перша"},[block],rooms),null);
+  assert.equal(findBookingBlockConflict({date:"2026-10-04",startTime:"12:30",endTime:"13:00",roomName:"Перша"},[block],rooms),null);
+});
+
+test("continuous block finds a later weekly occurrence on a fully blocked interior date", () => {
+  const block={...base,startsOn:"2026-10-01",endsOn:"2026-10-20",startTime:"16:00",endTime:"09:00",allRooms:true};
+  const booking={date:"2026-10-01",recurrence:"weekly",recurrenceUntil:"2026-10-31",startTime:"10:00",endTime:"11:00",roomName:"Перша"};
+  const conflict=findBookingBlockConflict(booking,[block],rooms);
+  assert.equal(conflict?.date,"2026-10-08");
+});
+
+test("selected-room UI exposes controlled scope, loading/error states and multi-select", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/name="booking-block-room-scope"/);
+  assert.match(source,/studioRoomsLoadStatus === "loading"/);
+  assert.match(source,/studioRoomsLoadStatus === "error"/);
+  assert.match(source,/selectableBlockRooms\.map/);
+  assert.match(source,/!blockDraft\.allRooms && \(!\(blockDraft\.roomIds \|\| \[\]\)\.length/);
 });

@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -486,6 +486,7 @@ export default function ScheduleTab({
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
   const [studioRooms, setStudioRooms] = useState([]);
+  const [studioRoomsLoadStatus, setStudioRoomsLoadStatus] = useState("loading");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -622,6 +623,10 @@ export default function ScheduleTab({
   const reconciledBookingBlocks = useMemo(
     () => safeBookingBlocks.map((block) => reconcileBookingBlockRooms(block, studioRooms)),
     [safeBookingBlocks, studioRooms],
+  );
+  const selectableBlockRooms = useMemo(
+    () => selectBookingBlockRooms(studioRooms, blockDraft),
+    [studioRooms, blockDraft?.roomIds, blockDraft?.roomNames],
   );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
   const studioRoomNameById = useMemo(
@@ -2347,12 +2352,14 @@ export default function ScheduleTab({
   const periodLabel = calendarPeriodLabel(viewMode, selectedDate, weekStart);
   const periodNavigationLabels = navigationLabels(viewMode);
   const loadStudioRooms = async () => {
+    setStudioRoomsLoadStatus("loading");
     try {
       const rooms = await fetchStudioRooms({ includeInactive: isAdmin });
       setStudioRooms(Array.isArray(rooms) ? rooms : []);
+      setStudioRoomsLoadStatus("ready");
     } catch (error) {
       console.warn("Failed to load studio rooms:", error);
-      setStudioRooms([]);
+      setStudioRoomsLoadStatus("error");
     }
   };
   const addCustomRoom = async () => {
@@ -2623,13 +2630,18 @@ export default function ScheduleTab({
           <input style={inputSt} maxLength={2000} value={blockDraft.note || ""} onChange={e=>setBlockDraft(p=>({...p,note:e.target.value}))} placeholder="Нотатка" />
           <input style={inputSt} type="date" value={blockDraft.startsOn} onChange={e=>setBlockDraft(p=>({...p,startsOn:e.target.value}))}/><input style={inputSt} type="date" value={blockDraft.endsOn} onChange={e=>setBlockDraft(p=>({...p,endsOn:e.target.value}))}/>
           <input style={inputSt} type="time" value={blockDraft.startTime} onChange={e=>setBlockDraft(p=>({...p,startTime:e.target.value}))}/><input style={inputSt} type="time" value={blockDraft.endTime} onChange={e=>setBlockDraft(p=>({...p,endTime:e.target.value}))}/>
-          <label><input type="radio" checked={blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:true,roomIds:[]}))}/> Усі зали</label><label><input type="radio" checked={!blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:false}))}/> Обрані зали</label>
-          {!blockDraft.allRooms ? <div style={{gridColumn:"1/-1",display:"flex",gap:8,flexWrap:"wrap"}}>{activeStudioRooms.map(room=><label key={room.id}><input type="checkbox" checked={blockDraft.roomIds.includes(room.id)} onChange={()=>setBlockDraft(p=>({...p,roomIds:p.roomIds.includes(room.id)?p.roomIds.filter(id=>id!==room.id):[...p.roomIds,room.id]}))}/>{room.name}</label>)}</div>:null}
+          <label><input name="booking-block-room-scope" type="radio" checked={blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:true}))}/> Усі зали</label><label><input name="booking-block-room-scope" type="radio" checked={!blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:false}))}/> Обрані зали</label>
+          {!blockDraft.allRooms ? <div style={{gridColumn:"1/-1",display:"flex",gap:8,flexWrap:"wrap"}}>
+            {studioRoomsLoadStatus === "loading" ? <span>Завантаження залів…</span> : null}
+            {studioRoomsLoadStatus === "error" ? <span role="alert" style={{color:theme.danger}}>Не вдалося завантажити зали. Спробуйте ще раз.</span> : null}
+            {studioRoomsLoadStatus === "ready" && !selectableBlockRooms.length ? <span>Немає доступних залів.</span> : null}
+            {studioRoomsLoadStatus === "ready" ? selectableBlockRooms.map(room=><label key={room.id}><input type="checkbox" checked={(blockDraft.roomIds || []).map(String).includes(String(room.id))} onChange={()=>setBlockDraft(p=>({...p,roomIds:(p.roomIds || []).map(String).includes(String(room.id))?p.roomIds.filter(id=>String(id)!==String(room.id)):[...p.roomIds,room.id]}))}/>{room.name}{room.isActive === false ? " (архівна)" : ""}</label>) : null}
+          </div>:null}
           <div style={{gridColumn:"1/-1",display:"flex",gap:5,flexWrap:"wrap"}}>{[{v:1,l:"ПН"},{v:2,l:"ВТ"},{v:3,l:"СР"},{v:4,l:"ЧТ"},{v:5,l:"ПТ"},{v:6,l:"СБ"},{v:7,l:"НД"}].map(day=><button type="button" key={day.v} style={blockDraft.weekdays.includes(day.v)?btnP:btnS} onClick={()=>setBlockDraft(p=>({...p,weekdays:p.weekdays.includes(day.v)?p.weekdays.filter(v=>v!==day.v):[...p.weekdays,day.v].sort()}))}>{day.l}</button>)}</div>
           <label><input type="checkbox" checked={blockDraft.isActive} onChange={e=>setBlockDraft(p=>({...p,isActive:e.target.checked}))}/> Активне</label>
           <div><b>{blockDraft.title}</b> · {blockDraft.startsOn}—{blockDraft.endsOn} · {blockDraft.startTime}–{blockDraft.endTime}</div>
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
+          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady || (!blockDraft.allRooms && (!(blockDraft.roomIds || []).length || studioRoomsLoadStatus !== "ready"))}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
         </div> : <button style={btnP} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>+ Нове правило</button>}
       </div> : null}
 
