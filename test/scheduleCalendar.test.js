@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, compactDayPreview, getTrainerInitials, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, canMutateScheduleEvent, compactDayPreview, getTrainerInitials, isBookingBlockEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -9,6 +9,45 @@ test("day, week and month navigation keep selected date and week anchor synchron
   assert.equal(navigateCalendar("week", "2026-09-30", 1).selectedDate, "2026-10-07");
   assert.equal(navigateCalendar("month", "2026-09-30", 1).selectedDate, "2026-10-30");
   for (const mode of ["day", "week", "month"]) assert.equal(key(navigateCalendar(mode, "2020-01-01", 0, new Date("2026-09-30T12:00:00")).weekStart), "2026-09-28");
+});
+
+test("booking-block identity is read-only even for administrators", () => {
+  assert.equal(canMutateScheduleEvent({ readOnly: true, kind: "booking" }, { isAdmin: true }), false);
+  assert.equal(canMutateScheduleEvent({ kind: "booking_block" }, { isAdmin: true }), false);
+  assert.equal(canMutateScheduleEvent({ eventType: "booking_block" }, { isAdmin: true }), false);
+});
+
+test("booking-block identity is centralized for mobile filter bypass", async () => {
+  assert.equal(isBookingBlockEvent({ kind: "booking_block" }), true);
+  assert.equal(isBookingBlockEvent({ eventType: "booking_block" }), true);
+  assert.equal(isBookingBlockEvent({ kind: "booking", eventType: "room_booking" }), false);
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /const matchesMobileScheduleFilter = \(event\) => \{\s*if \(isBookingBlockEvent\(event\)\) return true;/);
+  assert.match(source, /filter\(\(e\) => selectedRoom === "all" \|\| \(e\.roomName \|\| UNKNOWN_ROOM_NAME\) === selectedRoom\)\s*\.filter\(matchesMobileScheduleFilter\)/);
+});
+
+test("ordinary admin and owned trainer bookings remain mutable", () => {
+  const booking = { kind: "booking", eventType: "room_booking" };
+  assert.equal(canMutateScheduleEvent(booking, { isAdmin: true }), true);
+  assert.equal(canMutateScheduleEvent(booking, { isAssignedToTrainer: true }), true);
+  assert.equal(canMutateScheduleEvent(booking, { isAssignedToTrainer: false }), false);
+});
+
+test("booking-block activation opens details for click and keyboard without booking actions", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /isReadOnlyScheduleEvent\(event\)[\s\S]*setSelectedEventDetails\(event\)/);
+  assert.match(source, /activateScheduleEvent\(e, \{ editMutable: true \}\)/);
+  assert.match(source, /ev\.key === "Enter" \|\| ev\.key === " "/);
+  assert.match(source, /selectedEventDetails\.kind === "booking" && canMutateEvent\(selectedEventDetails\)/);
+  assert.match(source, /if \(!canMutateEvent\(e\)\) \{ setSelectedEventDetails\(e\); return; \}/);
+  assert.match(source, /if \(!canMutateEvent\(event\)\) \{ setSelectedEventDetails\(event\); return; \}/);
+});
+
+test("booking-block details include reason and note only", () => {
+  assert.deepEqual(buildEventDetails({ kind: "booking_block", eventType: "booking_block", title: "Ремонт", note: "Фарбування" }), [
+    { label: "Причина", value: "Ремонт" },
+    { label: "Примітка", value: "Фарбування" },
+  ]);
 });
 
 test("month navigation clamps end-of-month dates without overflow", () => {
@@ -158,7 +197,7 @@ test("all schedule edit paths expose guarded async save state", async () => {
   assert.match(schedule, /formErrors\.save \? <div role="alert"/);
   assert.match(schedule, /groupOverrideEdit\.saving \? "Зберігаємо…"/);
   assert.match(schedule, /groupSlotEdit\.saving \? "Зберігаємо…"/);
-  assert.match(schedule, /await onUpdateBooking\?\.\(editingId, payload\)/);
+  assert.match(schedule, /onUpdateBooking\?\.\(editingId, payload, \{ overrideBookingBlock: override \}\)/);
   assert.match(schedule, /await onUpdateGroupLessonOverride\?\.\(groupOverrideEdit\.overrideId, payload\)/);
   assert.match(schedule, /await onUpdateGroupSchedule\(groupSlotEdit\.groupId, nextSchedule\)/);
   assert.match(app, /const updateRoomBookingAction[\s\S]*?return updated;/);

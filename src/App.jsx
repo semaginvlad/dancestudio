@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as db from "./db";
 import { supabase } from "./supabase";
 import { getOperationalTrainers } from "./shared/trainers";
@@ -141,6 +141,12 @@ export default function App() {
   const [trainers, setTrainers] = useState([]);
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
+  const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
+  const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
+  const roomBookingsLoadStatusRef = useRef("loading");
+  const [scheduleBookingBlocks, setScheduleBookingBlocks] = useState([]);
+  const [bookingBlocksLoadStatus, setBookingBlocksLoadStatus] = useState("loading");
+  const bookingBlocksLoadStatusRef = useRef("loading");
   const [studioRooms, setStudioRooms] = useState([]);
   const [groupLessonOverrides, setGroupLessonOverrides] = useState([]);
   const [trainingLessonPlans, setTrainingLessonPlans] = useState([]);
@@ -557,6 +563,11 @@ export default function App() {
   const loadAllData = async (currentUser = user) => {
     console.info("[access guard] loadAllData", { email: currentUser?.email || null, isAdmin: currentUser ? isAdminEmail(currentUser.email, adminEmails) : false });
     setLoading(true);
+    bookingBlocksLoadStatusRef.current = "loading";
+    setBookingBlocksLoadStatus("loading");
+    roomBookingsLoadStatusRef.current = "loading";
+    setRoomBookingsLoadStatus("loading");
+    setRoomBookingsLoadNotice("");
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
       const isCurrentAdmin = currentUser && isAdminEmail(currentUser.email, adminEmails);
@@ -606,16 +617,21 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
         fetchCustomOrders(), safeFetch(db.fetchWarnedStudents, "fetchWarnedStudents"), safeFetch(fetchTrainerProfiles, "fetchTrainerProfiles"), safeFetch(db.fetchTrainerGroups, "fetchTrainerGroups"),
-        safeFetch(db.fetchDirections, "fetchDirections"), safeFetch(fetchScheduleBookings, "fetchScheduleBookings"),
+        safeFetch(db.fetchDirections, "fetchDirections"), fetchScheduleBookings()
+          .then((data) => ({ ok: true, data }))
+          .catch((error) => { console.warn("[loadAllData] fetchScheduleBookings failed", error); return { ok: false, error }; }),
         safeFetch(() => db.fetchGroupLessonOverrides(overrideStartDate, overrideEndDate), "fetchGroupLessonOverrides"),
         safeFetch(() => db.fetchTrainingLessonPlans({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonPlans"),
         safeFetch(() => db.fetchTrainingLessonReports({ dateFrom: overrideStartDate, dateTo: overrideEndDate }), "fetchTrainingLessonReports"),
-        safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations")
+        safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations"),
+        db.fetchScheduleBookingBlocks()
+          .then((data) => ({ ok: true, data }))
+          .catch((error) => { console.warn("[loadAllData] fetchScheduleBookingBlocks failed", error); return { ok: false, error }; })
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -702,7 +718,23 @@ export default function App() {
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
       setTrainerGroups(currentTrainerGroupRows);
       setDirections(dirs || []);
-      setRoomBookings(rb || []);
+      if (rb?.ok) {
+        setRoomBookings(rb.data);
+        setRoomBookingsLoadNotice("");
+        roomBookingsLoadStatusRef.current = "ready";
+        setRoomBookingsLoadStatus("ready");
+      } else {
+        roomBookingsLoadStatusRef.current = "error";
+        setRoomBookingsLoadStatus("error");
+      }
+      if (bookingBlocks?.ok) {
+        setScheduleBookingBlocks(bookingBlocks.data);
+        bookingBlocksLoadStatusRef.current = "ready";
+        setBookingBlocksLoadStatus("ready");
+      } else {
+        bookingBlocksLoadStatusRef.current = "error";
+        setBookingBlocksLoadStatus("error");
+      }
       setGroupLessonOverrides(glo || []);
       setTrainingLessonPlans(tlp || []);
       setTrainingLessonReports(tlr || []);
@@ -2063,14 +2095,21 @@ export default function App() {
     };
   };
 
-  const addRoomBookingAction = async (payload) => {
+  const addRoomBookingAction = async (payload, options = {}) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
-    const created = await db.insertRoomBooking(safePayload);
+    if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
+    const created = options.overrideBookingBlock
+      ? await db.adminOverrideInsertRoomBooking(safePayload)
+      : await db.insertRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
     return created;
   };
 
   const deleteRoomBookingAction = async (id) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       alert("Можна видаляти тільки власні резерви / індивідуальні тренування.");
@@ -2081,7 +2120,9 @@ export default function App() {
     setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
   };
 
-  const updateRoomBookingAction = async (id, payload) => {
+  const updateRoomBookingAction = async (id, payload, options = {}) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       throw new Error("Можна редагувати тільки власні резерви / індивідуальні тренування.");
@@ -2093,9 +2134,76 @@ export default function App() {
           ...payload,
           eventType: payload?.eventType || booking.eventType || "room_booking",
         });
-    const updated = await db.updateRoomBooking(id, safePayload);
+    if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
+    const updated = options.overrideBookingBlock
+      ? await db.adminOverrideUpdateRoomBooking(id, safePayload)
+      : await db.updateRoomBooking(id, safePayload);
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
     return updated;
+  };
+  const removeRoomBookingOccurrenceAction = async (id, occurrenceDate) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Повторне видалення заблоковано.");
+    await db.removeRoomBookingOccurrence(id, occurrenceDate);
+    try { await reloadScheduleRoomBookingsAction(); }
+    catch (error) {
+      console.warn("Occurrence removed, but room bookings refresh failed", error);
+      setRoomBookings((previous) => previous.filter((booking) => String(booking.id) !== String(id)));
+      setRoomBookingsLoadNotice("Заняття видалено, але список бронювань не вдалося оновити. Повторно завантажте список перед наступною дією.");
+      return { removed: true, refreshRequired: true };
+    }
+    return { removed: true, refreshRequired: false };
+  };
+
+  const saveScheduleBookingBlockAction = async (block) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань не завантажений. Правило не збережено.");
+    const saved = block.id ? await db.updateScheduleBookingBlock(block.id, block) : await db.createScheduleBookingBlock(block);
+    setScheduleBookingBlocks((previous) => block.id ? previous.map((item) => item.id === saved.id ? saved : item) : [...previous, saved]);
+    return saved;
+  };
+  const toggleScheduleBookingBlockAction = async (block) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
+    if (!block.isActive && roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань не завантажений. Правило не активовано.");
+    const saved = await db.setScheduleBookingBlockActive(block, !block.isActive);
+    setScheduleBookingBlocks((previous) => previous.map((item) => item.id === saved.id ? saved : item));
+    return saved;
+  };
+  const deleteScheduleBookingBlockAction = async (id) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
+    await db.deleteScheduleBookingBlock(id);
+    setScheduleBookingBlocks((previous) => previous.filter((item) => item.id !== id));
+  };
+  const reloadScheduleBookingBlocksAction = async () => {
+    bookingBlocksLoadStatusRef.current = "loading";
+    setBookingBlocksLoadStatus("loading");
+    try {
+      const blocks = await db.fetchScheduleBookingBlocks();
+      setScheduleBookingBlocks(blocks);
+      bookingBlocksLoadStatusRef.current = "ready";
+      setBookingBlocksLoadStatus("ready");
+      return blocks;
+    } catch (error) {
+      bookingBlocksLoadStatusRef.current = "error";
+      setBookingBlocksLoadStatus("error");
+      throw error;
+    }
+  };
+  const reloadScheduleRoomBookingsAction = async () => {
+    roomBookingsLoadStatusRef.current = "loading";
+    setRoomBookingsLoadStatus("loading");
+    try {
+      const bookings = await (isAdmin ? db.fetchRoomBookings() : db.fetchScheduleRoomBookings());
+      setRoomBookings(bookings);
+      setRoomBookingsLoadNotice("");
+      roomBookingsLoadStatusRef.current = "ready";
+      setRoomBookingsLoadStatus("ready");
+      return bookings;
+    } catch (error) {
+      roomBookingsLoadStatusRef.current = "error";
+      setRoomBookingsLoadStatus("error");
+      throw error;
+    }
   };
 
 
@@ -2413,6 +2521,7 @@ export default function App() {
             trainerGroups={trainerGroups}
             cancelled={cancelled}
             roomBookings={roomBookings}
+            bookingBlocks={scheduleBookingBlocks}
             groupLessonOverrides={groupLessonOverrides}
             isAdmin={!!isAdmin}
             aiInsightsContext={{
@@ -2429,6 +2538,12 @@ export default function App() {
             trainers={trainers}
             cancelled={scheduleCancelled}
             roomBookings={roomBookings}
+            roomBookingsLoadStatus={roomBookingsLoadStatus}
+            roomBookingsLoadNotice={roomBookingsLoadNotice}
+            onRetryRoomBookings={reloadScheduleRoomBookingsAction}
+            bookingBlocks={scheduleBookingBlocks}
+            bookingBlocksLoadStatus={bookingBlocksLoadStatus}
+            onRetryBookingBlocks={reloadScheduleBookingBlocksAction}
             groupLessonOverrides={groupLessonOverrides}
             trainingLessonPlans={trainingLessonPlans}
             currentUser={user}
@@ -2437,6 +2552,8 @@ export default function App() {
             onAddBooking={addRoomBookingAction}
             onDeleteBooking={deleteRoomBookingAction}
             onUpdateBooking={updateRoomBookingAction}
+            onRemoveBookingOccurrence={removeRoomBookingOccurrenceAction}
+            {...(isAdmin ? { onSaveBookingBlock: saveScheduleBookingBlockAction, onToggleBookingBlock: toggleScheduleBookingBlockAction, onDeleteBookingBlock: deleteScheduleBookingBlockAction } : {})}
             onUpdateGroupSchedule={updateGroupScheduleAction}
             onAddGroupLessonOverride={addGroupLessonOverrideAction}
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}
