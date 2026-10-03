@@ -75,7 +75,7 @@ test("schedule UI distinguishes ready empty data from load failure and gates eve
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
   assert.match(source,/const bookingBlocksReady = bookingBlocksLoadStatus === "ready"/);
   assert.match(source,/const canManageBookings = \(isAdmin \|\| allowBookingMutations\) && bookingBlocksReady/);
-  assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && canMutateScheduleEvent/);
+  assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady && canMutateScheduleEvent/);
   assert.match(source,/role=\{bookingBlocksLoadStatus === "error" \? "alert" : "status"\}/);
   assert.match(source,/onRetryBookingBlocks\(\)\.catch/);
   assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}/);
@@ -123,9 +123,12 @@ test("fresh trainer guard releases deleted blocks, retains active blocks, and fa
   assert.ok(retained.conflict);
   await assert.rejects(getFreshBookingBlockSaveGuard(booking,[base],rooms,false,async()=>{throw new Error("refresh failed");}),/refresh failed/);
   let refreshed=false;
-  const admin=await getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>{refreshed=true; return [];});
-  assert.equal(admin.requiresConfirmation,true);
-  assert.equal(refreshed,false);
+  const deletedForAdmin=await getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>{refreshed=true; return [];});
+  assert.equal(deletedForAdmin.conflict,null);
+  assert.equal(refreshed,true);
+  const activeForAdmin=await getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>[base]);
+  assert.equal(activeForAdmin.requiresConfirmation,true);
+  await assert.rejects(getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>{throw new Error("admin refresh failed");}),/admin refresh failed/);
 });
 
 test("editor and status actions share explicit override and retain UI on failure or declined confirmation", async () => {
@@ -152,4 +155,15 @@ test("single-occurrence removal uses the guarded atomic RPC and keeps details op
   assert.match(source,/detailsMutationBusy[\s\S]*detailsMutationError \? <div role="alert"/);
   assert.match(app,/db\.removeRoomBookingOccurrence\(id, occurrenceDate\)[\s\S]*reloadScheduleRoomBookingsAction/);
   assert.match(db,/crm_remove_room_booking_occurrence/);
+});
+
+test("committed occurrence removal with refresh failure invalidates stale booking actions", async () => {
+  const fs=await import("node:fs/promises");
+  const app=await fs.readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
+  const schedule=await fs.readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(app,/await db\.removeRoomBookingOccurrence\(id, occurrenceDate\)[\s\S]*catch \(error\)[\s\S]*setRoomBookings\(\(previous\) => previous\.filter[\s\S]*refreshRequired: true/);
+  assert.match(app,/Повторне видалення заблоковано/);
+  assert.match(schedule,/const canManageBookings = \(isAdmin \|\| allowBookingMutations\) && bookingBlocksReady && roomBookingsReady/);
+  assert.match(schedule,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady/);
+  assert.match(schedule,/roomBookingsLoadNotice \|\| "Поточні бронювання не завантажилися/);
 });

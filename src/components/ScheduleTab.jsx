@@ -371,6 +371,7 @@ export default function ScheduleTab({
   cancelled = [],
   roomBookings = [],
   roomBookingsLoadStatus = "loading",
+  roomBookingsLoadNotice = "",
   bookingBlocks = [],
   bookingBlocksLoadStatus = "loading",
   groupLessonOverrides = [],
@@ -407,7 +408,7 @@ export default function ScheduleTab({
   const bookingBlocksReady = bookingBlocksLoadStatus === "ready";
   const roomBookingsReady = roomBookingsLoadStatus === "ready";
   const bookingBlockMutationsReady = bookingBlocksReady && roomBookingsReady;
-  const canManageBookings = (isAdmin || allowBookingMutations) && bookingBlocksReady;
+  const canManageBookings = (isAdmin || allowBookingMutations) && bookingBlocksReady && roomBookingsReady;
   const isNarrowScreen = typeof window !== "undefined" ? window.innerWidth < 900 : false;
   const isMobile = typeof window !== "undefined" ? window.innerWidth < 768 : false;
   const currentTrainerId = currentUser?.id ? String(currentUser.id) : "";
@@ -977,7 +978,7 @@ export default function ScheduleTab({
     });
     return map;
   }, [eventsByDay, selectedRoom, primaryRoomName, hasMobileScheduleFilter, effectiveMobileFilterValue, mobileFilterValueIsValid, mobileFilterType, mobileTrainerFilterOptions, mobileDirectionFilterOptions, safeGroups]);
-  const canMutateEvent = (event) => bookingBlocksReady && canMutateScheduleEvent(event, {
+  const canMutateEvent = (event) => bookingBlocksReady && roomBookingsReady && canMutateScheduleEvent(event, {
     isAdmin,
     isAssignedToTrainer: isEventAssignedToCurrentTrainer(event),
   });
@@ -2605,7 +2606,7 @@ export default function ScheduleTab({
       </div> : null}
 
       {roomBookingsLoadStatus !== "ready" ? <div role={roomBookingsLoadStatus === "error" ? "alert" : "status"} style={{ ...cardSt, border: `1px solid ${roomBookingsLoadStatus === "error" ? theme.danger : theme.border}`, color: roomBookingsLoadStatus === "error" ? theme.danger : theme.textLight, display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-        <span>{roomBookingsLoadStatus === "error" ? "Поточні бронювання не завантажилися. Створення, редагування й активація закритих годин тимчасово вимкнені." : "Завантажуємо поточні бронювання… Керування закритими годинами тимчасово обмежене."}</span>
+        <span>{roomBookingsLoadStatus === "error" ? (roomBookingsLoadNotice || "Поточні бронювання не завантажилися. Зміни бронювань і керування закритими годинами тимчасово вимкнені.") : "Завантажуємо поточні бронювання… Зміни бронювань тимчасово вимкнені."}</span>
         {roomBookingsLoadStatus === "error" && onRetryRoomBookings ? <button type="button" style={btnS} onClick={() => onRetryRoomBookings().catch((error) => setBlockError(error?.message || "Повторне завантаження бронювань не вдалося"))}>Спробувати ще раз</button> : null}
       </div> : null}
 

@@ -142,6 +142,7 @@ export default function App() {
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
+  const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
   const roomBookingsLoadStatusRef = useRef("loading");
   const [scheduleBookingBlocks, setScheduleBookingBlocks] = useState([]);
   const [bookingBlocksLoadStatus, setBookingBlocksLoadStatus] = useState("loading");
@@ -566,6 +567,7 @@ export default function App() {
     setBookingBlocksLoadStatus("loading");
     roomBookingsLoadStatusRef.current = "loading";
     setRoomBookingsLoadStatus("loading");
+    setRoomBookingsLoadNotice("");
     try {
       const safeFetch = async (fn, label = "unknown") => { try { return await fn(); } catch (e) { console.warn(`[loadAllData] ${label} failed`, e); return null; } };
       const isCurrentAdmin = currentUser && isAdminEmail(currentUser.email, adminEmails);
@@ -718,6 +720,7 @@ export default function App() {
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
+        setRoomBookingsLoadNotice("");
         roomBookingsLoadStatusRef.current = "ready";
         setRoomBookingsLoadStatus("ready");
       } else {
@@ -2094,6 +2097,7 @@ export default function App() {
 
   const addRoomBookingAction = async (payload, options = {}) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const safePayload = isAdmin ? payload : normalizeTrainerSchedulePayload(payload);
     if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
     const created = options.overrideBookingBlock
@@ -2105,6 +2109,7 @@ export default function App() {
 
   const deleteRoomBookingAction = async (id) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       alert("Можна видаляти тільки власні резерви / індивідуальні тренування.");
@@ -2117,6 +2122,7 @@ export default function App() {
 
   const updateRoomBookingAction = async (id, payload, options = {}) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Зміни тимчасово вимкнені.");
     const booking = roomBookings.find((x) => String(x.id) === String(id));
     if (!canMutateRoomBooking(booking)) {
       throw new Error("Можна редагувати тільки власні резерви / індивідуальні тренування.");
@@ -2137,10 +2143,16 @@ export default function App() {
   };
   const removeRoomBookingOccurrenceAction = async (id, occurrenceDate) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
+    if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань потребує оновлення. Повторне видалення заблоковано.");
     await db.removeRoomBookingOccurrence(id, occurrenceDate);
     try { await reloadScheduleRoomBookingsAction(); }
-    catch (error) { console.warn("Occurrence removed, but room bookings refresh failed", error); }
-    return true;
+    catch (error) {
+      console.warn("Occurrence removed, but room bookings refresh failed", error);
+      setRoomBookings((previous) => previous.filter((booking) => String(booking.id) !== String(id)));
+      setRoomBookingsLoadNotice("Заняття видалено, але список бронювань не вдалося оновити. Повторно завантажте список перед наступною дією.");
+      return { removed: true, refreshRequired: true };
+    }
+    return { removed: true, refreshRequired: false };
   };
 
   const saveScheduleBookingBlockAction = async (block) => {
@@ -2183,6 +2195,7 @@ export default function App() {
     try {
       const bookings = await (isAdmin ? db.fetchRoomBookings() : db.fetchScheduleRoomBookings());
       setRoomBookings(bookings);
+      setRoomBookingsLoadNotice("");
       roomBookingsLoadStatusRef.current = "ready";
       setRoomBookingsLoadStatus("ready");
       return bookings;
@@ -2526,6 +2539,7 @@ export default function App() {
             cancelled={scheduleCancelled}
             roomBookings={roomBookings}
             roomBookingsLoadStatus={roomBookingsLoadStatus}
+            roomBookingsLoadNotice={roomBookingsLoadNotice}
             onRetryRoomBookings={reloadScheduleRoomBookingsAction}
             bookingBlocks={scheduleBookingBlocks}
             bookingBlocksLoadStatus={bookingBlocksLoadStatus}

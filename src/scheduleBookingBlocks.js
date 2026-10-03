@@ -156,11 +156,11 @@ export const getBookingBlockSaveGuard = (booking, blocks, rooms, isAdmin) => {
 
 export async function getFreshBookingBlockSaveGuard(booking, blocks, rooms, isAdmin, refreshBlocks) {
   let guard = getBookingBlockSaveGuard(booking, blocks, rooms, isAdmin);
-  if (!guard.conflict || isAdmin) return guard;
+  if (!guard.conflict) return guard;
   const freshBlocks = await refreshBlocks();
   if (!Array.isArray(freshBlocks)) throw new Error("Не вдалося оновити правила недоступності.");
   const reconciled = freshBlocks.map((block) => reconcileBookingBlockRooms(block, rooms));
-  guard = getBookingBlockSaveGuard(booking, reconciled, rooms, false);
+  guard = getBookingBlockSaveGuard(booking, reconciled, rooms, isAdmin);
   return guard;
 }
 
