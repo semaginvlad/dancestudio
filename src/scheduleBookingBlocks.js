@@ -16,7 +16,7 @@ export const timeMinutes = (value) => {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
   if (!match) return null;
   const result = Number(match[1]) * 60 + Number(match[2]);
-  return result >= 0 && result < 1440 && Number(match[2]) < 60 ? result : null;
+  return result >= 0 && result <= 1440 && Number(match[2]) < 60 && (result < 1440 || Number(match[2]) === 0) ? result : null;
 };
 export const intervalsOverlap = (startA, endA, startB, endB) => {
   const values = [startA, endA, startB, endB].map(timeMinutes);
@@ -72,7 +72,15 @@ export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames =
   }
   return result;
 }
-export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.weekdays || []).map(Number).includes(isoWeekday(date));
+export const isContinuousBookingBlock = (block) => Boolean(block?.startsOn < block?.endsOn && timeMinutes(block?.endTime) <= timeMinutes(block?.startTime));
+export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (isContinuousBookingBlock(block) || (block.weekdays || []).map(Number).includes(isoWeekday(date)));
+export const bookingBlockIntervalForDate = (block, date) => {
+  if (!blockMatchesDate(block, date)) return null;
+  if (!isContinuousBookingBlock(block)) return { startTime: block.startTime, endTime: block.endTime };
+  if (date === block.startsOn) return { startTime: block.startTime, endTime: "24:00" };
+  if (date === block.endsOn) return { startTime: "00:00", endTime: block.endTime };
+  return { startTime: "00:00", endTime: "24:00" };
+};
 
 const MS_PER_DAY = 86400000;
 const calendarDayNumber = (date) => Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / MS_PER_DAY);
@@ -128,10 +136,11 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
     if (block?.isActive === false) continue;
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = formatDateOnly(date);
-      if (!blockMatchesDate(block, key)) continue;
+      const interval = bookingBlockIntervalForDate(block, key);
+      if (!interval) continue;
       const availableRooms = rooms.length ? rooms : [{ id: "legacy:default", name: "Основна зала", isActive: true }];
       const matchingRooms = block.allRooms ? availableRooms.filter((room) => room.isActive !== false) : availableRooms.filter((room) => blockMatchesRoom(block, room));
-      matchingRooms.forEach((room) => occurrences.push({ ...block, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: block.title, startTime: block.startTime, endTime: block.endTime, startMin: timeMinutes(block.startTime), endMin: timeMinutes(block.endTime), readOnly: true }));
+      matchingRooms.forEach((room) => occurrences.push({ ...block, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: block.title, startTime: interval.startTime, endTime: interval.endTime, startMin: timeMinutes(interval.startTime), endMin: timeMinutes(interval.endTime), readOnly: true }));
     }
   }
   return occurrences;
@@ -142,8 +151,11 @@ export function findBookingBlockConflict(booking, blocks, rooms = []) {
   const room = rooms.find((item) => String(item.id) === String(booking.roomId)) || { id: booking.roomId, name: booking.roomName };
   if (!parseDateOnly(booking.date)) return null;
   for (const block of blocks || []) {
-    if (block?.isActive === false || !blockMatchesRoom(block, room) || !intervalsOverlap(booking.startTime, booking.endTime, block.startTime, block.endTime)) continue;
-    const conflictDate = bookingRecurrenceCandidates(booking, block.startsOn, block.endsOn).find((date) => blockMatchesDate(block, date));
+    if (block?.isActive === false || !blockMatchesRoom(block, room)) continue;
+    const conflictDate = bookingRecurrenceCandidates(booking, block.startsOn, block.endsOn).find((date) => {
+      const interval = bookingBlockIntervalForDate(block, date);
+      return interval && intervalsOverlap(booking.startTime, booking.endTime, interval.startTime, interval.endTime);
+    });
     if (conflictDate) return { block, date: conflictDate };
   }
   return null;
@@ -184,7 +196,9 @@ export function validateBookingBlock(input) {
   if (!parseDateOnly(input?.startsOn) || !parseDateOnly(input?.endsOn) || input.startsOn > input.endsOn) errors.dates = "Перевірте діапазон дат";
   const weekdays = [...new Set((input?.weekdays || []).map(Number))];
   if (!weekdays.length || weekdays.some((day) => day < 1 || day > 7)) errors.weekdays = "Оберіть дні тижня";
-  if (!intervalsOverlap(input?.startTime, input?.endTime, input?.startTime, input?.endTime)) errors.time = "Час завершення має бути пізніше";
+  const startMinutes = timeMinutes(input?.startTime);
+  const endMinutes = timeMinutes(input?.endTime);
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || (input?.startsOn === input?.endsOn && startMinutes >= endMinutes)) errors.time = "Для однієї дати час завершення має бути пізніше";
   if (!input?.allRooms && !(input?.roomIds || []).length) errors.rooms = "Оберіть хоча б одну залу";
   return { valid: !Object.keys(errors).length, errors };
 }

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 
 const migrationUrl = new URL("../supabase/migrations/20261002090000_schedule_booking_blocks.sql", import.meta.url);
+const continuousMigrationUrl = new URL("../supabase/migrations/20261003090000_schedule_booking_blocks_continuous_periods.sql", import.meta.url);
 const checksUrl = new URL("../supabase/tests/schedule_booking_blocks_checks.sql", import.meta.url);
 
 const expectDatabaseError = async (action, pattern) => {
@@ -31,6 +32,7 @@ test("booking-block trigger and explicit override RPC are transactionally author
       insert into public.trainers values('30000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001',true,null,null);
     `);
     await db.exec(await readFile(migrationUrl, "utf8"));
+    await db.exec(await readFile(continuousMigrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
 
     const roomId = "10000000-0000-0000-0000-000000000001";
@@ -124,6 +126,19 @@ test("booking-block trigger and explicit override RPC are transactionally author
       () => db.exec("update room_bookings set room_name='Перейменована зала' where title='Move me'"),
       /Цей час закритий адміністратором/,
     );
+
+    await db.exec(`
+      select set_config('test.admin','on',false); select set_config('test.trainer','off',false);
+      insert into schedule_booking_blocks(title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
+      values('Безперервно','2026-10-03','2026-10-04','16:00','12:30',true,array[1,2,3,4,5,6,7]::smallint[],'00000000-0000-0000-0000-000000000001');
+      select set_config('test.admin','off',false); select set_config('test.trainer','on',false);
+    `);
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-03','16:30','17:00','Continuous first','Перейменована зала')"), /Безперервно/);
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-04','11:30','12:00','Continuous last','Перейменована зала')"), /Безперервно/);
+    await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-03','15:00','16:00','Adjacent before','Перейменована зала'),('2026-10-04','12:30','13:00','Adjacent after','Перейменована зала')");
+    await db.exec("select set_config('test.admin','on',false); select set_config('test.trainer','off',false)");
+    const continuousOverride = await db.query(`select (public.crm_admin_override_create_room_booking('2026-10-04','11:30','12:00',null,null,'Continuous override','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','Перейменована зала')).id as id`);
+    assert.ok(continuousOverride.rows[0]?.id);
   } finally {
     await db.close();
   }

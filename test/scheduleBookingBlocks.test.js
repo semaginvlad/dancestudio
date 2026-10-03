@@ -52,7 +52,7 @@ test("booking-block mutation guard clears after failure and permits create/updat
 
 test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady[\s\S]*?\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
   assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, async \(\) =>/);
   assert.match(source,/return onSaveBookingBlock\?\.\(presentationDraft\)/);
   assert.match(source,/catch \(error\) \{ setBlockError/);
@@ -78,7 +78,7 @@ test("schedule UI distinguishes ready empty data from load failure and gates eve
   assert.match(source,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady && canMutateScheduleEvent/);
   assert.match(source,/role=\{bookingBlocksLoadStatus === "error" \? "alert" : "status"\}/);
   assert.match(source,/onRetryBookingBlocks\(\)\.catch/);
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady/);
 });
 
 test("room-booking loading fails closed and fresh rows drive block warnings", async () => {
@@ -166,4 +166,32 @@ test("committed occurrence removal with refresh failure invalidates stale bookin
   assert.match(schedule,/const canManageBookings = \(isAdmin \|\| allowBookingMutations\) && bookingBlocksReady && roomBookingsReady/);
   assert.match(schedule,/const canMutateEvent = \(event\) => bookingBlocksReady && roomBookingsReady/);
   assert.match(schedule,/roomBookingsLoadNotice \|\| "Поточні бронювання не завантажилися/);
+});
+
+test("continuous multi-date block validates and expands across both boundary dates", () => {
+  const continuous={...base,startsOn:"2026-10-03",endsOn:"2026-10-04",startTime:"16:00",endTime:"12:30",allRooms:true};
+  assert.equal(validateBookingBlock(continuous).valid,true);
+  assert.equal(validateBookingBlock({...continuous,endsOn:"2026-10-03"}).valid,false);
+  const events=expandBookingBlocks([continuous],"2026-10-03","2026-10-04",[rooms[0]]);
+  assert.deepEqual(events.map(({date,startTime,endTime})=>({date,startTime,endTime})),[
+    {date:"2026-10-03",startTime:"16:00",endTime:"24:00"},
+    {date:"2026-10-04",startTime:"00:00",endTime:"12:30"},
+  ]);
+});
+
+test("continuous multi-date block conflicts on both ends but permits adjacent bookings", () => {
+  const block={...base,startsOn:"2026-10-03",endsOn:"2026-10-04",startTime:"16:00",endTime:"12:30",allRooms:true};
+  assert.ok(findBookingBlockConflict({date:"2026-10-03",startTime:"16:30",endTime:"17:00",roomName:"Перша"},[block],rooms));
+  assert.ok(findBookingBlockConflict({date:"2026-10-04",startTime:"11:30",endTime:"12:00",roomName:"Перша"},[block],rooms));
+  assert.equal(findBookingBlockConflict({date:"2026-10-03",startTime:"15:00",endTime:"16:00",roomName:"Перша"},[block],rooms),null);
+  assert.equal(findBookingBlockConflict({date:"2026-10-04",startTime:"12:30",endTime:"13:00",roomName:"Перша"},[block],rooms),null);
+});
+
+test("selected-room UI exposes controlled scope, loading/error states and multi-select", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/name="booking-block-room-scope"/);
+  assert.match(source,/studioRoomsLoadStatus === "loading"/);
+  assert.match(source,/studioRoomsLoadStatus === "error"/);
+  assert.match(source,/selectableBlockRooms\.map/);
+  assert.match(source,/!blockDraft\.allRooms && \(!\(blockDraft\.roomIds \|\| \[\]\)\.length/);
 });
