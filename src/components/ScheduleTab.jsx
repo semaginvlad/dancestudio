@@ -8,7 +8,8 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
+import { loadStudioRoomsState } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -486,6 +487,7 @@ export default function ScheduleTab({
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
   const [studioRooms, setStudioRooms] = useState([]);
+  const [studioRoomsLoadStatus, setStudioRoomsLoadStatus] = useState("loading");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -622,6 +624,10 @@ export default function ScheduleTab({
   const reconciledBookingBlocks = useMemo(
     () => safeBookingBlocks.map((block) => reconcileBookingBlockRooms(block, studioRooms)),
     [safeBookingBlocks, studioRooms],
+  );
+  const selectableBlockRooms = useMemo(
+    () => selectBookingBlockRooms(studioRooms, blockDraft),
+    [studioRooms, blockDraft?.roomIds, blockDraft?.roomNames],
   );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
   const studioRoomNameById = useMemo(
@@ -2346,15 +2352,14 @@ export default function ScheduleTab({
   };
   const periodLabel = calendarPeriodLabel(viewMode, selectedDate, weekStart);
   const periodNavigationLabels = navigationLabels(viewMode);
-  const loadStudioRooms = async () => {
-    try {
-      const rooms = await fetchStudioRooms({ includeInactive: isAdmin });
-      setStudioRooms(Array.isArray(rooms) ? rooms : []);
-    } catch (error) {
-      console.warn("Failed to load studio rooms:", error);
-      setStudioRooms([]);
-    }
-  };
+  const loadStudioRooms = () => loadStudioRoomsState(
+    () => fetchStudioRooms({ includeInactive: isAdmin, strict: true }),
+    {
+      setStatus: setStudioRoomsLoadStatus,
+      setRooms: setStudioRooms,
+      onError: (error) => console.warn("Failed to load studio rooms:", error),
+    },
+  );
   const addCustomRoom = async () => {
     const next = normalizeRoomName(newRoomName);
     if (!next) return;
@@ -2623,13 +2628,18 @@ export default function ScheduleTab({
           <input style={inputSt} maxLength={2000} value={blockDraft.note || ""} onChange={e=>setBlockDraft(p=>({...p,note:e.target.value}))} placeholder="Нотатка" />
           <input style={inputSt} type="date" value={blockDraft.startsOn} onChange={e=>setBlockDraft(p=>({...p,startsOn:e.target.value}))}/><input style={inputSt} type="date" value={blockDraft.endsOn} onChange={e=>setBlockDraft(p=>({...p,endsOn:e.target.value}))}/>
           <input style={inputSt} type="time" value={blockDraft.startTime} onChange={e=>setBlockDraft(p=>({...p,startTime:e.target.value}))}/><input style={inputSt} type="time" value={blockDraft.endTime} onChange={e=>setBlockDraft(p=>({...p,endTime:e.target.value}))}/>
-          <label><input type="radio" checked={blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:true,roomIds:[]}))}/> Усі зали</label><label><input type="radio" checked={!blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:false}))}/> Обрані зали</label>
-          {!blockDraft.allRooms ? <div style={{gridColumn:"1/-1",display:"flex",gap:8,flexWrap:"wrap"}}>{activeStudioRooms.map(room=><label key={room.id}><input type="checkbox" checked={blockDraft.roomIds.includes(room.id)} onChange={()=>setBlockDraft(p=>({...p,roomIds:p.roomIds.includes(room.id)?p.roomIds.filter(id=>id!==room.id):[...p.roomIds,room.id]}))}/>{room.name}</label>)}</div>:null}
+          <label><input name="booking-block-room-scope" type="radio" checked={blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:true}))}/> Усі зали</label><label><input name="booking-block-room-scope" type="radio" checked={!blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:false}))}/> Обрані зали</label>
+          {!blockDraft.allRooms ? <div style={{gridColumn:"1/-1",display:"flex",gap:8,flexWrap:"wrap"}}>
+            {studioRoomsLoadStatus === "loading" ? <span>Завантаження залів…</span> : null}
+            {studioRoomsLoadStatus === "error" ? <><span role="alert" style={{color:theme.danger}}>Не вдалося завантажити зали.</span><button type="button" style={btnS} onClick={loadStudioRooms}>Повторити</button></> : null}
+            {studioRoomsLoadStatus === "ready" && !selectableBlockRooms.length ? <span>Немає доступних залів.</span> : null}
+            {studioRoomsLoadStatus === "ready" ? selectableBlockRooms.map(room=><label key={room.id}><input type="checkbox" checked={(blockDraft.roomIds || []).map(String).includes(String(room.id))} onChange={()=>setBlockDraft(p=>({...p,roomIds:(p.roomIds || []).map(String).includes(String(room.id))?p.roomIds.filter(id=>String(id)!==String(room.id)):[...p.roomIds,room.id]}))}/>{room.name}{room.isActive === false ? " (архівна)" : ""}</label>) : null}
+          </div>:null}
           <div style={{gridColumn:"1/-1",display:"flex",gap:5,flexWrap:"wrap"}}>{[{v:1,l:"ПН"},{v:2,l:"ВТ"},{v:3,l:"СР"},{v:4,l:"ЧТ"},{v:5,l:"ПТ"},{v:6,l:"СБ"},{v:7,l:"НД"}].map(day=><button type="button" key={day.v} style={blockDraft.weekdays.includes(day.v)?btnP:btnS} onClick={()=>setBlockDraft(p=>({...p,weekdays:p.weekdays.includes(day.v)?p.weekdays.filter(v=>v!==day.v):[...p.weekdays,day.v].sort()}))}>{day.l}</button>)}</div>
           <label><input type="checkbox" checked={blockDraft.isActive} onChange={e=>setBlockDraft(p=>({...p,isActive:e.target.checked}))}/> Активне</label>
           <div><b>{blockDraft.title}</b> · {blockDraft.startsOn}—{blockDraft.endsOn} · {blockDraft.startTime}–{blockDraft.endTime}</div>
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
+          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady || (!blockDraft.allRooms && (!(blockDraft.roomIds || []).length || studioRoomsLoadStatus !== "ready"))}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
         </div> : <button style={btnP} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>+ Нове правило</button>}
       </div> : null}
 
@@ -3427,9 +3437,10 @@ export default function ScheduleTab({
                       <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * dayHourPx, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
-                      const dur = Math.max(0, e.endMin - e.startMin);
-                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * dayHourPx;
-                      const height = Math.max(scheduleMinEventHeight, (dur / 60) * dayHourPx);
+                      const geometry = weekEventGeometry(e.startMin, e.endMin, dayHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                      if (!geometry) return null;
+                      const { top } = geometry;
+                      const height = Math.max(scheduleMinEventHeight, geometry.height);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -3517,7 +3528,8 @@ export default function ScheduleTab({
                     {overviewDays.map(({ date, events, sameRoomConflictIds }) => <button key={date} data-week-date={date} type="button" aria-label={`Відкрити день ${date}, подій: ${events.length}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ position: "relative", width: dayWidth, scrollSnapAlign: "start", height: miniHeight, padding: 0, border: 0, borderLeft: `1px solid ${weekRoomDividerColor}`, background: date === toLocalDateKey(new Date()) ? `${theme.primary}0d` : "transparent", cursor: "pointer" }}>
                       {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, index) => <span key={index} aria-hidden="true" style={{ position: "absolute", top: index * miniHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: .28 }} />)}
                       {events.map((event) => {
-                        const geometry = weekEventGeometry(event.startMin, event.endMin, miniHourPx, DAY_START_HOUR);
+                        const geometry = weekEventGeometry(event.startMin, event.endMin, miniHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                        if (!geometry) return null;
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}55`, border: event.color } : palette[colorKey(event)] || palette.default;
                         const width = 100 / event.colCount;
@@ -3609,7 +3621,9 @@ export default function ScheduleTab({
                       {canManageBookings && hoverSlot?.date === date && hoverSlot?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} /> : null}
                       {canManageBookings && selection?.date === date && selection?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((selection.startMinute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: ((selection.endMinute - selection.startMinute) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} /> : null}
                       {lane.events.map((event) => {
-                        const { top, height } = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR);
+                        const geometry = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                        if (!geometry) return null;
+                        const { top, height } = geometry;
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
                         const conflictCount = event.hasRoomConflict ? event.simultaneous.length : 1;

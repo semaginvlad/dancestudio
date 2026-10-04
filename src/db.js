@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
+import { resolveStudioRoomsResponse } from './studioRooms'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -1808,16 +1809,12 @@ export async function upsertTrainingLessonReport(report = {}) {
   return mapTrainingLessonReport(data);
 }
 
-export async function fetchStudioRooms({ includeInactive = false } = {}) {
+export async function fetchStudioRooms({ includeInactive = false, strict = false } = {}) {
   const request = includeInactive
     ? supabase.from('studio_rooms').select('id,name,is_active,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
     : supabase.rpc('crm_fetch_active_studio_rooms');
   const { data, error } = await request;
-  if (error) {
-    console.warn('studio_rooms:', error.message);
-    return [];
-  }
-  return (data || []).map(mapStudioRoom);
+  return resolveStudioRoomsResponse(data, error, { strict }).map(mapStudioRoom);
 }
 
 export async function createStudioRoom(name) {
