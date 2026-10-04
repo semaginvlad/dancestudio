@@ -202,12 +202,25 @@ export const roomLaneLayout = (events = [], roomNames = [], unknownRoomName = "Ð
   });
 };
 
-export const weekEventGeometry = (startMin, endMin, hourPx, dayStartHour = 8) => ({
-  top: ((Number(startMin) - dayStartHour * 60) / 60) * Number(hourPx),
-  // Never inflate the outer box: doing so makes adjacent short bookings look
-  // as though they overlap. Compact content is handled inside the card.
-  height: Math.max(0, ((Number(endMin) - Number(startMin)) / 60) * Number(hourPx)),
-});
+export const visibleCalendarInterval = (startMin, endMin, dayStartHour = 8, dayEndHour = 22) => {
+  const values = [startMin, endMin, dayStartHour, dayEndHour].map(Number);
+  if (!values.every(Number.isFinite)) return null;
+  const visibleStartMin = Math.max(values[0], values[2] * 60);
+  const visibleEndMin = Math.min(values[1], values[3] * 60);
+  return visibleStartMin < visibleEndMin ? { visibleStartMin, visibleEndMin } : null;
+};
+
+export const weekEventGeometry = (startMin, endMin, hourPx, dayStartHour = 8, dayEndHour = 22) => {
+  const interval = visibleCalendarInterval(startMin, endMin, dayStartHour, dayEndHour);
+  if (!interval) return null;
+  return {
+    ...interval,
+    top: ((interval.visibleStartMin - dayStartHour * 60) / 60) * Number(hourPx),
+    // Never inflate the outer box: doing so makes adjacent short bookings look
+    // as though they overlap. Compact content is handled inside the card.
+    height: ((interval.visibleEndMin - interval.visibleStartMin) / 60) * Number(hourPx),
+  };
+};
 
 export const weekLaneSelection = ({ date, roomName, startY, endY, hourPx, dayStartHour = 8, dayEndHour = 22 }) => {
   const toQuarter = (y) => Math.round((dayStartHour * 60 + (Number(y) / Number(hourPx)) * 60) / 15) * 15;

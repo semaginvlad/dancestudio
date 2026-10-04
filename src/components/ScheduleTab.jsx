@@ -3437,9 +3437,10 @@ export default function ScheduleTab({
                       <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * dayHourPx, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
-                      const dur = Math.max(0, e.endMin - e.startMin);
-                      const top = ((e.startMin - DAY_START_HOUR * 60) / 60) * dayHourPx;
-                      const height = Math.max(scheduleMinEventHeight, (dur / 60) * dayHourPx);
+                      const geometry = weekEventGeometry(e.startMin, e.endMin, dayHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                      if (!geometry) return null;
+                      const { top } = geometry;
+                      const height = Math.max(scheduleMinEventHeight, geometry.height);
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -3527,7 +3528,8 @@ export default function ScheduleTab({
                     {overviewDays.map(({ date, events, sameRoomConflictIds }) => <button key={date} data-week-date={date} type="button" aria-label={`Відкрити день ${date}, подій: ${events.length}`} onClick={() => { setSelectedDate(date); setMobileWeekMode("day"); }} style={{ position: "relative", width: dayWidth, scrollSnapAlign: "start", height: miniHeight, padding: 0, border: 0, borderLeft: `1px solid ${weekRoomDividerColor}`, background: date === toLocalDateKey(new Date()) ? `${theme.primary}0d` : "transparent", cursor: "pointer" }}>
                       {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, index) => <span key={index} aria-hidden="true" style={{ position: "absolute", top: index * miniHourPx, left: 0, right: 0, borderTop: `1px solid ${theme.border}`, opacity: .28 }} />)}
                       {events.map((event) => {
-                        const geometry = weekEventGeometry(event.startMin, event.endMin, miniHourPx, DAY_START_HOUR);
+                        const geometry = weekEventGeometry(event.startMin, event.endMin, miniHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                        if (!geometry) return null;
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}55`, border: event.color } : palette[colorKey(event)] || palette.default;
                         const width = 100 / event.colCount;
@@ -3619,7 +3621,9 @@ export default function ScheduleTab({
                       {canManageBookings && hoverSlot?.date === date && hoverSlot?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} /> : null}
                       {canManageBookings && selection?.date === date && selection?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((selection.startMinute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: ((selection.endMinute - selection.startMinute) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} /> : null}
                       {lane.events.map((event) => {
-                        const { top, height } = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR);
+                        const geometry = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR, DAY_END_HOUR);
+                        if (!geometry) return null;
+                        const { top, height } = geometry;
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
                         const conflictCount = event.hasRoomConflict ? event.simultaneous.length : 1;

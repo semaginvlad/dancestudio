@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEventDetails, calendarStateForDate, canMutateScheduleEvent, compactDayPreview, getTrainerInitials, isBookingBlockEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
+import { buildEventDetails, calendarStateForDate, canMutateScheduleEvent, compactDayPreview, getTrainerInitials, isBookingBlockEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, recurringActionLabels, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, visibleCalendarInterval, weekEventGeometry, weekLaneSelection, weekEventLayout } from "../src/scheduleCalendar.js";
 
 const key = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 
@@ -335,6 +335,35 @@ test("adjacent fifteen-minute week cards have exact non-overlapping geometry", (
   }
 });
 
+test("continuous booking-block geometry is clipped to visible grid hours without changing canonical minutes", () => {
+  const grid = { hourPx: 60, dayStartHour: 8, dayEndHour: 22 };
+  assert.deepEqual(weekEventGeometry(0, 750, grid.hourPx, grid.dayStartHour, grid.dayEndHour), {
+    visibleStartMin: 480, visibleEndMin: 750, top: 0, height: 270,
+  });
+  assert.deepEqual(weekEventGeometry(0, 1440, grid.hourPx, grid.dayStartHour, grid.dayEndHour), {
+    visibleStartMin: 480, visibleEndMin: 1320, top: 0, height: 840,
+  });
+  assert.deepEqual(weekEventGeometry(960, 1440, grid.hourPx, grid.dayStartHour, grid.dayEndHour), {
+    visibleStartMin: 960, visibleEndMin: 1320, top: 480, height: 360,
+  });
+  assert.deepEqual(visibleCalendarInterval(0, 750, grid.dayStartHour, grid.dayEndHour), { visibleStartMin: 480, visibleEndMin: 750 });
+});
+
+test("time-grid geometry omits intervals entirely outside visible hours", () => {
+  assert.equal(weekEventGeometry(0, 420, 60, 8, 22), null);
+  assert.equal(weekEventGeometry(1320, 1440, 60, 8, 22), null);
+  assert.equal(weekEventGeometry(750, 750, 60, 8, 22), null);
+});
+
+test("desktop week, mobile selected-day and mobile overview share clipped presentation geometry", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.equal((source.match(/weekEventGeometry\([^\n]+DAY_START_HOUR, DAY_END_HOUR\)/g) || []).length, 3);
+  assert.match(source, /weekEventGeometry\(e\.startMin, e\.endMin, dayHourPx, DAY_START_HOUR, DAY_END_HOUR\);\s*if \(!geometry\) return null/);
+  assert.match(source, /weekEventGeometry\(event\.startMin, event\.endMin, miniHourPx, DAY_START_HOUR, DAY_END_HOUR\);\s*if \(!geometry\) return null/);
+  assert.match(source, /weekEventGeometry\(event\.startMin, event\.endMin, weekHourPx, DAY_START_HOUR, DAY_END_HOUR\);\s*if \(!geometry\) return null/);
+  assert.match(source, /setSelectedEventDetails\(event\)/);
+});
+
 test("room-lane creation remains available on desktop and mobile without covering cards", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /canManageBookings \? <div[\s\S]*?onPointerDown=[\s\S]*?onPointerMove=[\s\S]*?onPointerUp=/);
@@ -459,7 +488,7 @@ test("mobile week mini-grid uses dynamic overlap columns and exact geometry", as
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const overview = source.slice(source.indexOf('data-testid="mobile-week-overview"'), source.indexOf('{(!isMobile || mobileWeekMode === "day")'));
   assert.match(overview, /events: overlapEventLayout\(events\)/);
-  assert.match(overview, /weekEventGeometry\(event\.startMin, event\.endMin, miniHourPx, DAY_START_HOUR\)/);
+  assert.match(overview, /weekEventGeometry\(event\.startMin, event\.endMin, miniHourPx, DAY_START_HOUR, DAY_END_HOUR\)/);
   assert.match(overview, /const width = 100 \/ event\.colCount/);
   assert.match(overview, /const left = event\.colIndex \* width/);
   assert.match(overview, /height: geometry\.height/);
