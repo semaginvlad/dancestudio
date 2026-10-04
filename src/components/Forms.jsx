@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { theme, DIRECTIONS, PLAN_TYPES, PAY_METHODS, inputSt, btnP, btnS } from "../shared/constants";
 import { addMonth, today } from "../shared/utils";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
+import { createSynchronousGuard, subscriptionErrorMessage } from "../subscriptionMutations";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -66,7 +67,11 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
   );
 }
 
-export function SubForm({ initial, onDone, onCancel, students, groups, studentGrps, subs = [] }) {
+export function SubForm({ initial, onDone, onCancel, onPendingChange, students, groups, studentGrps, subs = [] }) {
+  const submitGuard = useRef(null);
+  if (!submitGuard.current) submitGuard.current = createSynchronousGuard();
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [studentId, setStudentId] = useState(initial?.studentId || "");
   const [groupId, setGroupId] = useState(initial?.groupId || "");
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
@@ -258,9 +263,10 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
           </div>
         </Field>
       </div>
+      {submitError && <div role="alert" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "rgba(234,84,85,0.12)", color: theme.danger, fontWeight: 700 }}>{submitError}</div>}
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
-        <button type="button" style={btnS} onClick={onCancel}>Скасувати</button>
-        <button type="button" style={{ ...btnP, opacity: studentId && groupId ? 1 : .4 }} onClick={() => {
+        <button type="button" style={btnS} onClick={onCancel} disabled={submitting}>Скасувати</button>
+        <button type="button" disabled={submitting || !studentId || !groupId} style={{ ...btnP, opacity: studentId && groupId && !submitting ? 1 : .4 }} onClick={async () => {
           if (!studentId || !groupId) return;
           if (selectedUsedTrainings > selectedTotalTrainings) {
             alert("Використані тренування не можуть перевищувати загальну кількість.");
@@ -274,20 +280,30 @@ export function SubForm({ initial, onDone, onCancel, students, groups, studentGr
             const ok = window.confirm("Увага: знайдено перетин з іншими абонементами. Зберегти ретроспективний абонемент?");
             if (!ok) return;
           }
-          onDone({
-            studentId, groupId, planType, startDate,
-            endDate: selectedEndDate,
-            // Звичайний режим: activationDate від поточної логіки.
-            // Ретроспективний режим: повністю ручне введення.
-            activationDate: selectedActivationDate,
-            totalTrainings: selectedTotalTrainings,
-            usedTrainings: selectedUsedTrainings,
-            amount, paid: initial?.id ? paid : true, payMethod, discountPct, discountSource,
-            basePrice, notes,
-            notificationSent: initial?.notificationSent || false
-          });
+          if (!submitGuard.current.tryLock()) return;
+          setSubmitting(true);
+          onPendingChange?.(true);
+          setSubmitError("");
+          try {
+            await onDone({
+              studentId, groupId, planType, startDate,
+              endDate: selectedEndDate,
+              activationDate: selectedActivationDate,
+              totalTrainings: selectedTotalTrainings,
+              usedTrainings: selectedUsedTrainings,
+              amount, paid: initial?.id ? paid : true, payMethod, discountPct, discountSource,
+              basePrice, notes,
+              notificationSent: initial?.notificationSent || false
+            });
+          } catch (error) {
+            setSubmitError(subscriptionErrorMessage(initial?.id ? "update" : "create", error));
+          } finally {
+            submitGuard.current.release();
+            setSubmitting(false);
+            onPendingChange?.(false);
+          }
         }}>
-          {initial?.id ? "Зберегти зміни" : "Створити абонемент"}
+          {submitting ? "Збереження…" : initial?.id ? "Зберегти зміни" : "Створити абонемент"}
         </button>
       </div>
     </div>
