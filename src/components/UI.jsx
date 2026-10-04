@@ -1,17 +1,26 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { theme, DIRECTIONS, inputSt } from "../shared/constants";
 import { getDisplayName } from "../shared/utils";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildGroupSelectSections } from "../shared/groupSelect";
 
-export function Modal({open, onClose, title, children, wide, variant}){
+export function Modal({open, onClose, title, children, wide, variant, closeDisabled = false}){
+  useEffect(() => {
+    if (!open || closeDisabled) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeDisabled, onClose, open]);
+
   if(!open) return null;
   const isStudentsMobile = variant === "students-mobile";
   const isTrialBookingMobile = variant === "trial-booking-mobile";
   const isPaymentsMobile = variant === "payments-mobile";
   const isAdminMobile = variant === "admin-mobile";
   return(
-    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isTrialBookingMobile ? " ds-modal-overlay--trial-booking-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={onClose}>
+    <div className={`ds-modal-overlay${isStudentsMobile ? " ds-modal-overlay--students-mobile" : ""}${isTrialBookingMobile ? " ds-modal-overlay--trial-booking-mobile" : ""}${isPaymentsMobile ? " ds-modal-overlay--payments-mobile" : ""}${isAdminMobile ? " ds-modal-overlay--admin-mobile" : ""}`} style={{position:"fixed", inset:0, background:"rgba(31, 31, 31, 0.4)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16}} onClick={() => { if (!closeDisabled) onClose?.(); }}>
       <style>{`
         @media (max-width: 768px) {
           .ds-modal-overlay--trial-booking-mobile { align-items: flex-end !important; padding: max(10px, env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) !important; overflow: hidden !important; }
@@ -58,7 +67,7 @@ export function Modal({open, onClose, title, children, wide, variant}){
       <div className="ds-modal-panel" onClick={e=>e.stopPropagation()} style={{background:theme.card, borderRadius:32, width:wide?800:500, maxWidth:"100%", maxHeight:"min(90dvh, 90vh)", overflow:"hidden", boxShadow: "0 24px 48px rgba(0,0,0,0.1)", display:"flex", flexDirection:"column"}}>
         <div className="ds-modal-header" style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"24px 32px 16px", borderBottom:`1px solid ${theme.border}`}}>
           <h3 style={{margin:0, fontSize:22, color:theme.textMain, fontWeight:700}}>{title}</h3>
-          <button type="button" onClick={onClose} style={{background:theme.input, borderRadius:"50%", width:40, height:40, border:"none", color:theme.textMuted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize: 18}}>✕</button>
+          <button type="button" aria-label="Закрити" disabled={closeDisabled} onClick={onClose} style={{background:theme.input, borderRadius:"50%", width:40, height:40, border:"none", color:theme.textMuted, cursor:closeDisabled ? "not-allowed" : "pointer", opacity:closeDisabled ? .5 : 1, display:"flex", alignItems:"center", justifyContent:"center", fontSize: 18}}>✕</button>
         </div>
         <div className="ds-modal-body" style={{overflowY:"auto", overflowX:"hidden", minHeight:0, padding:"16px 32px calc(24px + env(safe-area-inset-bottom))"}}>
           {children}
