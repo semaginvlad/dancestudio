@@ -81,7 +81,7 @@ test("booking-block loading fails closed without erasing the last successful lis
   assert.match(app,/bookingBlocksLoadStatusRef\.current = "loading";\s*setBookingBlocksLoadStatus\("loading"\)/);
 });
 
-test("room rename reconciles immediately and refresh failure remains fail-closed", async () => { const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8"); assert.match(source,/setStudioRooms\(\(previous\) => previous\.map/); assert.match(source,/try \{ await onRetryBookingBlocks\(\); \}\s*catch \(refreshError\)/); assert.match(source,/fetchStudioRooms\(\{ includeInactive: isAdmin \}\)/); });
+test("room rename reconciles immediately and refresh failure remains fail-closed", async () => { const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8"); assert.match(source,/setStudioRooms\(\(previous\) => previous\.map/); assert.match(source,/try \{ await onRetryBookingBlocks\(\); \}\s*catch \(refreshError\)/); assert.match(source,/fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/); });
 
 test("schedule UI distinguishes ready empty data from load failure and gates every booking mutation", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
@@ -211,6 +211,7 @@ test("selected-room UI exposes controlled scope, loading/error states and multi-
   assert.match(source,/name="booking-block-room-scope"/);
   assert.match(source,/studioRoomsLoadStatus === "loading"/);
   assert.match(source,/studioRoomsLoadStatus === "error"/);
+  assert.match(source,/onClick=\{loadStudioRooms\}>Повторити<\/button>/);
   assert.match(source,/selectableBlockRooms\.map/);
   assert.match(source,/!blockDraft\.allRooms && \(!\(blockDraft\.roomIds \|\| \[\]\)\.length/);
 });
