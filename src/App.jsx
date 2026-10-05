@@ -59,6 +59,7 @@ import {
   sendTestPushRequest,
 } from "./push";
 import { applyPwaUpdate, subscribeToPwaUpdates } from "./pwaUpdate";
+import { canEditSubscription, commitThenRefresh, composeSubscriptionNotice, createSynchronousGuard, refreshSubscriptionsOnly, subscriptionErrorMessage } from "./subscriptionMutations";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -159,6 +160,10 @@ export default function App() {
   const [searchQ, setSearchQ] = useState("");
   
   const [prefillSub, setPrefillSub] = useState(null);
+  const [subscriptionNotice, setSubscriptionNotice] = useState(null);
+  const [subscriptionMutationPending, setSubscriptionMutationPending] = useState(false);
+  const subscriptionDeleteGuards = useRef(new Map());
+  const [deletingSubscriptionIds, setDeletingSubscriptionIds] = useState(() => new Set());
 
   const [filterDir, setFilterDir] = useStickyState("all", "ds_filterDir");
   const [filterGroup, setFilterGroup] = useStickyState("all", "ds_filterGroup");
@@ -1923,11 +1928,29 @@ export default function App() {
 
   const deleteSubAction = async(id) => {
     if(!confirm("Видалити абонемент?")) return;
+    if (!subscriptionDeleteGuards.current.has(String(id))) subscriptionDeleteGuards.current.set(String(id), createSynchronousGuard());
+    const guard = subscriptionDeleteGuards.current.get(String(id));
+    if (!guard.tryLock()) return;
+    setDeletingSubscriptionIds((prev) => new Set(prev).add(String(id)));
+    setSubscriptionNotice(null);
     try {
-      setAttn(p=>p.filter(a=>a.subId!==id));
-      setSubs(p=>p.filter(s=>s.id!==id));
-      if(db.deleteSub) await db.deleteSub(id);
-    } catch(e) { console.warn("Помилка видалення абонемента:", e); }
+      await db.deleteSub(id);
+      setAttn(p=>p.filter(a=>String(a.subId)!==String(id)));
+      setSubs(p=>p.filter(s=>String(s.id)!==String(id)));
+    } catch(e) {
+      console.warn("Помилка видалення абонемента:", e);
+      setSubscriptionNotice({ type: "error", message: subscriptionErrorMessage("delete", e) });
+    } finally {
+      guard.release();
+      setDeletingSubscriptionIds((prev) => { const next = new Set(prev); next.delete(String(id)); return next; });
+    }
+  };
+
+  const openSubscriptionEdit = (subscription) => {
+    if (!canEditSubscription(subscription, deletingSubscriptionIds)) return false;
+    setEditItem(subscription);
+    setModal("editSub");
+    return true;
   };
 
   const syncStudentGroupLinks = async (studentId, selectedGroups) => {
@@ -2341,9 +2364,14 @@ export default function App() {
 
   const createSubscriptionAction = async (payload) => {
     const compensatedPayload = getCancelledTrainingCompensatedSubscription(payload);
-    try {
+    setSubscriptionNotice(null);
+    let convertedAttendance = [];
+    let followUpWarning = "";
+    const result = await commitThenRefresh({
+      mutate: async () => {
       let createdSub = await db.insertSub(compensatedPayload);
-      const savedSub = createdSub || { id: uid(), ...compensatedPayload, notificationSent: false };
+      if (!createdSub?.id) throw new Error("Сервер не повернув збережений абонемент");
+      const savedSub = createdSub;
 
       try {
         const conversion = await db.convertDebtAttendanceToSubscription({
@@ -2353,7 +2381,7 @@ export default function App() {
           startDate: savedSub.startDate || compensatedPayload.startDate,
           endDate: savedSub.endDate || compensatedPayload.endDate,
         });
-        applyConvertedDebtAttendance(conversion?.attendance || []);
+        convertedAttendance = conversion?.attendance || [];
         if (conversion?.subscription) {
           createdSub = {
             ...savedSub,
@@ -2363,25 +2391,52 @@ export default function App() {
         }
       } catch (conversionErr) {
         console.warn("Failed to convert debt attendance after subscription creation:", conversionErr);
+        followUpWarning = "Абонемент збережено, але автоматичне погашення боргу не завершено. Оновіть список і перевірте борг.";
       }
+      return createdSub;
+      },
+      applyCanonical: (canonical) => {
+        setSubs((prev) => [canonical, ...(prev || []).filter((sub) => String(sub.id) !== String(canonical.id))]);
+        applyConvertedDebtAttendance(convertedAttendance);
+      },
+      refresh: () => db.fetchSubs({ includeFinancial: true }),
+      applyRefresh: setSubs,
+      onRefreshFailure: (error) => {
+        console.warn("Failed to refresh subscriptions after subscription creation:", error);
+      },
+    });
+    setSubscriptionNotice(composeSubscriptionNotice({ followUpWarning, refreshed: result.refreshed }));
+    await clearSubscriptionWarningForStudent(result.canonical.groupId, result.canonical.studentId);
+    setModal(null);
+    setPrefillSub(null);
+    return result.canonical;
+  };
 
-      const finalSub = createdSub || savedSub;
-      try {
-        const freshSubs = await db.fetchSubs({ includeFinancial: true });
-        setSubs(freshSubs);
-      } catch (refreshErr) {
-        console.warn("Failed to refresh subscriptions after subscription creation:", refreshErr);
-        setSubs((prev) => [finalSub, ...(prev || []).filter((sub) => String(sub.id) !== String(finalSub.id))]);
-      }
-      await clearSubscriptionWarningForStudent(finalSub.groupId || compensatedPayload.groupId, finalSub.studentId || compensatedPayload.studentId);
-      setModal(null);
-      setPrefillSub(null);
-    } catch (e) {
-      console.warn(e);
-      setSubs((prev) => [{ id: uid(), ...compensatedPayload, notificationSent: false }, ...(prev || [])]);
-      setModal(null);
-      setPrefillSub(null);
-    }
+  const updateSubscriptionAction = async (payload) => {
+    const id = editItem?.id;
+    if (!id) throw new Error("Абонемент для редагування не знайдено");
+    setSubscriptionNotice(null);
+    const result = await commitThenRefresh({
+      mutate: () => db.updateSub(id, payload),
+      applyCanonical: (canonical) => setSubs((prev) => prev.map((row) => String(row.id) === String(id) ? canonical : row)),
+      refresh: () => db.fetchSubs({ includeFinancial: true }),
+      applyRefresh: setSubs,
+      onRefreshFailure: (error) => {
+        console.warn("Failed to refresh subscriptions after subscription update:", error);
+        setSubscriptionNotice({ type: "warning", retryable: true, message: "Зміни збережено, але список не вдалося оновити. Повторіть лише оновлення списку." });
+      },
+    });
+    setModal(null);
+    setEditItem(null);
+    return result.canonical;
+  };
+
+  const retrySubscriptionsRefresh = async () => {
+    await refreshSubscriptionsOnly({
+      fetchSubscriptions: () => db.fetchSubs({ includeFinancial: true }),
+      applySubscriptions: setSubs,
+      setNotice: setSubscriptionNotice,
+    });
   };
 
   const studentsMobileModalVariant = tab === "students" ? "students-mobile" : undefined;
@@ -2507,6 +2562,7 @@ export default function App() {
       </nav>
 
       <main className={tab === "messages" ? "app-main-messages" : undefined} style={{maxWidth:1200, margin:"0 auto", padding:"0 24px"}}>
+        {subscriptionNotice && <div role="alert" data-subscription-notice style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 14, background: subscriptionNotice.type === "error" ? "rgba(234,84,85,0.12)" : "rgba(245,158,11,0.14)", color: subscriptionNotice.type === "error" ? theme.danger : theme.warning, fontWeight: 700 }}>{subscriptionNotice.message}{subscriptionNotice.retryable && <button type="button" style={{ ...btnS, marginLeft: 12 }} onClick={retrySubscriptionsRefresh}>Оновити список</button>}</div>}
         {isAdmin && tab==="dashboard" && (
           <DashboardTab
             subs={subs}
@@ -2562,8 +2618,7 @@ export default function App() {
             scheduleScale={safeScheduleScale}
           />
         )}
-
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: (sub) => { setEditItem(sub); setModal("editSub"); } } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
@@ -2973,13 +3028,13 @@ export default function App() {
                   </button>
                   {isExpanded && <div className="payments-dir-body">
                     <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}} className="payments-desktop-table-inner">
-                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}><thead><tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}><th style={{padding: "16px 14px", width: 40}}>#</th><th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 14px", fontWeight: 700}}>Група</th><th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th><th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th><th style={{padding: "16px 14px", fontWeight: 700}}>Термін</th><th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th><th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th></tr></thead><tbody>{finalSubs.map((sub, index) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}><td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td><td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{getDisplayName(st)}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td><td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}><button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,marginRight:16}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>✏️</button><button style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></td></tr> })}</tbody></table>
+                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}><thead><tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}><th style={{padding: "16px 14px", width: 40}}>#</th><th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 14px", fontWeight: 700}}>Група</th><th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th><th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th><th style={{padding: "16px 14px", fontWeight: 700}}>Термін</th><th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th><th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th></tr></thead><tbody>{finalSubs.map((sub, index) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}><td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td><td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{getDisplayName(st)}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td><td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}><button disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{background:"none",border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:18,marginRight:16}} onClick={()=>openSubscriptionEdit(sub)}>✏️</button><button disabled={deletingSubscriptionIds.has(String(sub.id))} style={{background:"none",border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></td></tr> })}</tbody></table>
                     </div>
-                    {finalSubs.map((sub) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <button type="button" key={`card_${sub.id}`} className="payment-card" onClick={()=>{setEditItem(sub);setModal("editSub")}}>
+                    {finalSubs.map((sub) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <button type="button" key={`card_${sub.id}`} className="payment-card" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} aria-disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{ opacity: canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .55, cursor: canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed" }} onClick={()=>openSubscriptionEdit(sub)}>
                       <div className="payment-card-top"><div className="payment-student">{getDisplayName(st) || "—"}</div><div className="payment-amount">{Number(sub.amount || 0).toLocaleString()} ₴</div></div>
                       <div className="payment-muted-row"><span>{fmt(sub.activationDate || sub.startDate)}</span><span>· {gr?.name || "Без групи"}</span><span>· {planLabel}</span></div>
                       <div className="payment-muted-row"><span>{sub.payMethod === "card" ? "Картка" : sub.payMethod === "cash" ? "Готівка" : sub.payMethod === "transfer" ? "Переказ" : (sub.payMethod || "Метод не вказано")}</span><span>· {sub.usedTrainings}/{sub.totalTrainings} занять</span><span>· {fmt(sub.startDate)}—{fmt(sub.endDate)}</span></div>
-                      <div className="payment-card-bottom"><div style={{display:"flex", gap:6, flexWrap:"wrap", minWidth:0}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<Badge color={theme.danger}>Борг</Badge>}</div><div className="payments-card-menu" onClick={(e)=>e.stopPropagation()}><button type="button" aria-label="Редагувати оплату" style={{border:"none",cursor:"pointer",fontSize:16,color:theme.textMain}} onClick={()=>{setEditItem(sub);setModal("editSub")}}>⋯</button><button type="button" aria-label="Видалити оплату" style={{border:"none",cursor:"pointer",fontSize:16,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></div></div>
+                      <div className="payment-card-bottom"><div style={{display:"flex", gap:6, flexWrap:"wrap", minWidth:0}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<Badge color={theme.danger}>Борг</Badge>}</div><div className="payments-card-menu" onClick={(e)=>e.stopPropagation()}><button type="button" aria-label="Редагувати оплату" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:16,color:theme.textMain}} onClick={()=>openSubscriptionEdit(sub)}>⋯</button><button type="button" aria-label="Видалити оплату" disabled={deletingSubscriptionIds.has(String(sub.id))} style={{border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:16,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></div></div>
                     </button> })}
                   </div>}
                 </div>
@@ -3465,8 +3520,8 @@ export default function App() {
 
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      {isAdmin && <Modal open={modal==="editSub"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={async(d)=>{try{if(db.updateSub)await db.updateSub(editItem.id,d);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}catch(e){console.warn(e);setSubs(p=>p.map(x=>x.id===editItem.id?{...x,...d}:x));setModal(null);setEditItem(null);}}} students={students} groups={groups.filter((group) => !isGroupArchived(group) || String(group.id) === String(editItem?.groupId))} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} onPendingChange={setSubscriptionMutationPending} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="editSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} onPendingChange={setSubscriptionMutationPending} initial={editItem} onDone={updateSubscriptionAction} students={students} groups={groups.filter((group) => !isGroupArchived(group) || String(group.id) === String(editItem?.groupId))} studentGrps={studentGrps} subs={subs}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв" variant={studentsMobileModalVariant}><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="editWaitlist"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис резерву" variant={studentsMobileModalVariant}><WaitlistForm key={editItem?.id || "edit-waitlist"} initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={async(patch)=>{try{const updated=await db.updateWaitlist(editItem.id,patch);setWaitlist(prev=>prev.map(row=>row.id===updated.id?updated:row));setModal(null);setEditItem(null);}catch(e){console.error("Failed to update waitlist entry:",e);alert(`Не вдалося зберегти запис резерву: ${e?.message || e}`);throw e;}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне" variant={trialBookingMobileModalVariant}><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
