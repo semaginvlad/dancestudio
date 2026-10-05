@@ -603,9 +603,7 @@ export default function App() {
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile();
-      const fetchScheduleBookings = isCurrentAdmin
-        ? db.fetchRoomBookings
-        : db.fetchScheduleRoomBookings;
+      const fetchScheduleBookings = db.fetchScheduleRoomBookings;
       const fetchScheduleGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchScheduleGroups;

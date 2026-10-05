@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const migration = fs.readFileSync(new URL('../supabase/migrations/20261005090000_harden_financial_attendance_boundary.sql', import.meta.url), 'utf8');
+const diagnostic = fs.readFileSync(new URL('../supabase/diagnostics/suspicious_auto_one_off_payments.sql', import.meta.url), 'utf8');
+const integration = fs.readFileSync(new URL('../supabase/tests/financial_boundary_checks.sql', import.meta.url), 'utf8');
+
+test('financial hardening is a follow-up migration with canonical authorization', () => {
+  assert.match(migration, /public\.rls_is_admin\(\)/i);
+  assert.match(migration, /public\.rls_owns_group\(/i);
+  assert.doesNotMatch(migration, /user_metadata\s*->|user_metadata\s*->>/i);
+  assert.match(migration, /t\.is_active is true[\s\S]*t\.archived_at is null[\s\S]*t\.access_disabled_at is null/i);
+});
+
+test('trainer attendance cannot manufacture or erase money', () => {
+  assert.match(migration, /revoke all on function public\.crm_ensure_one_off_payment_for_attendance/i);
+  assert.match(migration, /revoke all on function public\.crm_remove_one_off_payment_if_orphan/i);
+  assert.match(migration, /Deliberately never delete or alter a payment/i);
+  assert.doesNotMatch(migration.match(/create or replace function public\.crm_record_attendance[\s\S]*?end \$\$;/i)?.[0] || '', /\bpaid\b|pay_method|\bamount\b|insert into public\.subscriptions/i);
+});
+
+test('financial mutations are audited and idempotent', () => {
+  assert.match(migration, /financial_change_audit/i);
+  assert.match(migration, /attendance_mutation_key_uidx/i);
+  assert.match(migration, /subscriptions_source_attendance_uidx/i);
+  assert.match(migration, /subscriptions_financial_idempotency_uidx/i);
+  assert.match(migration, /pg_advisory_xact_lock/i);
+  assert.match(migration, /exception when unique_violation/i);
+});
+
+test('trainer projections do not expose financial subscription or booking values', () => {
+  const subscriptions = migration.match(/create or replace function public\.crm_fetch_my_attendance_subscriptions[\s\S]*?\$\$;/i)?.[0] || '';
+  assert.doesNotMatch(subscriptions, /\bamount\b|base_price|pay_method|discount|\bpaid\b|\bnotes\b/i);
+  assert.match(migration, /case when public\.crm_is_admin_session\(\) then rb\.price else null end/i);
+  assert.match(migration, /case when public\.crm_is_admin_session\(\) then rb\.payment_method else null end/i);
+});
+
+test('historical review SQL is read-only and integration checks exercise real roles', () => {
+  assert.match(diagnostic, /^-- READ ONLY/i);
+  assert.doesNotMatch(diagnostic, /\b(update|delete|insert|alter|drop|truncate|create)\b/i);
+  assert.match(integration, /set local role anon/i);
+  assert.match(integration, /set local role authenticated/i);
+  assert.match(integration, /inactive trainer attendance unexpectedly succeeded/i);
+  assert.match(integration, /attendance deletion removed confirmed payment/i);
+  assert.match(integration, /rollback;/i);
+});
