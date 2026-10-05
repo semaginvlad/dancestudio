@@ -1264,6 +1264,7 @@ export default function AttendanceTab({
   onActionEditSub,
   onActionEditStudent,
   onActionMessageStudent,
+  onConfirmAttendancePayment,
   warnedStudents,
   setWarnedStudents,
   trialBookings = [],
@@ -1279,6 +1280,9 @@ export default function AttendanceTab({
   const [entryMode, setEntryMode] = useState("auto");
   const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
+  const [paymentDraft, setPaymentDraft] = useState(null);
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
   const [addMode, setAddMode] = useState("student");
@@ -2248,6 +2252,39 @@ export default function AttendanceTab({
       onActionAddSub(student.id, gid);
     }
     setOpenMenuState(null);
+  };
+
+  const openPaymentConfirmation = (student) => {
+    if (!isAdmin || typeof onConfirmAttendancePayment !== "function") return;
+    const candidate = [...attn]
+      .filter((row) => String(row.studentId) === String(student.id)
+        && String(row.groupId) === String(gid)
+        && !row.subId
+        && ["trial", "single", "debt", "unpaid"].includes(String(row.entryType || row.guestType || "").toLowerCase()))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
+    if (!candidate) {
+      alert("Немає неоплаченого відвідування для підтвердження.");
+      return;
+    }
+    const type = String(candidate.entryType || candidate.guestType || "single").toLowerCase();
+    setPaymentDraft({ attendanceId: candidate.id, studentName: getDisplayName(student), date: candidate.date, amount: type === "trial" ? 150 : 300, paymentMethod: "cash", idempotencyKey: crypto.randomUUID() });
+    setPaymentError("");
+    setOpenMenuState(null);
+  };
+
+  const submitPaymentConfirmation = async () => {
+    if (!paymentDraft || paymentSaving) return;
+    setPaymentSaving(true);
+    setPaymentError("");
+    try {
+      await onConfirmAttendancePayment(paymentDraft);
+      await reloadFromDb();
+      setPaymentDraft(null);
+    } catch (error) {
+      setPaymentError(error?.message || "Не вдалося підтвердити оплату");
+    } finally {
+      setPaymentSaving(false);
+    }
   };
 
   const handleEditStudent = (student) => {
@@ -4494,6 +4531,7 @@ export default function AttendanceTab({
                 <div style={styles.menuSection}>
                   <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
                   <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
+                  {isAdmin && <button type="button" style={styles.menuItem} onClick={() => openPaymentConfirmation(student)}>Підтвердити оплату боргу</button>}
                   <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                   <button type="button" style={styles.menuItem} onClick={() => openTransferModal(student)}>Перенести в іншу групу</button>
                 </div>
@@ -4520,6 +4558,18 @@ export default function AttendanceTab({
           })()}
         </div>,
         document.body
+      )}
+      {paymentDraft && createPortal(
+        <div role="dialog" aria-modal="true" aria-label="Підтвердження оплати" style={{ position:"fixed", inset:0, zIndex:10010, background:"rgba(0,0,0,.48)", display:"grid", placeItems:"center", padding:16 }}>
+          <div style={{ background:theme.card, color:theme.textMain, borderRadius:16, padding:18, width:"min(420px,100%)", display:"grid", gap:12 }}>
+            <strong>Підтвердити фактичну оплату</strong>
+            <div style={{ color:theme.textMuted }}>{paymentDraft.studentName} · {paymentDraft.date}</div>
+            <label>Сума, грн<input type="number" min="1" value={paymentDraft.amount} onChange={(e)=>setPaymentDraft((p)=>({...p,amount:Number(e.target.value)}))} disabled={paymentSaving} style={{ width:"100%" }} /></label>
+            <label>Спосіб<select value={paymentDraft.paymentMethod} onChange={(e)=>setPaymentDraft((p)=>({...p,paymentMethod:e.target.value}))} disabled={paymentSaving} style={{ width:"100%" }}><option value="cash">Готівка</option><option value="card">Картка</option><option value="transfer">Переказ</option><option value="other">Інше</option></select></label>
+            {paymentError && <div role="alert" style={{ color:theme.danger }}>{paymentError}</div>}
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}><button type="button" onClick={()=>setPaymentDraft(null)} disabled={paymentSaving}>Скасувати</button><button type="button" onClick={submitPaymentConfirmation} disabled={paymentSaving || Number(paymentDraft.amount)<=0}>{paymentSaving?"Збереження…":"Підтвердити"}</button></div>
+          </div>
+        </div>, document.body
       )}
     </div>
   );
