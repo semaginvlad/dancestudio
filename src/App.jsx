@@ -603,9 +603,7 @@ export default function App() {
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile();
-      const fetchScheduleBookings = isCurrentAdmin
-        ? db.fetchRoomBookings
-        : db.fetchScheduleRoomBookings;
+      const fetchScheduleBookings = db.fetchScheduleRoomBookings;
       const fetchScheduleGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchScheduleGroups;
@@ -2103,18 +2101,17 @@ export default function App() {
   };
 
   const normalizeTrainerSchedulePayload = (payload = {}) => {
+    const { price: _price, paymentMethod: _paymentMethod, payment_method: _paymentMethodSnake, ...operationalPayload } = payload;
     const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
       ? payload.eventType
       : "room_booking";
     const payloadTrainerId = payload?.trainerId || payload?.trainer_id || null;
     return {
-      ...payload,
+      ...operationalPayload,
       trainerId: isAssignedToCurrentTrainer(payloadTrainerId) ? payloadTrainerId : user?.id || null,
       eventType,
       bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
       peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
-      price: eventType === "individual_training" ? payload.price || null : null,
-      paymentMethod: eventType === "individual_training" ? payload.paymentMethod || "none" : "none",
     };
   };
 
@@ -2126,8 +2123,9 @@ export default function App() {
     const created = options.overrideBookingBlock
       ? await db.adminOverrideInsertRoomBooking(safePayload)
       : await db.insertRoomBooking(safePayload);
-    setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
-    return created;
+    const fresh = await db.fetchScheduleRoomBookings();
+    setRoomBookings(fresh);
+    return fresh.find((row) => String(row.id) === String(created.id)) || created;
   };
 
   const deleteRoomBookingAction = async (id) => {
@@ -2161,8 +2159,9 @@ export default function App() {
     const updated = options.overrideBookingBlock
       ? await db.adminOverrideUpdateRoomBooking(id, safePayload)
       : await db.updateRoomBooking(id, safePayload);
-    setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
-    return updated;
+    const fresh = await db.fetchScheduleRoomBookings();
+    setRoomBookings(fresh);
+    return fresh.find((row) => String(row.id) === String(id)) || updated;
   };
   const removeRoomBookingOccurrenceAction = async (id, occurrenceDate) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
@@ -2216,7 +2215,7 @@ export default function App() {
     roomBookingsLoadStatusRef.current = "loading";
     setRoomBookingsLoadStatus("loading");
     try {
-      const bookings = await (isAdmin ? db.fetchRoomBookings() : db.fetchScheduleRoomBookings());
+      const bookings = await db.fetchScheduleRoomBookings();
       setRoomBookings(bookings);
       setRoomBookingsLoadNotice("");
       roomBookingsLoadStatusRef.current = "ready";
@@ -2618,7 +2617,7 @@ export default function App() {
             scheduleScale={safeScheduleScale}
           />
         )}
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit, onConfirmAttendancePayment: db.confirmAttendancePayment } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
