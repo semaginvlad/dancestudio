@@ -777,7 +777,8 @@ export default function ScheduleTab({
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
-          bookingType: b.bookingType || b.booking_type || b.type,
+          type: b.type,
+          bookingType: b.bookingType ?? b.booking_type ?? null,
           eventType: b.eventType || b.event_type || "room_booking",
           note: b.note || "",
           recurrence,
@@ -816,7 +817,8 @@ export default function ScheduleTab({
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
-          bookingType: b.bookingType || b.booking_type || b.type,
+          type: b.type,
+          bookingType: b.bookingType ?? b.booking_type ?? null,
           eventType: b.eventType || b.event_type || "room_booking",
           note: b.note || "",
           recurrence,
@@ -998,6 +1000,7 @@ export default function ScheduleTab({
       : null;
     const base = {
       ...source,
+      type: source.type || (eventType === "individual_training" ? "individual" : "room_booking"),
       eventType,
       trainerId,
       trainerName,
@@ -1008,6 +1011,13 @@ export default function ScheduleTab({
       status: source.status || "active",
       roomName: normalizeRoomName(source.roomName || primaryRoomName) || primaryRoomName,
     };
+    if (!isAdmin && editingId) {
+      return {
+        ...base,
+        bookingType: source.bookingType ?? source.booking_type ?? null,
+        peopleCount: source.peopleCount ?? source.people_count ?? null,
+      };
+    }
     if (eventType === "individual_training") {
       const bookingType = tariffTypes.some((type) => type.id === source.bookingType)
         ? source.bookingType
@@ -1210,7 +1220,8 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
+      type: e.type,
+      bookingType: e.bookingType ?? null,
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
@@ -1268,6 +1279,7 @@ export default function ScheduleTab({
     startTime: event.startTime,
     endTime: event.endTime,
     eventType: event.eventType || "room_booking",
+    type: event.type,
     bookingType: event.bookingType || null,
     paymentMethod: event.paymentMethod || "none",
     peopleCount: event.peopleCount || null,
