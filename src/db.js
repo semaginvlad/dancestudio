@@ -1,3 +1,5 @@
+import { buildRoomBookingInsertRow, buildRoomBookingUpdateRow, mapRoomBookingRow } from './roomBookingPayload'
+export { buildRoomBookingInsertRow, buildRoomBookingUpdateRow, mapRoomBookingRow } from './roomBookingPayload'
 import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
@@ -171,6 +173,28 @@ export async function createStudentForGroup(groupId, s = {}) {
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) throw new Error('RPC crm_create_student_for_group did not return a student');
+  return mapStudent(row);
+}
+
+export async function convertGuestToStudent({ groupId, attendanceIds, student = {}, idempotencyKey }) {
+  const firstName = student.first_name ?? student.firstName ?? '';
+  const lastName = student.last_name ?? student.lastName ?? '';
+  const fullName = [lastName, firstName].filter(Boolean).join(' ') || student.name || '';
+  const { data, error } = await supabase.rpc('crm_convert_guest_to_student', {
+    p_group_id: groupId,
+    p_attendance_ids: attendanceIds,
+    p_name: fullName,
+    p_first_name: firstName || null,
+    p_last_name: lastName || null,
+    p_phone: student.phone || null,
+    p_telegram: student.telegram || null,
+    p_notes: student.notes || null,
+    p_message_template: student.message_template ?? student.messageTemplate ?? null,
+    p_idempotency_key: idempotencyKey,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.id) throw new Error('CRM не повернула створену ученицю');
   return mapStudent(row);
 }
 
@@ -1184,22 +1208,53 @@ export async function insertAttendance(a) {
     entry_type: normalizedEntryType,
   };
   if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[db.insertAttendance] raw/normalized", { raw: a, normalizedPayload });
-  const { data, error } = await supabase.from('attendance').insert(normalizedPayload).select().single()
+  const { data, error } = await supabase.rpc('crm_record_attendance', {
+    p_sub_id: normalizedPayload.sub_id,
+    p_student_id: normalizedPayload.student_id,
+    p_date: normalizedPayload.date,
+    p_guest_name: normalizedPayload.guest_name,
+    p_guest_type: normalizedPayload.guest_type,
+    p_group_id: normalizedPayload.group_id,
+    p_quantity: normalizedPayload.quantity,
+    p_entry_type: normalizedPayload.entry_type,
+    p_idempotency_key: a.idempotencyKey || crypto.randomUUID(),
+  })
   if (error) throw error
-  await ensureOneOffPaymentForAttendance(data);
-  if (data?.sub_id) {
-    await syncSubUsedTrainings(data.sub_id);
-  }
+  const saved = Array.isArray(data) ? data[0] : data
+  if (!saved?.id) throw new Error('Сервер не повернув збережене відвідування')
   return {
-    id: data.id,
-    subId: data.sub_id,
-    studentId: data.student_id,
-    date: data.date,
-    guestName: data.guest_name,
-    guestType: data.guest_type,
-    groupId: data.group_id,
-    quantity: data.quantity || 1,
-    entryType: data.entry_type || 'subscription',
+    id: saved.id,
+    subId: saved.sub_id,
+    studentId: saved.student_id,
+    date: saved.date,
+    guestName: saved.guest_name,
+    guestType: saved.guest_type,
+    groupId: saved.group_id,
+    quantity: saved.quantity || 1,
+    entryType: saved.entry_type || 'subscription',
+  }
+}
+
+export async function replaceAttendanceQuantity({ attendanceId, expectedQuantity, targetQuantity, idempotencyKey }) {
+  const { data, error } = await supabase.rpc('crm_replace_attendance_quantity', {
+    p_attendance_id: attendanceId,
+    p_expected_quantity: expectedQuantity,
+    p_target_quantity: targetQuantity,
+    p_idempotency_key: idempotencyKey || crypto.randomUUID(),
+  })
+  if (error) throw error
+  const saved = Array.isArray(data) ? data[0] : data
+  if (!saved?.id) throw new Error('Сервер не повернув оновлене відвідування')
+  return {
+    id: saved.id,
+    subId: saved.sub_id,
+    studentId: saved.student_id,
+    date: saved.date,
+    guestName: saved.guest_name,
+    guestType: saved.guest_type,
+    groupId: saved.group_id,
+    quantity: saved.quantity || 1,
+    entryType: saved.entry_type || 'subscription',
   }
 }
 
@@ -1243,49 +1298,40 @@ export async function convertDebtAttendanceToSubscription({ studentId, groupId, 
 }
 
 export async function deleteAttendance(id) {
-  const { data: existing } = await supabase
-    .from('attendance')
-    .select('id, sub_id, student_id, group_id, date, entry_type, guest_type')
-    .eq('id', id)
-    .maybeSingle();
-  if (existing) {
-    await removeOneOffPaymentIfOrphan(existing);
-  }
-  const { error } = await supabase.from('attendance').delete().eq('id', id)
+  const { error } = await supabase.rpc('crm_delete_attendance', { p_attendance_id: id })
   if (error) throw error
-  if (existing?.sub_id) {
-    await syncSubUsedTrainings(existing.sub_id);
-  }
+}
+
+export async function inspectAttendancePayment(attendanceId) {
+  const { data, error } = await supabase.rpc('crm_admin_inspect_attendance_payment', { p_attendance_id: attendanceId })
+  if (error) throw error
+  return (Array.isArray(data) ? data[0] : data) || { status: 'clear' }
+}
+
+export async function confirmAttendancePayment({ attendanceId, amount, paymentMethod, idempotencyKey, reconcileLegacy = false }) {
+  const { data, error } = await supabase.rpc('crm_admin_confirm_attendance_payment', {
+    p_attendance_id: attendanceId,
+    p_amount: Number(amount),
+    p_payment_method: paymentMethod,
+    p_idempotency_key: idempotencyKey || crypto.randomUUID(),
+    p_reconcile_legacy: Boolean(reconcileLegacy),
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.id) throw new Error('Сервер не повернув підтверджену оплату')
+  return mapSub(row)
 }
 
 export async function relinkGuestAttendanceToStudent({ groupId, studentId, attendanceIds = [] }) {
   if (!groupId || !studentId || !Array.isArray(attendanceIds) || !attendanceIds.length) return [];
   const ids = [...new Set(attendanceIds.filter(Boolean))];
-  const { data: candidates, error: readErr } = await supabase
-    .from('attendance')
-    .select('*')
-    .eq('group_id', groupId)
-    .is('student_id', null)
-    .in('id', ids);
-  if (readErr) throw readErr;
-  const rowIds = (candidates || []).map((r) => r.id);
-  if (!rowIds.length) return [];
-
-  const { data, error } = await supabase
-    .from('attendance')
-    .update({
-      student_id: studentId,
-      guest_name: null,
-      guest_type: null,
-      sub_id: null,
-    })
-    .in('id', rowIds)
-    .select('*');
+  const { data, error } = await supabase.rpc('crm_relink_guest_attendance', {
+    p_group_id: groupId,
+    p_student_id: studentId,
+    p_attendance_ids: ids,
+  });
   if (error) throw error;
   const rows = data || [];
-  for (const row of rows) {
-    await ensureOneOffPaymentForAttendance(row);
-  }
   return rows.map((a) => ({
     id: a.id,
     subId: a.sub_id,
@@ -1297,24 +1343,6 @@ export async function relinkGuestAttendanceToStudent({ groupId, studentId, atten
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
   }));
-}
-
-const ensureOneOffPaymentForAttendance = async (attendanceRow) => {
-  if (!attendanceRow?.id) return null
-  const { data, error } = await supabase.rpc('crm_ensure_one_off_payment_for_attendance', {
-    p_attendance_id: attendanceRow.id,
-  })
-  if (error) throw error
-  const row = Array.isArray(data) ? data[0] : data
-  return row ? mapSub(row) : null
-}
-
-const removeOneOffPaymentIfOrphan = async (attendanceRow) => {
-  if (!attendanceRow?.id) return
-  const { error } = await supabase.rpc('crm_remove_one_off_payment_if_orphan', {
-    p_attendance_id: attendanceRow.id,
-  })
-  if (error) throw error
 }
 
 // ─── CANCELLED ───
@@ -1381,29 +1409,7 @@ export async function restoreCancelledTraining(cancelledId) {
 }
 
 // ─── ROOM BOOKINGS ───
-const mapRoomBooking = (b) => ({
-  id: b.id,
-  date: b.date,
-  startTime: b.start_time,
-  endTime: b.end_time,
-  trainerId: b.trainer_id || null,
-  trainerName: b.trainer_name || null,
-  title: b.title || "",
-  type: b.type || "individual",
-  bookingType: b.booking_type || b.type || "individual",
-  peopleCount: Number(b.people_count || 0) || null,
-  price: Number(b.price || 0) || null,
-  paymentMethod: b.payment_method || null,
-  eventType: b.event_type || null,
-  note: b.note || "",
-  color: b.color || null,
-  recurrence: b.recurrence || "none",
-  recurrenceUntil: b.recurrence_until || null,
-  description: b.description || "",
-  status: b.status || "active",
-  roomName: b.room_name || b.room || b.location || b.hall || null,
-  createdAt: b.created_at || null,
-});
+const mapRoomBooking = mapRoomBookingRow;
 
 const mapStudioRoom = (row) => ({
   id: row.id,
@@ -1426,53 +1432,14 @@ export async function fetchScheduleRoomBookings() {
 }
 
 export async function insertRoomBooking(payload) {
-  const { data, error } = await supabase.from('room_bookings').insert({
-    date: payload.date,
-    start_time: payload.startTime,
-    end_time: payload.endTime,
-    trainer_id: payload.trainerId || null,
-    trainer_name: payload.trainerName || null,
-    title: payload.title,
-    type: payload.type || 'individual',
-    booking_type: payload.bookingType || payload.type || 'individual',
-    people_count: payload.peopleCount || null,
-    price: payload.price || null,
-    payment_method: payload.paymentMethod || null,
-    event_type: payload.eventType || null,
-    note: payload.note || null,
-    color: payload.color || null,
-    recurrence: payload.recurrence || "none",
-    recurrence_until: payload.recurrenceUntil || null,
-    description: payload.description || null,
-    status: payload.status || "active",
-    room_name: payload.roomName || 'Основна зала',
-  }).select('*').single();
+  const { data, error } = await supabase.from('room_bookings').insert(buildRoomBookingInsertRow(payload)).select('id,date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,people_count,event_type,note,color,recurrence,recurrence_until,description,status,created_at,room_name').single();
   if (error) throw error;
   return mapRoomBooking(data);
 }
 
 export async function updateRoomBooking(id, payload) {
-  const next = {};
-  if (payload.date !== undefined) next.date = payload.date;
-  if (payload.startTime !== undefined) next.start_time = payload.startTime;
-  if (payload.endTime !== undefined) next.end_time = payload.endTime;
-  if (payload.trainerId !== undefined) next.trainer_id = payload.trainerId || null;
-  if (payload.trainerName !== undefined) next.trainer_name = payload.trainerName || null;
-  if (payload.title !== undefined) next.title = payload.title;
-  if (payload.type !== undefined) next.type = payload.type;
-  if (payload.bookingType !== undefined) next.booking_type = payload.bookingType || null;
-  if (payload.peopleCount !== undefined) next.people_count = payload.peopleCount || null;
-  if (payload.price !== undefined) next.price = payload.price || null;
-  if (payload.paymentMethod !== undefined) next.payment_method = payload.paymentMethod || null;
-  if (payload.eventType !== undefined) next.event_type = payload.eventType || null;
-  if (payload.note !== undefined) next.note = payload.note || null;
-  if (payload.color !== undefined) next.color = payload.color || null;
-  if (payload.recurrence !== undefined) next.recurrence = payload.recurrence || "none";
-  if (payload.recurrenceUntil !== undefined) next.recurrence_until = payload.recurrenceUntil || null;
-  if (payload.description !== undefined) next.description = payload.description || null;
-  if (payload.status !== undefined) next.status = payload.status || "active";
-  if (payload.roomName !== undefined) next.room_name = payload.roomName || 'Основна зала';
-  const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
+  const next = buildRoomBookingUpdateRow(payload);
+  const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('id,date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,people_count,event_type,note,color,recurrence,recurrence_until,description,status,created_at,room_name').single();
   if (error) throw error;
   return mapRoomBooking(data);
 }
