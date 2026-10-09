@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { classificationTypeForEventType } from "../roomBookingPayload.js";
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
@@ -777,7 +778,8 @@ export default function ScheduleTab({
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
-          bookingType: b.bookingType || b.booking_type || b.type,
+          type: b.type,
+          bookingType: b.bookingType ?? b.booking_type ?? null,
           eventType: b.eventType || b.event_type || "room_booking",
           note: b.note || "",
           recurrence,
@@ -816,7 +818,8 @@ export default function ScheduleTab({
           peopleCount: b.peopleCount ?? b.people_count,
           price: b.price,
           paymentMethod: b.paymentMethod || b.payment_method,
-          bookingType: b.bookingType || b.booking_type || b.type,
+          type: b.type,
+          bookingType: b.bookingType ?? b.booking_type ?? null,
           eventType: b.eventType || b.event_type || "room_booking",
           note: b.note || "",
           recurrence,
@@ -998,6 +1001,7 @@ export default function ScheduleTab({
       : null;
     const base = {
       ...source,
+      type: editingId ? source.type : classificationTypeForEventType(eventType),
       eventType,
       trainerId,
       trainerName,
@@ -1008,6 +1012,13 @@ export default function ScheduleTab({
       status: source.status || "active",
       roomName: normalizeRoomName(source.roomName || primaryRoomName) || primaryRoomName,
     };
+    if (!isAdmin && editingId) {
+      return {
+        ...base,
+        bookingType: source.bookingType ?? source.booking_type ?? null,
+        peopleCount: source.peopleCount ?? source.people_count ?? null,
+      };
+    }
     if (eventType === "individual_training") {
       const bookingType = tariffTypes.some((type) => type.id === source.bookingType)
         ? source.bookingType
@@ -1210,7 +1221,8 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
+      type: e.type,
+      bookingType: e.bookingType ?? null,
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
@@ -1239,7 +1251,8 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
+      type: classificationTypeForEventType(e.eventType || "room_booking"),
+      bookingType: (e.eventType || "room_booking") === "individual_training" ? (e.bookingType || tariffTypes[0]?.id || "individual_1_2") : null,
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
@@ -1268,6 +1281,7 @@ export default function ScheduleTab({
     startTime: event.startTime,
     endTime: event.endTime,
     eventType: event.eventType || "room_booking",
+    type: event.type,
     bookingType: event.bookingType || null,
     paymentMethod: event.paymentMethod || "none",
     peopleCount: event.peopleCount || null,
@@ -1368,13 +1382,14 @@ export default function ScheduleTab({
       startTime: minToHHMM(start),
       endTime: minToHHMM(endMinuteOverride || (start + 60)),
       eventType: "room_booking",
+      type: classificationTypeForEventType("room_booking"),
       status: "active",
       recurrence: "none",
       originalParentDate: null,
       title: "",
       trainerId: isAdmin ? "" : currentTrainerId,
       trainerName: isAdmin ? "" : currentTrainerName,
-      bookingType: tariffTypes[0]?.id || "individual_1_2",
+      bookingType: null,
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
@@ -2663,7 +2678,7 @@ export default function ScheduleTab({
             <div style={editorSectionLabelSt}>Основне</div>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 42 : 46, fontSize: isMobile ? 14 : 15, borderColor: formErrors.title ? theme.danger : editorInputSt.borderColor }} placeholder="Назва / клієнт / група" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
             {formErrors.title ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.title}</div> : null}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { setDraft((p) => ({ ...p, eventType, type: editingId ? p.type : classificationTypeForEventType(eventType), bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
             <div style={editorSectionLabelSt}>Час і місце</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
             <input style={{ ...editorInputSt, borderColor: formErrors.date ? theme.danger : editorInputSt.borderColor }} type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
