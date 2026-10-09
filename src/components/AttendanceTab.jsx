@@ -16,6 +16,8 @@ import { theme } from "../shared/constants";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrainer";
 import { canConvertTrialBooking } from "../shared/trialBookings";
+import { reconcileAfterCommit } from "../committedMutation";
+import { runIdempotentQuantityMutation } from "../quantityMutation";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -643,6 +645,7 @@ const makeStyles = () => {
     boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.85)",
   }),
   cellShell: {
+    position: "relative",
     width: CELL_SIZE - 5,
     height: CELL_SIZE - 5,
     margin: "0 auto",
@@ -1264,6 +1267,8 @@ export default function AttendanceTab({
   onActionEditSub,
   onActionEditStudent,
   onActionMessageStudent,
+  onInspectAttendancePayment,
+  onConfirmAttendancePayment,
   warnedStudents,
   setWarnedStudents,
   trialBookings = [],
@@ -1279,6 +1284,16 @@ export default function AttendanceTab({
   const [entryMode, setEntryMode] = useState("auto");
   const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
+  const [paymentDraft, setPaymentDraft] = useState(null);
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const paymentSavingRef = useRef(false);
+  const guestConversionKeysRef = useRef(new Map());
+  const guestConversionRefreshingRef = useRef(false);
+  const [guestConversionRefresh, setGuestConversionRefresh] = useState(null);
+  const [guestConversionNotice, setGuestConversionNotice] = useState("");
+  const quantityMutationKeysRef = useRef(new Map());
+  const quantitySavingRef = useRef(new Set());
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
   const [addMode, setAddMode] = useState("student");
@@ -2130,6 +2145,10 @@ export default function AttendanceTab({
   };
 
   const handleCreateGuestAttendance = async () => {
+    if (!isAdmin) {
+      alert("Додавання, редагування та прив’язування гостей виконує адміністратор.");
+      return;
+    }
     if (!gid) return;
     if (!guestEntryType || (guestEntryType !== "trial" && guestEntryType !== "single")) return;
     const trimmedName = (guestNameInput || "").trim();
@@ -2250,6 +2269,99 @@ export default function AttendanceTab({
     setOpenMenuState(null);
   };
 
+  const openPaymentConfirmation = async (student, selectedAttendance = null) => {
+    if (!isAdmin || typeof onConfirmAttendancePayment !== "function") return;
+    const candidate = selectedAttendance || [...attn]
+      .filter((row) => String(row.studentId) === String(student.id)
+        && String(row.groupId) === String(gid)
+        && !row.subId
+        && ["trial", "single", "debt", "unpaid"].includes(String(row.entryType || row.guestType || "").toLowerCase()))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
+    if (!candidate) {
+      alert("Немає неоплаченого відвідування для підтвердження.");
+      return;
+    }
+    const type = String(candidate.entryType || candidate.guestType || "single").toLowerCase();
+    try {
+      const inspection = typeof onInspectAttendancePayment === "function"
+        ? await onInspectAttendancePayment(candidate.id)
+        : { status: "clear" };
+      const alreadyConfirmed = inspection?.status === "already_confirmed";
+      const quantity = Number(candidate.quantity || 1);
+      setPaymentDraft({ attendanceId: candidate.id, studentName: getDisplayName(student), groupName: getInternalGroupLabel(groups.find((group) => String(group.id) === String(candidate.groupId))), date: candidate.date, quantity, category: type === "trial" ? "trial" : type === "single" ? "single" : "other", amount: type === "trial" ? 150 : 300, paymentMethod: "cash", idempotencyKey: crypto.randomUUID(), inspection, reconcileLegacy: false, committed: alreadyConfirmed });
+      setPaymentError(["ambiguous", "mismatch", "legacy_unmarked_match", "already_confirmed", "unsupported_quantity"].includes(inspection?.status) ? inspection.message : "");
+    } catch (error) {
+      alert(error?.message || "Не вдалося перевірити попередні оплати");
+      return;
+    }
+    setOpenMenuState(null);
+  };
+
+  const submitPaymentConfirmation = async () => {
+    if (!paymentDraft || paymentSavingRef.current || paymentDraft.committed) return;
+    if (["ambiguous", "mismatch", "legacy_unmarked_match", "unsupported_quantity"].includes(paymentDraft.inspection?.status)) {
+      setPaymentError(paymentDraft.inspection?.message || "Потрібна ручна звірка перед створенням оплати.");
+      return;
+    }
+    paymentSavingRef.current = true;
+    setPaymentSaving(true);
+    setPaymentError("");
+    try {
+      const confirmed = await onConfirmAttendancePayment(paymentDraft);
+      await reconcileAfterCommit({
+        committed: confirmed,
+        applyCommitted: () => setPaymentDraft((current) => current ? { ...current, committed: true } : current),
+        refresh: reloadFromDb,
+        applyFresh: () => setPaymentDraft(null),
+        onRefreshFailure: (refreshError) => {
+          console.warn("Payment committed but attendance refresh failed", refreshError);
+          setPaymentError("Оплату збережено, але список потребує оновлення. Повторіть лише оновлення списку.");
+        },
+      });
+    } catch (error) {
+      setPaymentError(error?.message || "Не вдалося підтвердити оплату");
+    } finally {
+      paymentSavingRef.current = false;
+      setPaymentSaving(false);
+    }
+  };
+
+  const retryPaymentRefresh = async () => {
+    if (!paymentDraft?.committed || paymentSavingRef.current) return;
+    paymentSavingRef.current = true;
+    setPaymentSaving(true);
+    try {
+      await reloadFromDb();
+      setPaymentDraft(null);
+      setPaymentError("");
+    } catch (error) {
+      setPaymentError("Оплату збережено, але список потребує оновлення. Повторіть лише оновлення списку.");
+    } finally {
+      paymentSavingRef.current = false;
+      setPaymentSaving(false);
+    }
+  };
+
+  const refreshBlockedPaymentInspection = async () => {
+    if (!paymentDraft || paymentSavingRef.current) return;
+    paymentSavingRef.current = true;
+    setPaymentSaving(true);
+    try {
+      await reloadFromDb();
+      const inspection = typeof onInspectAttendancePayment === "function"
+        ? await onInspectAttendancePayment(paymentDraft.attendanceId)
+        : paymentDraft.inspection;
+      const blocked = ["ambiguous", "mismatch", "legacy_unmarked_match", "unsupported_quantity"].includes(inspection?.status);
+      setPaymentDraft((current) => current ? { ...current, inspection, committed: inspection?.status === "already_confirmed" } : current);
+      setPaymentError(blocked || inspection?.status === "already_confirmed" ? inspection?.message || "" : "");
+    } catch (error) {
+      setPaymentError("Не вдалося оновити список і повторити перевірку. Фінансову операцію не виконано.");
+    } finally {
+      paymentSavingRef.current = false;
+      setPaymentSaving(false);
+    }
+  };
+
   const handleEditStudent = (student) => {
     if (typeof onActionEditStudent === "function") {
       onActionEditStudent(student);
@@ -2292,7 +2404,15 @@ export default function AttendanceTab({
   };
 
   const handleConvertGuestToStudent = async (guestRow) => {
+    if (!isAdmin) {
+      alert("Додавання, редагування та прив’язування гостей виконує адміністратор.");
+      return;
+    }
     if (!guestRow?.guestName || !gid) return;
+    if (guestConversionRefresh?.committed) {
+      setGuestConversionNotice("Конвертацію вже збережено, але список потребує оновлення.");
+      return;
+    }
     const defaultName = isAnonymousGuestLabel(guestRow.guestName) ? "Гість" : guestRow.guestName;
     const enteredName = window.prompt("Ім'я нової учениці", defaultName);
     if (enteredName == null) return;
@@ -2309,26 +2429,67 @@ export default function AttendanceTab({
       }
       const ok = window.confirm(`Перетворити гостя на ученицю і переприв'язати ${safeRowIds.length} запис(ів) тільки з поточного видимого періоду?`);
       if (!ok) return;
-      const createdStudent = await db.createStudentForGroup(gid, { name });
+      const conversionIdentity = `${gid}|${[...safeRowIds].sort().join(",")}|${name}`;
+      const idempotencyKey = guestConversionKeysRef.current.get(conversionIdentity) || crypto.randomUUID();
+      guestConversionKeysRef.current.set(conversionIdentity, idempotencyKey);
+      const createdStudent = await db.convertGuestToStudent({ groupId: gid, attendanceIds: safeRowIds, student: { name }, idempotencyKey });
       const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
-      await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
-      setGuestRosterByGroup((prev) => ({
-        ...(prev || {}),
-        [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id && normalizeName(r.guestName) !== normalizeName(guestRow.guestName)),
-      }));
-      if (typeof setStudents === "function") {
-        setStudents((prev) => [...(prev || []), createdStudent]);
-      }
-      if (typeof setStudentGrps === "function") {
-        setStudentGrps((prev) => [...(prev || []), link || { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid }]);
-      }
-      await reloadFromDb();
-      setOpenMenuState(null);
+      await reconcileAfterCommit({
+        committed: { createdStudent, link, conversionIdentity, idempotencyKey },
+        applyCommitted: (committed) => {
+          setGuestConversionRefresh({ ...committed, committed: true, refreshRequired: true });
+          setGuestRosterByGroup((prev) => ({
+            ...(prev || {}),
+            [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id && normalizeName(r.guestName) !== normalizeName(guestRow.guestName)),
+          }));
+          if (typeof setStudents === "function") {
+            setStudents((prev) => (prev || []).some((row) => String(row.id) === String(createdStudent.id))
+              ? prev
+              : [...(prev || []), createdStudent]);
+          }
+          if (typeof setStudentGrps === "function") {
+            setStudentGrps((prev) => (prev || []).some((row) => String(row.studentId) === String(createdStudent.id) && String(row.groupId) === String(gid))
+              ? prev
+              : [...(prev || []), link]);
+          }
+          setOpenMenuState(null);
+        },
+        refresh: reloadFromDb,
+        applyFresh: () => {
+          guestConversionKeysRef.current.delete(conversionIdentity);
+          setGuestConversionRefresh(null);
+          setGuestConversionNotice("");
+        },
+        onRefreshFailure: (refreshError) => {
+          console.warn("Guest conversion committed but attendance refresh failed", refreshError);
+          setGuestConversionNotice("Конвертацію вже збережено, але список потребує оновлення.");
+        },
+      });
     } catch (err) {
       alert(`Не вдалося перетворити гостя на ученицю через CRM RPC. ${err?.message || "Перевір, що функція crm_create_student_for_group застосована в Supabase."}`);
     }
   };
+
+  const retryGuestConversionRefresh = async () => {
+    if (!guestConversionRefresh?.committed || guestConversionRefreshingRef.current) return;
+    guestConversionRefreshingRef.current = true;
+    try {
+      await reloadFromDb();
+      guestConversionKeysRef.current.delete(guestConversionRefresh.conversionIdentity);
+      setGuestConversionRefresh(null);
+      setGuestConversionNotice("");
+    } catch (refreshError) {
+      console.warn("Guest conversion refresh retry failed", refreshError);
+      setGuestConversionNotice("Конвертацію вже збережено, але список потребує оновлення.");
+    } finally {
+      guestConversionRefreshingRef.current = false;
+    }
+  };
   const handleRemoveGuestRosterRow = (guestRow) => {
+    if (!isAdmin) {
+      alert("Додавання, редагування та прив’язування гостей виконує адміністратор.");
+      return;
+    }
     const hasAttendance = attn.some((a) => String(a.groupId) === String(gid) && !a.studentId && normalizeName(a.guestName) === normalizeName(guestRow.guestName));
     if (hasAttendance) {
       alert("Спочатку приберіть відмітки відвідувань цього гостя в таблиці.");
@@ -2543,6 +2704,8 @@ export default function AttendanceTab({
       throw new Error(CANCELLED_ATTENDANCE_MESSAGE);
     }
 
+    if (!isAdmin) return { entryType: "unpaid", subId: null, neutralPresence: true };
+
     if (entryMode === "subscription") {
       const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (!activeSub) {
@@ -2677,54 +2840,15 @@ export default function AttendanceTab({
       const existing = getRecordsForCell(student, dateStr);
 
       if (existing.length) {
-        if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
-          const rec = existing[0];
-          const payload = {
-            id: `tmp_${uid()}`,
-            subId: rec.subId,
-            studentId: student.id,
-            date: dateStr,
-            guestName: null,
-            guestType: null,
-            groupId: gid,
-            quantity: 2,
-            entryType: rec.subId
-              ? "subscription"
-              : (String(rec.entryType || "").toLowerCase() === "single"
-                  ? "single"
-                  : (String(rec.entryType || "").toLowerCase() === "unpaid" ? "unpaid" : "debt")),
-          };
-          const optimisticRecord = buildOptimisticAttendanceRecord(payload);
-          applyAttendanceStateChange({ removeIds: [rec.id], addRows: [optimisticRecord] });
-          rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id], restoreRows: [rec] });
-
-          backendMutationStarted = true;
-          await db.deleteAttendance(rec.id);
-          if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-          const savedRecord = await db.insertAttendance(payload);
-          replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
-          rollbackOptimisticChange = null;
-          if (rec.subId) {
-            await db.syncSubUsedTrainings(rec.subId);
-          }
-          await refreshSubscriptionsAfterAttendanceChange();
-          return;
-        }
-
-        const subIdsToSync = [...new Set(existing.map((rec) => rec.subId).filter(Boolean))];
-        applyAttendanceStateChange({ removeIds: existing.map((rec) => rec.id) });
-        rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: existing });
-
+        // A checked cell is an unambiguous remove action. Quantity changes use
+        // the dedicated atomic RPC from their explicit control, never toggle.
         backendMutationStarted = true;
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
           }
         }
-        for (const subId of subIdsToSync) {
-          await db.syncSubUsedTrainings(subId);
-        }
-        rollbackOptimisticChange = null;
+        applyAttendanceStateChange({ removeIds: existing.map((rec) => rec.id) });
         await refreshSubscriptionsAfterAttendanceChange();
         return;
       }
@@ -2741,7 +2865,8 @@ export default function AttendanceTab({
         groupId: gid,
         quantity: 1,
         entryType: nextEntry.entryType,
-        explicitEntryType: entryMode === "trial" || entryMode === "single",
+          explicitEntryType: isAdmin && (entryMode === "trial" || entryMode === "single"),
+          neutralPresence: !isAdmin,
       };
       const optimisticRecord = buildOptimisticAttendanceRecord(payload);
       applyAttendanceStateChange({ addRows: [optimisticRecord] });
@@ -2822,6 +2947,7 @@ export default function AttendanceTab({
   };
 
   const handleToggleGuestCell = async (guestRow, dateStr) => {
+    if (!isAdmin) return;
     if (!gid) return;
     if (isCancelledDate(dateStr)) {
       alert(CANCELLED_ATTENDANCE_MESSAGE);
@@ -2862,10 +2988,9 @@ export default function AttendanceTab({
       const existing = existingById || existingByName || null;
 
       if (existing?.id) {
-        applyAttendanceStateChange({ removeIds: [existing.id] });
-        rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: [existing] });
         backendMutationStarted = true;
         await db.deleteAttendance(existing.id);
+        applyAttendanceStateChange({ removeIds: [existing.id] });
       } else {
         const entry = guestRow.guestEntryType || guestEntryType || "trial";
         if (entry === "trial") {
@@ -2904,6 +3029,61 @@ export default function AttendanceTab({
       }
       alert(err?.message || "Не вдалося змінити відвідування гостя.");
     } finally {
+      setBusyCell("");
+    }
+  };
+
+  const handleIncreaseAttendanceQuantity = async (student, dateStr) => {
+    if (!isAdmin) {
+      alert("Корекцію кількості занять виконує адміністратор.");
+      return;
+    }
+    const records = getRecordsForCell(student, dateStr);
+    if (records.length !== 1) {
+      alert("Змінити кількість можна лише для однієї конкретної відмітки.");
+      return;
+    }
+    const record = records[0];
+    if (!record.subId) {
+      alert("Для неоплаченого відвідування кількість збільшувати не можна. Оформлення виконує адміністратор окремо.");
+      return;
+    }
+    const currentQuantity = Number(record.quantity || 1);
+    const targetQuantity = currentQuantity + 1;
+    const mutationIdentity = `${record.id}|${currentQuantity}|${targetQuantity}`;
+    if (quantitySavingRef.current.has(mutationIdentity)) return;
+    if (!window.confirm(`Змінити кількість занять з ${currentQuantity} на ${targetQuantity}? З абонемента буде списано ще одне заняття.`)) return;
+    const cellKey = `${student.id}_${dateStr}`;
+    quantitySavingRef.current.add(mutationIdentity);
+    setBusyCell(cellKey);
+    try {
+      const result = await runIdempotentQuantityMutation({
+        pendingKeys: quantityMutationKeysRef.current,
+        identity: mutationIdentity,
+        attendanceId: record.id,
+        expectedQuantity: currentQuantity,
+        targetQuantity,
+        createKey: () => crypto.randomUUID(),
+        mutate: (idempotencyKey) => db.replaceAttendanceQuantity({
+          attendanceId: record.id,
+          expectedQuantity: currentQuantity,
+          targetQuantity,
+          idempotencyKey,
+        }),
+        refresh: reloadFromDb,
+      });
+      if (result.status === "committed") {
+        applyAttendanceStateChange({ removeIds: [record.id], addRows: [result.row] });
+        await refreshSubscriptionsAfterAttendanceChange();
+      } else if (result.status === "confirmed_by_refresh") {
+        await refreshSubscriptionsAfterAttendanceChange();
+      } else if (result.status === "rejected_confirmed") {
+        alert(result.error?.message || "Сервер відхилив зміну. Список оновлено до фактичного стану.");
+      } else {
+        alert("Результат зміни кількості невідомий: відповідь і оновлення списку не отримано. Повторна спроба використає той самий ключ і не спише заняття двічі.");
+      }
+    } finally {
+      quantitySavingRef.current.delete(mutationIdentity);
       setBusyCell("");
     }
   };
@@ -3507,6 +3687,12 @@ export default function AttendanceTab({
           }
         }
       `}</style>
+      {guestConversionNotice && (
+        <div role="alert" style={{ padding:10, borderRadius:10, background:theme.card, color:theme.textMain, display:"flex", gap:10, alignItems:"center", justifyContent:"space-between" }}>
+          <span>{guestConversionNotice}</span>
+          <button type="button" onClick={retryGuestConversionRefresh}>Оновити список</button>
+        </div>
+      )}
       <div className="attendance-toolbar attendance-filter-card" style={styles.toolbar}>
         <div className="attendance-toolbar-left" style={styles.toolbarLeft}>
           <div className="attendance-group-picker" style={styles.groupPickerWrap} ref={groupPickerRef}>
@@ -3523,7 +3709,7 @@ export default function AttendanceTab({
             style={styles.control}
           />
 
-          <select
+          {isAdmin && <select
             value={entryMode}
             onChange={(e) => setEntryMode(e.target.value)}
             style={styles.control}
@@ -3533,7 +3719,7 @@ export default function AttendanceTab({
             <option value="single">Разове</option>
             <option value="trial">Пробне</option>
             <option value="debt">Борг</option>
-          </select>
+          </select>}
 
           <button
             type="button"
@@ -3591,6 +3777,18 @@ export default function AttendanceTab({
           <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
+
+      {isAdmin && <section aria-label="Неоплачені відвідування" style={{ ...styles.toolbar, display:"grid", gap:8 }}>
+        <strong>Неоплачені відвідування</strong>
+        {attn.filter((row) => row.studentId && !row.subId && ["unpaid","debt","trial","single"].includes(String(row.entryType || row.guestType || "").toLowerCase())).map((row) => {
+          const student = students.find((item) => String(item.id) === String(row.studentId));
+          const group = groups.find((item) => String(item.id) === String(row.groupId));
+          return <div key={row.id} style={{ display:"flex", gap:8, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap" }}>
+            <span>{getDisplayName(student || { name:"—" })} · {getInternalGroupLabel(group || { id:row.groupId, name:row.groupId })} · {row.date} · {row.quantity || 1} · {getAuditEntryLabel(row.entryType || row.guestType)}</span>
+            <button type="button" onClick={()=>openPaymentConfirmation(student || { id:row.studentId, name:"—" },row)}>Оформити оплату</button>
+          </div>;
+        })}
+      </section>}
 
             {groupPickerOpen && createPortal(
         <div className="attendance-group-panel" style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>
@@ -3908,7 +4106,7 @@ export default function AttendanceTab({
                           <span style={styles.guestGroupArrow(guestGroupExpanded)}>▸</span>
                           <span className="attendance-student-name" style={styles.studentName}>{`Гості (${student.guestCount})`}</span>
                         </button>
-                        <div className="attendance-student-meta" style={styles.studentMeta}>Тимчасові гості</div>
+                        <div className="attendance-student-meta" style={styles.studentMeta}>{isAdmin ? "Тимчасові гості" : "Гостей додає та редагує адміністратор"}</div>
                       </div>
                     </td>
                     {visibleDays.map((dateStr) => {
@@ -3937,10 +4135,10 @@ export default function AttendanceTab({
                         <div className="attendance-student-name-row" style={styles.studentNameRow}>
                           <div className="attendance-student-name" style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
                           <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
-                            <button type="button" className="attendance-menu-btn" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
+                            <button type="button" className="attendance-menu-btn" style={styles.menuBtn} title={isAdmin ? "Дії" : "Дії з гостем виконує адміністратор"} disabled={!isAdmin} data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); if (isAdmin) openStudentMenu(student, e.currentTarget); }}>⋮</button>
                           </div>
                         </div>
-                        <div className="attendance-student-meta" style={styles.studentMeta}>Тимчасовий гість (trial/single)</div>
+                        <div className="attendance-student-meta" style={styles.studentMeta}>{isAdmin ? "Тимчасовий гість (trial/single)" : "Лише перегляд — зміни виконує адміністратор"}</div>
                       </div>
                     </td>
                     {visibleDays.map((dateStr) => {
@@ -3969,7 +4167,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button></div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={!isAdmin || isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, !isAdmin || isCancelledDate(dateStr) || futureDay, saving)} title={!isAdmin ? "Відмітки гостей змінює адміністратор" : (isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr))}>{cellView.mark}</button></div>
                         </td>
                       );
                     })}
@@ -4077,6 +4275,8 @@ export default function AttendanceTab({
                   const cellKey = `${student.id}_${dateStr}`;
                   const saving = busyCell === cellKey;
                   const cellView = getCellView(student, dateStr);
+                  const cellRecords = getRecordsForCell(student, dateStr);
+                  const quantityRecord = cellRecords.length === 1 ? cellRecords[0] : null;
                   const subPeriod = getSubPeriodForCell(student.id, dateStr);
                   const dayIdx = visibleDayIndex[dateStr];
                   const prevDay = dayIdx > 0 ? visibleDays[dayIdx - 1] : null;
@@ -4117,6 +4317,14 @@ export default function AttendanceTab({
                       >
                         {cellView.mark}
                       </button>
+                      {isAdmin && quantityRecord && <button
+                        type="button"
+                        aria-label={`Додати ще одне заняття. Зараз ${quantityRecord.quantity || 1}`}
+                        title={quantityRecord.subId ? `Зараз ${quantityRecord.quantity || 1}. Додати ще одне заняття` : "Для неоплаченого відвідування кількість збільшує лише адміністратор через окреме оформлення"}
+                        disabled={saving || !quantityRecord.subId}
+                        onClick={() => handleIncreaseAttendanceQuantity(student, dateStr)}
+                        style={{ position:"absolute", right:-5, bottom:-5, width:18, height:18, borderRadius:9, border:`1px solid ${theme.border}`, background:theme.card, color:theme.primary, fontSize:13, lineHeight:"16px", padding:0, cursor:saving || !quantityRecord.subId ? "not-allowed" : "pointer", opacity:saving || !quantityRecord.subId ? .55 : 1 }}
+                      >+</button>}
                       </div>
                     </td>
                   );
@@ -4176,7 +4384,7 @@ export default function AttendanceTab({
       <div className="attendance-add-panel" style={{ width: "min(278px, 100%)", alignSelf: "flex-start" }}>
         <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
-          <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
+          {isAdmin && <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>}
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("restore")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "restore" ? theme.primary : theme.input, color: addMode === "restore" ? "#fff" : theme.textMain }} disabled={loadingRestoreCandidates || !restoreCandidates.length}>Відновити</button>
         </div>
         <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>{addMode === "student" ? "Додати ученицю" : (addMode === "restore" ? "Відновити в групу" : "Додати гостя")}</div>
@@ -4227,6 +4435,10 @@ export default function AttendanceTab({
             ) : (
               <div style={{ ...styles.control, height: 30, display: "flex", alignItems: "center", flex: 1, minWidth: 0, fontSize: 12, color: theme.textMuted }}>{loadingRestoreCandidates ? "Завантажуємо..." : "Немає учениць для відновлення в цю групу."}</div>
             )
+          ) : !isAdmin ? (
+            <div role="note" style={{ ...styles.control, minHeight: 42, display:"flex", alignItems:"center", fontSize:12, color:theme.textMuted }}>
+              Додавання, редагування та прив’язування гостей виконує адміністратор.
+            </div>
           ) : (
             <form
               onSubmit={(e) => {
@@ -4477,10 +4689,10 @@ export default function AttendanceTab({
               return (
                 <>
                   <div style={styles.menuSection}>
-                    <button type="button" style={styles.menuItem} onClick={() => handleConvertGuestToStudent(student)}>Перетворити на ученицю</button>
+                    <button type="button" style={styles.menuItem} disabled={!isAdmin} onClick={() => handleConvertGuestToStudent(student)}>Перетворити на ученицю</button>
                   </div>
                   <div style={styles.menuSection}>
-                    <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} onClick={() => handleRemoveGuestRosterRow(student)}>Прибрати тимчасового гостя</button>
+                    <button type="button" style={{ ...styles.menuItem, ...styles.menuDanger }} disabled={!isAdmin} onClick={() => handleRemoveGuestRosterRow(student)}>Прибрати тимчасового гостя</button>
                   </div>
                 </>
               );
@@ -4494,6 +4706,7 @@ export default function AttendanceTab({
                 <div style={styles.menuSection}>
                   <button type="button" style={styles.menuItem} onClick={() => handleAddSub(student)}>Додати абонемент</button>
                   <button type="button" style={styles.menuItem} onClick={() => handleEditSub(student)}>Змінити абонемент</button>
+                  {isAdmin && <button type="button" style={styles.menuItem} onClick={() => openPaymentConfirmation(student)}>Підтвердити оплату боргу</button>}
                   <button type="button" style={styles.menuItem} onClick={() => handleEditStudent(student)}>Редагувати ученицю</button>
                   <button type="button" style={styles.menuItem} onClick={() => openTransferModal(student)}>Перенести в іншу групу</button>
                 </div>
@@ -4520,6 +4733,22 @@ export default function AttendanceTab({
           })()}
         </div>,
         document.body
+      )}
+      {paymentDraft && createPortal(
+        <div role="dialog" aria-modal="true" aria-label="Підтвердження оплати" style={{ position:"fixed", inset:0, zIndex:10010, background:"rgba(0,0,0,.48)", display:"grid", placeItems:"center", padding:16 }}>
+          <div style={{ background:theme.card, color:theme.textMain, borderRadius:16, padding:18, width:"min(420px,100%)", display:"grid", gap:12 }}>
+            <strong>Підтвердити фактичну оплату</strong>
+            <div style={{ color:theme.textMuted }}>{paymentDraft.studentName} · {paymentDraft.date}</div>
+            <div style={{ color:theme.textMuted }}>{paymentDraft.groupName}</div>
+            <div style={{ color:theme.textMuted }}>Кількість занять: {paymentDraft.quantity || 1}</div>
+            <label>Категорія<select value={paymentDraft.category} onChange={(e)=>setPaymentDraft((p)=>({...p,category:e.target.value}))} disabled={paymentSaving} style={{ width:"100%" }}><option value="trial">Пробне</option><option value="single">Разове</option><option value="other">Інше</option></select></label>
+            <label>Сума, грн<input type="number" min="1" value={paymentDraft.amount} onChange={(e)=>setPaymentDraft((p)=>({...p,amount:Number(e.target.value)}))} disabled={paymentSaving} style={{ width:"100%" }} /></label>
+            <label>Спосіб<select value={paymentDraft.paymentMethod} onChange={(e)=>setPaymentDraft((p)=>({...p,paymentMethod:e.target.value}))} disabled={paymentSaving} style={{ width:"100%" }}><option value="cash">Готівка</option><option value="card">Картка</option><option value="transfer">Переказ</option><option value="other">Інше</option></select></label>
+            {paymentDraft.inspection?.status === "legacy_unverified" && <label style={{ color:theme.warning || theme.danger }}><input type="checkbox" checked={paymentDraft.reconcileLegacy} onChange={(e)=>setPaymentDraft((p)=>({...p,reconcileLegacy:e.target.checked}))} disabled={paymentSaving} /> Старий автоматичний запис paid/card не підтверджує отримання коштів. Я звірив(ла) його та явно підтверджую прив’язку цієї оплати.</label>}
+            {paymentError && <div role="alert" style={{ color:theme.danger }}>{paymentError}</div>}
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}><button type="button" onClick={()=>setPaymentDraft(null)} disabled={paymentSaving}>{paymentDraft.committed?"Закрити":"Скасувати"}</button><button type="button" onClick={paymentDraft.committed?retryPaymentRefresh:["ambiguous","mismatch","legacy_unmarked_match","unsupported_quantity"].includes(paymentDraft.inspection?.status)?refreshBlockedPaymentInspection:submitPaymentConfirmation} disabled={paymentSaving || (!paymentDraft.committed && (!["ambiguous","mismatch","legacy_unmarked_match","unsupported_quantity"].includes(paymentDraft.inspection?.status) && (Number(paymentDraft.amount)<=0 || Number(paymentDraft.quantity || 1)!==1 || (paymentDraft.inspection?.status === "legacy_unverified" && !paymentDraft.reconcileLegacy))))}>{paymentSaving?"Оновлення…":paymentDraft.committed||["ambiguous","mismatch","legacy_unmarked_match","unsupported_quantity"].includes(paymentDraft.inspection?.status)?"Оновити список":"Підтвердити"}</button></div>
+          </div>
+        </div>, document.body
       )}
     </div>
   );
