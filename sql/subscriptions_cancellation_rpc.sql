@@ -9,8 +9,8 @@
 -- - Let admin cancel/restore trainings for any group.
 -- - Let trainer/non-admin users cancel/restore only trainings for groups that
 --   belong to their auth user through public.groups.trainer_id = auth.uid().
--- - Update only operational subscription fields: end_date and original_end_date
---   when it is missing.
+-- - Update only operational subscription fields: end_date and original_end_date;
+--   the latter is the canonical period including cancellation compensation.
 -- - Do not update financial/admin fields:
 --   amount, base_price, discount_pct, discount_source, paid, pay_method, notes.
 -- - Store cancelled_trainings.reason as the existing originalEnds JSON array.
@@ -62,11 +62,38 @@ begin
     raise exception 'Group % not found', p_group_id using errcode = 'P0002';
   end if;
 
-  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com');
+  v_is_admin := public.rls_is_admin();
   v_has_group_access := v_group.trainer_id::text = auth.uid()::text;
 
   if not (v_is_admin or v_has_group_access) then
     raise exception 'Not allowed to cancel training for group %', p_group_id using errcode = '42501';
+  end if;
+
+  -- Serialize a cancellation date before checking/creating its marker. A retry
+  -- must return the first committed result without extending subscriptions a
+  -- second time.
+  perform pg_advisory_xact_lock(hashtextextended(concat_ws('|','training-cancellation',p_group_id,p_date::text),0));
+  select * into v_cancelled from public.cancelled_trainings c
+  where c.group_id=p_group_id and c.date=p_date
+  order by c.created_at,c.id limit 1;
+  if found then
+    begin
+      v_original_ends:=coalesce(v_cancelled.reason::jsonb,'[]'::jsonb);
+    exception when others then
+      v_original_ends:='[]'::jsonb;
+    end;
+    return query select to_jsonb(v_cancelled),coalesce(jsonb_agg(jsonb_build_object(
+      'id',s.id,'student_id',s.student_id,'group_id',s.group_id,'plan_type',s.plan_type,
+      'start_date',s.start_date,'end_date',s.end_date,'total_trainings',s.total_trainings,
+      'used_trainings',s.used_trainings,'notification_sent',s.notification_sent,'created_at',s.created_at,
+      'activation_date',s.activation_date,'original_end_date',s.original_end_date
+    )) filter(where s.id is not null),'[]'::jsonb)
+    from public.subscriptions s where s.id in (
+      select nullif(item->>'subId','')::uuid from jsonb_array_elements(
+        case when jsonb_typeof(v_original_ends)='array' then v_original_ends else '[]'::jsonb end
+      ) item
+    );
+    return;
   end if;
 
   v_schedule := coalesce(to_jsonb(v_group.schedule), '[]'::jsonb);
@@ -102,7 +129,9 @@ begin
     update public.subscriptions s
     set
       end_date = v_new_end,
-      original_end_date = coalesce(s.original_end_date, v_sub.end_date)
+      -- Cancellation compensation is part of the administrator-controlled
+      -- canonical period, not a temporary usage-derived end date.
+      original_end_date = v_new_end
     where s.id = v_sub.id;
 
     v_updated_ids := array_append(v_updated_ids, v_sub.id);
