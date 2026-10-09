@@ -60,6 +60,8 @@ import {
 } from "./push";
 import { applyPwaUpdate, subscribeToPwaUpdates } from "./pwaUpdate";
 import { canEditSubscription, commitThenRefresh, composeSubscriptionNotice, createSynchronousGuard, refreshSubscriptionsOnly, subscriptionErrorMessage } from "./subscriptionMutations";
+import { mergeCommittedBooking, reconcileAfterCommit } from "./committedMutation";
+import { normalizeTrainerBookingPayload } from "./trainerBookingPayload";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -603,9 +605,7 @@ export default function App() {
       const fetchTrainerProfiles = isCurrentAdmin
         ? db.fetchTrainers
         : () => db.fetchMyTrainerProfile();
-      const fetchScheduleBookings = isCurrentAdmin
-        ? db.fetchRoomBookings
-        : db.fetchScheduleRoomBookings;
+      const fetchScheduleBookings = db.fetchScheduleRoomBookings;
       const fetchScheduleGroupRows = isCurrentAdmin
         ? () => null
         : db.fetchScheduleGroups;
@@ -2102,20 +2102,36 @@ export default function App() {
     return !!booking && isAssignedToCurrentTrainer(booking.trainerId || booking.trainer_id);
   };
 
-  const normalizeTrainerSchedulePayload = (payload = {}) => {
-    const eventType = ["room_booking", "individual_training"].includes(String(payload?.eventType || ""))
-      ? payload.eventType
-      : "room_booking";
-    const payloadTrainerId = payload?.trainerId || payload?.trainer_id || null;
-    return {
-      ...payload,
-      trainerId: isAssignedToCurrentTrainer(payloadTrainerId) ? payloadTrainerId : user?.id || null,
-      eventType,
-      bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
-      peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
-      price: eventType === "individual_training" ? payload.price || null : null,
-      paymentMethod: eventType === "individual_training" ? payload.paymentMethod || "none" : "none",
-    };
+  const normalizeTrainerSchedulePayload = (payload = {}, existing = null) => {
+    return normalizeTrainerBookingPayload({ payload, existing, currentUserId: user?.id || null, ownerIds: currentTrainerScopeIds });
+  };
+
+  const reconcileCommittedRoomBooking = async (committed, mode) => {
+    const result = await reconcileAfterCommit({
+      committed,
+      applyCommitted: (saved) => setRoomBookings((previous) => mode === "create"
+        ? [...previous.filter((row) => String(row.id) !== String(saved.id)), saved]
+        : previous.map((row) => String(row.id) === String(saved.id) ? saved : row)),
+      refresh: db.fetchScheduleRoomBookings,
+      applyFresh: (fresh) => {
+        setRoomBookings(fresh);
+        setRoomBookingsLoadNotice("");
+        roomBookingsLoadStatusRef.current = "ready";
+        setRoomBookingsLoadStatus("ready");
+      },
+      onRefreshFailure: (refreshError) => {
+        console.warn("Room booking committed but refresh failed", refreshError);
+        roomBookingsLoadStatusRef.current = "error";
+        setRoomBookingsLoadStatus("error");
+        setRoomBookingsLoadNotice("Зміни збережено, але список потребує оновлення. Повторіть лише оновлення списку.");
+      },
+    });
+    if (result.refreshed) {
+      const fresh = result.fresh;
+      setRoomBookingsLoadNotice("");
+      return fresh.find((row) => String(row.id) === String(committed.id)) || committed;
+    }
+    return { ...committed, refreshRequired: true };
   };
 
   const addRoomBookingAction = async (payload, options = {}) => {
@@ -2126,8 +2142,8 @@ export default function App() {
     const created = options.overrideBookingBlock
       ? await db.adminOverrideInsertRoomBooking(safePayload)
       : await db.insertRoomBooking(safePayload);
-    setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
-    return created;
+    const committed = isAdmin ? { ...created, price: safePayload.price ?? created.price, paymentMethod: safePayload.paymentMethod ?? created.paymentMethod } : created;
+    return reconcileCommittedRoomBooking(committed, "create");
   };
 
   const deleteRoomBookingAction = async (id) => {
@@ -2151,18 +2167,24 @@ export default function App() {
       throw new Error("Можна редагувати тільки власні резерви / індивідуальні тренування.");
     }
     const safePayload = isAdmin
-      ? payload
+      ? {
+          ...booking,
+          ...payload,
+          bookingType: Object.prototype.hasOwnProperty.call(payload || {}, "bookingType")
+            ? payload.bookingType
+            : booking?.bookingType,
+        }
       : normalizeTrainerSchedulePayload({
           ...booking,
           ...payload,
           eventType: payload?.eventType || booking.eventType || "room_booking",
-        });
+        }, booking);
     if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
     const updated = options.overrideBookingBlock
       ? await db.adminOverrideUpdateRoomBooking(id, safePayload)
       : await db.updateRoomBooking(id, safePayload);
-    setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
-    return updated;
+    const committed = isAdmin ? mergeCommittedBooking(booking, updated, safePayload) : updated;
+    return reconcileCommittedRoomBooking(committed, "update");
   };
   const removeRoomBookingOccurrenceAction = async (id, occurrenceDate) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Правила недоступності ще не завантажені. Зміни бронювань тимчасово вимкнені.");
@@ -2216,7 +2238,7 @@ export default function App() {
     roomBookingsLoadStatusRef.current = "loading";
     setRoomBookingsLoadStatus("loading");
     try {
-      const bookings = await (isAdmin ? db.fetchRoomBookings() : db.fetchScheduleRoomBookings());
+      const bookings = await db.fetchScheduleRoomBookings();
       setRoomBookings(bookings);
       setRoomBookingsLoadNotice("");
       roomBookingsLoadStatusRef.current = "ready";
@@ -2618,7 +2640,7 @@ export default function App() {
             scheduleScale={safeScheduleScale}
           />
         )}
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit, onInspectAttendancePayment: db.inspectAttendancePayment, onConfirmAttendancePayment: db.confirmAttendancePayment, onRecordAdminReception: db.recordAdminReception } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
