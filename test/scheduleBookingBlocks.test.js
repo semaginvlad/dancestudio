@@ -100,7 +100,7 @@ test("room-booking loading fails closed and fresh rows drive block warnings", as
   assert.match(app,/roomBookingsLoadStatusRef = useRef\("loading"\)/);
   assert.match(app,/if \(rb\?\.ok\)[\s\S]*setRoomBookings\(rb\.data\)[\s\S]*roomBookingsLoadStatusRef\.current = "ready"[\s\S]*else[\s\S]*roomBookingsLoadStatusRef\.current = "error"/);
   assert.doesNotMatch(app,/setRoomBookings\(rb \|\| \[\]\)/);
-  assert.match(app,/const bookings = await \(isAdmin \? db\.fetchRoomBookings\(\) : db\.fetchScheduleRoomBookings\(\)\)/);
+  assert.match(app,/const bookings = await db\.fetchScheduleRoomBookings\(\)/);
   assert.match(schedule,/const freshBookings = await onRetryRoomBookings\?\.\(\)/);
   assert.match(schedule,/freshBookings\.some\(\(booking\) => findBookingBlockConflict/);
   assert.match(schedule,/role=\{roomBookingsLoadStatus === "error" \? "alert" : "status"\}/);
