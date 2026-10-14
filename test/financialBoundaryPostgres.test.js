@@ -1,0 +1,875 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+
+const migration = fs.readFileSync(new URL('../supabase/migrations/20261005090000_harden_financial_attendance_boundary.sql', import.meta.url), 'utf8');
+const ids = {
+  student: '10000000-0000-0000-0000-000000000001', trainer: '10000000-0000-0000-0000-000000000002',
+  trainerUser: '10000000-0000-0000-0000-000000000003', adminUser: '10000000-0000-0000-0000-000000000004',
+  validSub: '10000000-0000-0000-0000-000000000005', expiredSub: '10000000-0000-0000-0000-000000000006',
+  exhaustedSub: '10000000-0000-0000-0000-000000000007',
+  otherTrainer: '10000000-0000-0000-0000-000000000008', otherTrainerUser: '10000000-0000-0000-0000-000000000009',
+  limitedSub: '10000000-0000-0000-0000-000000000010',
+  syncSub: '10000000-0000-0000-0000-000000000011',
+  noSubStudent: '10000000-0000-0000-0000-000000000012',
+  presenceSubStudent: '10000000-0000-0000-0000-000000000013', presenceSub: '10000000-0000-0000-0000-000000000014',
+  storedUsageStudent: '10000000-0000-0000-0000-000000000015', storedExhaustedSub: '10000000-0000-0000-0000-000000000016',
+  storedFallbackSub: '10000000-0000-0000-0000-000000000017', storedOnlyStudent: '10000000-0000-0000-0000-000000000018',
+  storedOnlySub: '10000000-0000-0000-0000-000000000019',
+  lastCreditStudent: '10000000-0000-0000-0000-000000000020', lastCreditSub: '10000000-0000-0000-0000-000000000021',
+  legacyCompStudent: '10000000-0000-0000-0000-000000000022', legacyCompSub: '10000000-0000-0000-0000-000000000023',
+};
+
+const bootstrap = `
+create role anon; create role authenticated; create schema auth;
+create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb$$;
+create table groups(id text primary key, archived_at timestamptz,direction_id text default 'd1',schedule jsonb default '[]'::jsonb,trainer_id uuid);
+create table students(id uuid primary key,name text);
+grant select on students to authenticated;
+create table student_groups(student_id uuid,group_id text,unique(student_id,group_id));
+create table trainers(id uuid primary key,name text,auth_user_id uuid,is_active boolean,archived_at timestamptz,access_disabled_at timestamptz,first_name text,last_name text,instagram_handle text);
+create table trainer_groups(trainer_id uuid,group_id text,is_primary boolean,unique(trainer_id,group_id));
+create table subscriptions(id uuid primary key default gen_random_uuid(),student_id uuid,group_id text,plan_type text,start_date date,end_date date,activation_date date,original_end_date date,total_trainings integer,used_trainings integer,amount integer,base_price integer,discount_pct integer,discount_source text,paid boolean,pay_method text,notification_sent boolean,notes text,created_at timestamptz default now());
+create table attendance(id uuid primary key default gen_random_uuid(),sub_id uuid,student_id uuid,date date,guest_name text,guest_type text,group_id text,quantity integer,entry_type text,created_at timestamptz default now());
+create table cancelled_trainings(id uuid primary key default gen_random_uuid(),group_id text,date date,reason text,created_at timestamptz default now());
+create function rls_is_admin() returns boolean language sql stable security definer set search_path=public as $$select auth.uid() is not null and coalesce(auth.jwt()->>'email','')='admin@test.invalid'$$;
+create function rls_owns_group(p text) returns boolean language sql stable security definer set search_path=public as $$select exists(select 1 from trainers t join trainer_groups tg on tg.trainer_id=t.id where t.auth_user_id=auth.uid() and t.is_active is true and t.archived_at is null and t.access_disabled_at is null and tg.group_id=p)$$;
+create function rls_can_record_attendance(p uuid,g text) returns boolean language sql stable security definer set search_path=public as $$select rls_owns_group(g) and exists(select 1 from student_groups where student_id=p and group_id=g)$$;
+create function crm_is_admin_session() returns boolean language sql stable security definer set search_path=public as $$select rls_is_admin()$$;
+create function crm_is_active_trainer_session() returns boolean language sql stable security definer set search_path=public as $$select exists(select 1 from trainers where auth_user_id=auth.uid() and is_active and archived_at is null and access_disabled_at is null)$$;
+create function crm_ensure_one_off_payment_for_attendance(uuid) returns void language sql as $$select$$;
+create function crm_remove_one_off_payment_if_orphan(uuid) returns void language sql as $$select$$;
+create function crm_create_student_for_group(p_group_id text,p_name text,p_first_name text,p_last_name text,p_phone text,p_telegram text,p_notes text,p_message_template text)
+returns setof students language plpgsql security definer as $$declare v students; begin insert into students(id,name) values(gen_random_uuid(),p_name) returning * into v; insert into student_groups values(v.id,p_group_id); return next v; end$$;
+alter table attendance enable row level security; create policy attendance_admin_all on attendance for all to authenticated using(rls_is_admin()) with check(rls_is_admin());
+create policy "Allow all on attendance" on attendance for all to authenticated using(true) with check(true);
+create policy attendance_trainer_insert_own_groups on attendance for insert to authenticated with check(true);
+create policy attendance_trainer_update_own_groups on attendance for update to authenticated using(true) with check(true);
+create policy attendance_trainer_delete_own_groups on attendance for delete to authenticated using(true);
+alter table subscriptions enable row level security;
+create policy subscriptions_trainer_select_own_group on subscriptions for select to authenticated using(true);
+create policy subscriptions_trainer_insert_own_group on subscriptions for insert to authenticated with check(true);
+create policy subscriptions_trainer_update_own_group on subscriptions for update to authenticated using(true) with check(true);
+create policy subscriptions_trainer_delete_own_group on subscriptions for delete to authenticated using(true);
+insert into groups(id,archived_at) values('g1',null),('g2',null); insert into students values('${ids.student}','Test'),('${ids.noSubStudent}','No Sub'),('${ids.presenceSubStudent}','Presence Sub'),('${ids.storedUsageStudent}','Stored usage with fallback'),('${ids.storedOnlyStudent}','Stored usage only'),('${ids.lastCreditStudent}','Last credit'),('${ids.legacyCompStudent}','Legacy compensated'); insert into student_groups values('${ids.student}','g1'),('${ids.student}','g2'),('${ids.noSubStudent}','g1'),('${ids.presenceSubStudent}','g1'),('${ids.storedUsageStudent}','g1'),('${ids.storedOnlyStudent}','g1'),('${ids.lastCreditStudent}','g1'),('${ids.legacyCompStudent}','g1');
+insert into trainers values('${ids.trainer}','Trainer','${ids.trainerUser}',true,null,null,null,null,null),('${ids.otherTrainer}','Other','${ids.otherTrainerUser}',true,null,null,null,null,null); insert into trainer_groups values('${ids.trainer}','g1',true);
+alter table trainers enable row level security; revoke all on trainers from public,anon,authenticated; grant select,update on trainers to authenticated;
+create policy trainers_admin_only on trainers for all to authenticated using(rls_is_admin()) with check(rls_is_admin());
+insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values
+('${ids.validSub}','${ids.student}','g1','4pack',current_date-1,current_date+30,4,0,1000,true),
+('${ids.expiredSub}','${ids.student}','g1','4pack',current_date-40,current_date-1,4,0,1000,true),
+('${ids.exhaustedSub}','${ids.student}','g1','single',current_date-1,current_date+1,1,1,300,true),
+('${ids.limitedSub}','${ids.student}','g1','single',current_date-1,current_date+1,1,0,300,true),
+('${ids.syncSub}','${ids.student}','g1','4pack',current_date-10,current_date+30,2,0,600,true),
+('${ids.presenceSub}','${ids.presenceSubStudent}','g1','4pack',current_date-1,current_date+30,4,0,600,true),
+('${ids.storedExhaustedSub}','${ids.storedUsageStudent}','g1','single',current_date-2,current_date+30,1,1,300,true),
+('${ids.storedFallbackSub}','${ids.storedUsageStudent}','g1','4pack',current_date-1,current_date+30,4,0,600,true),
+('${ids.storedOnlySub}','${ids.storedOnlyStudent}','g1','single',current_date-1,current_date+30,1,1,300,true),
+('${ids.lastCreditSub}','${ids.lastCreditStudent}','g1','single',current_date-1,current_date+30,1,0,300,true);
+insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,original_end_date,total_trainings,used_trainings,amount,paid)
+values('${ids.legacyCompSub}','${ids.legacyCompStudent}','g1','4pack',current_date-10,current_date+40,current_date+20,4,0,900,true);
+`;
+
+const actor = async (db, role, uid = '', email = '') => {
+  await db.exec(`reset role; set role ${role}; select set_config('request.jwt.claim.sub','${uid}',false); select set_config('request.jwt.claims','${JSON.stringify({ sub: uid, email }).replaceAll("'", "''")}',false);`);
+};
+
+test('financial boundary behaves under real PostgreSQL roles and RLS', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(bootstrap);
+    await db.exec(migration);
+    const backfilledCompensation = await db.query(`select end_date::text,original_end_date::text
+      from subscriptions where id='${ids.legacyCompSub}'`);
+    assert.deepEqual(backfilledCompensation.rows[0],{
+      end_date:new Date(Date.now()+40*86400000).toISOString().slice(0,10),
+      original_end_date:new Date(Date.now()+40*86400000).toISOString().slice(0,10),
+    });
+    const backfilledNullCanonical = await db.query(`select end_date::text,original_end_date::text
+      from subscriptions where id='${ids.validSub}'`);
+    assert.equal(backfilledNullCanonical.rows[0].original_end_date,backfilledNullCanonical.rows[0].end_date);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`select * from crm_record_attendance('${ids.legacyCompSub}','${ids.legacyCompStudent}',current_date,null,null,'g1',1,'subscription','10000000-0000-0000-0000-000000000024')`);
+    const syncedCompensation = await db.query(`select end_date::text,original_end_date::text,used_trainings
+      from subscriptions where id='${ids.legacyCompSub}'`);
+    assert.deepEqual(syncedCompensation.rows[0],{
+      end_date:new Date(Date.now()+40*86400000).toISOString().slice(0,10),
+      original_end_date:new Date(Date.now()+40*86400000).toISOString().slice(0,10),
+      used_trainings:1,
+    });
+    await db.exec('reset role');
+    const revokedLegacyHelpers = await db.query(`select
+      has_function_privilege('authenticated','public.crm_ensure_one_off_payment_for_attendance(uuid)','execute') as authenticated_ensure,
+      has_function_privilege('anon','public.crm_ensure_one_off_payment_for_attendance(uuid)','execute') as anon_ensure,
+      has_function_privilege('authenticated','public.crm_remove_one_off_payment_if_orphan(uuid)','execute') as authenticated_remove,
+      has_function_privilege('anon','public.crm_remove_one_off_payment_if_orphan(uuid)','execute') as anon_remove`);
+    assert.deepEqual(revokedLegacyHelpers.rows[0],{
+      authenticated_ensure:false,anon_ensure:false,authenticated_remove:false,anon_remove:false,
+    });
+    const publicLegacyExecute = await db.query(`select count(*)::int as count
+      from information_schema.routine_privileges
+      where routine_schema='public'
+        and routine_name in ('crm_ensure_one_off_payment_for_attendance','crm_remove_one_off_payment_if_orphan')
+        and grantee='PUBLIC' and privilege_type='EXECUTE'`);
+    assert.equal(publicLegacyExecute.rows[0].count,0);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    const hiddenTrainer = await db.query(`select * from trainers`);
+    assert.equal(hiddenTrainer.rows.length,0);
+    const finalPolicies = await db.query(`select tablename,policyname from pg_policies where schemaname='public' and tablename in ('attendance','subscriptions') order by tablename,policyname`);
+    assert.deepEqual(finalPolicies.rows,[
+      {tablename:'attendance',policyname:'attendance_admin_all'},
+      {tablename:'attendance',policyname:'attendance_trainer_select_own_groups'},
+      {tablename:'subscriptions',policyname:'subscriptions_admin_all'},
+    ]);
+    const hiddenFinance = await db.query(`select * from subscriptions`);
+    assert.equal(hiddenFinance.rows.length,0);
+    await assert.rejects(
+      ()=>db.query(`insert into student_groups(student_id,group_id) values('${ids.noSubStudent}','g2')`),
+      /row-level security/i,
+    );
+    const forgedMembershipDelete = await db.query(`delete from student_groups where student_id='${ids.student}' and group_id='g1' returning student_id`);
+    assert.equal(forgedMembershipDelete.rows.length,0);
+    const forgedSubscriptionMove = await db.query(`update subscriptions set group_id='g2' where id='${ids.validSub}' returning id`);
+    assert.equal(forgedSubscriptionMove.rows.length,0);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_create_student_for_group('g1','Forged roster student',null,null,null,null,null,null)`),
+      /permission denied/i,
+    );
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_transfer_student_group('${ids.student}','g1','g2',null)`),
+      /administrator required/i,
+    );
+    const trainerRosterState = await db.query(`select count(*)::int as count from student_groups where student_id='${ids.student}' and group_id='g1'`);
+    assert.equal(trainerRosterState.rows[0].count,1);
+
+    const transferStudent = '86000000-0000-0000-0000-000000000001';
+    const transferSub = '86000000-0000-0000-0000-000000000002';
+    await db.exec('reset role');
+    await db.query(`insert into students(id,name) values('${transferStudent}','Atomic transfer')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${transferStudent}','g1')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid)
+      values('${transferSub}','${transferStudent}','g1','4pack',current_date,current_date+30,4,0,600,true)`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_transfer_student_group('${transferStudent}','g1','g2','${ids.validSub}')`),
+      /does not belong/i,
+    );
+    const failedTransferState = await db.query(`select
+      (select count(*)::int from student_groups where student_id='${transferStudent}' and group_id='g1') as source_count,
+      (select count(*)::int from student_groups where student_id='${transferStudent}' and group_id='g2') as target_count,
+      (select group_id from subscriptions where id='${transferSub}') as subscription_group`);
+    assert.deepEqual(failedTransferState.rows[0],{source_count:1,target_count:0,subscription_group:'g1'});
+    const transferred = await db.query(`select * from crm_admin_transfer_student_group('${transferStudent}','g1','g2','${transferSub}')`);
+    assert.deepEqual(transferred.rows[0],{student_id:transferStudent,from_group_id:'g1',to_group_id:'g2',subscription_id:transferSub});
+    const completedTransferState = await db.query(`select
+      (select count(*)::int from student_groups where student_id='${transferStudent}' and group_id='g1') as source_count,
+      (select count(*)::int from student_groups where student_id='${transferStudent}' and group_id='g2') as target_count,
+      (select group_id from subscriptions where id='${transferSub}') as subscription_group`);
+    assert.deepEqual(completedTransferState.rows[0],{source_count:0,target_count:1,subscription_group:'g2'});
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_trainer_presence('${transferStudent}',current_date,'g1',1,'86000000-0000-0000-0000-000000000003')`),
+      /not allowed|no longer assigned/i,
+    );
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const adminCreatedStudent = await db.query(`select crm_admin_create_student_for_group('g2','Admin roster student',null,null,null,null,null,null) as student`);
+    assert.equal(adminCreatedStudent.rows[0].student.name,'Admin roster student');
+
+    const receptionUnpaidStudent = '87000000-0000-0000-0000-000000000001';
+    const receptionPaidStudent = '87000000-0000-0000-0000-000000000002';
+    const receptionSubStudent = '87000000-0000-0000-0000-000000000007';
+    const receptionSub = '87000000-0000-0000-0000-000000000008';
+    await db.query(`insert into students(id,name) values
+      ('${receptionUnpaidStudent}','Reception unpaid'),('${receptionPaidStudent}','Reception paid'),
+      ('${receptionSubStudent}','Reception subscription')`);
+    await db.query(`insert into student_groups(student_id,group_id) values
+      ('${receptionUnpaidStudent}','g1'),('${receptionPaidStudent}','g1'),('${receptionSubStudent}','g1')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid)
+      values('${receptionSub}','${receptionSubStudent}','g1','4pack',current_date-1,current_date+30,4,0,600,true)`);
+    const receptionWithSubscription = await db.query(`select * from crm_admin_record_reception(
+      '${receptionSubStudent}',current_date,'g1','paid','single',300,'cash','87000000-0000-0000-0000-000000000003')`);
+    assert.equal(receptionWithSubscription.rows[0].outcome,'subscription');
+    assert.equal(receptionWithSubscription.rows[0].sub_id,receptionSub);
+    assert.equal(receptionWithSubscription.rows[0].payment_id,null);
+    const receptionUnpaid = await db.query(`select * from crm_admin_record_reception(
+      '${receptionUnpaidStudent}',current_date,'g1','unpaid',null,null,null,'87000000-0000-0000-0000-000000000004')`);
+    assert.equal(receptionUnpaid.rows[0].outcome,'unpaid');
+    assert.equal(receptionUnpaid.rows[0].entry_type,'unpaid');
+    assert.equal(receptionUnpaid.rows[0].sub_id,null);
+    const receptionPaid = await db.query(`select * from crm_admin_record_reception(
+      '${receptionPaidStudent}',current_date,'g1','paid','trial',175,'transfer','87000000-0000-0000-0000-000000000005')`);
+    const receptionPaidRetry = await db.query(`select * from crm_admin_record_reception(
+      '${receptionPaidStudent}',current_date,'g1','paid','trial',175,'transfer','87000000-0000-0000-0000-000000000005')`);
+    assert.equal(receptionPaid.rows[0].outcome,'paid');
+    assert.equal(receptionPaidRetry.rows[0].attendance_id,receptionPaid.rows[0].attendance_id);
+    assert.equal(receptionPaidRetry.rows[0].payment_id,receptionPaid.rows[0].payment_id);
+    const paidReceptionState = await db.query(`select
+      (select count(*)::int from attendance where student_id='${receptionPaidStudent}' and group_id='g1' and date=current_date) as attendance_count,
+      (select count(*)::int from subscriptions where source_attendance_id='${receptionPaid.rows[0].attendance_id}') as payment_count,
+      (select student_id from subscriptions where id='${receptionPaid.rows[0].payment_id}') as payment_student,
+      (select group_id from subscriptions where id='${receptionPaid.rows[0].payment_id}') as payment_group,
+      (select start_date from subscriptions where id='${receptionPaid.rows[0].payment_id}')::text as payment_date,
+      (select amount from subscriptions where id='${receptionPaid.rows[0].payment_id}')::int as amount,
+      (select pay_method from subscriptions where id='${receptionPaid.rows[0].payment_id}') as method,
+      (select plan_type from subscriptions where id='${receptionPaid.rows[0].payment_id}') as category`);
+    assert.deepEqual(paidReceptionState.rows[0],{
+      attendance_count:1,payment_count:1,payment_student:receptionPaidStudent,payment_group:'g1',
+      payment_date:new Date().toISOString().slice(0,10),amount:175,method:'transfer',category:'trial',
+    });
+    const beforeRejectedTrial = await db.query(`select
+      (select count(*)::int from attendance where student_id='${receptionPaidStudent}') as attendance_count,
+      (select count(*)::int from subscriptions where student_id='${receptionPaidStudent}') as subscription_count,
+      (select count(*)::int from financial_change_audit where table_name='subscriptions' and (new_record->>'student_id')='${receptionPaidStudent}') as audit_count,
+      (select used_trainings from subscriptions where id='${receptionPaid.rows[0].payment_id}')::int as used_trainings`);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_record_reception(
+        '${receptionPaidStudent}',current_date+1,'g1','paid','trial',175,'cash','87000000-0000-0000-0000-000000000009')`),
+      /not eligible for another trial/i,
+    );
+    const afterRejectedTrial = await db.query(`select
+      (select count(*)::int from attendance where student_id='${receptionPaidStudent}') as attendance_count,
+      (select count(*)::int from subscriptions where student_id='${receptionPaidStudent}') as subscription_count,
+      (select count(*)::int from financial_change_audit where table_name='subscriptions' and (new_record->>'student_id')='${receptionPaidStudent}') as audit_count,
+      (select used_trainings from subscriptions where id='${receptionPaid.rows[0].payment_id}')::int as used_trainings`);
+    assert.deepEqual(afterRejectedTrial.rows[0],beforeRejectedTrial.rows[0]);
+    const receptionSingleAfterTrial = await db.query(`select * from crm_admin_record_reception(
+      '${receptionPaidStudent}',current_date+1,'g1','paid','single',325,'cash','87000000-0000-0000-0000-000000000010')`);
+    assert.equal(receptionSingleAfterTrial.rows[0].outcome,'paid');
+    const afterSingle = await db.query(`select plan_type,amount,pay_method from subscriptions where id='${receptionSingleAfterTrial.rows[0].payment_id}'`);
+    assert.deepEqual(afterSingle.rows[0],{plan_type:'single',amount:325,pay_method:'cash'});
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_record_reception('${ids.noSubStudent}',current_date+5,'g1','paid','single',300,'cash','87000000-0000-0000-0000-000000000006')`),
+      /administrator required/i,
+    );
+    await assert.rejects(()=>db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.student}','g1','single',current_date,current_date,1,0,300,true)`),/row-level security/i);
+    const operationalSubs = await db.query(`select * from crm_fetch_my_attendance_subscriptions()`);
+    assert.ok(operationalSubs.rows.length>=1);
+    assert.equal(Object.hasOwn(operationalSubs.rows[0],'amount'),false);
+    await assert.rejects(()=>db.query(`select * from crm_record_attendance(null,'${ids.noSubStudent}',current_date,null,null,'g1',1,'trial','80000000-0000-0000-0000-000000000001')`),/administrator required/i);
+    const neutralUnpaid = await db.query(`select * from crm_record_trainer_presence('${ids.noSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000002')`);
+    const neutralSameKeyRetry = await db.query(`select * from crm_record_trainer_presence('${ids.noSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000002')`);
+    const neutralRetry = await db.query(`select * from crm_record_trainer_presence('${ids.noSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000003')`);
+    assert.equal(neutralUnpaid.rows[0].entry_type,'unpaid');
+    assert.equal(neutralSameKeyRetry.rows[0].id,neutralUnpaid.rows[0].id);
+    assert.equal(neutralRetry.rows[0].id,neutralUnpaid.rows[0].id);
+    await db.query(`select set_config('crm.trainer_presence_internal','on',true)`);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_attendance(null,'${ids.noSubStudent}',current_date+1,null,null,'g1',1,'trial','80000000-0000-0000-0000-000000000004')`),
+      /administrator required/i,
+    );
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_attendance_internal(null,'${ids.noSubStudent}',current_date+1,null,null,'g1',1,'trial','80000000-0000-0000-0000-000000000005')`),
+      /permission denied/i,
+    );
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_trainer_presence('${ids.noSubStudent}',current_date,'g1',2,'80000000-0000-0000-0000-000000000002')`),
+      /idempotency key conflict/i,
+    );
+    const unpaidQuantityKey = '82000000-0000-0000-0000-000000000001';
+    for (let attempt=0; attempt<2; attempt+=1) {
+      await assert.rejects(
+        ()=>db.query(`select * from crm_replace_attendance_quantity('${neutralUnpaid.rows[0].id}',1,2,'${unpaidQuantityKey}')`),
+        /administrator required/i,
+      );
+    }
+    const trainerUnpaidUnchanged = await db.query(`select quantity,sub_id,entry_type from attendance where id='${neutralUnpaid.rows[0].id}'`);
+    assert.deepEqual(trainerUnpaidUnchanged.rows[0],{quantity:1,sub_id:null,entry_type:'unpaid'});
+    const neutralSubscribed = await db.query(`select * from crm_record_trainer_presence('${ids.presenceSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000004')`);
+    assert.equal(neutralSubscribed.rows[0].entry_type,'subscription'); assert.equal(neutralSubscribed.rows[0].sub_id,ids.presenceSub);
+    const neutralSubscribedRetry = await db.query(`select * from crm_record_trainer_presence('${ids.presenceSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000004')`);
+    const neutralSubscribedNewKeyRetry = await db.query(`select * from crm_record_trainer_presence('${ids.presenceSubStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000010')`);
+    assert.equal(neutralSubscribedRetry.rows[0].id,neutralSubscribed.rows[0].id);
+    assert.equal(neutralSubscribedNewKeyRetry.rows[0].id,neutralSubscribed.rows[0].id);
+    const forgedTrainerQuantityKey = '82000000-0000-0000-0000-000000000003';
+    await assert.rejects(
+      ()=>db.query(`select * from crm_replace_attendance_quantity('${neutralSubscribed.rows[0].id}',1,2,'${forgedTrainerQuantityKey}')`),
+      /administrator required/i,
+    );
+    await db.exec('reset role');
+    const rejectedTrainerQuantity = await db.query(`select
+      (select quantity from attendance where id='${neutralSubscribed.rows[0].id}')::int as quantity,
+      (select used_trainings from subscriptions where id='${ids.presenceSub}')::int as used_trainings,
+      (select count(*) from attendance_quantity_mutations where idempotency_key='${forgedTrainerQuantityKey}')::int as mutation_count`);
+    assert.deepEqual(rejectedTrainerQuantity.rows[0],{quantity:1,used_trainings:1,mutation_count:0});
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const correctedByAdmin = await db.query(`select * from crm_replace_attendance_quantity('${neutralSubscribed.rows[0].id}',1,2,'${forgedTrainerQuantityKey}')`);
+    assert.equal(correctedByAdmin.rows[0].quantity,2);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    const lastCreditKey = '80000000-0000-0000-0000-000000000008';
+    const lastCredit = await db.query(`select * from crm_record_trainer_presence('${ids.lastCreditStudent}',current_date,'g1',1,'${lastCreditKey}')`);
+    const lastCreditLostResponseRetry = await db.query(`select * from crm_record_trainer_presence('${ids.lastCreditStudent}',current_date,'g1',1,'${lastCreditKey}')`);
+    const lastCreditNewKeyRetry = await db.query(`select * from crm_record_trainer_presence('${ids.lastCreditStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000009')`);
+    assert.equal(lastCredit.rows[0].entry_type,'subscription');
+    assert.equal(lastCredit.rows[0].sub_id,ids.lastCreditSub);
+    assert.equal(lastCreditLostResponseRetry.rows[0].id,lastCredit.rows[0].id);
+    assert.equal(lastCreditNewKeyRetry.rows[0].id,lastCredit.rows[0].id);
+    await db.exec('reset role');
+    const lastCreditState = await db.query(`select
+      (select count(*)::int from attendance where student_id='${ids.lastCreditStudent}' and group_id='g1' and date=current_date) as attendance_count,
+      (select count(*)::int from attendance where student_id='${ids.lastCreditStudent}' and group_id='g1' and date=current_date and entry_type='unpaid') as unpaid_count,
+      (select used_trainings from subscriptions where id='${ids.lastCreditSub}')::int as used_trainings`);
+    assert.deepEqual(lastCreditState.rows[0],{attendance_count:1,unpaid_count:0,used_trainings:1});
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_trainer_presence('${ids.lastCreditStudent}',current_date,'g1',2,'${lastCreditKey}')`),
+      /idempotency key conflict/i,
+    );
+    await assert.rejects(
+      ()=>db.query(`select * from crm_record_trainer_presence('${ids.lastCreditStudent}',current_date,'g1',2,'80000000-0000-0000-0000-000000000011')`),
+      /payload conflicts with existing attendance/i,
+    );
+    const neutralSubscribedOtherDate = await db.query(`select * from crm_record_trainer_presence('${ids.presenceSubStudent}',current_date+1,'g1',1,'80000000-0000-0000-0000-000000000005')`);
+    assert.equal(neutralSubscribedOtherDate.rows[0].entry_type,'subscription'); assert.equal(neutralSubscribedOtherDate.rows[0].sub_id,ids.presenceSub);
+    const storedFallback = await db.query(`select * from crm_record_trainer_presence('${ids.storedUsageStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000006')`);
+    assert.equal(storedFallback.rows[0].entry_type,'subscription'); assert.equal(storedFallback.rows[0].sub_id,ids.storedFallbackSub);
+    const storedOnlyUnpaid = await db.query(`select * from crm_record_trainer_presence('${ids.storedOnlyStudent}',current_date,'g1',1,'80000000-0000-0000-0000-000000000007')`);
+    assert.equal(storedOnlyUnpaid.rows[0].entry_type,'unpaid'); assert.equal(storedOnlyUnpaid.rows[0].sub_id,null);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_replace_attendance_quantity('${neutralUnpaid.rows[0].id}',1,2,'82000000-0000-0000-0000-000000000002')`),
+      /require subscription attendance/i,
+    );
+    await db.exec('reset role');
+    const rejectedQuantityKeys = await db.query(`select count(*)::int as count from attendance_quantity_mutations where idempotency_key in ('${unpaidQuantityKey}','82000000-0000-0000-0000-000000000002')`);
+    assert.equal(rejectedQuantityKeys.rows[0].count,0);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const conversionSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.noSubStudent}','g1','4pack',current_date-1,current_date+10,2,0,600,false) returning id`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(()=>db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${conversionSub.rows[0].id}','81000000-0000-0000-0000-000000000001')`),/administrator required/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const convertedUnpaid = await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${conversionSub.rows[0].id}','81000000-0000-0000-0000-000000000001')`);
+    const convertedUnpaidRetry = await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${conversionSub.rows[0].id}','81000000-0000-0000-0000-000000000001')`);
+    assert.equal(convertedUnpaid.rows[0].id,neutralUnpaid.rows[0].id); assert.equal(convertedUnpaidRetry.rows[0].id,neutralUnpaid.rows[0].id);
+    const convertedUsage = await db.query(`select used_trainings from subscriptions where id='${conversionSub.rows[0].id}'`);
+    assert.equal(convertedUsage.rows[0].used_trainings,1);
+
+    const historicalDebt = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-6,null,null,'g1',1,'debt','81000000-0000-0000-0000-000000000002')`);
+    const historicalSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.student}','g1','4pack',current_date-7,current_date-5,2,0,600,false) returning id`);
+    await assert.rejects(()=>db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${historicalSub.rows[0].id}','81000000-0000-0000-0000-000000000001')`),/idempotency key conflict/i);
+    const convertedDebt = await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${historicalSub.rows[0].id}','81000000-0000-0000-0000-000000000003')`);
+    assert.equal(convertedDebt.rows[0].id,historicalDebt.rows[0].id);
+
+    const protectedTrial = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-9,null,null,'g1',1,'trial','81000000-0000-0000-0000-000000000004')`);
+    const outsideDebt = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-20,null,null,'g1',1,'debt','81000000-0000-0000-0000-000000000009')`);
+    const otherStudentDebt = await db.query(`select * from crm_record_attendance(null,'${ids.noSubStudent}',current_date-9,null,null,'g1',1,'debt','81000000-0000-0000-0000-000000000010')`);
+    const otherGroupDebt = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-9,null,null,'g2',1,'debt','81000000-0000-0000-0000-000000000011')`);
+    const narrowSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.student}','g1','single',current_date-10,current_date-8,1,0,300,false) returning id`);
+    await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${narrowSub.rows[0].id}','81000000-0000-0000-0000-000000000005')`);
+    const untouchedTrial = await db.query(`select sub_id,entry_type from attendance where id='${protectedTrial.rows[0].id}'`);
+    assert.deepEqual(untouchedTrial.rows[0],{sub_id:null,entry_type:'trial'});
+    const untouchedForeign = await db.query(`select count(*)::int as count from attendance where id in ('${outsideDebt.rows[0].id}','${otherStudentDebt.rows[0].id}','${otherGroupDebt.rows[0].id}','${neutralSubscribed.rows[0].id}') and (sub_id is null or id='${neutralSubscribed.rows[0].id}')`);
+    assert.equal(untouchedForeign.rows[0].count,4);
+
+    const overOne = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-12,null,null,'g1',1,'unpaid','81000000-0000-0000-0000-000000000006')`);
+    const overTwo = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-11,null,null,'g1',1,'debt','81000000-0000-0000-0000-000000000007')`);
+    const overSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.student}','g1','single',current_date-13,current_date-10,1,0,300,false) returning id`);
+    await assert.rejects(()=>db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${overSub.rows[0].id}','81000000-0000-0000-0000-000000000008')`),/no capacity/i);
+    const unchangedOver = await db.query(`select count(*)::int as count from attendance where id in ('${overOne.rows[0].id}','${overTwo.rows[0].id}') and sub_id is null`);
+    assert.equal(unchangedOver.rows[0].count,2);
+
+    const nullCapacityStudent = '85000000-0000-0000-0000-000000000001';
+    const nullSuccessStudent = '85000000-0000-0000-0000-000000000002';
+    await db.exec('reset role');
+    await db.query(`insert into students(id,name) values('${nullCapacityStudent}','Null capacity'),('${nullSuccessStudent}','Null success')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${nullCapacityStudent}','g1'),('${nullSuccessStudent}','g1')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const nullCapacityRows = await db.query(`insert into attendance(student_id,date,group_id,quantity,entry_type) values
+      ('${nullCapacityStudent}',current_date-15,'g1',null,'unpaid'),
+      ('${nullCapacityStudent}',current_date-14,'g1',1,'debt') returning id`);
+    const nullCapacitySub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid)
+      values('${nullCapacityStudent}','g1','single',current_date-16,current_date-13,1,0,300,false) returning id`);
+    const nullCapacityKey = '85000000-0000-0000-0000-000000000003';
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${nullCapacitySub.rows[0].id}','${nullCapacityKey}')`),
+      /no capacity/i,
+    );
+    await db.exec('reset role');
+    const nullCapacityState = await db.query(`select
+      (select count(*)::int from attendance where id in ('${nullCapacityRows.rows[0].id}','${nullCapacityRows.rows[1].id}') and sub_id is null) as unlinked_count,
+      (select used_trainings from subscriptions where id='${nullCapacitySub.rows[0].id}')::int as used_trainings,
+      (select count(*)::int from attendance_subscription_conversions where idempotency_key='${nullCapacityKey}') as mutation_count`);
+    assert.deepEqual(nullCapacityState.rows[0],{unlinked_count:2,used_trainings:0,mutation_count:0});
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+
+    const nullSuccessAttendance = await db.query(`insert into attendance(student_id,date,group_id,quantity,entry_type)
+      values('${nullSuccessStudent}',current_date-15,'g1',null,'unpaid') returning id`);
+    const nullSuccessSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid)
+      values('${nullSuccessStudent}','g1','single',current_date-16,current_date-14,1,0,300,false) returning id`);
+    const nullConverted = await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${nullSuccessSub.rows[0].id}','85000000-0000-0000-0000-000000000004')`);
+    assert.equal(nullConverted.rows[0].id,nullSuccessAttendance.rows[0].id);
+    const nullSuccessState = await db.query(`select a.sub_id,a.quantity,a.entry_type,s.used_trainings
+      from attendance a join subscriptions s on s.id=a.sub_id where a.id='${nullSuccessAttendance.rows[0].id}'`);
+    assert.deepEqual(nullSuccessState.rows[0],{sub_id:nullSuccessSub.rows[0].id,quantity:null,entry_type:'subscription',used_trainings:1});
+
+    const racedAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.storedOnlyStudent}',current_date-3,null,null,'g1',1,'unpaid','81000000-0000-0000-0000-000000000012')`);
+    const racedSub = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid) values('${ids.storedOnlyStudent}','g1','single',current_date-4,current_date-2,1,0,300,false) returning id`);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_replace_attendance_quantity('${racedAttendance.rows[0].id}',1,2,'81000000-0000-0000-0000-000000000013')`),
+      /require subscription attendance/i,
+    );
+    const racedConversion = await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${racedSub.rows[0].id}','81000000-0000-0000-0000-000000000014')`);
+    assert.equal(racedConversion.rows[0].id,racedAttendance.rows[0].id);
+    const racedUnchanged = await db.query(`select quantity,sub_id,entry_type from attendance where id='${racedAttendance.rows[0].id}'`);
+    assert.deepEqual(racedUnchanged.rows[0],{quantity:1,sub_id:racedSub.rows[0].id,entry_type:'subscription'});
+    const noOverflow = await db.query(`select count(*)::int as count from subscriptions where used_trainings>total_trainings`);
+    assert.equal(noOverflow.rows[0].count,0);
+
+    const trainerDeleteGuest = await db.query(`insert into attendance(date,guest_name,guest_type,group_id,quantity,entry_type) values(current_date-5,'Trainer cannot delete','trial','g1',1,'trial') returning id`);
+    const outsideScopeAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-5,null,null,'g2',1,'unpaid','83000000-0000-0000-0000-000000000001')`);
+    const adminDeleteAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-4,null,null,'g1',1,'unpaid','83000000-0000-0000-0000-000000000002')`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await db.query(`select crm_delete_attendance('${neutralSubscribed.rows[0].id}')`);
+    const deletedSubscriptionAttendance = await db.query(`select count(*)::int as count from attendance where id='${neutralSubscribed.rows[0].id}'`);
+    assert.equal(deletedSubscriptionAttendance.rows[0].count,0);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const usageAfterTrainerDelete = await db.query(`select used_trainings from subscriptions where id='${ids.presenceSub}'`);
+    assert.equal(usageAfterTrainerDelete.rows[0].used_trainings,1);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(()=>db.query(`select crm_delete_attendance('${trainerDeleteGuest.rows[0].id}')`),/authorized student attendance/i);
+    await assert.rejects(()=>db.query(`select crm_delete_attendance('${outsideScopeAttendance.rows[0].id}')`),/authorized student attendance/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`update trainers set is_active=false where id='${ids.trainer}'`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(()=>db.query(`select crm_delete_attendance('${neutralSubscribedOtherDate.rows[0].id}')`),/authorized student attendance/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`update trainers set is_active=true where id='${ids.trainer}'`);
+    await db.query(`select crm_delete_attendance('${trainerDeleteGuest.rows[0].id}')`);
+    await db.query(`select crm_delete_attendance('${outsideScopeAttendance.rows[0].id}')`);
+    await db.query(`select crm_delete_attendance('${adminDeleteAttendance.rows[0].id}')`);
+    await db.query(`select crm_delete_attendance('${neutralSubscribedOtherDate.rows[0].id}')`);
+    const usageAfterLastDelete = await db.query(`select used_trainings from subscriptions where id='${ids.presenceSub}'`);
+    assert.equal(usageAfterLastDelete.rows[0].used_trainings,0);
+    const adminGuest = await db.query(`insert into attendance(date,guest_name,guest_type,group_id,quantity,entry_type) values(current_date-8,'Admin guest','trial','g1',1,'trial') returning id`);
+    const adminRelink = await db.query(`select * from crm_relink_guest_attendance('g1','${ids.student}',array['${adminGuest.rows[0].id}'::uuid])`);
+    assert.equal(adminRelink.rows[0].student_id,ids.student);
+    const outsideGuest = await db.query(`insert into attendance(date,guest_name,guest_type,group_id,quantity,entry_type) values(current_date-7,'Outside','trial','g2',1,'trial') returning id`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_relink_guest_attendance('g2','${ids.student}',array['${outsideGuest.rows[0].id}'::uuid])`), /administrator required/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const conversionGuest = await db.query(`select * from crm_record_attendance(null,null,current_date-6,'Retry guest','trial','g1',1,'trial','50000000-0000-0000-0000-000000000001')`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    const conversionKey = '50000000-0000-0000-0000-000000000002';
+    await assert.rejects(
+      ()=>db.query(`select * from crm_convert_guest_to_student('g1',array['${conversionGuest.rows[0].id}'::uuid],'Retry Student',null,null,null,null,null,null,'${conversionKey}')`),
+      /administrator required/i,
+    );
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const converted = await db.query(`select * from crm_convert_guest_to_student('g1',array['${conversionGuest.rows[0].id}'::uuid],'Retry Student',null,null,null,null,null,null,'${conversionKey}')`);
+    const convertedRetry = await db.query(`select * from crm_convert_guest_to_student('g1',array['${conversionGuest.rows[0].id}'::uuid],'Retry Student',null,null,null,null,null,null,'${conversionKey}')`);
+    assert.equal(convertedRetry.rows[0].id,converted.rows[0].id);
+    const convertedCount = await db.query(`select count(*)::int as count from students where name='Retry Student'`);
+    assert.equal(convertedCount.rows[0].count,1);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_record_attendance('${ids.expiredSub}','${ids.student}',current_date,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000001')`), /does not cover/i);
+    await assert.rejects(() => db.query(`select * from crm_record_attendance('${ids.exhaustedSub}','${ids.student}',current_date,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000002')`), /no remaining/i);
+    const limited = await db.query(`select * from crm_record_attendance('${ids.limitedSub}','${ids.student}',current_date,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000009')`);
+    const limitedRetry = await db.query(`select * from crm_record_attendance('${ids.limitedSub}','${ids.student}',current_date,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000010')`);
+    assert.equal(limitedRetry.rows[0].id,limited.rows[0].id);
+    await assert.rejects(()=>db.query(`select * from crm_record_attendance('${ids.limitedSub}','${ids.student}',current_date,null,null,'g1',2,'subscription','20000000-0000-0000-0000-000000000011')`),/conflict/i);
+    await assert.rejects(()=>db.query(`select * from crm_record_attendance('${ids.limitedSub}','${ids.student}',current_date+1,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000012')`),/no remaining/i);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    const directAttendanceUpdate = await db.query(`update attendance set quantity=9 where id='${limited.rows[0].id}' returning id`);
+    const directAttendanceDelete = await db.query(`delete from attendance where id='${limited.rows[0].id}' returning id`);
+    assert.equal(directAttendanceUpdate.rows.length,0); assert.equal(directAttendanceDelete.rows.length,0);
+    await assert.rejects(()=>db.query(`insert into attendance(student_id,date,group_id,quantity,entry_type) values('${ids.student}',current_date,'g1',1,'debt')`),/row-level security/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_replace_attendance_quantity('${limited.rows[0].id}',1,2,'30000000-0000-0000-0000-000000000001')`), /no remaining/i);
+    const unpaid = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-9,null,null,'g1',1,'unpaid','70000000-0000-0000-0000-000000000001')`);
+    const unpaidRetry = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-9,null,null,'g1',1,'unpaid','70000000-0000-0000-0000-000000000002')`);
+    assert.equal(unpaid.rows[0].entry_type,'unpaid'); assert.equal(unpaidRetry.rows[0].id,unpaid.rows[0].id);
+    const implicitDebt = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-10,null,null,'g1',1,null,'70000000-0000-0000-0000-000000000003')`);
+    assert.equal(implicitDebt.rows[0].entry_type,'debt');
+    const syncAttendance = await db.query(`select * from crm_record_attendance('${ids.syncSub}','${ids.student}',current_date-2,null,null,'g1',1,'subscription','70000000-0000-0000-0000-000000000004')`);
+    await db.query(`select * from crm_replace_attendance_quantity('${syncAttendance.rows[0].id}',1,2,'70000000-0000-0000-0000-000000000005')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const fullyUsed = await db.query(`select used_trainings,activation_date,end_date from subscriptions where id='${ids.syncSub}'`);
+    assert.equal(fullyUsed.rows[0].used_trainings,2);
+    assert.equal(fullyUsed.rows[0].activation_date.toISOString().slice(0,10),new Date(Date.now()-2*86400000).toISOString().slice(0,10));
+    assert.equal(fullyUsed.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()-2*86400000).toISOString().slice(0,10));
+    await db.query(`select * from crm_replace_attendance_quantity('${syncAttendance.rows[0].id}',2,1,'70000000-0000-0000-0000-000000000006')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const reducedUsage = await db.query(`select used_trainings,activation_date,end_date from subscriptions where id='${ids.syncSub}'`);
+    assert.equal(reducedUsage.rows[0].used_trainings,1);
+    assert.equal(reducedUsage.rows[0].activation_date.toISOString(),fullyUsed.rows[0].activation_date.toISOString());
+    assert.equal(reducedUsage.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()+30*86400000).toISOString().slice(0,10));
+    await db.query(`select * from crm_replace_attendance_quantity('${syncAttendance.rows[0].id}',1,2,'70000000-0000-0000-0000-000000000007')`);
+    const fullyUsedAgain = await db.query(`select used_trainings,activation_date,end_date,original_end_date from subscriptions where id='${ids.syncSub}'`);
+    assert.equal(fullyUsedAgain.rows[0].used_trainings,2);
+    assert.equal(fullyUsedAgain.rows[0].end_date.toISOString(),fullyUsed.rows[0].end_date.toISOString());
+    assert.equal(fullyUsedAgain.rows[0].original_end_date.toISOString(),reducedUsage.rows[0].end_date.toISOString());
+    await db.query(`select crm_delete_attendance('${syncAttendance.rows[0].id}')`);
+    const deletedPackUsage = await db.query(`select used_trainings,activation_date,end_date from subscriptions where id='${ids.syncSub}'`);
+    assert.equal(deletedPackUsage.rows[0].used_trainings,0);
+    assert.equal(deletedPackUsage.rows[0].activation_date,null);
+    assert.equal(deletedPackUsage.rows[0].end_date.toISOString(),reducedUsage.rows[0].end_date.toISOString());
+
+    const cancellationStudent = '88000000-0000-0000-0000-000000000001';
+    const cancellationSub = '88000000-0000-0000-0000-000000000002';
+    const shortenedStudent = '88000000-0000-0000-0000-000000000020';
+    const shortenedSub = '88000000-0000-0000-0000-000000000021';
+    const expiredCanonicalStudent = '88000000-0000-0000-0000-000000000022';
+    const expiredCanonicalSub = '88000000-0000-0000-0000-000000000023';
+    await db.exec('reset role');
+    await db.query(`insert into groups(id,archived_at,direction_id,schedule) values('g-cancel',null,'d-cancel','[]')`);
+    await db.query(`insert into students(id,name) values('${cancellationStudent}','Cancellation extension'),('${shortenedStudent}','Shortened canonical pack'),('${expiredCanonicalStudent}','Expired canonical pack')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${cancellationStudent}','g-cancel'),('${shortenedStudent}','g-cancel'),('${expiredCanonicalStudent}','g-cancel')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,original_end_date,total_trainings,used_trainings,amount,base_price,paid,pay_method)
+      values('${cancellationSub}','${cancellationStudent}','g-cancel','4pack',current_date-1,current_date+10,current_date+10,2,0,700,700,true,'card')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,original_end_date,total_trainings,used_trainings,amount,paid)
+      values
+      ('${shortenedSub}','${shortenedStudent}','g-cancel','4pack',current_date-10,current_date-1,current_date+10,1,1,400,true),
+      ('${expiredCanonicalSub}','${expiredCanonicalStudent}','g-cancel','4pack',current_date-20,current_date-2,current_date-1,4,0,400,true)`);
+    await db.query(`insert into attendance(sub_id,student_id,date,group_id,quantity,entry_type) values('${shortenedSub}','${shortenedStudent}',current_date-1,'g-cancel',1,'subscription')`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_cancel_training_for_group('g-cancel',current_date)`),
+      /administrator required/i,
+    );
+    await assert.rejects(
+      ()=>db.query(`select * from crm_restore_cancelled_training('88000000-0000-0000-0000-000000000099')`),
+      /administrator required/i,
+    );
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const cancellation = await db.query(`select * from crm_cancel_training_for_group('g-cancel',current_date)`);
+    const cancellationRetry = await db.query(`select * from crm_cancel_training_for_group('g-cancel',current_date)`);
+    assert.equal(cancellationRetry.rows[0].cancelled_training.id,cancellation.rows[0].cancelled_training.id);
+    const secondCancellation = await db.query(`select * from crm_cancel_training_for_group('g-cancel',current_date+1)`);
+    await db.exec('reset role');
+    const cancellationMarkers = await db.query(`select count(*)::int as count from cancelled_trainings where group_id='g-cancel' and date=current_date`);
+    assert.equal(cancellationMarkers.rows[0].count,1);
+    const canonicalCoverage = await db.query(`select id,end_date,original_end_date from subscriptions where id in ('${shortenedSub}','${expiredCanonicalSub}') order by id`);
+    const expiredCanonical = canonicalCoverage.rows.find((row)=>row.id===expiredCanonicalSub);
+    const shortenedCanonical = canonicalCoverage.rows.find((row)=>row.id===shortenedSub);
+    assert.equal(shortenedCanonical.original_end_date.toISOString().slice(0,10),new Date(Date.now()+24*86400000).toISOString().slice(0,10));
+    assert.equal(expiredCanonical.original_end_date.toISOString().slice(0,10),new Date(Date.now()-1*86400000).toISOString().slice(0,10));
+    const compensatedPackStudent = '88000000-0000-0000-0000-000000000010';
+    const compensatedPack = '88000000-0000-0000-0000-000000000011';
+    const legacyRestoreStudent = '88000000-0000-0000-0000-000000000030';
+    const legacyRestoreSub = '88000000-0000-0000-0000-000000000031';
+    await db.query(`insert into students(id,name) values('${compensatedPackStudent}','Post-cancellation pack')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${compensatedPackStudent}','g-cancel')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,original_end_date,total_trainings,used_trainings,amount,paid)
+      values('${compensatedPack}','${compensatedPackStudent}','g-cancel','4pack',current_date,current_date+24,current_date+10,4,0,900,true)`);
+    await db.query(`insert into students(id,name) values('${legacyRestoreStudent}','Legacy cancellation restore')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${legacyRestoreStudent}','g-cancel')`);
+    await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,start_date,end_date,original_end_date,total_trainings,used_trainings,amount,paid)
+      values('${legacyRestoreSub}','${legacyRestoreStudent}','g-cancel','4pack',current_date,current_date+24,current_date+24,4,0,900,true)`);
+    const legacyCancellation = await db.query(`insert into cancelled_trainings(group_id,date,reason)
+      values('g-cancel',current_date-5,jsonb_build_object('${legacyRestoreSub}',(current_date+10)::text)::text) returning id`);
+    // The current schedule is mutable and no longer proves the historical
+    // extension that produced this legacy object metadata.
+    await db.query(`update groups set schedule='[{"day":6}]'::jsonb where id='g-cancel'`);
+    const legacyBeforeFailedRestore = await db.query(`select end_date,original_end_date from subscriptions where id='${legacyRestoreSub}'`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(
+      () => db.query(`select * from crm_restore_cancelled_training('${legacyCancellation.rows[0].id}')`),
+      /manual reconciliation.*historical extension delta/i,
+    );
+    const legacyAfterFailedRestore = await db.query(`select end_date,original_end_date from subscriptions where id='${legacyRestoreSub}'`);
+    assert.deepEqual(legacyAfterFailedRestore.rows,legacyBeforeFailedRestore.rows);
+    await db.exec('reset role');
+    const retainedLegacyMarker = await db.query(`select count(*)::int as count from cancelled_trainings where id='${legacyCancellation.rows[0].id}'`);
+    assert.equal(retainedLegacyMarker.rows[0].count,1);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`select * from crm_sync_subscription_usage('${shortenedSub}')`);
+    const shortenedAfterSync = await db.query(`select end_date,original_end_date from subscriptions where id='${shortenedSub}'`);
+    assert.equal(shortenedAfterSync.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()-1*86400000).toISOString().slice(0,10));
+    assert.equal(shortenedAfterSync.rows[0].original_end_date.toISOString().slice(0,10),new Date(Date.now()+24*86400000).toISOString().slice(0,10));
+    const shortenedAttendance = await db.query(`select id from attendance where sub_id='${shortenedSub}'`);
+    await db.query(`select crm_delete_attendance('${shortenedAttendance.rows[0].id}')`);
+    const shortenedAfterDelete = await db.query(`select used_trainings,end_date,original_end_date from subscriptions where id='${shortenedSub}'`);
+    assert.equal(shortenedAfterDelete.rows[0].used_trainings,0);
+    assert.equal(shortenedAfterDelete.rows[0].end_date.toISOString(),shortenedAfterDelete.rows[0].original_end_date.toISOString());
+    const compensatedPackAttendance = await db.query(`select * from crm_record_attendance('${compensatedPack}','${compensatedPackStudent}',current_date,null,null,'g-cancel',1,'subscription','88000000-0000-0000-0000-000000000012')`);
+    const compensatedPackDebt = await db.query(`select * from crm_record_attendance(null,'${compensatedPackStudent}',current_date+1,null,null,'g-cancel',1,'unpaid','88000000-0000-0000-0000-000000000013')`);
+    await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${compensatedPack}','88000000-0000-0000-0000-000000000014')`);
+    await db.query(`select * from crm_sync_subscription_usage('${compensatedPack}')`);
+    const compensatedPackAfterSync = await db.query(`select used_trainings,end_date,original_end_date from subscriptions where id='${compensatedPack}'`);
+    assert.deepEqual({used_trainings:compensatedPackAfterSync.rows[0].used_trainings,end_date:compensatedPackAfterSync.rows[0].end_date.toISOString().slice(0,10),original_end_date:compensatedPackAfterSync.rows[0].original_end_date.toISOString().slice(0,10)},
+      {used_trainings:2,end_date:new Date(Date.now()+24*86400000).toISOString().slice(0,10),original_end_date:new Date(Date.now()+24*86400000).toISOString().slice(0,10)});
+    assert.ok(compensatedPackAttendance.rows[0].id);
+    assert.equal(compensatedPackDebt.rows[0].sub_id,null);
+    const extended = await db.query(`select end_date,original_end_date,amount,base_price,paid,pay_method from subscriptions where id='${cancellationSub}'`);
+    assert.equal(extended.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()+24*86400000).toISOString().slice(0,10));
+    assert.equal(extended.rows[0].original_end_date.toISOString(),extended.rows[0].end_date.toISOString());
+    assert.deepEqual({amount:extended.rows[0].amount,base_price:extended.rows[0].base_price,paid:extended.rows[0].paid,pay_method:extended.rows[0].pay_method},
+      {amount:700,base_price:700,paid:true,pay_method:'card'});
+    const cancellationAttendance = await db.query(`select * from crm_record_attendance('${cancellationSub}','${cancellationStudent}',current_date,null,null,'g-cancel',1,'subscription','88000000-0000-0000-0000-000000000003')`);
+    await db.query(`select * from crm_replace_attendance_quantity('${cancellationAttendance.rows[0].id}',1,2,'88000000-0000-0000-0000-000000000004')`);
+    const cancellationFullyUsed = await db.query(`select end_date,original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(cancellationFullyUsed.rows[0].end_date.toISOString().slice(0,10),new Date().toISOString().slice(0,10));
+    assert.equal(cancellationFullyUsed.rows[0].original_end_date.toISOString(),extended.rows[0].original_end_date.toISOString());
+    await db.query(`select * from crm_replace_attendance_quantity('${cancellationAttendance.rows[0].id}',2,1,'88000000-0000-0000-0000-000000000005')`);
+    const cancellationReduced = await db.query(`select used_trainings,end_date,original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(cancellationReduced.rows[0].used_trainings,1);
+    assert.equal(cancellationReduced.rows[0].end_date.toISOString(),extended.rows[0].end_date.toISOString());
+    await db.query(`select crm_delete_attendance('${cancellationAttendance.rows[0].id}')`);
+    const cancellationAfterDelete = await db.query(`select used_trainings,end_date,original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(cancellationAfterDelete.rows[0].used_trainings,0);
+    assert.equal(cancellationAfterDelete.rows[0].end_date.toISOString(),extended.rows[0].end_date.toISOString());
+    const cancellationDebt = await db.query(`select * from crm_record_attendance(null,'${cancellationStudent}',current_date+1,null,null,'g-cancel',1,'unpaid','88000000-0000-0000-0000-000000000006')`);
+    await db.query(`select * from crm_admin_convert_unpaid_attendance_to_subscription('${cancellationSub}','88000000-0000-0000-0000-000000000007')`);
+    const cancellationAfterConversion = await db.query(`select used_trainings,end_date,original_end_date,amount,paid from subscriptions where id='${cancellationSub}'`);
+    assert.deepEqual({used_trainings:cancellationAfterConversion.rows[0].used_trainings,amount:cancellationAfterConversion.rows[0].amount,paid:cancellationAfterConversion.rows[0].paid},{used_trainings:1,amount:700,paid:true});
+    assert.equal(cancellationAfterConversion.rows[0].end_date.toISOString(),extended.rows[0].end_date.toISOString());
+    assert.equal(cancellationAfterConversion.rows[0].original_end_date.toISOString(),extended.rows[0].original_end_date.toISOString());
+    await db.query(`select * from crm_sync_subscription_usage('${cancellationSub}')`);
+    const cancellationAfterExplicitSync = await db.query(`select used_trainings,end_date,original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(cancellationAfterExplicitSync.rows[0].used_trainings,1);
+    assert.equal(cancellationAfterExplicitSync.rows[0].end_date.toISOString(),extended.rows[0].end_date.toISOString());
+    assert.equal(cancellationAfterExplicitSync.rows[0].original_end_date.toISOString(),extended.rows[0].original_end_date.toISOString());
+    assert.equal(cancellationDebt.rows[0].sub_id,null);
+    const beforeFailedRestore = cancellationAfterExplicitSync.rows[0].original_end_date.toISOString();
+    await db.exec('reset role');
+    const malformedRestore = await db.query(`insert into cancelled_trainings(group_id,date,reason)
+      values('g-cancel',current_date+2,jsonb_build_array(
+        jsonb_build_object('subId','${cancellationSub}','oldEndDate',current_date+17,'newEndDate',current_date+24),
+        jsonb_build_object('subId','${cancellationSub}','oldEndDate',null,'newEndDate',current_date+24)
+      )::text) returning id`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_restore_cancelled_training('${malformedRestore.rows[0].id}')`),
+      /invalid restoration metadata/i,
+    );
+    const afterFailedRestore = await db.query(`select original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(afterFailedRestore.rows[0].original_end_date.toISOString(),beforeFailedRestore);
+    await db.exec('reset role');
+    const retainedMalformedMarker = await db.query(`select count(*)::int as count from cancelled_trainings where id='${malformedRestore.rows[0].id}'`);
+    assert.equal(retainedMalformedMarker.rows[0].count,1);
+    await db.query(`delete from cancelled_trainings where id='${malformedRestore.rows[0].id}'`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`select * from crm_restore_cancelled_training('${cancellation.rows[0].cancelled_training.id}')`);
+    const afterFirstRestore = await db.query(`select end_date,original_end_date from subscriptions where id='${cancellationSub}'`);
+    assert.equal(afterFirstRestore.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()+17*86400000).toISOString().slice(0,10));
+    await db.query(`select * from crm_restore_cancelled_training('${secondCancellation.rows[0].cancelled_training.id}')`);
+    const afterSecondRestore = await db.query(`select end_date,original_end_date,used_trainings,amount,paid from subscriptions where id='${cancellationSub}'`);
+    assert.equal(afterSecondRestore.rows[0].end_date.toISOString().slice(0,10),new Date(Date.now()+10*86400000).toISOString().slice(0,10));
+    assert.deepEqual({used_trainings:afterSecondRestore.rows[0].used_trainings,amount:afterSecondRestore.rows[0].amount,paid:afterSecondRestore.rows[0].paid},{used_trainings:1,amount:700,paid:true});
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const first = await db.query(`select * from crm_record_attendance('${ids.validSub}','${ids.student}',current_date,null,null,'g1',1,'subscription','20000000-0000-0000-0000-000000000003')`);
+    assert.equal(first.rows.length,1);
+    const attendanceIdForQuantity = first.rows[0].id;
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const unchanged = await db.query(`select a.quantity,s.used_trainings from attendance a join subscriptions s on s.id=a.sub_id where a.id='${limited.rows[0].id}'`);
+    assert.equal(unchanged.rows[0].quantity,1); assert.equal(unchanged.rows[0].used_trainings,1);
+    const activation = await db.query(`select activation_date from subscriptions where id='${ids.validSub}'`);
+    assert.ok(activation.rows[0].activation_date);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_record_attendance('${ids.validSub}','${ids.student}',current_date,null,null,'g1',2,'subscription','20000000-0000-0000-0000-000000000003')`), /idempotency key conflict/i);
+    const changed = await db.query(`select * from crm_replace_attendance_quantity('${attendanceIdForQuantity}',1,2,'30000000-0000-0000-0000-000000000002')`);
+    assert.equal(changed.rows[0].quantity,2);
+    const competingUsage = await Promise.allSettled([
+      db.query(`select * from crm_replace_attendance_quantity('${attendanceIdForQuantity}',2,3,'30000000-0000-0000-0000-000000000003')`),
+      db.query(`select * from crm_replace_attendance_quantity('${attendanceIdForQuantity}',2,4,'30000000-0000-0000-0000-000000000004')`),
+    ]);
+    assert.equal(competingUsage.filter((result)=>result.status==='fulfilled').length,1);
+    assert.equal(competingUsage.filter((result)=>result.status==='rejected').length,1);
+    const multiUnit = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-5,null,null,'g1',2,'debt','60000000-0000-0000-0000-000000000001')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const multiInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${multiUnit.rows[0].id}')`);
+    assert.equal(multiInspection.rows[0].status,'unsupported_quantity');
+    for (const key of ['60000000-0000-0000-0000-000000000002','60000000-0000-0000-0000-000000000003']) {
+      await assert.rejects(()=>db.query(`select * from crm_admin_confirm_attendance_payment('${multiUnit.rows[0].id}',600,'cash','${key}')`),/exactly one training/i);
+    }
+    const unchangedMulti = await db.query(`select quantity,sub_id from attendance where id='${multiUnit.rows[0].id}'`);
+    assert.deepEqual(unchangedMulti.rows[0],{quantity:2,sub_id:null});
+    const noMultiPayment = await db.query(`select count(*)::int as count from subscriptions where source_attendance_id='${multiUnit.rows[0].id}'`);
+    assert.equal(noMultiPayment.rows[0].count,0);
+    const validCounters = await db.query(`select count(*)::int as count from subscriptions where used_trainings>total_trainings`);
+    assert.equal(validCounters.rows[0].count,0);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const trial = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-1,null,null,'g1',1,'trial','20000000-0000-0000-0000-000000000004')`);
+    const attendanceId = trial.rows[0].id;
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_admin_confirm_attendance_payment('${attendanceId}',150,'cash','20000000-0000-0000-0000-000000000005')`), /administrator required/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const payment = await db.query(`select * from crm_admin_confirm_attendance_payment('${attendanceId}',150,'cash','20000000-0000-0000-0000-000000000005')`);
+    const concurrentPayment = await db.query(`select * from crm_admin_confirm_attendance_payment('${attendanceId}',150,'cash','20000000-0000-0000-0000-000000000006')`);
+    assert.equal(payment.rows.length,1);
+    assert.equal(concurrentPayment.rows[0].id,payment.rows[0].id);
+    const confirmedInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${attendanceId}')`);
+    assert.equal(confirmedInspection.rows[0].status,'already_confirmed');
+    await assert.rejects(() => db.query(`select * from crm_admin_confirm_attendance_payment('${attendanceId}',300,'card','20000000-0000-0000-0000-000000000005')`), /conflict/i);
+    const linked = await db.query(`select entry_type,sub_id from attendance where id='${attendanceId}'`);
+    assert.equal(linked.rows[0].entry_type,'subscription'); assert.equal(linked.rows[0].sub_id,payment.rows[0].id);
+    const paidBeforeAdminDelete = await db.query(`select amount,base_price,discount_pct,discount_source,paid,pay_method,
+      used_trainings,activation_date::text,end_date::text,original_end_date::text,source_attendance_id
+      from subscriptions where id='${payment.rows[0].id}'`);
+    await db.query(`select crm_delete_attendance('${attendanceId}')`);
+    const paidAfterAdminDelete = await db.query(`select amount,base_price,discount_pct,discount_source,paid,pay_method,
+      used_trainings,activation_date::text,end_date::text,original_end_date::text,source_attendance_id
+      from subscriptions where id='${payment.rows[0].id}'`);
+    assert.deepEqual(paidAfterAdminDelete.rows,paidBeforeAdminDelete.rows);
+    const retryAfterAttendanceDelete = await db.query(`select * from crm_admin_confirm_attendance_payment('${attendanceId}',150,'cash','20000000-0000-0000-0000-000000000005')`);
+    assert.equal(retryAfterAttendanceDelete.rows[0].id,payment.rows[0].id);
+    const deletedAttendanceInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${attendanceId}')`);
+    assert.equal(deletedAttendanceInspection.rows[0].status,'already_confirmed');
+    const repeatedPaidLesson = await db.query(`select * from crm_record_attendance(
+      null,'${ids.student}',current_date-1,null,null,'g1',1,'unpaid','20000000-0000-0000-0000-000000000007')`);
+    const orphanedInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${repeatedPaidLesson.rows[0].id}')`);
+    assert.equal(orphanedInspection.rows[0].status,'orphaned_source_attendance');
+    assert.equal(orphanedInspection.rows[0].legacy_subscription_id,payment.rows[0].id);
+    await assert.rejects(
+      () => db.query(`select * from crm_admin_confirm_attendance_payment(
+        '${repeatedPaidLesson.rows[0].id}',150,'cash','20000000-0000-0000-0000-000000000008')`),
+      /deleted source attendance already covers this lesson/i,
+    );
+    const noDuplicateOrphanedReceipt = await db.query(`select count(*)::int as count from subscriptions
+      where student_id='${ids.student}' and group_id='g1' and paid is true
+        and source_attendance_id is not null
+        and lower(plan_type) in ('trial','single') and current_date-1 between start_date and coalesce(original_end_date,end_date)`);
+    assert.equal(noDuplicateOrphanedReceipt.rows[0].count,1);
+
+    const paidBeforeTrainerDelete = await db.query(`select amount,base_price,discount_pct,discount_source,paid,pay_method,
+      used_trainings,activation_date::text,end_date::text,original_end_date::text,source_attendance_id
+      from subscriptions where id='${receptionPaid.rows[0].payment_id}'`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await db.query(`select crm_delete_attendance('${receptionPaid.rows[0].attendance_id}')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const paidAfterTrainerDelete = await db.query(`select amount,base_price,discount_pct,discount_source,paid,pay_method,
+      used_trainings,activation_date::text,end_date::text,original_end_date::text,source_attendance_id
+      from subscriptions where id='${receptionPaid.rows[0].payment_id}'`);
+    assert.deepEqual(paidAfterTrainerDelete.rows,paidBeforeTrainerDelete.rows);
+
+    const eligibleTrialStudent = '89000000-0000-0000-0000-000000000001';
+    const blockedTrialStudent = '89000000-0000-0000-0000-000000000002';
+    await db.exec('reset role');
+    await db.query(`insert into students(id,name) values('${eligibleTrialStudent}','Eligible delayed trial'),('${blockedTrialStudent}','Blocked delayed trial')`);
+    await db.query(`insert into student_groups(student_id,group_id) values('${eligibleTrialStudent}','g1'),('${blockedTrialStudent}','g1')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const eligibleDelayedTrial = await db.query(`select * from crm_record_attendance(null,'${eligibleTrialStudent}',current_date-20,null,null,'g1',1,'unpaid','89000000-0000-0000-0000-000000000003')`);
+    const eligibleTrialPayment = await db.query(`select * from crm_admin_confirm_attendance_payment('${eligibleDelayedTrial.rows[0].id}',150,'cash','89000000-0000-0000-0000-000000000004',false,'trial')`);
+    assert.equal(eligibleTrialPayment.rows[0].plan_type,'trial');
+    assert.equal(eligibleTrialPayment.rows[0].source_attendance_id,eligibleDelayedTrial.rows[0].id);
+
+    await db.query(`select * from crm_record_attendance(null,'${blockedTrialStudent}',current_date-21,null,null,'g1',1,'single','89000000-0000-0000-0000-000000000005')`);
+    const blockedDelayedTrial = await db.query(`select * from crm_record_attendance(null,'${blockedTrialStudent}',current_date-20,null,null,'g1',1,'debt','89000000-0000-0000-0000-000000000006')`);
+    const beforeBlockedTrial = await db.query(`select
+      (select count(*)::int from subscriptions where source_attendance_id='${blockedDelayedTrial.rows[0].id}') as payments,
+      (select count(*)::int from financial_change_audit) as audits`);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_confirm_attendance_payment('${blockedDelayedTrial.rows[0].id}',150,'card','89000000-0000-0000-0000-000000000007',false,'trial')`),
+      /not eligible for another trial/i,
+    );
+    const afterBlockedTrial = await db.query(`select
+      (select count(*)::int from subscriptions where source_attendance_id='${blockedDelayedTrial.rows[0].id}') as payments,
+      (select count(*)::int from financial_change_audit) as audits,
+      (select entry_type from attendance where id='${blockedDelayedTrial.rows[0].id}') as entry_type`);
+    assert.deepEqual(afterBlockedTrial.rows[0],{payments:beforeBlockedTrial.rows[0].payments,audits:beforeBlockedTrial.rows[0].audits,entry_type:'debt'});
+    const delayedSingle = await db.query(`select * from crm_admin_confirm_attendance_payment('${blockedDelayedTrial.rows[0].id}',300,'card','89000000-0000-0000-0000-000000000008',false,'single')`);
+    assert.equal(delayedSingle.rows[0].plan_type,'single');
+
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const unmarkedAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-30,null,null,'g1',1,'unpaid','41000000-0000-0000-0000-000000000001')`);
+    await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid,pay_method,notes)
+      values('${ids.student}','g1','single',current_date-30,current_date-30,1,1,300,true,'card',null)`);
+    const unmarkedInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${unmarkedAttendance.rows[0].id}')`);
+    assert.equal(unmarkedInspection.rows[0].status,'legacy_unmarked_match');
+    assert.match(unmarkedInspection.rows[0].message,/історична оплата без технічного зв’язку/i);
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_confirm_attendance_payment('${unmarkedAttendance.rows[0].id}',300,'cash','41000000-0000-0000-0000-000000000002',false,'single')`),
+      /historical unmarked payment/i,
+    );
+    const unmarkedPaymentCount = await db.query(`select count(*)::int as count from subscriptions where student_id='${ids.student}' and group_id='g1' and start_date=current_date-30 and plan_type='single'`);
+    assert.equal(unmarkedPaymentCount.rows[0].count,1);
+
+    const multipleUnmarkedAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-31,null,null,'g1',1,'unpaid','41000000-0000-0000-0000-000000000003')`);
+    await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid,pay_method)
+      values
+      ('${ids.student}','g1','single',current_date-31,current_date-31,1,1,300,true,'cash'),
+      ('${ids.student}','g1','trial',current_date-31,current_date-31,1,1,150,true,'card')`);
+    const multipleUnmarkedInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${multipleUnmarkedAttendance.rows[0].id}')`);
+    assert.equal(multipleUnmarkedInspection.rows[0].status,'legacy_unmarked_match');
+    await assert.rejects(
+      ()=>db.query(`select * from crm_admin_confirm_attendance_payment('${multipleUnmarkedAttendance.rows[0].id}',300,'cash','41000000-0000-0000-0000-000000000004',false,'single')`),
+      /historical unmarked payment/i,
+    );
+    const clearAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-32,null,null,'g1',1,'unpaid','41000000-0000-0000-0000-000000000005')`);
+    const clearInspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${clearAttendance.rows[0].id}')`);
+    assert.equal(clearInspection.rows[0].status,'clear');
+
+    const legacyAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-2,null,null,'g1',1,'trial','40000000-0000-0000-0000-000000000001')`);
+    await actor(db,'authenticated',ids.trainerUser,'trainer@test.invalid');
+    await assert.rejects(() => db.query(`select * from crm_admin_inspect_attendance_payment('${legacyAttendance.rows[0].id}')`), /administrator required/i);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const legacy = await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid,pay_method,notes) values('${ids.student}','g1','trial',current_date-2,current_date-2,1,1,150,true,'card','auto_one_off_from_attendance:${legacyAttendance.rows[0].id}') returning id`);
+    const inspection = await db.query(`select * from crm_admin_inspect_attendance_payment('${legacyAttendance.rows[0].id}')`);
+    assert.equal(inspection.rows[0].status,'legacy_unverified');
+    await assert.rejects(() => db.query(`select * from crm_admin_confirm_attendance_payment('${legacyAttendance.rows[0].id}',150,'cash','40000000-0000-0000-0000-000000000002',false,'trial')`), /explicit reconciliation/i);
+    const stillUnverified = await db.query(`select source_attendance_id,paid,pay_method from subscriptions where id='${legacy.rows[0].id}'`);
+    assert.deepEqual(stillUnverified.rows[0],{source_attendance_id:null,paid:true,pay_method:'card'});
+    const reconciled = await db.query(`select * from crm_admin_confirm_attendance_payment('${legacyAttendance.rows[0].id}',150,'cash','40000000-0000-0000-0000-000000000002',true,'trial')`);
+    assert.equal(reconciled.rows[0].id,legacy.rows[0].id);
+    const reconciledAttendance = await db.query(`select sub_id,entry_type from attendance where id='${legacyAttendance.rows[0].id}'`);
+    assert.deepEqual(reconciledAttendance.rows[0],{sub_id:legacy.rows[0].id,entry_type:'subscription'});
+    const reconciliationAudit = await db.query(`select count(*)::int as count from financial_change_audit where table_name='subscriptions' and row_id='${legacy.rows[0].id}' and operation='UPDATE'`);
+    assert.equal(reconciliationAudit.rows[0].count,1);
+
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    const ambiguousAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-3,null,null,'g1',1,'single','40000000-0000-0000-0000-000000000003')`);
+    const mismatchAttendance = await db.query(`select * from crm_record_attendance(null,'${ids.student}',current_date-4,null,null,'g1',1,'single','40000000-0000-0000-0000-000000000004')`);
+    await actor(db,'authenticated',ids.adminUser,'admin@test.invalid');
+    await db.query(`insert into subscriptions(student_id,group_id,plan_type,start_date,end_date,total_trainings,used_trainings,amount,paid,pay_method,notes) values
+      ('${ids.student}','g1','single',current_date-3,current_date-3,1,1,300,true,'card','auto_one_off_from_attendance:${ambiguousAttendance.rows[0].id}'),
+      ('${ids.student}','g1','single',current_date-3,current_date-3,1,1,300,true,'card','auto_one_off_from_attendance:${ambiguousAttendance.rows[0].id}'),
+      ('${ids.student}','wrong-group','single',current_date-4,current_date-4,1,1,300,true,'card','auto_one_off_from_attendance:${mismatchAttendance.rows[0].id}')`);
+    await assert.rejects(() => db.query(`select * from crm_admin_confirm_attendance_payment('${ambiguousAttendance.rows[0].id}',300,'cash','40000000-0000-0000-0000-000000000005',true)`), /multiple legacy/i);
+    await assert.rejects(() => db.query(`select * from crm_admin_confirm_attendance_payment('${mismatchAttendance.rows[0].id}',300,'cash','40000000-0000-0000-0000-000000000006',true)`), /does not match/i);
+    const untouchedLegacy = await db.query(`select count(*)::int as count from subscriptions where source_attendance_id is not null and source_attendance_id in ('${ambiguousAttendance.rows[0].id}','${mismatchAttendance.rows[0].id}')`);
+    assert.equal(untouchedLegacy.rows[0].count,0);
+  } finally { await db.close(); }
+});
+
+test('financial migration tolerates installations without optional legacy payment helpers', async () => {
+  const db = new PGlite();
+  try {
+    const withoutOptionalHelpers = bootstrap
+      .split('\n')
+      .filter((line) => !line.startsWith('create function crm_ensure_one_off_payment_for_attendance')
+        && !line.startsWith('create function crm_remove_one_off_payment_if_orphan'))
+      .join('\n');
+    await db.exec(withoutOptionalHelpers);
+    await db.exec(migration);
+    const functions = await db.query(`select
+      to_regprocedure('public.crm_ensure_one_off_payment_for_attendance(uuid)')::text as ensure_helper,
+      to_regprocedure('public.crm_remove_one_off_payment_if_orphan(uuid)')::text as remove_helper`);
+    assert.deepEqual(functions.rows[0],{ensure_helper:null,remove_helper:null});
+  } finally {
+    await db.close();
+  }
+});
+
+test.skip('two independent PostgreSQL connections serialize attendance payment confirmation', () => {
+  // This repository environment has no PostgreSQL server/container. PGlite exposes
+  // one in-process connection, so Promise.all here would not prove cross-connection locking.
+});
+
+test.skip('two independent trainer-presence connections wait and re-read the same eligible subscription', () => {
+  // PGlite exposes one in-process connection only. The migration-level assertion
+  // verifies a student/group advisory lock plus blocking FOR UPDATE (no SKIP
+  // LOCKED), while this cross-connection proof must run in the disposable
+  // server-backed Supabase integration environment.
+});
+
+test.skip('independent PostgreSQL deletion and quantity/relink requests serialize subscription usage', () => {
+  // PGlite provides one in-process connection. A real server with at least two
+  // independent connections is required to prove row-lock serialization.
+});
+
+test.skip('independent conversion and quantity replacement serialize without over-capacity', () => {
+  // Staging-required: PGlite has one in-process connection and Promise.all
+  // would not prove PostgreSQL row/advisory lock behavior across connections.
+});
+
+test.skip('independent trainer and admin attendance creates share lock order without deadlock', () => {
+  // Staging-required: needs two server-backed PostgreSQL connections targeting
+  // the same natural attendance identity and student/group simultaneously.
+});
+
+test.skip('independent trainer presence and admin transfer serialize on both group attendance locks', () => {
+  // Staging-required: needs two server-backed PostgreSQL connections so transfer
+  // can race the trainer authorization and the post-lock membership recheck.
+});
