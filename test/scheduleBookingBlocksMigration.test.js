@@ -6,7 +6,7 @@ const baseName = "20261002090000_schedule_booking_blocks.sql";
 const name = "20261003090000_schedule_booking_blocks_continuous_periods.sql";
 const baseSql = readFileSync(new URL(`../supabase/migrations/${baseName}`, import.meta.url), "utf8");
 const sql = baseSql + "\n" + readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
-test("booking-block migration remains the latest timestamp", () => { assert.equal(readdirSync(new URL("../supabase/migrations", import.meta.url)).filter(x=>x.endsWith(".sql")).sort().at(-1), name); });
+test("booking-block migrations precede the financial boundary follow-up", () => { const migrations=readdirSync(new URL("../supabase/migrations", import.meta.url)).filter(x=>x.endsWith(".sql")).sort(); assert.ok(migrations.includes(name)); assert.equal(migrations.at(-1), "20261005090000_harden_financial_attendance_boundary.sql"); });
 test("migration preserves access and trigger invariants", () => {
   for (const required of ["enable row level security", "crm_is_admin_session()", "crm_is_active_trainer_session()", "security definer", "set search_path", "before insert or update", "new.start_time::time < b.end_time", "b.start_time < new.end_time::time", "revoke all", "grant execute"]) assert.match(sql.toLowerCase(), new RegExp(required.replace(/[()]/g, "\\$&")));
   assert.doesNotMatch(sql, /service_role|ip_address|token|secret/i);
