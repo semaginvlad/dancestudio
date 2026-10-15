@@ -39,3 +39,8 @@ export function isStudioRoomBookingOpen(rooms = [], roomName = "") {
   const room = findStudioRoomByName(rooms, roomName);
   return !room || room.bookingOpen !== false;
 }
+
+export function shouldBlockStudioRoomBookingMutation(rooms = [], payload = {}, { removesOnlyOccurrences = false } = {}) {
+  if (removesOnlyOccurrences || String(payload?.status || "").toLowerCase() === "cancelled") return false;
+  return !isStudioRoomBookingOpen(rooms, payload?.roomName);
+}

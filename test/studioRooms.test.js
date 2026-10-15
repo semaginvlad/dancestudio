@@ -6,6 +6,7 @@ import {
   loadStudioRoomsState,
   ROOM_BOOKING_CLOSED_MESSAGE,
   resolveStudioRoomsResponse,
+  shouldBlockStudioRoomBookingMutation,
 } from "../src/studioRooms.js";
 
 test("studio-room response preserves successful rows and a successful empty result", () => {
@@ -56,4 +57,20 @@ test("booking availability matches room names canonically and keeps legacy rooms
   assert.equal(isStudioRoomBookingOpen(rooms, "  ЗАЛА  2 "), false);
   assert.equal(isStudioRoomBookingOpen(rooms, "Стара назва"), true);
   assert.equal(ROOM_BOOKING_CLOSED_MESSAGE, "Цей зал тимчасово недоступний для бронювання. Оберіть інший зал.");
+});
+
+test("closed room allows cancelling a single booking while blocking regular edits", () => {
+  const rooms = [{ id: "closed", name: "Зала 2", bookingOpen: false }];
+  assert.equal(shouldBlockStudioRoomBookingMutation(rooms, { roomName: "Зала 2", status: "active" }), true);
+  assert.equal(shouldBlockStudioRoomBookingMutation(rooms, { roomName: "Зала 2", status: "cancelled", recurrence: "none" }), false);
+});
+
+test("closed room allows cancelling an entire recurring series", () => {
+  const rooms = [{ id: "closed", name: "Зала 2", bookingOpen: false }];
+  assert.equal(shouldBlockStudioRoomBookingMutation(rooms, {
+    roomName: "Зала 2",
+    status: "cancelled",
+    recurrence: "weekly",
+    recurrenceUntil: "2026-12-31",
+  }), false);
 });

@@ -9,7 +9,7 @@ import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { isStudioRoomBookingOpen, loadStudioRoomsState, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
+import { isStudioRoomBookingOpen, loadStudioRoomsState, ROOM_BOOKING_CLOSED_MESSAGE, shouldBlockStudioRoomBookingMutation } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -1127,7 +1127,7 @@ export default function ScheduleTab({
   const bookingBlockMessage = (conflict) => `Цей час закритий адміністратором: ${conflict.block.title} (${conflict.date}, ${conflict.block.startTime}–${conflict.block.endTime})`;
   const runBookingMutation = async (payload, persistBooking, setBusy = setBookingSaving, { removesOnlyOccurrences = false } = {}) => {
     if (bookingMutationRef.current) return { skipped: true };
-    if (!removesOnlyOccurrences && isRoomBookingClosed(payload.roomName)) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
+    if (shouldBlockStudioRoomBookingMutation(studioRooms, payload, { removesOnlyOccurrences })) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
     bookingMutationRef.current = true;
     setBusy(true);
     try {
@@ -1170,7 +1170,7 @@ export default function ScheduleTab({
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
     setFormErrors(errors);
     if (hasErrors) return;
-    if (isRoomBookingClosed(fallbackRoomName)) {
+    if (shouldBlockStudioRoomBookingMutation(studioRooms, { ...draft, roomName: fallbackRoomName })) {
       setFormErrors((previous) => ({ ...previous, save: ROOM_BOOKING_CLOSED_MESSAGE }));
       return;
     }
