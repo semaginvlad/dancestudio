@@ -44,3 +44,26 @@ export function shouldBlockStudioRoomBookingMutation(rooms = [], payload = {}, {
   if (removesOnlyOccurrences || String(payload?.status || "").toLowerCase() === "cancelled") return false;
   return !isStudioRoomBookingOpen(rooms, payload?.roomName);
 }
+
+export async function refreshStudioRoomBookingAvailability(fetchRooms, payload = {}, options = {}) {
+  if (options.removesOnlyOccurrences || String(payload?.status || "").toLowerCase() === "cancelled") {
+    return { blocked: false, refreshed: false, rooms: null };
+  }
+  const rooms = await fetchRooms();
+  return {
+    blocked: shouldBlockStudioRoomBookingMutation(rooms, payload, options),
+    refreshed: true,
+    rooms,
+  };
+}
+
+export function resolveStudioRoomBookingSelection(rooms = [], selectedRoom = "all") {
+  const activeOpenRooms = (Array.isArray(rooms) ? rooms : []).filter((room) =>
+    room?.isActive !== false && room?.bookingOpen !== false && canonicalStudioRoomName(room?.name),
+  );
+  if (selectedRoom !== "all") {
+    const selected = findStudioRoomByName(activeOpenRooms, selectedRoom);
+    if (selected) return String(selected.name || "").trim().replace(/\s+/g, " ");
+  }
+  return String(activeOpenRooms[0]?.name || "").trim().replace(/\s+/g, " ");
+}

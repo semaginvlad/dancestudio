@@ -9,7 +9,7 @@ import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { isStudioRoomBookingOpen, loadStudioRoomsState, ROOM_BOOKING_CLOSED_MESSAGE, shouldBlockStudioRoomBookingMutation } from "../studioRooms";
+import { isStudioRoomBookingOpen, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -1127,10 +1127,16 @@ export default function ScheduleTab({
   const bookingBlockMessage = (conflict) => `Цей час закритий адміністратором: ${conflict.block.title} (${conflict.date}, ${conflict.block.startTime}–${conflict.block.endTime})`;
   const runBookingMutation = async (payload, persistBooking, setBusy = setBookingSaving, { removesOnlyOccurrences = false } = {}) => {
     if (bookingMutationRef.current) return { skipped: true };
-    if (shouldBlockStudioRoomBookingMutation(studioRooms, payload, { removesOnlyOccurrences })) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
     bookingMutationRef.current = true;
     setBusy(true);
     try {
+      const roomAvailability = await refreshStudioRoomBookingAvailability(
+        () => fetchStudioRooms({ includeInactive: isAdmin, strict: true }),
+        payload,
+        { removesOnlyOccurrences },
+      );
+      if (roomAvailability.refreshed) setStudioRooms(roomAvailability.rooms);
+      if (roomAvailability.blocked) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
       const guard = removesOnlyOccurrences
         ? { conflict: null, blocked: false, requiresConfirmation: false }
         : await getFreshBookingBlockSaveGuard(
@@ -1170,10 +1176,6 @@ export default function ScheduleTab({
     const fallbackRoomName = normalizeRoomName(draft.roomName || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM;
     setFormErrors(errors);
     if (hasErrors) return;
-    if (shouldBlockStudioRoomBookingMutation(studioRooms, { ...draft, roomName: fallbackRoomName })) {
-      setFormErrors((previous) => ({ ...previous, save: ROOM_BOOKING_CLOSED_MESSAGE }));
-      return;
-    }
     const payload = normalizeBookingPayload({
       ...draft,
       date: editingId && draft.originalParentDate ? draft.originalParentDate : draft.date,
@@ -1409,14 +1411,15 @@ export default function ScheduleTab({
     setShowForm(true);
   };
   const openFullBookingForm = () => {
-    if (!primaryBookingRoomName) {
+    const bookingRoomName = resolveStudioRoomBookingSelection(studioRooms, selectedRoom);
+    if (!bookingRoomName) {
       window.alert(ROOM_BOOKING_CLOSED_MESSAGE);
       return;
     }
     setFormErrors({});
     setEditingId(null);
     setFormMode("full");
-    setDraft((previous) => ({ ...previous, roomName: primaryBookingRoomName }));
+    setDraft((previous) => ({ ...previous, roomName: bookingRoomName }));
     setShowForm(true);
   };
   const minuteFromY = (y, hourPx = weekHourPx) =>
