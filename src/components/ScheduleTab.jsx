@@ -9,7 +9,7 @@ import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { loadStudioRoomsState } from "../studioRooms";
+import { isStudioRoomBookingOpen, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -630,6 +630,11 @@ export default function ScheduleTab({
     [studioRooms, blockDraft?.roomIds, blockDraft?.roomNames],
   );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
+  const primaryBookingRoomName = useMemo(
+    () => normalizeRoomName(activeStudioRooms.find((room) => room.bookingOpen !== false)?.name) || "",
+    [activeStudioRooms],
+  );
+  const isRoomBookingClosed = (roomName) => !isStudioRoomBookingOpen(studioRooms, roomName);
   const studioRoomNameById = useMemo(
     () => new Map(activeStudioRooms.map((room) => [String(room.id), normalizeRoomName(room.name)])),
     [activeStudioRooms],
@@ -888,6 +893,10 @@ export default function ScheduleTab({
     if (!set.size) set.add(DEFAULT_ROOM);
     return Array.from(set);
   }, [activeStudioRooms, eventsByDay]);
+  const availableBookingRooms = useMemo(
+    () => allKnownRooms.filter((roomName) => isStudioRoomBookingOpen(studioRooms, roomName)),
+    [allKnownRooms, studioRooms],
+  );
   const weekCanonicalRooms = useMemo(() => resolveWeekRoomNames({
     selectedRoom,
     activeRoomNames: activeStudioRooms.map((room) => normalizeRoomName(room.name)).filter(Boolean),
@@ -1121,6 +1130,13 @@ export default function ScheduleTab({
     bookingMutationRef.current = true;
     setBusy(true);
     try {
+      const roomAvailability = await refreshStudioRoomBookingAvailability(
+        () => fetchStudioRooms({ includeInactive: isAdmin, strict: true }),
+        payload,
+        { removesOnlyOccurrences },
+      );
+      if (roomAvailability.refreshed) setStudioRooms(roomAvailability.rooms);
+      if (roomAvailability.blocked) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
       const guard = removesOnlyOccurrences
         ? { conflict: null, blocked: false, requiresConfirmation: false }
         : await getFreshBookingBlockSaveGuard(
@@ -1362,6 +1378,13 @@ export default function ScheduleTab({
   };
 
   const openCreateAt = (date, minute, clickEvent, endMinuteOverride = null, roomNameOverride = "") => {
+    const requestedRoomName = normalizeRoomName(
+      roomNameOverride || (selectedRoom === "all" ? primaryBookingRoomName : selectedRoom) || primaryBookingRoomName,
+    );
+    if (!requestedRoomName || isRoomBookingClosed(requestedRoomName)) {
+      window.alert(ROOM_BOOKING_CLOSED_MESSAGE);
+      return;
+    }
     const start = roundToNearest15(minute);
     const base = {
       date,
@@ -1378,13 +1401,25 @@ export default function ScheduleTab({
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
-      roomName: normalizeRoomName(roomNameOverride || (selectedRoom === "all" ? primaryRoomName : selectedRoom) || primaryRoomName) || DEFAULT_ROOM,
+      roomName: requestedRoomName,
     };
     if (DEBUG_QUICK_CREATE) console.log("[quick-create] openCreateAt", base);
     setEditingId(null);
     setFormMode("compact");
     setDraft((p) => ({ ...p, ...base }));
     setFormErrors({});
+    setShowForm(true);
+  };
+  const openFullBookingForm = () => {
+    const bookingRoomName = resolveStudioRoomBookingSelection(studioRooms, selectedRoom);
+    if (!bookingRoomName) {
+      window.alert(ROOM_BOOKING_CLOSED_MESSAGE);
+      return;
+    }
+    setFormErrors({});
+    setEditingId(null);
+    setFormMode("full");
+    setDraft((previous) => ({ ...previous, roomName: bookingRoomName }));
     setShowForm(true);
   };
   const minuteFromY = (y, hourPx = weekHourPx) =>
@@ -2380,6 +2415,16 @@ export default function ScheduleTab({
     if (String(selectedRoom || "").toLowerCase() === normalizeRoomName(room.name).toLowerCase()) setSelectedRoom("all");
     await loadStudioRooms();
   };
+  const toggleRoomBookingAvailability = async (room) => {
+    if (!isAdmin || room?.isActive === false) return;
+    try {
+      const updatedRoom = await updateStudioRoom(room.id, { bookingOpen: room.bookingOpen === false });
+      setStudioRooms((previous) => previous.map((item) => String(item.id) === String(room.id) ? { ...item, ...updatedRoom } : item));
+      window.dispatchEvent(new CustomEvent("studio-rooms-changed"));
+    } catch (error) {
+      setBlockError(error?.message || "Не вдалося змінити доступність залу");
+    }
+  };
   const startRenameRoom = (room) => {
     setRenamingRoomId(room.id);
     setRenamingRoomName(room.name || "");
@@ -2513,7 +2558,7 @@ export default function ScheduleTab({
             <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "minmax(0,1fr) 58px" : "minmax(0,1fr)", gap: 4, alignItems: "center" }}>
               <select aria-label="Фільтр за залою" style={mobileToolbarSelectSt} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
                 <option value="all">Усі зали</option>
-                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}{isRoomBookingClosed(room) ? " — Тимчасово недоступний" : ""}</option>)}
               </select>
               {isAdmin ? <button style={mobileToolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
             </div>
@@ -2536,12 +2581,7 @@ export default function ScheduleTab({
                 {canManageBookings ? (
                   <button
                     style={mobileToolbarActiveSt}
-                    onClick={() => {
-                      setFormErrors({});
-                      setEditingId(null);
-                      setFormMode("full");
-                      setShowForm(true);
-                    }}
+                    onClick={openFullBookingForm}
                   >
                     + Додати
                   </button>
@@ -2574,7 +2614,7 @@ export default function ScheduleTab({
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ display: "grid", gap: 3, fontSize: 11, color: theme.textLight }}>Зала<select aria-label="Фільтр за залою" style={{ ...editorInputSt, minHeight: 44, maxWidth: 210, borderRadius: 999 }} value={selectedRoom} onChange={(e) => setSelectedRoom(e.target.value)}>
                 <option value="all">Усі зали</option>
-                {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+                {allKnownRooms.map((room) => <option key={room} value={room}>{room}{isRoomBookingClosed(room) ? " — Тимчасово недоступний" : ""}</option>)}
               </select></label>
               {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
               {isAdmin ? <button style={{ ...toolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>🔒 Закрити години</button> : null}
@@ -2583,12 +2623,7 @@ export default function ScheduleTab({
               {canManageBookings && (
                 <button
                   style={{ ...toolbarActiveSt, minHeight: 40, padding: "0 16px" }}
-                  onClick={() => {
-                    setFormErrors({});
-                    setEditingId(null);
-                    setFormMode("full");
-                    setShowForm(true);
-                  }}
+                  onClick={openFullBookingForm}
                 >
                   + Додати тренування / резерв
                 </button>
@@ -2671,8 +2706,10 @@ export default function ScheduleTab({
               <input style={{ ...editorInputSt, borderColor: formErrors.endTime ? theme.danger : editorInputSt.borderColor }} type="time" value={draft.endTime} onChange={(e) => setDraft((p) => ({ ...p, endTime: e.target.value }))} />
             </div>
             {(formErrors.date || formErrors.startTime || formErrors.endTime) ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.date || formErrors.startTime || formErrors.endTime}</div> : null}
-            <select style={editorInputSt} value={draft.roomName || primaryRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
-              {allKnownRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+            <select style={editorInputSt} value={draft.roomName || primaryBookingRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
+              {draft.roomName && isRoomBookingClosed(draft.roomName) ? <option value={draft.roomName} disabled>{draft.roomName} — Тимчасово недоступний</option> : null}
+              {!availableBookingRooms.length ? <option value="" disabled>Немає доступних залів</option> : null}
+              {availableBookingRooms.map((room) => <option key={room} value={room}>{room}</option>)}
             </select>
             {draft.eventType !== "cleaning" ? (
               <select
@@ -3303,6 +3340,7 @@ export default function ScheduleTab({
                   ) : (
                     <>
                       {room.name}
+                      {room.isActive !== false ? <button type="button" role="switch" aria-checked={room.bookingOpen !== false} style={{ ...btnS, padding: "0 8px", lineHeight: "20px", color: room.bookingOpen === false ? theme.danger : theme.text }} onClick={() => toggleRoomBookingAvailability(room)}>{room.bookingOpen === false ? "Бронювання закриті" : "Бронювання відкриті"}</button> : null}
                       <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => startRenameRoom(room)}>✎</button>
                       {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
                     </>
@@ -3384,11 +3422,11 @@ export default function ScheduleTab({
             ) : null}
           </div>
           <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: selectedRoom === "all" ? "auto" : "visible", overflowY: "visible", WebkitOverflowScrolling: "touch", touchAction: selectedRoom === "all" ? "pan-x pan-y" : "auto", overscrollBehaviorX: "contain" }}>
-            {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}</span>)}</div> : null}
+            {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}{isRoomBookingClosed(room) ? " · Тимчасово недоступний" : ""}</span>)}</div> : null}
             <div style={{ display: "grid", gap: isMobile ? 6 : 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
               {dayRoomsToRender.map(([room, items]) => (
                 <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : undefined }}>
-                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}</div>
+                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}{isRoomBookingClosed(room) ? <div style={{ marginTop: 2, color: theme.danger, fontSize: 11 }}>Тимчасово недоступний</div> : null}</div>
                   <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * dayHourPx, background: "rgba(255,255,255,.01)" }}>
                     {canManageBookings ? (
                       <div
@@ -3568,7 +3606,7 @@ export default function ScheduleTab({
                     const divider = index > 0 ? `3px solid ${isToday ? theme.primary : weekDayDividerColor}` : `1px solid ${weekRoomDividerColor}`;
                     return <div key={date} data-day-divider="header" style={{ width: dayWidths[index], flex: "0 0 auto", borderLeft: divider, background: index % 2 ? (isDarkTheme ? "rgba(148,163,184,.025)" : "rgba(148,163,184,.035)") : "transparent" }}>
                       <div style={{ padding: "6px 8px", fontWeight: 900 }}>{day.toLocaleDateString("uk-UA", { weekday: "short", day: "2-digit", month: "2-digit" })}</div>
-                      {selectedRoom === "all" ? <div style={{ display: "flex" }}>{lanes.map((lane, laneIndex) => <div key={lane.roomName} data-room-divider="header" title={lane.roomName} style={{ width: laneWidth, flex: "0 0 auto", padding: "4px 5px", borderTop: `1px solid ${theme.border}`, borderLeft: laneIndex ? `1px solid ${weekRoomDividerColor}` : 0, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane.roomName}</div>)}</div> : null}
+                      {selectedRoom === "all" ? <div style={{ display: "flex" }}>{lanes.map((lane, laneIndex) => <div key={lane.roomName} data-room-divider="header" title={lane.roomName} style={{ width: laneWidth, flex: "0 0 auto", padding: "4px 5px", borderTop: `1px solid ${theme.border}`, borderLeft: laneIndex ? `1px solid ${weekRoomDividerColor}` : 0, fontSize: 10, fontWeight: 800, whiteSpace: "normal", overflow: "hidden" }}>{lane.roomName}{isRoomBookingClosed(lane.roomName) ? <div style={{ color: theme.danger, fontSize: 8 }}>Тимчасово недоступний</div> : null}</div>)}</div> : null}
                     </div>;
                   })}
                 </div>
