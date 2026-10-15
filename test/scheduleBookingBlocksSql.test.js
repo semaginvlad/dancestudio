@@ -5,6 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 
 const migrationUrl = new URL("../supabase/migrations/20261002090000_schedule_booking_blocks.sql", import.meta.url);
 const continuousMigrationUrl = new URL("../supabase/migrations/20261003090000_schedule_booking_blocks_continuous_periods.sql", import.meta.url);
+const roomAvailabilityMigrationUrl = new URL("../supabase/migrations/20261015090000_studio_room_booking_availability.sql", import.meta.url);
 const checksUrl = new URL("../supabase/tests/schedule_booking_blocks_checks.sql", import.meta.url);
 
 const expectDatabaseError = async (action, pattern) => {
@@ -35,6 +36,7 @@ test("booking-block trigger and explicit override RPC are transactionally author
     `);
     await db.exec(await readFile(migrationUrl, "utf8"));
     await db.exec(await readFile(continuousMigrationUrl, "utf8"));
+    await db.exec(await readFile(roomAvailabilityMigrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
     const roomId = "10000000-0000-0000-0000-000000000001";
     const blockId = "20000000-0000-0000-0000-000000000001";
@@ -165,6 +167,23 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(`select set_config('test.uid','00000000-0000-0000-0000-000000000001',false); select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
     const continuousOverride = await db.query(`select (public.crm_admin_override_create_room_booking('2026-10-04','11:30','12:00',null,null,'Continuous override','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','Перейменована зала')).id as id`);
     assert.ok(continuousOverride.rows[0]?.id);
+
+    await db.exec(`update studio_rooms set booking_open=false where id='${roomId}'`);
+    await expectDatabaseError(
+      () => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-10-05','10:00','11:00','Closed direct','Перейменована зала')"),
+      /Цей зал тимчасово недоступний для бронювання\. Оберіть інший зал\./,
+    );
+    await expectDatabaseError(
+      () => db.query(`select public.crm_admin_override_create_room_booking('2026-10-05','10:00','11:00',null,null,'Closed override','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','Перейменована зала')`),
+      /Цей зал тимчасово недоступний для бронювання\. Оберіть інший зал\./,
+    );
+    await expectDatabaseError(
+      () => db.exec("update room_bookings set title='Closed edit' where title='Adjacent before'"),
+      /Цей зал тимчасово недоступний для бронювання\. Оберіть інший зал\./,
+    );
+    await db.exec("update room_bookings set status='cancelled' where title='Adjacent before'");
+    const closedRename = await db.query(`select (public.rename_studio_room('${roomId}','Закрита перейменована зала')).name as name`);
+    assert.equal(closedRename.rows[0]?.name, "Закрита перейменована зала");
   } finally {
     await db.close();
   }

@@ -1409,6 +1409,7 @@ const mapStudioRoom = (row) => ({
   id: row.id,
   name: row.name,
   isActive: row.is_active !== false,
+  bookingOpen: row.booking_open !== false,
   sortOrder: Number(row.sort_order || 0),
   createdAt: row.created_at || null,
 });
@@ -1811,7 +1812,7 @@ export async function upsertTrainingLessonReport(report = {}) {
 
 export async function fetchStudioRooms({ includeInactive = false, strict = false } = {}) {
   const request = includeInactive
-    ? supabase.from('studio_rooms').select('id,name,is_active,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
+    ? supabase.from('studio_rooms').select('id,name,is_active,booking_open,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
     : supabase.rpc('crm_fetch_active_studio_rooms');
   const { data, error } = await request;
   return resolveStudioRoomsResponse(data, error, { strict }).map(mapStudioRoom);
@@ -1852,6 +1853,7 @@ export async function updateStudioRoom(id, patch = {}) {
   const next = {};
   if (patch.name !== undefined) next.name = String(patch.name || '').trim();
   if (patch.isActive !== undefined) next.is_active = !!patch.isActive;
+  if (patch.bookingOpen !== undefined) next.booking_open = !!patch.bookingOpen;
   if (patch.sortOrder !== undefined) next.sort_order = Number(patch.sortOrder || 0);
   const { data, error } = await supabase
     .from('studio_rooms')

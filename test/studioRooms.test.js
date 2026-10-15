@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadStudioRoomsState, resolveStudioRoomsResponse } from "../src/studioRooms.js";
+import {
+  canonicalStudioRoomName,
+  isStudioRoomBookingOpen,
+  loadStudioRoomsState,
+  ROOM_BOOKING_CLOSED_MESSAGE,
+  resolveStudioRoomsResponse,
+} from "../src/studioRooms.js";
 
 test("studio-room response preserves successful rows and a successful empty result", () => {
   const rooms = [{ id: "one", name: "Перша" }];
@@ -38,4 +44,16 @@ test("successful retry transitions error to loading to ready and replaces rooms"
   assert.deepEqual(statuses, ["error", "loading", "ready"]);
   assert.deepEqual(stored, [rooms]);
   assert.deepEqual(result, { ok: true, rooms });
+});
+
+test("booking availability matches room names canonically and keeps legacy rooms usable", () => {
+  const rooms = [
+    { id: "open", name: " Зала   1 ", bookingOpen: true },
+    { id: "closed", name: "Зала 2", bookingOpen: false },
+  ];
+  assert.equal(canonicalStudioRoomName("  ЗАЛА   2 "), canonicalStudioRoomName("зала 2"));
+  assert.equal(isStudioRoomBookingOpen(rooms, "зала 1"), true);
+  assert.equal(isStudioRoomBookingOpen(rooms, "  ЗАЛА  2 "), false);
+  assert.equal(isStudioRoomBookingOpen(rooms, "Стара назва"), true);
+  assert.equal(ROOM_BOOKING_CLOSED_MESSAGE, "Цей зал тимчасово недоступний для бронювання. Оберіть інший зал.");
 });

@@ -21,3 +21,21 @@ export async function loadStudioRoomsState(fetchRooms, { setStatus, setRooms, on
     return { ok: false, error };
   }
 }
+
+export const ROOM_BOOKING_CLOSED_MESSAGE = "Цей зал тимчасово недоступний для бронювання. Оберіть інший зал.";
+
+export function canonicalStudioRoomName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("uk-UA");
+}
+
+export function findStudioRoomByName(rooms = [], roomName = "") {
+  const wanted = canonicalStudioRoomName(roomName);
+  return (Array.isArray(rooms) ? rooms : []).find((room) =>
+    canonicalStudioRoomName(room?.name) === wanted,
+  ) || null;
+}
+
+export function isStudioRoomBookingOpen(rooms = [], roomName = "") {
+  const room = findStudioRoomByName(rooms, roomName);
+  return !room || room.bookingOpen !== false;
+}
