@@ -3,6 +3,11 @@ begin;
 alter table public.studio_rooms
   add column if not exists booking_open boolean not null default true;
 
+-- PostgreSQL cannot change OUT parameters with CREATE OR REPLACE. The prior
+-- zero-argument RPC therefore has to be removed before adding booking_open to
+-- its RETURNS TABLE shape.
+drop function if exists public.crm_fetch_active_studio_rooms();
+
 create or replace function public.crm_fetch_active_studio_rooms()
 returns table (
   id uuid,

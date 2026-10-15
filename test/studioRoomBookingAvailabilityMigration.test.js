@@ -1,14 +1,58 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
 
 const name = "20261015090000_studio_room_booking_availability.sql";
 const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const priorSql = readFileSync(new URL("../supabase/migrations/20260917090000_fix_trainer_schedule_rooms.sql", import.meta.url), "utf8");
 
 test("room-booking availability is an isolated latest migration", () => {
   assert.equal(readdirSync(new URL("../supabase/migrations", import.meta.url)).filter((file) => file.endsWith(".sql")).sort().at(-1), name);
   assert.match(sql, /add column if not exists booking_open boolean not null default true/i);
+  assert.match(sql, /drop function if exists public\.crm_fetch_active_studio_rooms\(\);[\s\S]*create or replace function public\.crm_fetch_active_studio_rooms\(\)/i);
   assert.doesNotMatch(sql, /update\s+public\.room_bookings/i);
+});
+
+test("migration upgrades the already-existing zero-argument room RPC return shape", async () => {
+  const oldRpc = priorSql.match(/create or replace function public\.crm_fetch_active_studio_rooms\(\)[\s\S]*?\$function\$;/i)?.[0];
+  assert.ok(oldRpc, "previous migration must define the old room RPC");
+
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated;
+      create function public.crm_is_admin_session() returns boolean language sql stable as $$ select true $$;
+      create function public.crm_is_active_trainer_session() returns boolean language sql stable as $$ select true $$;
+      create function public.crm_canonical_room_name(text) returns text language sql immutable as $$ select lower(btrim($1)) $$;
+      create function public.crm_schedule_booking_update_only_shrinks(date,date,date,date,text) returns boolean language sql immutable as $$ select false $$;
+      create function public.crm_occurrence_removal_signature(date,text,text,text,text,date,text,text) returns text language sql immutable as $$ select ''::text $$;
+      create table public.studio_rooms(
+        id uuid primary key default gen_random_uuid(), name text not null, is_active boolean default true,
+        sort_order integer default 0, created_at timestamptz default now()
+      );
+      create table public.room_bookings(
+        id uuid primary key default gen_random_uuid(), date date, start_time text, end_time text,
+        trainer_id text, room_name text, recurrence text, recurrence_until date, status text
+      );
+      insert into public.studio_rooms(name) values ('Основна зала');
+    `);
+    await db.exec(oldRpc);
+    assert.doesNotMatch(
+      (await db.query("select pg_get_function_result('public.crm_fetch_active_studio_rooms()'::regprocedure) as result")).rows[0].result,
+      /booking_open/i,
+    );
+
+    await db.exec(sql);
+    const upgradedShape = (await db.query("select pg_get_function_result('public.crm_fetch_active_studio_rooms()'::regprocedure) as result")).rows[0].result;
+    assert.match(upgradedShape, /booking_open boolean/i);
+    assert.deepEqual(
+      (await db.query("select name, booking_open from public.crm_fetch_active_studio_rooms()")).rows,
+      [{ name: "Основна зала", booking_open: true }],
+    );
+  } finally {
+    await db.close();
+  }
 });
 
 test("closed rooms are readable but server-rejected for booking writes", () => {
@@ -27,8 +71,7 @@ test("migration preserves cancellation, occurrence removal, and room rename flow
 });
 
 test("room state remains admin-managed by the canonical RLS policy", () => {
-  const priorMigration = readFileSync(new URL("../supabase/migrations/20260917090000_fix_trainer_schedule_rooms.sql", import.meta.url), "utf8");
-  assert.match(priorMigration, /create policy studio_rooms_admin_mutations[\s\S]*using \(public\.crm_is_admin_session\(\)\)[\s\S]*with check \(public\.crm_is_admin_session\(\)\)/i);
+  assert.match(priorSql, /create policy studio_rooms_admin_mutations[\s\S]*using \(public\.crm_is_admin_session\(\)\)[\s\S]*with check \(public\.crm_is_admin_session\(\)\)/i);
 });
 
 test("schedule UI hides closed rooms from booking choices and marks them in the graph", () => {
