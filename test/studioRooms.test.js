@@ -88,6 +88,16 @@ test("booking mutation refresh catches a room closed in another tab", async () =
   assert.equal(result.blocked, true);
 });
 
+test("admin booking mutation refresh allows a closed room", async () => {
+  const result = await refreshStudioRoomBookingAvailability(
+    async () => [{ id: "room", name: "Зала 2", bookingOpen: false, isActive: true }],
+    { roomName: "Зала 2", status: "active" },
+    { isAdmin: true },
+  );
+  assert.equal(result.refreshed, true);
+  assert.equal(result.blocked, false);
+});
+
 test("add booking keeps a concrete open room and falls back only when needed", () => {
   const rooms = [
     { id: "first", name: "Перша зала", bookingOpen: true, isActive: true },
@@ -98,4 +108,5 @@ test("add booking keeps a concrete open room and falls back only when needed", (
   assert.equal(resolveStudioRoomBookingSelection(rooms, "all"), "Перша зала");
   assert.equal(resolveStudioRoomBookingSelection(rooms, "Закрита зала"), "Перша зала");
   assert.equal(resolveStudioRoomBookingSelection(rooms, "Видалена зала"), "Перша зала");
+  assert.equal(resolveStudioRoomBookingSelection(rooms, "Закрита зала", { isAdmin: true }), "Закрита зала");
 });

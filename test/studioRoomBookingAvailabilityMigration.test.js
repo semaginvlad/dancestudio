@@ -4,14 +4,25 @@ import { readFileSync, readdirSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 
 const name = "20261015090000_studio_room_booking_availability.sql";
+const adminOverrideName = "20261019090000_admin_closed_room_booking_override.sql";
 const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const adminOverrideSql = readFileSync(new URL(`../supabase/migrations/${adminOverrideName}`, import.meta.url), "utf8");
 const priorSql = readFileSync(new URL("../supabase/migrations/20260917090000_fix_trainer_schedule_rooms.sql", import.meta.url), "utf8");
 
-test("room-booking availability is an isolated latest migration", () => {
-  assert.equal(readdirSync(new URL("../supabase/migrations", import.meta.url)).filter((file) => file.endsWith(".sql")).sort().at(-1), name);
+test("room-booking availability migrations remain isolated and ordered", () => {
+  const migrations = readdirSync(new URL("../supabase/migrations", import.meta.url)).filter((file) => file.endsWith(".sql")).sort();
+  assert.equal(migrations.at(-1), adminOverrideName);
+  assert.ok(migrations.indexOf(adminOverrideName) > migrations.indexOf(name));
   assert.match(sql, /add column if not exists booking_open boolean not null default true/i);
   assert.match(sql, /drop function if exists public\.crm_fetch_active_studio_rooms\(\);[\s\S]*create or replace function public\.crm_fetch_active_studio_rooms\(\)/i);
   assert.doesNotMatch(sql, /update\s+public\.room_bookings/i);
+});
+
+test("follow-up trigger allows canonical admins but retains the closed-room rejection", () => {
+  assert.match(adminOverrideSql, /if public\.crm_is_admin_session\(\) then return new; end if;/i);
+  assert.match(adminOverrideSql, /room\.booking_open is false/i);
+  assert.match(adminOverrideSql, /Цей зал тимчасово недоступний для бронювання\. Оберіть інший зал\./);
+  assert.doesNotMatch(adminOverrideSql, /user_metadata|app_metadata|email\s*=/i);
 });
 
 test("migration upgrades the already-existing zero-argument room RPC return shape", async () => {
@@ -82,6 +93,7 @@ test("schedule UI hides closed rooms from booking choices and marks them in the 
   assert.match(schedule, /Бронювання закриті/);
   assert.match(schedule, /Бронювання відкриті/);
   assert.match(schedule, /refreshStudioRoomBookingAvailability\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
-  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom\)/);
+  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin \}\)/);
+  assert.match(schedule, /availableBookingRooms[\s\S]*isAdmin \|\| isStudioRoomBookingOpen/);
   assert.match(schedule, /return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
 });

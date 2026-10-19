@@ -631,8 +631,8 @@ export default function ScheduleTab({
   );
   const primaryRoomName = useMemo(() => normalizeRoomName(activeStudioRooms[0]?.name) || DEFAULT_ROOM, [activeStudioRooms]);
   const primaryBookingRoomName = useMemo(
-    () => normalizeRoomName(activeStudioRooms.find((room) => room.bookingOpen !== false)?.name) || "",
-    [activeStudioRooms],
+    () => normalizeRoomName(activeStudioRooms.find((room) => isAdmin || room.bookingOpen !== false)?.name) || "",
+    [activeStudioRooms, isAdmin],
   );
   const isRoomBookingClosed = (roomName) => !isStudioRoomBookingOpen(studioRooms, roomName);
   const studioRoomNameById = useMemo(
@@ -894,8 +894,8 @@ export default function ScheduleTab({
     return Array.from(set);
   }, [activeStudioRooms, eventsByDay]);
   const availableBookingRooms = useMemo(
-    () => allKnownRooms.filter((roomName) => isStudioRoomBookingOpen(studioRooms, roomName)),
-    [allKnownRooms, studioRooms],
+    () => allKnownRooms.filter((roomName) => isAdmin || isStudioRoomBookingOpen(studioRooms, roomName)),
+    [allKnownRooms, studioRooms, isAdmin],
   );
   const weekCanonicalRooms = useMemo(() => resolveWeekRoomNames({
     selectedRoom,
@@ -1133,7 +1133,7 @@ export default function ScheduleTab({
       const roomAvailability = await refreshStudioRoomBookingAvailability(
         () => fetchStudioRooms({ includeInactive: isAdmin, strict: true }),
         payload,
-        { removesOnlyOccurrences },
+        { removesOnlyOccurrences, isAdmin },
       );
       if (roomAvailability.refreshed) setStudioRooms(roomAvailability.rooms);
       if (roomAvailability.blocked) throw new Error(ROOM_BOOKING_CLOSED_MESSAGE);
@@ -1381,7 +1381,7 @@ export default function ScheduleTab({
     const requestedRoomName = normalizeRoomName(
       roomNameOverride || (selectedRoom === "all" ? primaryBookingRoomName : selectedRoom) || primaryBookingRoomName,
     );
-    if (!requestedRoomName || isRoomBookingClosed(requestedRoomName)) {
+    if (!requestedRoomName || (!isAdmin && isRoomBookingClosed(requestedRoomName))) {
       window.alert(ROOM_BOOKING_CLOSED_MESSAGE);
       return;
     }
@@ -1411,7 +1411,7 @@ export default function ScheduleTab({
     setShowForm(true);
   };
   const openFullBookingForm = () => {
-    const bookingRoomName = resolveStudioRoomBookingSelection(studioRooms, selectedRoom);
+    const bookingRoomName = resolveStudioRoomBookingSelection(studioRooms, selectedRoom, { isAdmin });
     if (!bookingRoomName) {
       window.alert(ROOM_BOOKING_CLOSED_MESSAGE);
       return;
@@ -2707,9 +2707,9 @@ export default function ScheduleTab({
             </div>
             {(formErrors.date || formErrors.startTime || formErrors.endTime) ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.date || formErrors.startTime || formErrors.endTime}</div> : null}
             <select style={editorInputSt} value={draft.roomName || primaryBookingRoomName} onChange={(e) => setDraft((p) => ({ ...p, roomName: e.target.value }))}>
-              {draft.roomName && isRoomBookingClosed(draft.roomName) ? <option value={draft.roomName} disabled>{draft.roomName} — Тимчасово недоступний</option> : null}
+              {!isAdmin && draft.roomName && isRoomBookingClosed(draft.roomName) ? <option value={draft.roomName} disabled>{draft.roomName} — Тимчасово недоступний</option> : null}
               {!availableBookingRooms.length ? <option value="" disabled>Немає доступних залів</option> : null}
-              {availableBookingRooms.map((room) => <option key={room} value={room}>{room}</option>)}
+              {availableBookingRooms.map((room) => <option key={room} value={room}>{room}{isRoomBookingClosed(room) ? " — Тимчасово недоступний" : ""}</option>)}
             </select>
             {draft.eventType !== "cleaning" ? (
               <select
