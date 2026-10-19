@@ -107,6 +107,18 @@ test("closed-room exception allows only the configured trainer", () => {
   assert.equal(resolveStudioRoomBookingSelection(rooms, "Зала 2", { trainerIds: ["trainer-3"] }), "");
 });
 
+test("unknown trainer profile defers a closed-room exception decision to the server", async () => {
+  const rooms = [{ id: "room", name: "Зала 2", bookingOpen: false, isActive: true, allowedTrainerIds: ["trainer-record-id"] }];
+  const actor = { trainerIds: ["auth-user-id"], trainerAccessKnown: false };
+  assert.equal(isStudioRoomBookingOpenForActor(rooms, "Зала 2", actor), true);
+  assert.equal(resolveStudioRoomBookingSelection(rooms, "Зала 2", actor), "Зала 2");
+  const result = await refreshStudioRoomBookingAvailability(async () => rooms, { roomName: "Зала 2", status: "active" }, actor);
+  assert.equal(result.blocked, false);
+  assert.equal(result.refreshed, true);
+
+  assert.equal(isStudioRoomBookingOpenForActor(rooms, "Зала 2", { ...actor, trainerAccessKnown: true }), false);
+});
+
 test("add booking keeps a concrete open room and falls back only when needed", () => {
   const rooms = [
     { id: "first", name: "Перша зала", bookingOpen: true, isActive: true },

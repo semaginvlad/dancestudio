@@ -81,7 +81,15 @@ test("booking-block loading fails closed without erasing the last successful lis
   assert.match(app,/bookingBlocksLoadStatusRef\.current = "loading";\s*setBookingBlocksLoadStatus\("loading"\)/);
 });
 
-test("room rename reconciles immediately and refresh failure remains fail-closed", async () => { const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8"); assert.match(source,/setStudioRooms\(\(previous\) => previous\.map/); assert.match(source,/try \{ await onRetryBookingBlocks\(\); \}\s*catch \(refreshError\)/); assert.match(source,/fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/); });
+test("room mutations reload canonical rows without losing trainer exceptions", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/const loadStudioRooms = \(\) => loadStudioRoomsState\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
+  assert.match(source,/await updateStudioRoom\(room\.id, \{ bookingOpen:[^}]+\}\);\s*await loadStudioRooms\(\)/);
+  assert.match(source,/await setStudioRoomBookingTrainerExceptions\(room\.id, next\);\s*await loadStudioRooms\(\)/);
+  assert.match(source,/await renameStudioRoom\(room\.id, room\.name, nextName\);[\s\S]*await loadStudioRooms\(\)/);
+  assert.doesNotMatch(source,/\{ \.\.\.item, \.\.\.updatedRoom \}/);
+  assert.match(source,/try \{ await onRetryBookingBlocks\(\); \}\s*catch \(refreshError\)/);
+});
 
 test("schedule UI distinguishes ready empty data from load failure and gates every booking mutation", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");

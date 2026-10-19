@@ -104,7 +104,7 @@ test("schedule UI hides closed rooms from booking choices and marks them in the 
   assert.match(schedule, /Бронювання закриті/);
   assert.match(schedule, /Бронювання відкриті/);
   assert.match(schedule, /refreshStudioRoomBookingAvailability\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
-  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin, trainerIds: currentTrainerScopeIds \}\)/);
+  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin, trainerIds: currentTrainerScopeIds, trainerAccessKnown: trainerRoomAccessKnown \}\)/);
   assert.match(schedule, /availableBookingRooms[\s\S]*isStudioRoomBookingOpenForActor/);
   assert.match(schedule, /return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
 });
