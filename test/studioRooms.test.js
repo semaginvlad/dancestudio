@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canonicalStudioRoomName,
   isStudioRoomBookingOpen,
+  isStudioRoomBookingOpenForActor,
   loadStudioRoomsState,
   refreshStudioRoomBookingAvailability,
   resolveStudioRoomBookingSelection,
@@ -96,6 +97,14 @@ test("admin booking mutation refresh allows a closed room", async () => {
   );
   assert.equal(result.refreshed, true);
   assert.equal(result.blocked, false);
+});
+
+test("closed-room exception allows only the configured trainer", () => {
+  const rooms = [{ id: "room", name: "Зала 2", bookingOpen: false, isActive: true, allowedTrainerIds: ["trainer-1", "trainer-2"] }];
+  assert.equal(isStudioRoomBookingOpenForActor(rooms, "Зала 2", { trainerIds: ["trainer-1"] }), true);
+  assert.equal(isStudioRoomBookingOpenForActor(rooms, "Зала 2", { trainerIds: ["trainer-3"] }), false);
+  assert.equal(resolveStudioRoomBookingSelection(rooms, "Зала 2", { trainerIds: ["trainer-2"] }), "Зала 2");
+  assert.equal(resolveStudioRoomBookingSelection(rooms, "Зала 2", { trainerIds: ["trainer-3"] }), "");
 });
 
 test("add booking keeps a concrete open room and falls back only when needed", () => {
