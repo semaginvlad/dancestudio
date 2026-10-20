@@ -99,6 +99,18 @@ test("room trainer exception checkboxes serialize rapid changes per room", async
   assert.match(source,/disabled=\{roomTrainerExceptionsSavingIds\.has\(String\(room\.id\)\)\}/);
 });
 
+test("selected inactive trainers remain visible in room exceptions", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  const { getOperationalTrainers }=await import("../src/shared/trainers.js");
+  const trainers=[
+    { id: "active", isActive: true },
+    { id: "selected-inactive", isActive: false },
+    { id: "other-inactive", accessDisabledAt: "2026-10-20T00:00:00Z" },
+  ];
+  assert.deepEqual(getOperationalTrainers(trainers, ["selected-inactive"]).map((trainer) => trainer.id), ["active", "selected-inactive"]);
+  assert.match(source,/getOperationalTrainers\(safeTrainers, room\.allowedTrainerIds \|\| \[\]\)/);
+});
+
 test("schedule UI distinguishes ready empty data from load failure and gates every booking mutation", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
   assert.match(source,/const bookingBlocksReady = bookingBlocksLoadStatus === "ready"/);

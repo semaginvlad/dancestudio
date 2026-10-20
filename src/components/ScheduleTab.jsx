@@ -3366,7 +3366,7 @@ export default function ScheduleTab({
                       {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
                     </>
                   )}
-                  {room.isActive !== false && room.bookingOpen === false ? <span style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%", fontSize: 11 }}><b>Винятки:</b>{getOperationalTrainers(safeTrainers).map((trainer) => <label key={trainer.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} disabled={roomTrainerExceptionsSavingIds.has(String(room.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</span> : null}
+                  {room.isActive !== false && room.bookingOpen === false ? <span style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%", fontSize: 11 }}><b>Винятки:</b>{getOperationalTrainers(safeTrainers, room.allowedTrainerIds || []).map((trainer) => <label key={trainer.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} disabled={roomTrainerExceptionsSavingIds.has(String(room.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</span> : null}
                 </span>
               );
             })}
