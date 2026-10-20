@@ -36,6 +36,41 @@ test("trainer exceptions are multi-value, admin-managed, and restricted to owned
   assert.match(trainerExceptionsSql, /t\.is_active is true[\s\S]*t\.archived_at is null[\s\S]*t\.access_disabled_at is null/i);
 });
 
+test("archived trainer deletion removes disposable room exceptions", async () => {
+  const deleteRpc = trainerExceptionsSql.match(/create or replace function public\.delete_archived_trainer\(p_trainer_id text\)[\s\S]*?\$function\$;/i)?.[0];
+  assert.ok(deleteRpc, "room exception migration must update the trainer deletion RPC");
+  assert.match(deleteRpc, /delete from public\.studio_room_booking_trainer_exceptions[\s\S]*for v_dependency in/i);
+
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated;
+      create function public.rls_is_admin() returns boolean language sql stable as $$ select true $$;
+      create table public.trainers(id uuid primary key, archived_at timestamptz);
+      create table public.studio_rooms(id uuid primary key);
+      create table public.studio_room_booking_trainer_exceptions(
+        room_id uuid references public.studio_rooms(id) on delete cascade,
+        trainer_id uuid references public.trainers(id) on delete cascade,
+        primary key(room_id, trainer_id)
+      );
+      insert into public.trainers values ('00000000-0000-0000-0000-000000000001', now());
+      insert into public.studio_rooms values ('00000000-0000-0000-0000-000000000002');
+      insert into public.studio_room_booking_trainer_exceptions values (
+        '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001'
+      );
+    `);
+    await db.exec(deleteRpc);
+    assert.deepEqual(
+      (await db.query("select * from public.delete_archived_trainer('00000000-0000-0000-0000-000000000001')")).rows,
+      [{ deleted_id: "00000000-0000-0000-0000-000000000001" }],
+    );
+    assert.equal((await db.query("select count(*)::int as count from public.trainers")).rows[0].count, 0);
+    assert.equal((await db.query("select count(*)::int as count from public.studio_room_booking_trainer_exceptions")).rows[0].count, 0);
+  } finally {
+    await db.close();
+  }
+});
+
 test("migration upgrades the already-existing zero-argument room RPC return shape", async () => {
   const oldRpc = priorSql.match(/create or replace function public\.crm_fetch_active_studio_rooms\(\)[\s\S]*?\$function\$;/i)?.[0];
   assert.ok(oldRpc, "previous migration must define the old room RPC");
