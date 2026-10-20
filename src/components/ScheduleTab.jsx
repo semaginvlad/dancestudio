@@ -489,6 +489,8 @@ export default function ScheduleTab({
   const [renamingRoomName, setRenamingRoomName] = useState("");
   const [studioRooms, setStudioRooms] = useState([]);
   const [studioRoomsLoadStatus, setStudioRoomsLoadStatus] = useState("loading");
+  const [roomTrainerExceptionsSavingIds, setRoomTrainerExceptionsSavingIds] = useState(() => new Set());
+  const roomTrainerExceptionsSavingRef = useRef(new Set());
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [openMenuState, setOpenMenuState] = useState(null); // { eventId, top, left }
@@ -2428,12 +2430,24 @@ export default function ScheduleTab({
   };
   const toggleRoomTrainerException = async (room, trainerId) => {
     if (!isAdmin) return;
+    const roomId = String(room?.id || "");
+    if (!roomId || roomTrainerExceptionsSavingRef.current.has(roomId)) return;
+    roomTrainerExceptionsSavingRef.current.add(roomId);
+    setRoomTrainerExceptionsSavingIds((previous) => new Set(previous).add(roomId));
     const current = (room.allowedTrainerIds || []).map(String);
     const next = current.includes(String(trainerId)) ? current.filter((id) => id !== String(trainerId)) : [...current, String(trainerId)];
     try {
       await setStudioRoomBookingTrainerExceptions(room.id, next);
       await loadStudioRooms();
     } catch (error) { setBlockError(error?.message || "Не вдалося змінити винятки залу"); }
+    finally {
+      roomTrainerExceptionsSavingRef.current.delete(roomId);
+      setRoomTrainerExceptionsSavingIds((previous) => {
+        const nextSavingIds = new Set(previous);
+        nextSavingIds.delete(roomId);
+        return nextSavingIds;
+      });
+    }
   };
   const startRenameRoom = (room) => {
     setRenamingRoomId(room.id);
@@ -3352,7 +3366,7 @@ export default function ScheduleTab({
                       {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
                     </>
                   )}
-                  {room.isActive !== false && room.bookingOpen === false ? <span style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%", fontSize: 11 }}><b>Винятки:</b>{getOperationalTrainers(safeTrainers).map((trainer) => <label key={trainer.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</span> : null}
+                  {room.isActive !== false && room.bookingOpen === false ? <span style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%", fontSize: 11 }}><b>Винятки:</b>{getOperationalTrainers(safeTrainers).map((trainer) => <label key={trainer.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} disabled={roomTrainerExceptionsSavingIds.has(String(room.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</span> : null}
                 </span>
               );
             })}

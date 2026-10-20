@@ -91,6 +91,14 @@ test("room mutations reload canonical rows without losing trainer exceptions", a
   assert.match(source,/try \{ await onRetryBookingBlocks\(\); \}\s*catch \(refreshError\)/);
 });
 
+test("room trainer exception checkboxes serialize rapid changes per room", async () => {
+  const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
+  assert.match(source,/roomTrainerExceptionsSavingRef = useRef\(new Set\(\)\)/);
+  assert.match(source,/if \(!roomId \|\| roomTrainerExceptionsSavingRef\.current\.has\(roomId\)\) return;\s*roomTrainerExceptionsSavingRef\.current\.add\(roomId\);[\s\S]*await setStudioRoomBookingTrainerExceptions/);
+  assert.match(source,/finally \{\s*roomTrainerExceptionsSavingRef\.current\.delete\(roomId\)/);
+  assert.match(source,/disabled=\{roomTrainerExceptionsSavingIds\.has\(String\(room\.id\)\)\}/);
+});
+
 test("schedule UI distinguishes ready empty data from load failure and gates every booking mutation", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
   assert.match(source,/const bookingBlocksReady = bookingBlocksLoadStatus === "ready"/);
