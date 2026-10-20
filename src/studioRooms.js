@@ -40,9 +40,20 @@ export function isStudioRoomBookingOpen(rooms = [], roomName = "") {
   return !room || room.bookingOpen !== false;
 }
 
-export function shouldBlockStudioRoomBookingMutation(rooms = [], payload = {}, { removesOnlyOccurrences = false, isAdmin = false } = {}) {
+export function studioRoomAllowsTrainer(room = {}, trainerIds = []) {
+  const allowed = new Set((room?.allowedTrainerIds || []).map(String));
+  return (trainerIds || []).some((id) => allowed.has(String(id)));
+}
+
+export function isStudioRoomBookingOpenForActor(rooms = [], roomName = "", { isAdmin = false, trainerIds = [], trainerAccessKnown = true } = {}) {
+  if (isAdmin) return true;
+  const room = findStudioRoomByName(rooms, roomName);
+  return !room || room.bookingOpen !== false || !trainerAccessKnown || studioRoomAllowsTrainer(room, trainerIds);
+}
+
+export function shouldBlockStudioRoomBookingMutation(rooms = [], payload = {}, { removesOnlyOccurrences = false, isAdmin = false, trainerIds = [], trainerAccessKnown = true } = {}) {
   if (isAdmin || removesOnlyOccurrences || String(payload?.status || "").toLowerCase() === "cancelled") return false;
-  return !isStudioRoomBookingOpen(rooms, payload?.roomName);
+  return !isStudioRoomBookingOpenForActor(rooms, payload?.roomName, { isAdmin, trainerIds, trainerAccessKnown });
 }
 
 export async function refreshStudioRoomBookingAvailability(fetchRooms, payload = {}, options = {}) {
@@ -57,9 +68,9 @@ export async function refreshStudioRoomBookingAvailability(fetchRooms, payload =
   };
 }
 
-export function resolveStudioRoomBookingSelection(rooms = [], selectedRoom = "all", { isAdmin = false } = {}) {
+export function resolveStudioRoomBookingSelection(rooms = [], selectedRoom = "all", { isAdmin = false, trainerIds = [], trainerAccessKnown = true } = {}) {
   const activeOpenRooms = (Array.isArray(rooms) ? rooms : []).filter((room) =>
-    room?.isActive !== false && (isAdmin || room?.bookingOpen !== false) && canonicalStudioRoomName(room?.name),
+    room?.isActive !== false && isStudioRoomBookingOpenForActor([room], room?.name, { isAdmin, trainerIds, trainerAccessKnown }) && canonicalStudioRoomName(room?.name),
   );
   if (selectedRoom !== "all") {
     const selected = findStudioRoomByName(activeOpenRooms, selectedRoom);

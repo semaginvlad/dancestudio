@@ -1410,6 +1410,7 @@ const mapStudioRoom = (row) => ({
   name: row.name,
   isActive: row.is_active !== false,
   bookingOpen: row.booking_open !== false,
+  allowedTrainerIds: Array.isArray(row.allowed_trainer_ids) ? row.allowed_trainer_ids.map(String) : [],
   sortOrder: Number(row.sort_order || 0),
   createdAt: row.created_at || null,
 });
@@ -1811,11 +1812,18 @@ export async function upsertTrainingLessonReport(report = {}) {
 }
 
 export async function fetchStudioRooms({ includeInactive = false, strict = false } = {}) {
-  const request = includeInactive
-    ? supabase.from('studio_rooms').select('id,name,is_active,booking_open,sort_order,created_at').order('sort_order', { ascending: true }).order('created_at', { ascending: true })
-    : supabase.rpc('crm_fetch_active_studio_rooms');
+  const request = supabase.rpc('crm_fetch_studio_rooms', { p_include_inactive: !!includeInactive });
   const { data, error } = await request;
   return resolveStudioRoomsResponse(data, error, { strict }).map(mapStudioRoom);
+}
+
+export async function setStudioRoomBookingTrainerExceptions(roomId, trainerIds = []) {
+  const { data, error } = await supabase.rpc('crm_admin_set_studio_room_booking_trainers', {
+    p_room_id: roomId,
+    p_trainer_ids: trainerIds,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data.map(String) : [];
 }
 
 export async function createStudioRoom(name) {

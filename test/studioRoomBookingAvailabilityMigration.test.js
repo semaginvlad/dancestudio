@@ -5,14 +5,17 @@ import { PGlite } from "@electric-sql/pglite";
 
 const name = "20261015090000_studio_room_booking_availability.sql";
 const adminOverrideName = "20261019090000_admin_closed_room_booking_override.sql";
+const trainerExceptionsName = "20261019091000_closed_room_trainer_exceptions.sql";
 const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
 const adminOverrideSql = readFileSync(new URL(`../supabase/migrations/${adminOverrideName}`, import.meta.url), "utf8");
+const trainerExceptionsSql = readFileSync(new URL(`../supabase/migrations/${trainerExceptionsName}`, import.meta.url), "utf8");
 const priorSql = readFileSync(new URL("../supabase/migrations/20260917090000_fix_trainer_schedule_rooms.sql", import.meta.url), "utf8");
 
 test("room-booking availability migrations remain isolated and ordered", () => {
   const migrations = readdirSync(new URL("../supabase/migrations", import.meta.url)).filter((file) => file.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), adminOverrideName);
+  assert.equal(migrations.at(-1), trainerExceptionsName);
   assert.ok(migrations.indexOf(adminOverrideName) > migrations.indexOf(name));
+  assert.ok(migrations.indexOf(trainerExceptionsName) > migrations.indexOf(adminOverrideName));
   assert.match(sql, /add column if not exists booking_open boolean not null default true/i);
   assert.match(sql, /drop function if exists public\.crm_fetch_active_studio_rooms\(\);[\s\S]*create or replace function public\.crm_fetch_active_studio_rooms\(\)/i);
   assert.doesNotMatch(sql, /update\s+public\.room_bookings/i);
@@ -23,6 +26,49 @@ test("follow-up trigger allows canonical admins but retains the closed-room reje
   assert.match(adminOverrideSql, /room\.booking_open is false/i);
   assert.match(adminOverrideSql, /Цей зал тимчасово недоступний для бронювання\. Оберіть інший зал\./);
   assert.doesNotMatch(adminOverrideSql, /user_metadata|app_metadata|email\s*=/i);
+});
+
+test("trainer exceptions are multi-value, admin-managed, and restricted to owned bookings", () => {
+  assert.match(trainerExceptionsSql, /primary key \(room_id, trainer_id\)/i);
+  assert.match(trainerExceptionsSql, /crm_admin_set_studio_room_booking_trainers[\s\S]*crm_is_admin_session\(\)/i);
+  assert.match(trainerExceptionsSql, /t\.auth_user_id=auth\.uid\(\)/i);
+  assert.match(trainerExceptionsSql, /new\.trainer_id::text in \(auth\.uid\(\)::text, t\.id::text\)/i);
+  assert.match(trainerExceptionsSql, /t\.is_active is true[\s\S]*t\.archived_at is null[\s\S]*t\.access_disabled_at is null/i);
+});
+
+test("archived trainer deletion removes disposable room exceptions", async () => {
+  const deleteRpc = trainerExceptionsSql.match(/create or replace function public\.delete_archived_trainer\(p_trainer_id text\)[\s\S]*?\$function\$;/i)?.[0];
+  assert.ok(deleteRpc, "room exception migration must update the trainer deletion RPC");
+  assert.match(deleteRpc, /delete from public\.studio_room_booking_trainer_exceptions[\s\S]*for v_dependency in/i);
+
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated;
+      create function public.rls_is_admin() returns boolean language sql stable as $$ select true $$;
+      create table public.trainers(id uuid primary key, archived_at timestamptz);
+      create table public.studio_rooms(id uuid primary key);
+      create table public.studio_room_booking_trainer_exceptions(
+        room_id uuid references public.studio_rooms(id) on delete cascade,
+        trainer_id uuid references public.trainers(id) on delete cascade,
+        primary key(room_id, trainer_id)
+      );
+      insert into public.trainers values ('00000000-0000-0000-0000-000000000001', now());
+      insert into public.studio_rooms values ('00000000-0000-0000-0000-000000000002');
+      insert into public.studio_room_booking_trainer_exceptions values (
+        '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001'
+      );
+    `);
+    await db.exec(deleteRpc);
+    assert.deepEqual(
+      (await db.query("select * from public.delete_archived_trainer('00000000-0000-0000-0000-000000000001')")).rows,
+      [{ deleted_id: "00000000-0000-0000-0000-000000000001" }],
+    );
+    assert.equal((await db.query("select count(*)::int as count from public.trainers")).rows[0].count, 0);
+    assert.equal((await db.query("select count(*)::int as count from public.studio_room_booking_trainer_exceptions")).rows[0].count, 0);
+  } finally {
+    await db.close();
+  }
 });
 
 test("migration upgrades the already-existing zero-argument room RPC return shape", async () => {
@@ -93,7 +139,7 @@ test("schedule UI hides closed rooms from booking choices and marks them in the 
   assert.match(schedule, /Бронювання закриті/);
   assert.match(schedule, /Бронювання відкриті/);
   assert.match(schedule, /refreshStudioRoomBookingAvailability\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
-  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin \}\)/);
-  assert.match(schedule, /availableBookingRooms[\s\S]*isAdmin \|\| isStudioRoomBookingOpen/);
+  assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin, trainerIds: currentTrainerScopeIds, trainerAccessKnown: trainerRoomAccessKnown \}\)/);
+  assert.match(schedule, /availableBookingRooms[\s\S]*isStudioRoomBookingOpenForActor/);
   assert.match(schedule, /return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
 });
