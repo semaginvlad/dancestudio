@@ -68,7 +68,7 @@ begin
   end if;
 
   v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
-  if v_entry_type not in ('trial', 'single') then
+  if v_entry_type is null or v_entry_type not in ('trial', 'single') then
     return;
   end if;
 
@@ -195,7 +195,7 @@ begin
   end if;
 
   v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
-  if v_entry_type not in ('trial', 'single') then
+  if v_entry_type is null or v_entry_type not in ('trial', 'single') then
     return;
   end if;
 

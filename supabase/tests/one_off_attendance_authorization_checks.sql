@@ -20,13 +20,13 @@ begin
 
   -- Subscription/debt rows return before one-off authorization, so their
   -- Attendance mutations cannot fail with a one-off access denial.
-  if strpos(ensure_def, 'v_entry_type not in (''trial'', ''single'')') = 0
+  if strpos(ensure_def, 'v_entry_type is null or v_entry_type not in (''trial'', ''single'')') = 0
      or strpos(ensure_def, 'v_has_group_access := public.rls_owns_group') = 0
-     or strpos(ensure_def, 'v_entry_type not in (''trial'', ''single'')')
+     or strpos(ensure_def, 'v_entry_type is null or v_entry_type not in (''trial'', ''single'')')
         > strpos(ensure_def, 'v_has_group_access := public.rls_owns_group')
-     or strpos(remove_def, 'v_entry_type not in (''trial'', ''single'')') = 0
+     or strpos(remove_def, 'v_entry_type is null or v_entry_type not in (''trial'', ''single'')') = 0
      or strpos(remove_def, 'v_has_group_access := public.rls_owns_group') = 0
-     or strpos(remove_def, 'v_entry_type not in (''trial'', ''single'')')
+     or strpos(remove_def, 'v_entry_type is null or v_entry_type not in (''trial'', ''single'')')
         > strpos(remove_def, 'v_has_group_access := public.rls_owns_group') then
     raise exception 'non-one-off Attendance does not return before one-off authorization';
   end if;

@@ -47,7 +47,7 @@ test("subscription and debt Attendance return before one-off authorization", asy
   const remove = functionBody(sql, "crm_remove_one_off_payment_if_orphan");
 
   for (const body of [ensure, remove]) {
-    const typeGuard = body.indexOf("v_entry_type not in ('trial', 'single')");
+    const typeGuard = body.indexOf("v_entry_type is null or v_entry_type not in ('trial', 'single')");
     const authorization = body.indexOf("v_has_group_access := public.rls_owns_group");
     assert.ok(typeGuard > 0, "one-off type guard must be present");
     assert.ok(authorization > typeGuard, "one-off authorization must follow the type guard");
@@ -57,7 +57,7 @@ test("subscription and debt Attendance return before one-off authorization", asy
 test("post-migration SQL checks preserve both authorization regressions", async () => {
   const checks = (await readFile(checksUrl, "utf8")).toLowerCase();
   assert.match(checks, /rls_owns_group\(v_att\.group_id\)/);
-  assert.match(checks, /v_entry_type not in \(''trial'', ''single''\)/);
+  assert.match(checks, /v_entry_type is null or v_entry_type not in \(''trial'', ''single''\)/);
   assert.match(checks, /strpos\(ensure_def/);
   assert.match(checks, /strpos\(remove_def/);
 });
@@ -84,6 +84,7 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
       access_disabled_at timestamptz
     );
     create table public.trainer_groups (trainer_id uuid, group_id text);
+    create table public.group_ownership_checks (group_id text);
     create table public.attendance (
       id uuid primary key,
       sub_id uuid,
@@ -118,8 +119,10 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
     );
 
     create function public.rls_owns_group(p_group_id text)
-    returns boolean language sql stable security definer set search_path = public as $$
-      select exists (
+    returns boolean language plpgsql security definer set search_path = public as $$
+    begin
+      insert into public.group_ownership_checks values (p_group_id);
+      return exists (
         select 1
         from public.trainers t
         join public.trainer_groups tg on tg.trainer_id = t.id
@@ -128,7 +131,8 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
           and t.archived_at is null
           and t.access_disabled_at is null
           and tg.group_id = p_group_id
-      )
+      );
+    end
     $$;
   `);
   await db.exec(await readFile(migrationUrl, "utf8"));
@@ -139,6 +143,8 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
   const oneOffAttendanceId = "40000000-0000-0000-0000-000000000001";
   const subscriptionAttendanceId = "40000000-0000-0000-0000-000000000002";
   const debtAttendanceId = "40000000-0000-0000-0000-000000000003";
+  const nullLegacyAttendanceId = "40000000-0000-0000-0000-000000000004";
+  const emptyLegacyAttendanceId = "40000000-0000-0000-0000-000000000005";
 
   await db.exec(`
     select set_config('request.jwt.claim.sub', '${trainerAuthId}', false);
@@ -147,11 +153,13 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
       values ('${trainerId}', '${trainerAuthId}', true);
     insert into public.trainer_groups (trainer_id, group_id)
       values ('${trainerId}', 'assigned-group');
-    insert into public.attendance (id, student_id, date, group_id, quantity, entry_type)
+    insert into public.attendance (id, student_id, date, group_id, quantity, entry_type, guest_type)
       values
-        ('${oneOffAttendanceId}', '${studentId}', '2026-10-22', 'assigned-group', 1, 'single'),
-        ('${subscriptionAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, 'subscription'),
-        ('${debtAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, 'debt');
+        ('${oneOffAttendanceId}', '${studentId}', '2026-10-22', 'assigned-group', 1, 'single', null),
+        ('${subscriptionAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, 'subscription', null),
+        ('${debtAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, 'debt', null),
+        ('${nullLegacyAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, null, null),
+        ('${emptyLegacyAttendanceId}', '${studentId}', '2026-10-22', 'foreign-group', 1, '', '');
   `);
 
   const ensured = await db.query(
@@ -172,6 +180,29 @@ test("assigned trainer can ensure and remove one-off while non-one-off rows bypa
       [attendanceId],
     );
   }
+
+  const ownershipChecksBeforeLegacy = (await db.query(
+    "select count(*)::integer as count from public.group_ownership_checks",
+  )).rows[0].count;
+  for (const attendanceId of [nullLegacyAttendanceId, emptyLegacyAttendanceId]) {
+    const result = await db.query(
+      "select * from public.crm_ensure_one_off_payment_for_attendance($1::uuid)",
+      [attendanceId],
+    );
+    assert.equal(result.rows.length, 0);
+    await db.query(
+      "select public.crm_remove_one_off_payment_if_orphan($1::uuid)",
+      [attendanceId],
+    );
+  }
+  const ownershipChecksAfterLegacy = (await db.query(
+    "select count(*)::integer as count from public.group_ownership_checks",
+  )).rows[0].count;
+  assert.equal(
+    ownershipChecksAfterLegacy,
+    ownershipChecksBeforeLegacy,
+    "legacy NULL/empty attendance must return without calling rls_owns_group",
+  );
 
   await db.query(
     "select public.crm_remove_one_off_payment_if_orphan($1::uuid)",
