@@ -8,6 +8,7 @@ declare
   student_def text := pg_get_functiondef('public.rls_can_access_student(uuid)'::regprocedure);
   record_def text := pg_get_functiondef('public.rls_can_record_attendance(uuid,text)'::regprocedure);
   subscription_def text := pg_get_functiondef('public.rls_can_access_subscription(uuid,uuid,text)'::regprocedure);
+  auto_entry_def text := pg_get_functiondef('public.rls_is_auto_attendance_entry(uuid,text,date,uuid,text)'::regprocedure);
   insert_check text;
   update_check text;
 begin
@@ -59,20 +60,22 @@ begin
   where polrelid = 'public.attendance'::regclass
     and polname = 'attendance_trainer_update_own_groups';
 
+  if auto_entry_def not like '%rls_can_record_attendance(p_student_id, p_group_id)%'
+     or auto_entry_def not like '%p_entry_type%subscription%'
+     or auto_entry_def not like '%p_entry_type%debt%' then
+    raise exception 'trainer automatic Attendance classification helper is incomplete';
+  end if;
+
   if insert_check is null
      or insert_check not like '%rls_owns_group(group_id)%'
-     or insert_check not like '%rls_can_record_attendance(student_id, group_id)%'
-     or insert_check not like '%rls_can_access_subscription(sub_id, student_id, group_id)%'
-     or insert_check not like '%sub_id is null%'
-     or insert_check not like '%student_id is null%sub_id is null%' then
-    raise exception 'trainer INSERT policy does not cover owned guests, no-subscription students, and validated subscriptions';
+     or insert_check not like '%rls_is_auto_attendance_entry(student_id, group_id, date, sub_id, entry_type)%' then
+    raise exception 'trainer INSERT policy does not enforce automatic financial classification';
   end if;
 
   if update_check is null
      or update_check not like '%rls_owns_group(group_id)%'
      or update_check not like '%rls_can_record_attendance(student_id, group_id)%'
-     or update_check not like '%rls_can_access_subscription(sub_id, student_id, group_id)%'
-     or update_check not like '%student_id is null%sub_id is null%' then
+     or update_check not like '%rls_can_record_attendance(student_id, group_id)%' then
     raise exception 'trainer UPDATE policy is not equivalently constrained';
   end if;
 
