@@ -8,8 +8,8 @@
 --   direct trainer/non-admin writes to public.subscriptions.
 -- - Let admin manage one-off rows for any attendance row.
 -- - Let trainer/non-admin users manage one-off rows only for attendance rows
---   whose group belongs to their auth user through public.groups.trainer_id =
---   auth.uid().
+--   whose group is assigned to their active trainer profile through
+--   public.trainer_groups.
 -- - Work only for entry_type/guest_type trial and single.
 -- - Do not accept amount, base_price, discount_pct, discount_source, paid,
 --   pay_method, or notes from the client.
@@ -67,22 +67,16 @@ begin
     raise exception 'Attendance % not found', p_attendance_id using errcode = 'P0002';
   end if;
 
-  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com');
+  v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
+  if v_entry_type is null or v_entry_type not in ('trial', 'single') then
+    return;
+  end if;
 
-  select exists (
-    select 1
-    from public.groups g
-    where g.id = v_att.group_id
-      and g.trainer_id::text = auth.uid()::text
-  ) into v_has_group_access;
+  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com');
+  v_has_group_access := public.rls_owns_group(v_att.group_id);
 
   if not (v_is_admin or v_has_group_access) then
     raise exception 'Not allowed to manage one-off payment for attendance %', p_attendance_id using errcode = '42501';
-  end if;
-
-  v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
-  if v_entry_type not in ('trial', 'single') then
-    return;
   end if;
 
   if v_att.student_id is null or v_att.group_id is null or v_att.date is null then
@@ -200,22 +194,16 @@ begin
     return;
   end if;
 
-  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com');
+  v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
+  if v_entry_type is null or v_entry_type not in ('trial', 'single') then
+    return;
+  end if;
 
-  select exists (
-    select 1
-    from public.groups g
-    where g.id = v_att.group_id
-      and g.trainer_id::text = auth.uid()::text
-  ) into v_has_group_access;
+  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com');
+  v_has_group_access := public.rls_owns_group(v_att.group_id);
 
   if not (v_is_admin or v_has_group_access) then
     raise exception 'Not allowed to remove one-off payment for attendance %', p_attendance_id using errcode = '42501';
-  end if;
-
-  v_entry_type := lower(nullif(btrim(coalesce(v_att.entry_type, v_att.guest_type, '')), ''));
-  if v_entry_type not in ('trial', 'single') then
-    return;
   end if;
 
   if v_att.student_id is null or v_att.group_id is null or v_att.date is null then

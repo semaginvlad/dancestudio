@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 const name = "20261015090000_studio_room_booking_availability.sql";
 const adminOverrideName = "20261019090000_admin_closed_room_booking_override.sql";
 const trainerExceptionsName = "20261019091000_closed_room_trainer_exceptions.sql";
+const oneOffAttendanceAuthorizationName = "20261022090000_fix_one_off_attendance_trainer_authorization.sql";
 const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
 const adminOverrideSql = readFileSync(new URL(`../supabase/migrations/${adminOverrideName}`, import.meta.url), "utf8");
 const trainerExceptionsSql = readFileSync(new URL(`../supabase/migrations/${trainerExceptionsName}`, import.meta.url), "utf8");
@@ -13,9 +14,9 @@ const priorSql = readFileSync(new URL("../supabase/migrations/20260917090000_fix
 
 test("room-booking availability migrations remain isolated and ordered", () => {
   const migrations = readdirSync(new URL("../supabase/migrations", import.meta.url)).filter((file) => file.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), trainerExceptionsName);
   assert.ok(migrations.indexOf(adminOverrideName) > migrations.indexOf(name));
   assert.ok(migrations.indexOf(trainerExceptionsName) > migrations.indexOf(adminOverrideName));
+  assert.ok(migrations.indexOf(oneOffAttendanceAuthorizationName) > migrations.indexOf(trainerExceptionsName));
   assert.match(sql, /add column if not exists booking_open boolean not null default true/i);
   assert.match(sql, /drop function if exists public\.crm_fetch_active_studio_rooms\(\);[\s\S]*create or replace function public\.crm_fetch_active_studio_rooms\(\)/i);
   assert.doesNotMatch(sql, /update\s+public\.room_bookings/i);
