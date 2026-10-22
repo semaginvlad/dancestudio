@@ -2543,7 +2543,9 @@ export default function AttendanceTab({
       throw new Error(CANCELLED_ATTENDANCE_MESSAGE);
     }
 
-    if (entryMode === "subscription") {
+    const effectiveEntryMode = isAdmin ? entryMode : "auto";
+
+    if (effectiveEntryMode === "subscription") {
       const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (!activeSub) {
         throw new Error("На цю дату немає активного абонемента.");
@@ -2551,18 +2553,18 @@ export default function AttendanceTab({
       return { entryType: "subscription", subId: activeSub.id };
     }
 
-    if (entryMode === "single") {
+    if (effectiveEntryMode === "single") {
       return { entryType: "single", subId: null };
     }
 
-    if (entryMode === "trial") {
+    if (effectiveEntryMode === "trial") {
       if (hasAttendanceInDirection(student)) {
         throw new Error("Пробне заняття доступне тільки для нових учениць у цьому напрямку.");
       }
       return { entryType: "trial", subId: null };
     }
 
-    if (entryMode === "debt") {
+    if (effectiveEntryMode === "debt") {
       const activeSub = getActiveSubOnDateForCell(subsForAttendanceSemantics, student.id, gid, dateStr, cancelledDatesForCurrentGroup);
       if (activeSub) {
         throw new Error("У учениці є активний абонемент, борг ставити не можна.");
@@ -2679,34 +2681,14 @@ export default function AttendanceTab({
       if (existing.length) {
         if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
           const rec = existing[0];
-          const payload = {
-            id: `tmp_${uid()}`,
-            subId: rec.subId,
-            studentId: student.id,
-            date: dateStr,
-            guestName: null,
-            guestType: null,
-            groupId: gid,
-            quantity: 2,
-            entryType: rec.subId
-              ? "subscription"
-              : (String(rec.entryType || "").toLowerCase() === "single"
-                  ? "single"
-                  : (String(rec.entryType || "").toLowerCase() === "unpaid" ? "unpaid" : "debt")),
-          };
-          const optimisticRecord = buildOptimisticAttendanceRecord(payload);
+          const optimisticRecord = { ...rec, quantity: 2 };
           applyAttendanceStateChange({ removeIds: [rec.id], addRows: [optimisticRecord] });
           rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id], restoreRows: [rec] });
 
           backendMutationStarted = true;
-          await db.deleteAttendance(rec.id);
-          if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-          const savedRecord = await db.insertAttendance(payload);
+          const savedRecord = await db.updateAttendanceQuantity(rec.id, 2);
           replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
           rollbackOptimisticChange = null;
-          if (rec.subId) {
-            await db.syncSubUsedTrainings(rec.subId);
-          }
           await refreshSubscriptionsAfterAttendanceChange();
           return;
         }
@@ -2741,7 +2723,7 @@ export default function AttendanceTab({
         groupId: gid,
         quantity: 1,
         entryType: nextEntry.entryType,
-        explicitEntryType: entryMode === "trial" || entryMode === "single",
+        explicitEntryType: isAdmin && (entryMode === "trial" || entryMode === "single"),
       };
       const optimisticRecord = buildOptimisticAttendanceRecord(payload);
       applyAttendanceStateChange({ addRows: [optimisticRecord] });
@@ -3523,17 +3505,21 @@ export default function AttendanceTab({
             style={styles.control}
           />
 
-          <select
-            value={entryMode}
-            onChange={(e) => setEntryMode(e.target.value)}
-            style={styles.control}
-          >
-            <option value="auto">Авто</option>
-            <option value="subscription">Абонемент</option>
-            <option value="single">Разове</option>
-            <option value="trial">Пробне</option>
-            <option value="debt">Борг</option>
-          </select>
+          {isAdmin ? (
+            <select
+              value={entryMode}
+              onChange={(e) => setEntryMode(e.target.value)}
+              style={styles.control}
+            >
+              <option value="auto">Авто</option>
+              <option value="subscription">Абонемент</option>
+              <option value="single">Разове</option>
+              <option value="trial">Пробне</option>
+              <option value="debt">Борг</option>
+            </select>
+          ) : (
+            <span data-trainer-attendance-mode="auto" style={{ ...styles.control, display: "inline-flex", alignItems: "center" }}>Авто</span>
+          )}
 
           <button
             type="button"
@@ -3936,9 +3922,9 @@ export default function AttendanceTab({
                       <div className="attendance-profile-card" style={{ ...styles.profileCard, ...(student.isGuestChild ? styles.guestChildCard : {}) }}>
                         <div className="attendance-student-name-row" style={styles.studentNameRow}>
                           <div className="attendance-student-name" style={styles.studentName}>{`${rowIndex + 1}. ${student.anonymous ? "Гість" : student.guestName}`}</div>
-                          <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
+                          {isAdmin && <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
                             <button type="button" className="attendance-menu-btn" style={styles.menuBtn} title="Дії" data-attn-menu-btn="1" onClick={(e) => { e.stopPropagation(); openStudentMenu(student, e.currentTarget); }}>⋮</button>
-                          </div>
+                          </div>}
                         </div>
                         <div className="attendance-student-meta" style={styles.studentMeta}>Тимчасовий гість (trial/single)</div>
                       </div>
@@ -3969,7 +3955,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button></div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={!isAdmin || isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, !isAdmin || isCancelledDate(dateStr) || futureDay, saving)} title={!isAdmin ? "Гостьова відмітка доступна лише адміністратору" : (isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr))}>{cellView.mark}</button></div>
                         </td>
                       );
                     })}
@@ -4014,7 +4000,7 @@ export default function AttendanceTab({
                     <div className="attendance-student-name-row" style={styles.studentNameRow}>
                       <div className="attendance-student-name" style={styles.studentName}>{`${rowIndex + 1}. ${getDisplayName(student)}`}</div>
                       <div style={styles.orderBtns}>
-                        <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
+                        {isAdmin && <div className="attendance-student-menu-wrap" style={styles.menuWrap}>
                         <button
                           type="button"
                           className="attendance-menu-btn"
@@ -4032,7 +4018,7 @@ export default function AttendanceTab({
                         >
                           ⋮
                         </button>
-                        </div>
+                        </div>}
                       </div>
                     </div>
                     <div className="attendance-student-meta" style={{ ...styles.studentMeta, color: metaColor }}>
@@ -4173,7 +4159,7 @@ export default function AttendanceTab({
         </table>
       </div>
 
-      <div className="attendance-add-panel" style={{ width: "min(278px, 100%)", alignSelf: "flex-start" }}>
+      {isAdmin && <div className="attendance-add-panel" style={{ width: "min(278px, 100%)", alignSelf: "flex-start" }}>
         <div className="attendance-add-mode-row" style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("student")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "student" ? theme.primary : theme.input, color: addMode === "student" ? "#fff" : theme.textMain }}>Учениця</button>
           <button type="button" className="attendance-add-mode-btn" onClick={() => setAddMode("guest")} style={{ ...styles.control, height: 28, fontSize: 12, padding: "0 8px", background: addMode === "guest" ? theme.primary : theme.input, color: addMode === "guest" ? "#fff" : theme.textMain }}>Гість</button>
@@ -4254,7 +4240,7 @@ export default function AttendanceTab({
             </form>
           )}
         </div>
-      </div>
+      </div>}
 
       {selectedLessonPlanView && createPortal(
         <>

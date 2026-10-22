@@ -1203,6 +1203,32 @@ export async function insertAttendance(a) {
   }
 }
 
+export async function updateAttendanceQuantity(id, quantity) {
+  const safeQuantity = Number(quantity);
+  if (!id || !Number.isInteger(safeQuantity) || safeQuantity < 1) {
+    throw new Error('attendance id and a positive integer quantity are required')
+  }
+  const { data, error } = await supabase
+    .from('attendance')
+    .update({ quantity: safeQuantity })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  if (data?.sub_id) await syncSubUsedTrainings(data.sub_id)
+  return {
+    id: data.id,
+    subId: data.sub_id,
+    studentId: data.student_id,
+    date: data.date,
+    guestName: data.guest_name,
+    guestType: data.guest_type,
+    groupId: data.group_id,
+    quantity: data.quantity || 1,
+    entryType: data.entry_type || 'subscription',
+  }
+}
+
 
 export async function convertDebtAttendanceToSubscription({ studentId, groupId, subId, startDate, endDate }) {
   if (!studentId || !groupId || !subId || !startDate || !endDate) {
