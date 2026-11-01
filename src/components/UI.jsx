@@ -94,11 +94,11 @@ export function Pill({active, onClick, children, color}){
   return <button type="button" onClick={onClick} style={{padding:"10px 20px", borderRadius:100, fontSize:14, fontWeight:600, cursor:"pointer", background:active?(color||theme.primary):theme.input, color:active?"#fff":theme.textMuted, border:"none", fontFamily:"inherit", transition:"all 0.2s"}}>{children}</button>;
 }
 
-export function GroupSelect({groups, historicalGroups = [], directionsList = DIRECTIONS, value, onChange, filterDir = "all", allowAll = false, placeholder = "Оберіть групу"}) {
+export function GroupSelect({groups, historicalGroups = [], directionsList = DIRECTIONS, value, onChange, filterDir = "all", allowAll = false, placeholder = "Оберіть групу", disabled = false}) {
   const sections = buildGroupSelectSections(groups, directionsList, filterDir);
   const filteredHistoricalGroups = filterDir === "all" ? historicalGroups : historicalGroups.filter(g => g.directionId === filterDir);
   return (
-    <select style={{...inputSt, width:"auto", minWidth:200, cursor:"pointer"}} value={value} onChange={e=>onChange(e.target.value)}>
+    <select disabled={disabled} style={{...inputSt, width:"auto", minWidth:200, cursor:disabled ? "not-allowed" : "pointer", opacity:disabled ? .7 : 1}} value={value} onChange={e=>onChange(e.target.value)}>
       {allowAll && <option value="all">Усі групи</option>}
       {!allowAll && <option value="">{placeholder}</option>}
       {sections.map(d=>(
@@ -113,7 +113,7 @@ export function GroupSelect({groups, historicalGroups = [], directionsList = DIR
   );
 }
 
-export function StudentSelectWithSearch({ students, value, onChange, studentGrps, groups }) {
+export function StudentSelectWithSearch({ students, value, onChange, studentGrps, groups, disabled = false }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -137,11 +137,11 @@ export function StudentSelectWithSearch({ students, value, onChange, studentGrps
   return (
     <div style={{position: 'relative'}}>
       {open && <div style={{position: 'fixed', inset: 0, zIndex: 9}} onClick={() => setOpen(false)}></div>}
-      <div onClick={() => setOpen(!open)} style={{...inputSt, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: theme.card, border: `1px solid ${theme.border}`, position: 'relative', zIndex: 10}}>
+      <div onClick={() => { if (!disabled) setOpen(!open); }} aria-disabled={disabled} style={{...inputSt, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? .7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: theme.card, border: `1px solid ${theme.border}`, position: 'relative', zIndex: 10}}>
         {selectedSt ? getDisplayName(selectedSt) : "Оберіть ученицю..."}
         <span style={{fontSize: 10, color: theme.textLight}}>▼</span>
       </div>
-      {open && (
+      {open && !disabled && (
         <div style={{position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 11, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 16, marginTop: 4, boxShadow: "0 10px 30px rgba(0,0,0,0.15)", maxHeight: 350, display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
           <div style={{padding: 12, borderBottom: `1px solid ${theme.border}`, background: theme.bg}}>
             <input autoFocus value={search} onChange={e=>setSearch(e.target.value)} placeholder="Пошук за прізвищем..." style={{...inputSt, height: 44, padding: "0 16px"}} />

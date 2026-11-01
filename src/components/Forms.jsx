@@ -70,13 +70,14 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
 export function SubForm({ initial, onDone, onCancel, onPendingChange, students, groups, studentGrps, subs = [] }) {
   const submitGuard = useRef(null);
   if (!submitGuard.current) submitGuard.current = createSynchronousGuard();
+  const isEditingExisting = Boolean(initial?.id);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [studentId, setStudentId] = useState(initial?.studentId || "");
   const [groupId, setGroupId] = useState(initial?.groupId || "");
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
   const [startDate, setStartDate] = useState(initial?.startDate || today());
-  const [paidAt, setPaidAt] = useState(initial?.paidAt || (initial ? "" : today()));
+  const [paidAt, setPaidAt] = useState(initial?.paidAt || (isEditingExisting ? "" : today()));
   const [previousSubscriptionId, setPreviousSubscriptionId] = useState(initial?.previousSubscriptionId || "");
   const [amount, setAmount] = useState(initial?.amount || 1500);
   const [paid] = useState(initial?.paid ?? true);
@@ -103,7 +104,6 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
-  const isEditingExisting = Boolean(initial?.id);
   const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
   const selectablePlanTypes = PLAN_TYPES.filter((p) => ["4pack", "8pack", "12pack"].includes(p.id));
   const visiblePlanTypes = isEditingExisting && isLegacyPlanType
@@ -158,8 +158,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
 
   return (
     <div>
-      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
-      <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} disabled={isEditingExisting} /></Field>
+      <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} disabled={isEditingExisting} /></Field>
       <Field label="Тип Абонемента">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           {visiblePlanTypes.map((p) => {
@@ -296,8 +296,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
       {submitError && <div role="alert" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "rgba(234,84,85,0.12)", color: theme.danger, fontWeight: 700 }}>{submitError}</div>}
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel} disabled={submitting}>Скасувати</button>
-        <button type="button" disabled={submitting || !studentId || !groupId || (!initial && !paidAt)} style={{ ...btnP, opacity: studentId && groupId && (initial || paidAt) && !submitting ? 1 : .4 }} onClick={async () => {
-          if (!studentId || !groupId || (!initial && !paidAt)) return;
+        <button type="button" disabled={submitting || !studentId || !groupId || (!isEditingExisting && !paidAt)} style={{ ...btnP, opacity: studentId && groupId && (isEditingExisting || paidAt) && !submitting ? 1 : .4 }} onClick={async () => {
+          if (!studentId || !groupId || (!isEditingExisting && !paidAt)) return;
           if (selectedUsedTrainings > selectedTotalTrainings) {
             alert("Використані тренування не можуть перевищувати загальну кількість.");
             return;

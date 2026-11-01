@@ -2222,18 +2222,20 @@ export default function AttendanceTab({
     setTransferSaving(true);
     setTransferError("");
     try {
-      await db.addStudentGroup(studentId, newGroupId);
-      let updatedSub = null;
-      if (transferActiveSub && transferState.activeSub?.id) {
-        updatedSub = await db.updateSub(transferState.activeSub.id, { groupId: newGroupId });
-      }
-      await db.removeStudentGroup(studentId, oldGroupId);
+      await db.moveGroupMembershipsAndSubscriptions({
+        sourceGroupId: oldGroupId,
+        targetGroupId: newGroupId,
+        addTargetStudentIds: [studentId],
+        removeSourceStudentIds: [studentId],
+        subscriptionIds: transferActiveSub && transferState.activeSub?.id ? [transferState.activeSub.id] : [],
+      });
+      const refreshedSubscriptions = await fetchSubscriptions();
       setStudentGrps((prev) => {
         const withoutOld = (prev || []).filter((row) => !(String(row.studentId) === String(studentId) && String(row.groupId) === String(oldGroupId)));
         if (withoutOld.some((row) => String(row.studentId) === String(studentId) && String(row.groupId) === String(newGroupId))) return withoutOld;
         return [...withoutOld, { id: `local_transfer_${uid()}`, studentId, groupId: newGroupId }];
       });
-      if (updatedSub) setSubs((prev) => (prev || []).map((sub) => String(sub.id) === String(updatedSub.id) ? { ...sub, ...updatedSub } : sub));
+      setSubs(refreshedSubscriptions);
       setGid(newGroupId);
       closeTransferModal();
     } catch (err) {

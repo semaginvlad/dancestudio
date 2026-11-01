@@ -229,6 +229,26 @@ export async function removeStudentGroup(studentId, groupId) {
   if (error) throw error
 }
 
+export async function moveGroupMembershipsAndSubscriptions({
+  sourceGroupId,
+  targetGroupId,
+  addTargetStudentIds = [],
+  removeSourceStudentIds = [],
+  subscriptionIds = [],
+  restorePreviousSubscriptionIds = {},
+}) {
+  const { data, error } = await supabase.rpc('crm_move_group_memberships_and_subscriptions', {
+    p_source_group_id: sourceGroupId,
+    p_target_group_id: targetGroupId,
+    p_add_target_student_ids: addTargetStudentIds,
+    p_remove_source_student_ids: removeSourceStudentIds,
+    p_subscription_ids: subscriptionIds,
+    p_restore_previous_subscription_ids: restorePreviousSubscriptionIds,
+  })
+  if (error) throw error
+  return data || []
+}
+
 // ─── GROUPS ───
 const mapGroup = (g) => ({
   ...g,
@@ -337,6 +357,7 @@ const mapGroupMergeOperation = (row) => ({
   removedSourceLinksStudentIds: row.removed_source_links_student_ids || [],
   movedSubscriptionIds: row.moved_subscription_ids || [],
   previousSubscriptionGroupIds: row.previous_subscription_group_ids || {},
+  previousSubscriptionPredecessorIds: row.previous_subscription_predecessor_ids || {},
   previousTargetSchedule: row.previous_target_schedule || [],
   newTargetSchedule: row.new_target_schedule || [],
   previousSourceArchiveState: row.previous_source_archive_state || null,
@@ -370,6 +391,7 @@ export async function insertGroupMergeOperation(operation) {
     removed_source_links_student_ids: operation.removedSourceLinksStudentIds || [],
     moved_subscription_ids: operation.movedSubscriptionIds || [],
     previous_subscription_group_ids: operation.previousSubscriptionGroupIds || {},
+    previous_subscription_predecessor_ids: operation.previousSubscriptionPredecessorIds || {},
     previous_target_schedule: operation.previousTargetSchedule || [],
     new_target_schedule: operation.newTargetSchedule || [],
     previous_source_archive_state: operation.previousSourceArchiveState || null,
@@ -905,8 +927,9 @@ export async function updateSub(id, s) {
   if (s.paidAt !== undefined) payload.paid_at = s.paidAt || null
   if (s.previousSubscriptionId !== undefined) payload.previous_subscription_id = s.previousSubscriptionId || null
   if (s.notes !== undefined) payload.notes = s.notes
-  if (s.studentId !== undefined) payload.student_id = s.studentId
-  if (s.groupId !== undefined) payload.group_id = s.groupId
+  // Subscription ownership is immutable through generic edits. Group moves
+  // must use moveGroupMembershipsAndSubscriptions so memberships and queue
+  // boundaries change in one database transaction.
 
   const { data, error } = await supabase.from('subscriptions').update(payload).eq('id', id).select().single()
   if (error) throw error

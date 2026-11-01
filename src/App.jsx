@@ -1279,8 +1279,8 @@ export default function App() {
       alert("Для архівації старої групи потрібне поле is_active, active або archived_at у таблиці groups.");
       return;
     }
-    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.insertGroupMergeOperation || !db.updateGroupMergeOperationStatus) {
-      alert("Не вистачає db helper-ів: потрібні addStudentGroup, removeStudentGroup, updateSub, updateGroup, insertGroupMergeOperation, updateGroupMergeOperationStatus.");
+    if (!db.moveGroupMembershipsAndSubscriptions || !db.updateGroup || !db.insertGroupMergeOperation || !db.updateGroupMergeOperationStatus) {
+      alert("Не вистачає db helper-ів для атомарного переносу membership та абонементів.");
       return;
     }
 
@@ -1304,6 +1304,15 @@ export default function App() {
       const previousSubscriptionGroupIds = Object.fromEntries(
         groupMergeSummary.movableSubs.map((sub) => [String(sub.id), sub.groupId])
       );
+      const movedSubscriptionIds = new Set(groupMergeSummary.movableSubs.map((sub) => String(sub.id)));
+      const previousSubscriptionPredecessorIds = Object.fromEntries(
+        subsExt
+          .filter((sub) => (
+            movedSubscriptionIds.has(String(sub.id))
+            || movedSubscriptionIds.has(String(sub.previousSubscriptionId || ""))
+          ))
+          .map((sub) => [String(sub.id), sub.previousSubscriptionId || null])
+      );
       const operationDraft = {
         id: uid(),
         sourceGroupId: sourceId,
@@ -1313,6 +1322,7 @@ export default function App() {
         removedSourceLinksStudentIds: groupMergeSummary.selectedStudentIds,
         movedSubscriptionIds: groupMergeSummary.movableSubs.map((sub) => sub.id),
         previousSubscriptionGroupIds,
+        previousSubscriptionPredecessorIds,
         previousTargetSchedule,
         newTargetSchedule,
         previousSourceArchiveState: sourceMeta,
@@ -1323,21 +1333,17 @@ export default function App() {
       };
       savedOperation = await db.insertGroupMergeOperation(operationDraft);
 
-      const createdLinks = [];
-      for (const studentId of groupMergeSummary.newLinkStudentIds) {
-        const link = await db.addStudentGroup(studentId, targetId);
-        createdLinks.push(link);
-      }
-
-      for (const studentId of groupMergeSummary.selectedStudentIds) {
-        await db.removeStudentGroup(studentId, sourceId);
-      }
-
-      const updatedSubs = [];
-      for (const sub of groupMergeSummary.movableSubs) {
-        const updatedSub = await db.updateSub(sub.id, { groupId: targetId });
-        updatedSubs.push(updatedSub);
-      }
+      await db.moveGroupMembershipsAndSubscriptions({
+        sourceGroupId: sourceId,
+        targetGroupId: targetId,
+        addTargetStudentIds: groupMergeSummary.selectedStudentIds,
+        removeSourceStudentIds: groupMergeSummary.selectedStudentIds,
+        subscriptionIds: groupMergeSummary.movableSubs.map((sub) => sub.id),
+      });
+      const [refreshedStudentGroups, refreshedSubscriptions] = await Promise.all([
+        db.fetchStudentGroups(),
+        db.fetchSubs({ includeFinancial: true }),
+      ]);
 
       let updatedTargetGroup = null;
       if (scheduleMode !== "keep_target_schedule") {
@@ -1352,22 +1358,8 @@ export default function App() {
       const completedOperation = await db.updateGroupMergeOperationStatus(savedOperation.id, "completed");
 
       setGroupMergeOperations((prev) => [completedOperation, ...prev.filter((op) => String(op.id) !== String(completedOperation.id))]);
-      setStudentGrps((prev) => {
-        const removedIds = new Set(groupMergeSummary.selectedStudentIds.map((id) => String(id)));
-        const withoutSource = prev.filter((link) => !(String(link.groupId) === String(sourceId) && removedIds.has(String(link.studentId))));
-        const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
-        const additions = createdLinks.filter((link) => {
-          const key = `${String(link.studentId)}:${String(link.groupId)}`;
-          if (existing.has(key)) return false;
-          existing.add(key);
-          return true;
-        });
-        return [...withoutSource, ...additions];
-      });
-      setSubs((prev) => prev.map((sub) => {
-        const updated = updatedSubs.find((item) => String(item.id) === String(sub.id));
-        return updated ? { ...sub, ...updated } : sub;
-      }));
+      setStudentGrps(refreshedStudentGroups);
+      setSubs(refreshedSubscriptions);
       setGroups((prev) => prev.map((group) => {
         if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
         if (archivedSourceGroup && String(group.id) === String(sourceId)) return { ...group, ...archivedSourceGroup };
@@ -1396,7 +1388,7 @@ export default function App() {
 
   const undoGroupMerge = async (operation) => {
     if (!operation || operation.undoneAt || operation.status !== "completed") return;
-    if (!db.addStudentGroup || !db.removeStudentGroup || !db.updateSub || !db.updateGroup || !db.markGroupMergeOperationUndone) {
+    if (!db.moveGroupMembershipsAndSubscriptions || !db.updateGroup || !db.markGroupMergeOperationUndone) {
       alert("Не вистачає db helper-ів для скасування merge.");
       return;
     }
@@ -1405,23 +1397,18 @@ export default function App() {
 
     setGroupMergeBusy(true);
     try {
-      const restoredSourceLinks = [];
-      for (const studentId of operation.selectedStudentIds || []) {
-        const link = await db.addStudentGroup(studentId, operation.sourceGroupId);
-        restoredSourceLinks.push(link);
-      }
-
-      for (const studentId of operation.newTargetLinksStudentIds || []) {
-        await db.removeStudentGroup(studentId, operation.targetGroupId);
-      }
-
-      const updatedSubs = [];
-      for (const subId of operation.movedSubscriptionIds || []) {
-        const previousGroupId = operation.previousSubscriptionGroupIds?.[String(subId)];
-        if (previousGroupId === undefined || previousGroupId === null) continue;
-        const updatedSub = await db.updateSub(subId, { groupId: previousGroupId });
-        updatedSubs.push(updatedSub);
-      }
+      await db.moveGroupMembershipsAndSubscriptions({
+        sourceGroupId: operation.targetGroupId,
+        targetGroupId: operation.sourceGroupId,
+        addTargetStudentIds: operation.selectedStudentIds || [],
+        removeSourceStudentIds: operation.newTargetLinksStudentIds || [],
+        subscriptionIds: operation.movedSubscriptionIds || [],
+        restorePreviousSubscriptionIds: operation.previousSubscriptionPredecessorIds || {},
+      });
+      const [refreshedStudentGroups, refreshedSubscriptions] = await Promise.all([
+        db.fetchStudentGroups(),
+        db.fetchSubs({ includeFinancial: true }),
+      ]);
 
       const updatedTargetGroup = operation.scheduleMode !== "keep_target_schedule"
         ? await db.updateGroup(operation.targetGroupId, getExplicitMergeSchedulePatch(operation.scheduleMode, operation.previousTargetSchedule))
@@ -1437,22 +1424,8 @@ export default function App() {
       const updatedOperation = await db.markGroupMergeOperationUndone(operation.id, { undoneBy: user?.id || user?.email || null });
 
       setGroupMergeOperations((prev) => prev.map((op) => String(op.id) === String(updatedOperation.id) ? updatedOperation : op));
-      setStudentGrps((prev) => {
-        const targetRemovalIds = new Set((operation.newTargetLinksStudentIds || []).map((id) => String(id)));
-        const withoutMergeTargetLinks = prev.filter((link) => !(String(link.groupId) === String(operation.targetGroupId) && targetRemovalIds.has(String(link.studentId))));
-        const existing = new Set(withoutMergeTargetLinks.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
-        const additions = restoredSourceLinks.filter((link) => {
-          const key = `${String(link.studentId)}:${String(link.groupId)}`;
-          if (existing.has(key)) return false;
-          existing.add(key);
-          return true;
-        });
-        return [...withoutMergeTargetLinks, ...additions];
-      });
-      setSubs((prev) => prev.map((sub) => {
-        const updated = updatedSubs.find((item) => String(item.id) === String(sub.id));
-        return updated ? { ...sub, ...updated } : sub;
-      }));
+      setStudentGrps(refreshedStudentGroups);
+      setSubs(refreshedSubscriptions);
       setGroups((prev) => prev.map((group) => {
         if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
         if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };

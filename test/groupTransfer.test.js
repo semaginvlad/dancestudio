@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
+import { readFile } from 'node:fs/promises';
 
 const latinGroup = (id, overrides = {}) => ({
   id,
@@ -65,4 +66,16 @@ test('same-name Latin groups receive distinct complete labels and startTime wins
   assert.equal(labels[0], 'Latin · MIX · 16+ · [пн] 18:00');
   assert.equal(labels[1], 'Latin · BASE · 10–16 · [вт] 19:10');
   assert.equal(labels[2], 'Latin · MIX · 16+ · [пн·ср·пт] 19:10');
+});
+
+test('Attendance and merge flows use the atomic membership/subscription RPC helper', async () => {
+  const attendance = await readFile(new URL('../src/components/AttendanceTab.jsx', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const db = await readFile(new URL('../src/db.js', import.meta.url), 'utf8');
+
+  assert.match(attendance, /await db\.moveGroupMembershipsAndSubscriptions\(/);
+  assert.doesNotMatch(attendance, /await db\.addStudentGroup\(studentId, newGroupId\)[\s\S]{0,500}await db\.removeStudentGroup/);
+  assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 2, 'merge and undo are atomic');
+  assert.match(db, /supabase\.rpc\('crm_move_group_memberships_and_subscriptions'/);
+  assert.doesNotMatch(db, /payload\.group_id\s*=\s*s\.groupId/);
 });

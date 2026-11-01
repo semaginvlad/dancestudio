@@ -21,12 +21,21 @@ const ids = {
 const setup = async () => {
   const db = new PGlite();
   await db.exec(`
+    create role anon;
+    create role authenticated;
     create table public.subscriptions (
       id uuid primary key,
       student_id uuid,
       group_id text,
       created_at timestamptz default now()
     );
+    create table public.student_groups (
+      id uuid primary key default gen_random_uuid(),
+      student_id uuid not null,
+      group_id text not null,
+      unique (student_id, group_id)
+    );
+    create table public.group_merge_operations (id text primary key);
     insert into public.subscriptions (id, student_id, group_id, created_at)
     values ('${ids.legacy}', '${ids.studentA}', 'legacy-group', '2020-01-01T00:00:00Z');
   `);
@@ -119,11 +128,138 @@ test("database rejects self-links and incomplete queue ownership", async () => {
   await db.close();
 });
 
+test("database rejects indirect predecessor cycles on create and edit", async () => {
+  const db = await setup();
+  await db.exec(`
+    insert into public.subscriptions (id, student_id, group_id)
+    values
+      ('${ids.aGroupOne}', '${ids.studentA}', 'group-one'),
+      ('${ids.aGroupOneNext}', '${ids.studentA}', 'group-one');
+    update public.subscriptions
+    set previous_subscription_id = '${ids.aGroupOne}'
+    where id = '${ids.aGroupOneNext}';
+  `);
+  await assert.rejects(
+    db.query(
+      "update public.subscriptions set previous_subscription_id = $1 where id = $2",
+      [ids.aGroupOneNext, ids.aGroupOne],
+    ),
+    /predecessor cycle/i,
+  );
+
+  const thirdId = "20000000-0000-0000-0000-000000000006";
+  await db.query(
+    "insert into public.subscriptions (id, student_id, group_id, previous_subscription_id) values ($1, $2, 'group-one', $3)",
+    [thirdId, ids.studentA, ids.aGroupOneNext],
+  );
+  await assert.rejects(
+    db.query(
+      "update public.subscriptions set previous_subscription_id = $1 where id = $2",
+      [thirdId, ids.aGroupOne],
+    ),
+    /predecessor cycle/i,
+  );
+  await db.close();
+});
+
+test("group transfer atomically preserves internal queue links and detaches boundaries", async () => {
+  const db = await setup();
+  const predecessorId = "20000000-0000-0000-0000-000000000010";
+  const movedFirstId = "20000000-0000-0000-0000-000000000011";
+  const movedSecondId = "20000000-0000-0000-0000-000000000012";
+  const successorId = "20000000-0000-0000-0000-000000000013";
+  await db.exec(`
+    insert into public.student_groups (student_id, group_id)
+    values ('${ids.studentA}', 'source-group');
+    insert into public.subscriptions (id, student_id, group_id, previous_subscription_id)
+    values
+      ('${predecessorId}', '${ids.studentA}', 'source-group', null),
+      ('${movedFirstId}', '${ids.studentA}', 'source-group', '${predecessorId}'),
+      ('${movedSecondId}', '${ids.studentA}', 'source-group', '${movedFirstId}'),
+      ('${successorId}', '${ids.studentA}', 'source-group', '${movedSecondId}');
+  `);
+
+  await db.query(
+    "select * from public.crm_move_group_memberships_and_subscriptions($1, $2, $3::uuid[], $3::uuid[], $4::uuid[], '{}'::jsonb)",
+    ["source-group", "target-group", [ids.studentA], [movedFirstId, movedSecondId]],
+  );
+
+  const rows = (await db.query(`
+    select id, group_id, previous_subscription_id
+    from public.subscriptions
+    where student_id = '${ids.studentA}' and group_id in ('source-group', 'target-group')
+    order by id
+  `)).rows;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  assert.equal(byId.get(movedFirstId).group_id, "target-group");
+  assert.equal(byId.get(movedFirstId).previous_subscription_id, null, "source boundary is detached");
+  assert.equal(byId.get(movedSecondId).previous_subscription_id, movedFirstId, "internal queue link survives");
+  assert.equal(byId.get(successorId).previous_subscription_id, null, "remaining source boundary is detached");
+  const memberships = (await db.query(
+    "select group_id from public.student_groups where student_id = $1",
+    [ids.studentA],
+  )).rows.map((row) => row.group_id);
+  assert.deepEqual(memberships, ["target-group"]);
+
+  await db.query(
+    "select * from public.crm_move_group_memberships_and_subscriptions($1, $2, $3::uuid[], $3::uuid[], $4::uuid[], $5::jsonb)",
+    [
+      "target-group",
+      "source-group",
+      [ids.studentA],
+      [movedFirstId, movedSecondId],
+      JSON.stringify({
+        [movedFirstId]: predecessorId,
+        [movedSecondId]: movedFirstId,
+        [successorId]: movedSecondId,
+      }),
+    ],
+  );
+  const restored = (await db.query(`
+    select id, group_id, previous_subscription_id
+    from public.subscriptions
+    where id in ('${movedFirstId}', '${movedSecondId}', '${successorId}')
+    order by id
+  `)).rows;
+  const restoredById = new Map(restored.map((row) => [row.id, row]));
+  assert.equal(restoredById.get(movedFirstId).group_id, "source-group");
+  assert.equal(restoredById.get(movedFirstId).previous_subscription_id, predecessorId);
+  assert.equal(restoredById.get(movedSecondId).previous_subscription_id, movedFirstId);
+  assert.equal(restoredById.get(successorId).previous_subscription_id, movedSecondId);
+  await db.close();
+});
+
+test("invalid subscription transfer rolls back before membership changes", async () => {
+  const db = await setup();
+  await db.exec(`
+    insert into public.student_groups (student_id, group_id)
+    values ('${ids.studentA}', 'source-group');
+    insert into public.subscriptions (id, student_id, group_id)
+    values ('${ids.aGroupOne}', '${ids.studentA}', 'other-group');
+  `);
+  await assert.rejects(
+    db.query(
+      "select * from public.crm_move_group_memberships_and_subscriptions($1, $2, $3::uuid[], $3::uuid[], $4::uuid[], '{}'::jsonb)",
+      ["source-group", "target-group", [ids.studentA], [ids.aGroupOne]],
+    ),
+    /cannot be moved/i,
+  );
+  const memberships = (await db.query(
+    "select group_id from public.student_groups where student_id = $1",
+    [ids.studentA],
+  )).rows.map((row) => row.group_id);
+  assert.deepEqual(memberships, ["source-group"]);
+  await db.close();
+});
+
 test("admin subscription creation sends the explicit payment date and predecessor", async () => {
   const form = await readFile(new URL("../src/components/Forms.jsx", import.meta.url), "utf8");
   const db = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
 
   assert.match(form, /<Field label="Дата оплати \*">/);
+  assert.match(form, /const isEditingExisting = Boolean\(initial\?\.id\)/);
+  assert.match(form, /initial\?\.paidAt \|\| \(isEditingExisting \? "" : today\(\)\)/);
+  assert.match(form, /!isEditingExisting && !paidAt/);
   assert.match(form, /paidAt: paidAt \|\| null/);
   assert.match(form, /previousSubscriptionId: previousSubscriptionId \|\| null/);
   assert.match(db, /paid_at: s\.paidAt \|\| null/);
