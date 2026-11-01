@@ -836,6 +836,8 @@ const SAFE_SUBS_COLUMNS = [
   'total_trainings',
   'used_trainings',
   'notification_sent',
+  'paid_at',
+  'previous_subscription_id',
   'created_at',
 ].join(',')
 
@@ -870,6 +872,8 @@ export async function insertSub(s) {
     paid: s.paid,
     pay_method: s.payMethod || 'card',
     notification_sent: false,
+    paid_at: s.paidAt || null,
+    previous_subscription_id: s.previousSubscriptionId || null,
     notes: s.notes,
   };
   const { data, error } = await supabase.from('subscriptions').insert({
@@ -898,6 +902,8 @@ export async function updateSub(id, s) {
   if (s.paid !== undefined) payload.paid = s.paid
   if (s.payMethod !== undefined) payload.pay_method = s.payMethod
   if (s.notificationSent !== undefined) payload.notification_sent = s.notificationSent
+  if (s.paidAt !== undefined) payload.paid_at = s.paidAt || null
+  if (s.previousSubscriptionId !== undefined) payload.previous_subscription_id = s.previousSubscriptionId || null
   if (s.notes !== undefined) payload.notes = s.notes
   if (s.studentId !== undefined) payload.student_id = s.studentId
   if (s.groupId !== undefined) payload.group_id = s.groupId
@@ -931,6 +937,8 @@ function mapSub(s) {
     paid: s.paid,
     payMethod: s.pay_method,
     notificationSent: s.notification_sent,
+    paidAt: s.paid_at || null,
+    previousSubscriptionId: s.previous_subscription_id || null,
     notes: s.notes,
     created_at: s.created_at,
   }
