@@ -16,6 +16,7 @@ import { theme } from "../shared/constants";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrainer";
 import { canConvertTrialBooking } from "../shared/trialBookings";
+import { commitServerMutationThenRefresh, projectMovedMemberships, projectMovedSubscriptions } from "../groupMergeMutations";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -2222,22 +2223,37 @@ export default function AttendanceTab({
     setTransferSaving(true);
     setTransferError("");
     try {
-      await db.moveGroupMembershipsAndSubscriptions({
-        sourceGroupId: oldGroupId,
-        targetGroupId: newGroupId,
-        addTargetStudentIds: [studentId],
-        removeSourceStudentIds: [studentId],
-        subscriptionIds: transferActiveSub && transferState.activeSub?.id ? [transferState.activeSub.id] : [],
+      const subscriptionIds = transferActiveSub && transferState.activeSub?.id ? [transferState.activeSub.id] : [];
+      await commitServerMutationThenRefresh({
+        commit: () => db.moveGroupMembershipsAndSubscriptions({
+          sourceGroupId: oldGroupId,
+          targetGroupId: newGroupId,
+          addTargetStudentIds: [studentId],
+          removeSourceStudentIds: [studentId],
+          subscriptionIds,
+        }),
+        applyCommitted: () => {
+          setStudentGrps((prev) => projectMovedMemberships(prev, {
+            sourceGroupId: oldGroupId,
+            targetGroupId: newGroupId,
+            addTargetStudentIds: [studentId],
+            removeSourceStudentIds: [studentId],
+            localIdPrefix: "local_transfer",
+          }));
+          setSubs((prev) => projectMovedSubscriptions(prev, {
+            targetGroupId: newGroupId,
+            subscriptionIds,
+          }));
+          setGid(newGroupId);
+          closeTransferModal();
+        },
+        refresh: fetchSubscriptions,
+        applyRefresh: setSubs,
+        onRefreshFailure: (refreshError) => {
+          console.warn("Student transfer completed, but subscriptions refresh failed", refreshError);
+          alert("Перенесення виконано. Не вдалося оновити список абонементів; повторіть оновлення сторінки.");
+        },
       });
-      const refreshedSubscriptions = await fetchSubscriptions();
-      setStudentGrps((prev) => {
-        const withoutOld = (prev || []).filter((row) => !(String(row.studentId) === String(studentId) && String(row.groupId) === String(oldGroupId)));
-        if (withoutOld.some((row) => String(row.studentId) === String(studentId) && String(row.groupId) === String(newGroupId))) return withoutOld;
-        return [...withoutOld, { id: `local_transfer_${uid()}`, studentId, groupId: newGroupId }];
-      });
-      setSubs(refreshedSubscriptions);
-      setGid(newGroupId);
-      closeTransferModal();
     } catch (err) {
       setTransferError(err?.message || "Не вдалося перенести ученицю");
     } finally {

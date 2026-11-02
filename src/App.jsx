@@ -60,7 +60,7 @@ import {
 } from "./push";
 import { applyPwaUpdate, subscribeToPwaUpdates } from "./pwaUpdate";
 import { canEditSubscription, commitThenRefresh, composeSubscriptionNotice, createSynchronousGuard, refreshSubscriptionsOnly, subscriptionErrorMessage } from "./subscriptionMutations";
-import { commitGroupMergeThenRefresh } from "./groupMergeMutations";
+import { commitGroupMergeThenRefresh, projectMovedMemberships, projectMovedSubscriptions } from "./groupMergeMutations";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -1359,31 +1359,17 @@ export default function App() {
           return { completedOperation, updatedTargetGroup, archivedSourceGroup };
         },
         applyCommitted: ({ completedOperation, updatedTargetGroup, archivedSourceGroup }) => {
-          const selectedStudentIds = new Set(groupMergeSummary.selectedStudentIds.map((id) => String(id)));
           setGroupMergeOperations((prev) => [completedOperation, ...prev.filter((op) => String(op.id) !== String(completedOperation.id))]);
-          setStudentGrps((prev) => {
-            const withoutSource = (prev || []).filter((link) => !(
-              String(link.groupId) === String(sourceId)
-              && selectedStudentIds.has(String(link.studentId))
-            ));
-            const existing = new Set(withoutSource.map((link) => `${String(link.studentId)}:${String(link.groupId)}`));
-            const additions = groupMergeSummary.selectedStudentIds
-              .filter((studentId) => !existing.has(`${String(studentId)}:${String(targetId)}`))
-              .map((studentId) => ({ id: `local_merge_${uid()}`, studentId, groupId: targetId }));
-            return [...withoutSource, ...additions];
-          });
-          setSubs((prev) => (prev || []).map((sub) => {
-            const subId = String(sub.id);
-            const previousId = String(sub.previousSubscriptionId || "");
-            if (movedSubscriptionIds.has(subId)) {
-              return {
-                ...sub,
-                groupId: targetId,
-                previousSubscriptionId: movedSubscriptionIds.has(previousId) ? sub.previousSubscriptionId : null,
-              };
-            }
-            if (movedSubscriptionIds.has(previousId)) return { ...sub, previousSubscriptionId: null };
-            return sub;
+          setStudentGrps((prev) => projectMovedMemberships(prev, {
+            sourceGroupId: sourceId,
+            targetGroupId: targetId,
+            addTargetStudentIds: groupMergeSummary.selectedStudentIds,
+            removeSourceStudentIds: groupMergeSummary.selectedStudentIds,
+            localIdPrefix: "local_merge",
+          }));
+          setSubs((prev) => projectMovedSubscriptions(prev, {
+            targetGroupId: targetId,
+            subscriptionIds: groupMergeSummary.movableSubs.map((sub) => sub.id),
           }));
           setGroups((prev) => prev.map((group) => {
             if (String(group.id) === String(targetId) && updatedTargetGroup) return { ...group, ...updatedTargetGroup };
@@ -1436,45 +1422,67 @@ export default function App() {
 
     setGroupMergeBusy(true);
     try {
-      await db.moveGroupMembershipsAndSubscriptions({
-        sourceGroupId: operation.targetGroupId,
-        targetGroupId: operation.sourceGroupId,
-        addTargetStudentIds: operation.selectedStudentIds || [],
-        removeSourceStudentIds: operation.newTargetLinksStudentIds || [],
-        subscriptionIds: operation.movedSubscriptionIds || [],
-        restorePreviousSubscriptionIds: operation.previousSubscriptionPredecessorIds || {},
+      await commitGroupMergeThenRefresh({
+        commit: async () => {
+          await db.moveGroupMembershipsAndSubscriptions({
+            sourceGroupId: operation.targetGroupId,
+            targetGroupId: operation.sourceGroupId,
+            addTargetStudentIds: operation.selectedStudentIds || [],
+            removeSourceStudentIds: operation.newTargetLinksStudentIds || [],
+            subscriptionIds: operation.movedSubscriptionIds || [],
+            restorePreviousSubscriptionIds: operation.previousSubscriptionPredecessorIds || {},
+          });
+
+          const updatedTargetGroup = operation.scheduleMode !== "keep_target_schedule"
+            ? await db.updateGroup(operation.targetGroupId, getExplicitMergeSchedulePatch(operation.scheduleMode, operation.previousTargetSchedule))
+            : null;
+          const archiveMode = operation.previousSourceArchiveState?.mode;
+          let updatedSourceGroup = null;
+          if (archiveMode) {
+            const restorePatch = buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore);
+            if (restorePatch) updatedSourceGroup = await db.updateGroup(operation.sourceGroupId, restorePatch);
+          }
+          const updatedOperation = await db.markGroupMergeOperationUndone(operation.id, { undoneBy: user?.id || user?.email || null });
+          return { updatedOperation, updatedTargetGroup, updatedSourceGroup };
+        },
+        applyCommitted: ({ updatedOperation, updatedTargetGroup, updatedSourceGroup }) => {
+          setGroupMergeOperations((prev) => prev.map((op) => String(op.id) === String(updatedOperation.id) ? updatedOperation : op));
+          setStudentGrps((prev) => projectMovedMemberships(prev, {
+            sourceGroupId: operation.targetGroupId,
+            targetGroupId: operation.sourceGroupId,
+            addTargetStudentIds: operation.selectedStudentIds || [],
+            removeSourceStudentIds: operation.newTargetLinksStudentIds || [],
+            localIdPrefix: "local_merge_undo",
+          }));
+          setSubs((prev) => projectMovedSubscriptions(prev, {
+            targetGroupId: operation.sourceGroupId,
+            subscriptionIds: operation.movedSubscriptionIds || [],
+            restorePreviousSubscriptionIds: operation.previousSubscriptionPredecessorIds || {},
+          }));
+          setGroups((prev) => prev.map((group) => {
+            if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+            if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
+            return group;
+          }));
+          setScheduleGroups((prev) => prev.map((group) => {
+            if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
+            if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
+            return group;
+          }));
+        },
+        refresh: () => Promise.all([
+          db.fetchStudentGroups(),
+          db.fetchSubs({ includeFinancial: true }),
+        ]),
+        applyRefresh: ([refreshedStudentGroups, refreshedSubscriptions]) => {
+          setStudentGrps(refreshedStudentGroups);
+          setSubs(refreshedSubscriptions);
+        },
+        onRefreshFailure: (refreshError) => {
+          console.warn("Group merge undo completed, but canonical refresh failed", refreshError);
+          alert("Скасування обʼєднання виконано. Не вдалося оновити списки; повторіть оновлення сторінки.");
+        },
       });
-      const [refreshedStudentGroups, refreshedSubscriptions] = await Promise.all([
-        db.fetchStudentGroups(),
-        db.fetchSubs({ includeFinancial: true }),
-      ]);
-
-      const updatedTargetGroup = operation.scheduleMode !== "keep_target_schedule"
-        ? await db.updateGroup(operation.targetGroupId, getExplicitMergeSchedulePatch(operation.scheduleMode, operation.previousTargetSchedule))
-        : null;
-
-      const archiveMode = operation.previousSourceArchiveState?.mode;
-      let updatedSourceGroup = null;
-      if (archiveMode) {
-        const restorePatch = buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore);
-        if (restorePatch) updatedSourceGroup = await db.updateGroup(operation.sourceGroupId, restorePatch);
-      }
-
-      const updatedOperation = await db.markGroupMergeOperationUndone(operation.id, { undoneBy: user?.id || user?.email || null });
-
-      setGroupMergeOperations((prev) => prev.map((op) => String(op.id) === String(updatedOperation.id) ? updatedOperation : op));
-      setStudentGrps(refreshedStudentGroups);
-      setSubs(refreshedSubscriptions);
-      setGroups((prev) => prev.map((group) => {
-        if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
-        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
-        return group;
-      }));
-      setScheduleGroups((prev) => prev.map((group) => {
-        if (updatedTargetGroup && String(group.id) === String(operation.targetGroupId)) return { ...group, ...updatedTargetGroup };
-        if (updatedSourceGroup && String(group.id) === String(operation.sourceGroupId)) return { ...group, ...updatedSourceGroup };
-        return group;
-      }));
     } catch (e) {
       alert(e?.message || "Не вдалося скасувати merge");
     } finally {

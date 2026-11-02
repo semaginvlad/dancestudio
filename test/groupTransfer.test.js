@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
 import { readFile } from 'node:fs/promises';
-import { commitGroupMergeThenRefresh } from '../src/groupMergeMutations.js';
+import {
+  commitGroupMergeThenRefresh,
+  commitServerMutationThenRefresh,
+  projectMovedMemberships,
+  projectMovedSubscriptions,
+} from '../src/groupMergeMutations.js';
 
 const latinGroup = (id, overrides = {}) => ({
   id,
@@ -74,28 +79,122 @@ test('Attendance and merge flows use the atomic membership/subscription RPC help
   const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
   const db = await readFile(new URL('../src/db.js', import.meta.url), 'utf8');
 
-  assert.match(attendance, /await db\.moveGroupMembershipsAndSubscriptions\(/);
+  assert.match(attendance, /commit: \(\) => db\.moveGroupMembershipsAndSubscriptions\(/);
   assert.doesNotMatch(attendance, /await db\.addStudentGroup\(studentId, newGroupId\)[\s\S]{0,500}await db\.removeStudentGroup/);
   assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 2, 'merge and undo are atomic');
-  assert.match(app, /await commitGroupMergeThenRefresh\(\{/);
+  assert.equal((app.match(/await commitGroupMergeThenRefresh\(\{/g) || []).length, 2, 'merge and undo commit locally before refresh');
+  assert.match(attendance, /await commitServerMutationThenRefresh\(\{/);
   assert.match(db, /supabase\.rpc\('crm_move_group_memberships_and_subscriptions'/);
   assert.doesNotMatch(db, /payload\.group_id\s*=\s*s\.groupId/);
 });
 
-test('successful merge stays completed and undoable when canonical refresh fails', async () => {
-  let operation = { id: 'merge-1', status: 'pending' };
-  let refreshWarning = '';
+const moveState = (state, { sourceGroupId, targetGroupId, studentIds, subscriptionIds, restore = {} }) => {
+  for (const subId of subscriptionIds) {
+    const sub = state.subscriptions.find((row) => String(row.id) === String(subId));
+    if (!sub || String(sub.groupId) !== String(sourceGroupId)) throw new Error('RPC source-group validation error');
+  }
+  state.memberships = projectMovedMemberships(state.memberships, {
+    sourceGroupId,
+    targetGroupId,
+    addTargetStudentIds: studentIds,
+    removeSourceStudentIds: studentIds,
+  });
+  state.subscriptions = projectMovedSubscriptions(state.subscriptions, {
+    targetGroupId,
+    subscriptionIds,
+    restorePreviousSubscriptionIds: restore,
+  });
+};
 
-  const result = await commitGroupMergeThenRefresh({
-    commit: async () => ({ ...operation, status: 'completed' }),
-    applyCommitted: (completed) => { operation = completed; },
-    refresh: async () => { throw new Error('temporary read failure'); },
+const normalizeMoveState = (state) => ({
+  ...state,
+  memberships: state.memberships.map(({ studentId, groupId }) => ({ studentId, groupId })),
+});
+
+test('successful merge and undo stay fully local when both canonical refreshes fail', async () => {
+  const initial = {
+    memberships: [{ id: 'sg-source', studentId: 'student-1', groupId: 'source' }],
+    subscriptions: [
+      { id: 'sub-1', studentId: 'student-1', groupId: 'source', previousSubscriptionId: null },
+      { id: 'sub-2', studentId: 'student-1', groupId: 'source', previousSubscriptionId: 'sub-1' },
+    ],
+    sourceArchived: false,
+  };
+  const server = structuredClone(initial);
+  const local = structuredClone(initial);
+  let operation = { id: 'merge-1', status: 'pending' };
+
+  const merge = await commitGroupMergeThenRefresh({
+    commit: async () => {
+      moveState(server, { sourceGroupId: 'source', targetGroupId: 'target', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'] });
+      server.sourceArchived = true;
+      return { ...operation, status: 'completed' };
+    },
+    applyCommitted: (completed) => {
+      moveState(local, { sourceGroupId: 'source', targetGroupId: 'target', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'] });
+      local.sourceArchived = true;
+      operation = completed;
+    },
+    refresh: async () => { throw new Error('merge refresh failed'); },
     applyRefresh: () => assert.fail('failed refresh must not apply rows'),
-    onRefreshFailure: (error) => { refreshWarning = error.message; },
+  });
+  assert.equal(merge.refreshed, false);
+  assert.equal(operation.status, 'completed', 'undo remains enabled');
+  assert.deepEqual(local, server, 'merge is fully projected before refresh');
+
+  const undo = await commitGroupMergeThenRefresh({
+    commit: async () => {
+      moveState(server, {
+        sourceGroupId: 'target', targetGroupId: 'source', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'],
+        restore: { 'sub-1': null, 'sub-2': 'sub-1' },
+      });
+      server.sourceArchived = false;
+      return { ...operation, status: 'undone', undoneAt: 'now' };
+    },
+    applyCommitted: (undone) => {
+      moveState(local, {
+        sourceGroupId: 'target', targetGroupId: 'source', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'],
+        restore: { 'sub-1': null, 'sub-2': 'sub-1' },
+      });
+      local.sourceArchived = false;
+      operation = undone;
+    },
+    refresh: async () => { throw new Error('undo refresh failed'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
+  });
+  assert.equal(undo.refreshed, false);
+  assert.equal(operation.status, 'undone');
+  assert.deepEqual(normalizeMoveState(local), normalizeMoveState(initial), 'undo is fully projected before refresh');
+  assert.deepEqual(local, server);
+});
+
+test('attendance transfer remains repeatable after subscriptions refresh fails', async () => {
+  const initial = {
+    memberships: [{ id: 'sg-source', studentId: 'student-1', groupId: 'source' }],
+    subscriptions: [{ id: 'sub-1', studentId: 'student-1', groupId: 'source', previousSubscriptionId: null }],
+  };
+  const server = structuredClone(initial);
+  const local = structuredClone(initial);
+  let visibleGroupId = 'source';
+
+  const transfer = async (sourceGroupId, targetGroupId) => commitServerMutationThenRefresh({
+    commit: async () => moveState(server, {
+      sourceGroupId, targetGroupId, studentIds: ['student-1'], subscriptionIds: ['sub-1'],
+    }),
+    applyCommitted: () => {
+      moveState(local, { sourceGroupId, targetGroupId, studentIds: ['student-1'], subscriptionIds: ['sub-1'] });
+      visibleGroupId = targetGroupId;
+    },
+    refresh: async () => { throw new Error('subscriptions refresh failed'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
   });
 
-  assert.equal(result.refreshed, false);
-  assert.equal(operation.status, 'completed');
-  assert.equal(operation.status === 'completed', true, 'undoGroupMerge remains enabled');
-  assert.equal(refreshWarning, 'temporary read failure');
+  assert.equal((await transfer('source', 'target')).refreshed, false);
+  assert.equal(visibleGroupId, 'target');
+  assert.deepEqual(local, server, 'attendance transfer is fully projected before refresh');
+
+  assert.equal((await transfer(visibleGroupId, 'source')).refreshed, false, 'reverse transfer uses the committed local source group');
+  assert.equal(visibleGroupId, 'source');
+  assert.deepEqual(normalizeMoveState(local), normalizeMoveState(initial));
+  assert.deepEqual(local, server);
 });
