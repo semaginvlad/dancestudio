@@ -4,6 +4,7 @@ import { addMonth, today } from "../shared/utils";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 import { createSynchronousGuard, subscriptionErrorMessage } from "../subscriptionMutations";
+import { resolvePlanTypePrice } from "../subscriptionPricing";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -149,10 +150,9 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
 
   // Existing records retain their historical price. A newly selected plan uses the current catalog price.
   useEffect(() => {
-    if (isEditingExisting && planType === initial?.planType) return;
-    const nextBase = Number(priceByPlan[planType] ?? 0);
-    setBasePrice(nextBase);
-    setAmount(nextBase - Math.round((nextBase * Number(discountPct || 0)) / 100));
+    const resolved = resolvePlanTypePrice({ planType, initial, priceByPlan, discountPct });
+    setBasePrice(resolved.basePrice);
+    setAmount(resolved.amount);
   }, [planType]);
 
   useEffect(() => {

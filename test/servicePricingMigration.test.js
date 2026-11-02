@@ -29,7 +29,7 @@ test("new one-off payments snapshot the current price without rewriting history"
   assert.match(sql, /select sp\.price_uah into v_amount[\s\S]*where sp\.service_code = v_entry_type/);
   assert.match(sql, /insert into public\.subscriptions[\s\S]*v_amount, v_amount/);
   assert.doesNotMatch(sql, /update public\.subscriptions/);
-  assert.doesNotMatch(sql, /update\s+public\.attendance/);
+  assert.match(sql, /update public\.attendance[\s\S]*where student_id is null[\s\S]*price_snapshot_uah is null/);
 });
 
 test("React has no hardcoded CRM prices and only admin flows receive catalog prices", async () => {
@@ -40,6 +40,6 @@ test("React has no hardcoded CRM prices and only admin flows receive catalog pri
   assert.match(app, /isCurrentAdmin \? db\.fetchServicePrices : async \(\) => \[\]/);
   assert.match(app, /isAdmin && <Modal open=\{modal==="addSub"\}[\s\S]*servicePrices=\{servicePrices\}/);
   assert.match(app, /<PricingTab prices=\{servicePrices\}/);
-  assert.match(form, /if \(isEditingExisting && planType === initial\?\.planType\) return/);
+  assert.match(form, /resolvePlanTypePrice\(\{ planType, initial, priceByPlan, discountPct \}\)/);
   assert.match(form, /priceByPlan\[planType\]/);
 });

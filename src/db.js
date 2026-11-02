@@ -1049,6 +1049,7 @@ export async function fetchAttendance() {
     groupId: a.group_id,
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
+    priceSnapshotUah: a.price_snapshot_uah ?? null,
   }))
 }
 
@@ -1269,6 +1270,7 @@ export async function insertAttendance(a) {
     groupId: data.group_id,
     quantity: data.quantity || 1,
     entryType: data.entry_type || 'subscription',
+    priceSnapshotUah: data.price_snapshot_uah ?? null,
   }
 }
 

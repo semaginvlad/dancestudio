@@ -31,7 +31,6 @@ on public.service_prices for select to authenticated
 using (
   lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
   or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
-  or coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'admin'
 );
 
 drop policy if exists service_prices_admin_update on public.service_prices;
@@ -40,13 +39,59 @@ on public.service_prices for update to authenticated
 using (
   lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
   or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
-  or coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'admin'
 )
 with check (
   lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
   or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
-  or coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'admin'
 );
+
+-- Guest attendance has no subscription row, so snapshot its price separately.
+-- Existing rows predate this catalog and retain the historical defaults.
+alter table public.attendance
+  add column if not exists price_snapshot_uah integer check (price_snapshot_uah >= 0);
+
+update public.attendance
+set price_snapshot_uah = case lower(coalesce(entry_type, guest_type, ''))
+  when 'trial' then 150
+  when 'single' then 300
+end
+where student_id is null
+  and price_snapshot_uah is null
+  and lower(coalesce(entry_type, guest_type, '')) in ('trial', 'single');
+
+create or replace function public.crm_snapshot_guest_attendance_price()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_service_code text;
+begin
+  if new.student_id is not null or new.price_snapshot_uah is not null then
+    return new;
+  end if;
+
+  v_service_code := lower(coalesce(new.entry_type, new.guest_type, ''));
+  if v_service_code not in ('trial', 'single') then
+    return new;
+  end if;
+
+  select price_uah into new.price_snapshot_uah
+  from public.service_prices
+  where service_code = v_service_code;
+
+  if new.price_snapshot_uah is null then
+    raise exception 'Price is not configured for guest service %', v_service_code using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists attendance_snapshot_guest_price on public.attendance;
+create trigger attendance_snapshot_guest_price
+before insert on public.attendance
+for each row execute function public.crm_snapshot_guest_attendance_price();
 
 create or replace function public.crm_ensure_one_off_payment_for_attendance(
   p_attendance_id uuid
