@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { calculateGuestTrainerShare, getGuestAttendanceRevenue } from "../src/guestRevenue.js";
 import { resolvePlanTypePrice } from "../src/subscriptionPricing.js";
 import { mergeCatalogIntoPriceDrafts } from "../src/pricingDrafts.js";
+import { FINANCIAL_ATTENDANCE_ADMIN_MESSAGE, isFinancialAttendance } from "../src/attendanceFinancialGuard.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261102090000_admin_service_prices.sql", import.meta.url);
 
@@ -143,4 +144,44 @@ test("saving one catalog price preserves other dirty drafts", async () => {
   assert.match(pricingTab, /mergeCatalogIntoPriceDrafts\(prices, current, dirtyCodesRef\.current\)/);
   assert.match(pricingTab, /dirtyCodesRef\.current\.delete\(row\.serviceCode\)/);
   assert.match(pricingTab, /dirtyCodesRef\.current\.add\(row\.serviceCode\)/);
+});
+
+test("trainer UI blocks financial attendance before deletion while normal Auto stays editable", async () => {
+  assert.equal(isFinancialAttendance({ studentId: "student-1", entryType: "single" }), true);
+  assert.equal(isFinancialAttendance({ studentId: "student-1", entryType: "trial" }), true);
+  assert.equal(isFinancialAttendance({ studentId: null, guestName: "Гостя", entryType: "trial" }), true);
+  assert.equal(isFinancialAttendance({ studentId: "student-1", entryType: "debt", priceSnapshotUah: 0 }), true);
+  assert.equal(isFinancialAttendance({ studentId: "student-1", entryType: "subscription", subId: "sub-1" }), false);
+  assert.equal(isFinancialAttendance({ studentId: "student-1", entryType: "debt" }), false);
+  assert.match(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE, /лише адміністратор/);
+
+  const source = await readFile(new URL("../src/components/AttendanceTab.jsx", import.meta.url), "utf8");
+  const toggle = source.slice(source.indexOf("const handleToggleCell"), source.indexOf("const handleGuestCellClick"));
+  const guard = toggle.indexOf("existing.some(isFinancialAttendance)");
+  const deletion = toggle.indexOf("await db.deleteAttendance");
+  assert.ok(guard >= 0 && deletion > guard, "financial guard runs before the first destructive call");
+  assert.match(toggle.slice(guard, deletion), /alert\(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE\)/);
+});
+
+test("trainer RLS rejects direct financial update/delete but permits normal subscription/debt Auto", async () => {
+  const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
+  const updateStart = sql.indexOf("create policy attendance_trainer_update_own_groups");
+  const deleteStart = sql.indexOf("create policy attendance_trainer_delete_own_groups");
+  const rpcStart = sql.indexOf("create or replace function public.crm_remove_one_off_payment_if_orphan");
+  const updatePolicy = sql.slice(updateStart, deleteStart);
+  const deletePolicy = sql.slice(deleteStart, sql.indexOf("create or replace function public.crm_ensure_one_off_payment_for_attendance"));
+  const deleteRpc = sql.slice(rpcStart);
+
+  for (const policy of [updatePolicy, deletePolicy]) {
+    assert.match(policy, /student_id is not null/);
+    assert.match(policy, /guest_name is null/);
+    assert.match(policy, /guest_type is null/);
+    assert.match(policy, /price_snapshot_uah is null/);
+    assert.match(policy, /lower\(coalesce\(entry_type, ''\)\) not in \('trial', 'single'\)/);
+    assert.match(policy, /rls_owns_group\(group_id\)/);
+  }
+  assert.match(updatePolicy, /rls_can_record_attendance\(student_id, group_id\)/);
+  assert.match(updatePolicy, /rls_can_access_subscription\(sub_id, student_id, group_id\)/);
+  assert.match(deleteRpc, /if not v_is_admin then[\s\S]*only an administrator may remove financial attendance[\s\S]*errcode = '42501'/);
+  assert.ok(deleteRpc.indexOf("if not v_is_admin then") < deleteRpc.indexOf("delete from public.subscriptions"));
 });

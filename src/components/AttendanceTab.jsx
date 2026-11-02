@@ -17,6 +17,7 @@ import { getInternalGroupLabel } from "../shared/groupLabels";
 import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrainer";
 import { canConvertTrialBooking } from "../shared/trialBookings";
 import { commitServerMutationThenRefresh, projectMovedMemberships, projectMovedSubscriptions } from "../groupMergeMutations";
+import { FINANCIAL_ATTENDANCE_ADMIN_MESSAGE, isFinancialAttendance } from "../attendanceFinancialGuard";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -2693,6 +2694,11 @@ export default function AttendanceTab({
 
     try {
       const existing = getRecordsForCell(student, dateStr);
+
+      if (!isAdmin && existing.some(isFinancialAttendance)) {
+        alert(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+        return;
+      }
 
       if (existing.length) {
         if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
