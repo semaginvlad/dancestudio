@@ -1,0 +1,7 @@
+export function mergeCatalogIntoPriceDrafts(prices = [], drafts = {}, dirtyCodes = new Set()) {
+  return Object.fromEntries(prices.map((row) => {
+    const code = row.serviceCode;
+    const keepDraft = dirtyCodes.has(code) && Object.prototype.hasOwnProperty.call(drafts, code);
+    return [code, keepDraft ? drafts[code] : String(row.priceUah)];
+  }));
+}

@@ -68,21 +68,14 @@ as $$
 declare
   v_service_code text;
   v_is_admin boolean;
-  v_is_trainer_auto boolean;
 begin
   v_service_code := lower(coalesce(new.entry_type, new.guest_type, ''));
   v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
     or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
-  v_is_trainer_auto := coalesce(current_setting('app.crm_trainer_auto_attendance', true), '') = '1';
 
   if not v_is_admin then
-    if not v_is_trainer_auto then
-      raise exception 'Trainer attendance must use server-side Auto mode' using errcode = '42501';
-    end if;
-    if new.student_id is null or new.guest_name is not null or new.guest_type is not null
-       or new.price_snapshot_uah is not null then
-      raise exception 'Trainer Auto attendance accepts only an existing student' using errcode = '42501';
-    end if;
+    -- Client-supplied trainer values are never authoritative. Existing
+    -- attendance/payment behavior stays unchanged; only the price is discarded.
     new.price_snapshot_uah := null;
     return new;
   end if;
@@ -113,7 +106,7 @@ create trigger attendance_snapshot_guest_price
 before insert on public.attendance
 for each row execute function public.crm_snapshot_guest_attendance_price();
 
-create or replace function public.crm_protect_attendance_financial_fields()
+create or replace function public.crm_protect_attendance_price_snapshot()
 returns trigger
 language plpgsql
 security definer
@@ -122,17 +115,14 @@ as $$
 declare
   v_is_admin boolean;
 begin
-  if new.price_snapshot_uah is not distinct from old.price_snapshot_uah
-     and new.entry_type is not distinct from old.entry_type
-     and new.guest_type is not distinct from old.guest_type
-     and new.sub_id is not distinct from old.sub_id then
+  if new.price_snapshot_uah is not distinct from old.price_snapshot_uah then
     return new;
   end if;
 
   v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
     or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
   if not v_is_admin then
-    raise exception 'Only an administrator may change attendance financial fields' using errcode = '42501';
+    raise exception 'Only an administrator may change attendance.price_snapshot_uah' using errcode = '42501';
   end if;
   return new;
 end;
@@ -140,82 +130,8 @@ $$;
 
 drop trigger if exists attendance_protect_price_snapshot on public.attendance;
 create trigger attendance_protect_price_snapshot
-before update of price_snapshot_uah, entry_type, guest_type, sub_id on public.attendance
-for each row execute function public.crm_protect_attendance_financial_fields();
-
-create or replace function public.crm_record_auto_attendance(
-  p_student_id uuid,
-  p_group_id text,
-  p_date date,
-  p_quantity integer default 1
-)
-returns setof public.attendance
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_subscription_id uuid;
-  v_attendance public.attendance%rowtype;
-begin
-  if auth.uid() is null then
-    raise exception 'Not authenticated' using errcode = '28000';
-  end if;
-  if p_student_id is null or p_group_id is null or p_date is null then
-    raise exception 'student, group and date are required' using errcode = '22023';
-  end if;
-  if p_quantity not between 1 and 2 then
-    raise exception 'quantity must be 1 or 2' using errcode = '22023';
-  end if;
-  if not public.rls_owns_group(p_group_id)
-     or not public.rls_can_record_attendance(p_student_id, p_group_id) then
-    raise exception 'Trainer cannot record attendance for this student/group' using errcode = '42501';
-  end if;
-
-  select s.id into v_subscription_id
-  from public.subscriptions s
-  where s.student_id = p_student_id
-    and s.group_id = p_group_id
-    and coalesce(s.used_trainings, 0) < coalesce(s.total_trainings, 0)
-    and coalesce(s.activation_date, s.start_date) <= p_date
-    and coalesce(s.end_date, '2099-12-31'::date) >= p_date
-  order by coalesce(s.activation_date, s.start_date), s.id
-  limit 1
-  for update;
-
-  perform set_config('app.crm_trainer_auto_attendance', '1', true);
-  insert into public.attendance (
-    sub_id, student_id, date, guest_name, guest_type, group_id, quantity,
-    entry_type, price_snapshot_uah
-  ) values (
-    v_subscription_id, p_student_id, p_date, null, null, p_group_id, p_quantity,
-    case when v_subscription_id is null then 'debt' else 'subscription' end, null
-  ) returning * into v_attendance;
-
-  return next v_attendance;
-end;
-$$;
-
-revoke execute on function public.crm_record_auto_attendance(uuid, text, date, integer) from public, anon;
-grant execute on function public.crm_record_auto_attendance(uuid, text, date, integer) to authenticated;
-
--- Trainers mutate attendance only through crm_record_auto_attendance (plus
--- removing a row previously produced by that Auto flow). Admin policy remains
--- responsible for explicit attendance/payment corrections and conversions.
-drop policy if exists attendance_trainer_update_own_groups on public.attendance;
-drop policy if exists attendance_trainer_delete_own_groups on public.attendance;
-create policy attendance_trainer_delete_own_groups
-on public.attendance
-for delete
-to authenticated
-using (
-  public.rls_owns_group(group_id)
-  and student_id is not null
-  and guest_name is null
-  and guest_type is null
-  and price_snapshot_uah is null
-  and entry_type in ('subscription', 'debt')
-);
+before update of price_snapshot_uah on public.attendance
+for each row execute function public.crm_protect_attendance_price_snapshot();
 
 create or replace function public.crm_ensure_one_off_payment_for_attendance(
   p_attendance_id uuid

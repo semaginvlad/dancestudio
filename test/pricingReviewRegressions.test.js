@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { calculateGuestTrainerShare, getGuestAttendanceRevenue } from "../src/guestRevenue.js";
 import { resolvePlanTypePrice } from "../src/subscriptionPricing.js";
+import { mergeCatalogIntoPriceDrafts } from "../src/pricingDrafts.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261102090000_admin_service_prices.sql", import.meta.url);
 
@@ -92,43 +93,50 @@ test("returning to the original plan applies an explicitly changed discount to h
 test("attendance snapshots are server-owned for trainers and preserve trusted historical conversions", async () => {
   const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
   const insertStart = sql.indexOf("create or replace function public.crm_snapshot_guest_attendance_price");
-  const updateStart = sql.indexOf("create or replace function public.crm_protect_attendance_financial_fields");
+  const updateStart = sql.indexOf("create or replace function public.crm_protect_attendance_price_snapshot");
   const ensureStart = sql.indexOf("create or replace function public.crm_ensure_one_off_payment_for_attendance");
   const insertTrigger = sql.slice(insertStart, updateStart);
   const updateTrigger = sql.slice(updateStart, ensureStart);
   const ensureRpc = sql.slice(ensureStart);
 
-  assert.match(insertTrigger, /if not v_is_admin then[\s\S]*trainer attendance must use server-side auto mode/);
+  assert.match(insertTrigger, /if not v_is_admin then[\s\S]*new\.price_snapshot_uah := null;[\s\S]*return new/);
   assert.match(insertTrigger, /if v_is_admin and new\.price_snapshot_uah is not null then[\s\S]*return new/);
   assert.match(insertTrigger, /select price_uah into new\.price_snapshot_uah[\s\S]*from public\.service_prices/);
-  assert.match(insertTrigger, /if not v_is_trainer_auto then[\s\S]*errcode = '42501'/);
-  assert.match(updateTrigger, /new\.price_snapshot_uah is not distinct from old\.price_snapshot_uah[\s\S]*new\.entry_type is not distinct from old\.entry_type[\s\S]*new\.sub_id is not distinct from old\.sub_id[\s\S]*return new/);
+  assert.match(updateTrigger, /new\.price_snapshot_uah is not distinct from old\.price_snapshot_uah[\s\S]*return new/);
   assert.match(updateTrigger, /if not v_is_admin then[\s\S]*errcode = '42501'/);
-  assert.match(updateTrigger, /before update of price_snapshot_uah, entry_type, guest_type, sub_id on public\.attendance/);
+  assert.match(updateTrigger, /before update of price_snapshot_uah on public\.attendance/);
 
   assert.match(ensureRpc, /if v_att\.price_snapshot_uah is not null then[\s\S]*v_amount := v_att\.price_snapshot_uah/);
   assert.match(insertTrigger, /if new\.price_snapshot_uah is null then[\s\S]*raise exception/);
   assert.doesNotMatch(insertTrigger, /coalesce\([^\n]*price_snapshot_uah/);
 });
 
-test("trainer Auto RPC accepts no financial inputs and derives attendance server-side", async () => {
+test("pricing scope adds no trainer subscription resolver or usage synchronization", async () => {
   const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
-  const rpcStart = sql.indexOf("create or replace function public.crm_record_auto_attendance");
-  const rpcEnd = sql.indexOf("create or replace function public.crm_ensure_one_off_payment_for_attendance", rpcStart);
-  const rpc = sql.slice(rpcStart, rpcEnd);
-  const signature = rpc.slice(0, rpc.indexOf("returns setof"));
-
-  assert.match(signature, /p_student_id uuid[\s\S]*p_group_id text[\s\S]*p_date date[\s\S]*p_quantity integer/);
-  assert.doesNotMatch(signature, /entry_type|guest_type|sub_id|price_snapshot|amount|payment/);
-  assert.match(rpc, /rls_can_record_attendance\(p_student_id, p_group_id\)/);
-  assert.match(rpc, /select s\.id into v_subscription_id[\s\S]*from public\.subscriptions/);
-  assert.match(rpc, /case when v_subscription_id is null then 'debt' else 'subscription' end/);
-  assert.match(rpc, /price_snapshot_uah[\s\S]*\) values \([\s\S]*null/);
-  assert.doesNotMatch(rpc, /service_prices|crm_ensure_one_off_payment_for_attendance/);
-  assert.match(rpc, /drop policy if exists attendance_trainer_update_own_groups/);
-  assert.match(rpc, /create policy attendance_trainer_delete_own_groups[\s\S]*price_snapshot_uah is null[\s\S]*entry_type in \('subscription', 'debt'\)/);
-
+  assert.doesNotMatch(sql, /crm_record_auto_attendance|used_trainings\s*\)|crm_sync_subscription_usage/);
   const attendanceTab = await readFile(new URL("../src/components/AttendanceTab.jsx", import.meta.url), "utf8");
-  assert.match(attendanceTab, /isAdmin\s*\? db\.insertAttendance\(payload\)[\s\S]*: db\.insertAutoAttendance/);
-  assert.match(attendanceTab, /disabled=\{!isAdmin\}[\s\S]*<option value="auto">Авто<\/option>/);
+  const db = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
+  assert.doesNotMatch(attendanceTab, /insertAutoAttendance|persistAttendanceRecord/);
+  assert.doesNotMatch(db, /insertAutoAttendance|crm_record_auto_attendance/);
+});
+
+test("saving one catalog price preserves other dirty drafts", async () => {
+  const prices = [
+    { serviceCode: "trial", priceUah: 200 },
+    { serviceCode: "single", priceUah: 400 },
+    { serviceCode: "8pack", priceUah: 1800 },
+  ];
+  const drafts = { trial: "225", single: "450", "8pack": "1800" };
+  const dirtyCodes = new Set(["trial", "single"]);
+
+  assert.deepEqual(mergeCatalogIntoPriceDrafts(
+    prices.map((row) => row.serviceCode === "trial" ? { ...row, priceUah: 225 } : row),
+    drafts,
+    new Set(["single"]),
+  ), { trial: "225", single: "450", "8pack": "1800" });
+  assert.deepEqual(mergeCatalogIntoPriceDrafts(prices, drafts, dirtyCodes), drafts);
+  const pricingTab = await readFile(new URL("../src/components/PricingTab.jsx", import.meta.url), "utf8");
+  assert.match(pricingTab, /mergeCatalogIntoPriceDrafts\(prices, current, dirtyCodesRef\.current\)/);
+  assert.match(pricingTab, /dirtyCodesRef\.current\.delete\(row\.serviceCode\)/);
+  assert.match(pricingTab, /dirtyCodesRef\.current\.add\(row\.serviceCode\)/);
 });
