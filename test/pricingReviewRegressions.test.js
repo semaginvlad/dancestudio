@@ -185,3 +185,28 @@ test("trainer RLS rejects direct financial update/delete but permits normal subs
   assert.match(deleteRpc, /if not v_is_admin then[\s\S]*only an administrator may remove financial attendance[\s\S]*errcode = '42501'/);
   assert.ok(deleteRpc.indexOf("if not v_is_admin then") < deleteRpc.indexOf("delete from public.subscriptions"));
 });
+
+test("changing existing trial/single quantity preserves historical snapshot and payment", async () => {
+  const attendanceTab = await readFile(new URL("../src/components/AttendanceTab.jsx", import.meta.url), "utf8");
+  const quantityBranchStart = attendanceTab.indexOf("if (existing.length === 1 && (existing[0].quantity || 1) === 1)");
+  const quantityBranchEnd = attendanceTab.indexOf("const subIdsToSync", quantityBranchStart);
+  const quantityBranch = attendanceTab.slice(quantityBranchStart, quantityBranchEnd);
+  assert.match(quantityBranch, /db\.updateAttendanceQuantity\(rec\.id, 2\)/);
+  assert.doesNotMatch(quantityBranch, /deleteAttendance|insertAttendance/);
+
+  const db = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
+  const updateStart = db.indexOf("export async function updateAttendanceQuantity");
+  const updateEnd = db.indexOf("export async function convertDebtAttendanceToSubscription", updateStart);
+  const updateQuantity = db.slice(updateStart, updateEnd);
+  assert.match(updateQuantity, /\.update\(\{ quantity: normalizedQuantity \}\)/);
+  assert.match(updateQuantity, /priceSnapshotUah: data\.price_snapshot_uah \?\? null/);
+  assert.doesNotMatch(updateQuantity, /service_prices|ensureOneOffPayment|removeOneOffPayment|delete\(/);
+
+  const historical = { priceSnapshotUah: 150, paymentAmount: 150, quantity: 1 };
+  const afterCatalogChangeAndQuantityUpdate = { ...historical, quantity: 2 };
+  assert.deepEqual(afterCatalogChangeAndQuantityUpdate, {
+    priceSnapshotUah: 150,
+    paymentAmount: 150,
+    quantity: 2,
+  });
+});

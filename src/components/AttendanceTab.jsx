@@ -2703,34 +2703,14 @@ export default function AttendanceTab({
       if (existing.length) {
         if (existing.length === 1 && (existing[0].quantity || 1) === 1) {
           const rec = existing[0];
-          const payload = {
-            id: `tmp_${uid()}`,
-            subId: rec.subId,
-            studentId: student.id,
-            date: dateStr,
-            guestName: null,
-            guestType: null,
-            groupId: gid,
-            quantity: 2,
-            entryType: rec.subId
-              ? "subscription"
-              : (String(rec.entryType || "").toLowerCase() === "single"
-                  ? "single"
-                  : (String(rec.entryType || "").toLowerCase() === "unpaid" ? "unpaid" : "debt")),
-          };
-          const optimisticRecord = buildOptimisticAttendanceRecord(payload);
+          const optimisticRecord = { ...rec, quantity: 2 };
           applyAttendanceStateChange({ removeIds: [rec.id], addRows: [optimisticRecord] });
-          rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id], restoreRows: [rec] });
+          rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [rec.id], restoreRows: [rec] });
 
           backendMutationStarted = true;
-          await db.deleteAttendance(rec.id);
-          if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-          const savedRecord = await db.insertAttendance(payload);
-          replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
+          const savedRecord = await db.updateAttendanceQuantity(rec.id, 2);
+          replaceOptimisticAttendanceRecord(rec.id, savedRecord);
           rollbackOptimisticChange = null;
-          if (rec.subId) {
-            await db.syncSubUsedTrainings(rec.subId);
-          }
           await refreshSubscriptionsAfterAttendanceChange();
           return;
         }
