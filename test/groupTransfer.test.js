@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
+import { splitPaymentGroups } from '../src/shared/groupSchedule.js';
+import { resolveStudentGroupsResponse } from '../src/studentGroups.js';
+import { buildGroupArchivePatch, getGroupArchiveMeta, normalizeGroupArchiveAliases } from '../src/groupArchive.js';
+import { readFile } from 'node:fs/promises';
+import {
+  commitGroupMergeThenRefresh,
+  commitServerMutationThenRefresh,
+  projectGroupArchiveState,
+  projectMovedMemberships,
+  projectMovedSubscriptions,
+} from '../src/groupMergeMutations.js';
 
 const latinGroup = (id, overrides = {}) => ({
   id,
@@ -65,4 +76,210 @@ test('same-name Latin groups receive distinct complete labels and startTime wins
   assert.equal(labels[0], 'Latin · MIX · 16+ · [пн] 18:00');
   assert.equal(labels[1], 'Latin · BASE · 10–16 · [вт] 19:10');
   assert.equal(labels[2], 'Latin · MIX · 16+ · [пн·ср·пт] 19:10');
+});
+
+test('Attendance and merge flows use the atomic membership/subscription RPC helper', async () => {
+  const attendance = await readFile(new URL('../src/components/AttendanceTab.jsx', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const db = await readFile(new URL('../src/db.js', import.meta.url), 'utf8');
+
+  assert.match(attendance, /commit: \(\) => db\.moveGroupMembershipsAndSubscriptions\(/);
+  assert.doesNotMatch(attendance, /await db\.addStudentGroup\(studentId, newGroupId\)[\s\S]{0,500}await db\.removeStudentGroup/);
+  assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 1, 'forward merge uses the atomic move RPC');
+  assert.match(app, /await db\.undoGroupMergeAtomically\(operation\.id/);
+  assert.doesNotMatch(app, /await db\.markGroupMergeOperationUndone\(/);
+  assert.equal((app.match(/await commitGroupMergeThenRefresh\(\{/g) || []).length, 2, 'merge and undo commit locally before refresh');
+  assert.match(attendance, /await commitServerMutationThenRefresh\(\{/);
+  assert.match(db, /supabase\.rpc\('crm_move_group_memberships_and_subscriptions'/);
+  assert.doesNotMatch(db, /payload\.group_id\s*=\s*s\.groupId/);
+});
+
+const moveState = (state, { sourceGroupId, targetGroupId, studentIds, subscriptionIds, restore = {} }) => {
+  for (const subId of subscriptionIds) {
+    const sub = state.subscriptions.find((row) => String(row.id) === String(subId));
+    if (!sub || String(sub.groupId) !== String(sourceGroupId)) throw new Error('RPC source-group validation error');
+  }
+  state.memberships = projectMovedMemberships(state.memberships, {
+    sourceGroupId,
+    targetGroupId,
+    addTargetStudentIds: studentIds,
+    removeSourceStudentIds: studentIds,
+  });
+  state.subscriptions = projectMovedSubscriptions(state.subscriptions, {
+    targetGroupId,
+    subscriptionIds,
+    restorePreviousSubscriptionIds: restore,
+  });
+};
+
+const normalizeMoveState = (state) => ({
+  ...state,
+  memberships: state.memberships.map(({ studentId, groupId }) => ({ studentId, groupId })),
+});
+
+test('successful merge and undo stay fully local when both canonical refreshes fail', async () => {
+  const initial = {
+    memberships: [{ id: 'sg-source', studentId: 'student-1', groupId: 'source' }],
+    subscriptions: [
+      { id: 'sub-1', studentId: 'student-1', groupId: 'source', previousSubscriptionId: null },
+      { id: 'sub-2', studentId: 'student-1', groupId: 'source', previousSubscriptionId: 'sub-1' },
+    ],
+    sourceArchived: false,
+  };
+  const server = structuredClone(initial);
+  const local = structuredClone(initial);
+  let operation = { id: 'merge-1', status: 'pending' };
+
+  const merge = await commitGroupMergeThenRefresh({
+    commit: async () => {
+      moveState(server, { sourceGroupId: 'source', targetGroupId: 'target', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'] });
+      server.sourceArchived = true;
+      return { ...operation, status: 'completed' };
+    },
+    applyCommitted: (completed) => {
+      moveState(local, { sourceGroupId: 'source', targetGroupId: 'target', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'] });
+      local.sourceArchived = true;
+      operation = completed;
+    },
+    refresh: async () => { throw new Error('merge refresh failed'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
+  });
+  assert.equal(merge.refreshed, false);
+  assert.equal(operation.status, 'completed', 'undo remains enabled');
+  assert.deepEqual(local, server, 'merge is fully projected before refresh');
+
+  const undo = await commitGroupMergeThenRefresh({
+    commit: async () => {
+      moveState(server, {
+        sourceGroupId: 'target', targetGroupId: 'source', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'],
+        restore: { 'sub-1': null, 'sub-2': 'sub-1' },
+      });
+      server.sourceArchived = false;
+      return { ...operation, status: 'undone', undoneAt: 'now' };
+    },
+    applyCommitted: (undone) => {
+      moveState(local, {
+        sourceGroupId: 'target', targetGroupId: 'source', studentIds: ['student-1'], subscriptionIds: ['sub-1', 'sub-2'],
+        restore: { 'sub-1': null, 'sub-2': 'sub-1' },
+      });
+      local.sourceArchived = false;
+      operation = undone;
+    },
+    refresh: async () => { throw new Error('undo refresh failed'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
+  });
+  assert.equal(undo.refreshed, false);
+  assert.equal(operation.status, 'undone');
+  assert.deepEqual(normalizeMoveState(local), normalizeMoveState(initial), 'undo is fully projected before refresh');
+  assert.deepEqual(local, server);
+});
+
+test('attendance transfer remains repeatable after subscriptions refresh fails', async () => {
+  const initial = {
+    memberships: [{ id: 'sg-source', studentId: 'student-1', groupId: 'source' }],
+    subscriptions: [{ id: 'sub-1', studentId: 'student-1', groupId: 'source', previousSubscriptionId: null }],
+  };
+  const server = structuredClone(initial);
+  const local = structuredClone(initial);
+  let visibleGroupId = 'source';
+
+  const transfer = async (sourceGroupId, targetGroupId) => commitServerMutationThenRefresh({
+    commit: async () => moveState(server, {
+      sourceGroupId, targetGroupId, studentIds: ['student-1'], subscriptionIds: ['sub-1'],
+    }),
+    applyCommitted: () => {
+      moveState(local, { sourceGroupId, targetGroupId, studentIds: ['student-1'], subscriptionIds: ['sub-1'] });
+      visibleGroupId = targetGroupId;
+    },
+    refresh: async () => { throw new Error('subscriptions refresh failed'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
+  });
+
+  assert.equal((await transfer('source', 'target')).refreshed, false);
+  assert.equal(visibleGroupId, 'target');
+  assert.deepEqual(local, server, 'attendance transfer is fully projected before refresh');
+
+  assert.equal((await transfer(visibleGroupId, 'source')).refreshed, false, 'reverse transfer uses the committed local source group');
+  assert.equal(visibleGroupId, 'source');
+  assert.deepEqual(normalizeMoveState(local), normalizeMoveState(initial));
+  assert.deepEqual(local, server);
+});
+
+test('successful undo clears every local archive alias before canonical refresh', () => {
+  const restored = projectGroupArchiveState({
+    id: 'source',
+    name: 'Source',
+    is_active: false,
+    isActive: false,
+    active: false,
+    archived_at: '2026-10-01T00:00:00Z',
+    archivedAt: '2026-10-01T00:00:00Z',
+    archived: true,
+    isArchived: true,
+  }, { wasArchived: false });
+
+  assert.equal(restored.is_active, true);
+  assert.equal(restored.isActive, true);
+  assert.equal(restored.active, true);
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archivedAt, null);
+  assert.equal(restored.archived, false);
+  assert.equal(restored.isArchived, false);
+  assert.deepEqual(
+    splitPaymentGroups([restored], []).current.map((group) => group.id),
+    ['source'],
+    'Payments treats the locally restored source as current without a reload',
+  );
+});
+
+test('archived_at-only undo preserves production shape for the next merge write', () => {
+  const productionGroup = normalizeGroupArchiveAliases({
+    id: 'source',
+    name: 'Source',
+    archived_at: '2026-10-01T00:00:00Z',
+  });
+  const restored = projectGroupArchiveState(productionGroup, { wasArchived: false });
+
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archivedAt, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'is_active'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'isActive'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'active'), false);
+
+  const nextMergeMeta = getGroupArchiveMeta(restored);
+  const updateGroupPayload = buildGroupArchivePatch(nextMergeMeta.mode, true, '2026-11-02');
+  assert.deepEqual(nextMergeMeta, { mode: 'archived_at', isArchived: false });
+  assert.deepEqual(updateGroupPayload, { archived_at: '2026-11-02' });
+  assert.equal(Object.prototype.hasOwnProperty.call(updateGroupPayload, 'is_active'), false);
+});
+
+test('membership refresh errors preserve the locally committed merge projection', async () => {
+  let memberships = [{ id: 'source-link', studentId: 'student-1', groupId: 'source' }];
+  let refreshFailure = '';
+
+  const result = await commitServerMutationThenRefresh({
+    commit: async () => ({ ok: true }),
+    applyCommitted: () => {
+      memberships = projectMovedMemberships(memberships, {
+        sourceGroupId: 'source',
+        targetGroupId: 'target',
+        addTargetStudentIds: ['student-1'],
+        removeSourceStudentIds: ['student-1'],
+      });
+    },
+    refresh: async () => resolveStudentGroupsResponse({
+      data: null,
+      error: new Error('membership database unavailable'),
+    }),
+    applyRefresh: (rows) => { memberships = rows; },
+    onRefreshFailure: (error) => { refreshFailure = error.message; },
+  });
+
+  assert.equal(result.refreshed, false);
+  assert.equal(refreshFailure, 'membership database unavailable');
+  assert.deepEqual(
+    memberships.map(({ studentId, groupId }) => ({ studentId, groupId })),
+    [{ studentId: 'student-1', groupId: 'target' }],
+    'the committed local membership is not replaced with an empty list',
+  );
 });
