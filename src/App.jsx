@@ -51,6 +51,7 @@ import ScheduleTab from "./components/ScheduleTab";
 import StudentsCrmTab from "./components/StudentsCrmTab";
 import SiteTab from "./components/SiteTab";
 import SiteInquiriesTab from "./components/SiteInquiriesTab";
+import PricingTab from "./components/PricingTab";
 import {
   extractPushSubscriptionPayload,
   getPushStatus,
@@ -141,6 +142,7 @@ export default function App() {
   const [trialBookings, setTrialBookings] = useState([]);
   const [trainers, setTrainers] = useState([]);
   const [trainerGroups, setTrainerGroups] = useState([]);
+  const [servicePrices, setServicePrices] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -485,6 +487,7 @@ export default function App() {
     setTrialBookings([]);
     setTrainers([]);
     setTrainerGroups([]);
+    setServicePrices([]);
     setRoomBookings([]);
     setGroupLessonOverrides([]);
     setTrainingLessonPlans([]);
@@ -622,7 +625,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -636,7 +639,8 @@ export default function App() {
         safeFetch(isCurrentAdmin && db.fetchGroupMergeOperations ? db.fetchGroupMergeOperations : async () => [], "fetchGroupMergeOperations"),
         db.fetchScheduleBookingBlocks()
           .then((data) => ({ ok: true, data }))
-          .catch((error) => { console.warn("[loadAllData] fetchScheduleBookingBlocks failed", error); return { ok: false, error }; })
+          .catch((error) => { console.warn("[loadAllData] fetchScheduleBookingBlocks failed", error); return { ok: false, error }; }),
+        safeFetch(isCurrentAdmin ? db.fetchServicePrices : async () => [], "fetchServicePrices")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -722,6 +726,7 @@ export default function App() {
       setWarnedStudents(isCurrentAdmin ? (warned || {}) : {});
       setTrainers(isCurrentAdmin ? (tr || []) : (tr ? [tr] : []));
       setTrainerGroups(currentTrainerGroupRows);
+      setServicePrices(isCurrentAdmin ? (prices || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
@@ -1946,6 +1951,13 @@ export default function App() {
     }
   };
 
+  const saveServicePrice = async (serviceCode, priceUah) => {
+    if (!isAdmin) throw new Error("Доступ до прайсу має лише адміністратор");
+    const saved = await db.updateServicePrice(serviceCode, priceUah);
+    setServicePrices((current) => current.map((row) => row.serviceCode === serviceCode ? saved : row));
+    return saved;
+  };
+
   const openSubscriptionEdit = (subscription) => {
     if (!canEditSubscription(subscription, deletingSubscriptionIds)) return false;
     setEditItem(subscription);
@@ -2694,6 +2706,7 @@ export default function App() {
                 <option value="analytics:groups">Аналітика · Групи</option>
                 <option value="analytics:notifications">Аналітика · Автоматизація</option>
                 <option value="finance:finance">Фінанси</option>
+                <option value="pricing:pricing">Ціни</option>
                 <option value="pro:pro">Про-аналітика</option>
                 <option value="inquiries:inquiries">Запити</option>
                 <option value="site:site">Сайт</option>
@@ -2703,6 +2716,7 @@ export default function App() {
               <div style={{ display: "inline-flex", background: theme.card, borderRadius: 100, padding: 6, minWidth: "max-content" }}>
               <button type="button" onClick={() => setAdminTab("analytics")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "analytics" ? theme.primary : "transparent", color: adminTab === "analytics" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Аналітика</button>
               <button type="button" onClick={() => setAdminTab("finance")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "finance" ? theme.primary : "transparent", color: adminTab === "finance" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Фінанси</button>
+              <button type="button" onClick={() => setAdminTab("pricing")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pricing" ? theme.primary : "transparent", color: adminTab === "pricing" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Ціни</button>
               <button type="button" onClick={() => setAdminTab("pro")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "pro" ? theme.primary : "transparent", color: adminTab === "pro" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Про-аналітика</button>
               <button type="button" onClick={() => setAdminTab("inquiries")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "inquiries" ? theme.primary : "transparent", color: adminTab === "inquiries" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Запити</button>
               <button type="button" onClick={() => setAdminTab("site")} style={{ padding: "10px 18px", border: "none", borderRadius: 100, background: adminTab === "site" ? theme.primary : "transparent", color: adminTab === "site" ? "#fff" : theme.textMuted, cursor: "pointer", fontWeight: 700 }}>Сайт</button>
@@ -2857,6 +2871,7 @@ export default function App() {
             ))}
             
             {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
+            {adminTab === "pricing" && <PricingTab prices={servicePrices} onSave={saveServicePrice} />}
             {adminTab === "inquiries" && <SiteInquiriesTab />}
             {adminTab === "site" && <SiteTab />}
           </div>
@@ -3520,8 +3535,8 @@ export default function App() {
 
       <Modal open={modal==="editStudent"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати профіль" variant={studentsMobileModalVariant}><StudentForm onCancel={()=>{setModal(null);setEditItem(null)}} initial={editItem} onDone={updateStudentAction} studentGrps={studentGrps} groups={activeGroups}/></Modal>
       
-      {isAdmin && <Modal open={modal==="addSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} onPendingChange={setSubscriptionMutationPending} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs}/></Modal>}
-      {isAdmin && <Modal open={modal==="editSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} onPendingChange={setSubscriptionMutationPending} initial={editItem} onDone={updateSubscriptionAction} students={students} groups={groups.filter((group) => !isGroupArchived(group) || String(group.id) === String(editItem?.groupId))} studentGrps={studentGrps} subs={subs}/></Modal>}
+      {isAdmin && <Modal open={modal==="addSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null); setPrefillSub(null);}} title="Оформити абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null); setPrefillSub(null);}} onPendingChange={setSubscriptionMutationPending} initial={prefillSub} onDone={createSubscriptionAction} students={students} groups={activeGroups} studentGrps={studentGrps} subs={subs} servicePrices={servicePrices}/></Modal>}
+      {isAdmin && <Modal open={modal==="editSub"} closeDisabled={subscriptionMutationPending} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати абонемент" variant="payments-mobile"><SubForm onCancel={()=>{setModal(null);setEditItem(null)}} onPendingChange={setSubscriptionMutationPending} initial={editItem} onDone={updateSubscriptionAction} students={students} groups={groups.filter((group) => !isGroupArchived(group) || String(group.id) === String(editItem?.groupId))} studentGrps={studentGrps} subs={subs} servicePrices={servicePrices}/></Modal>}
       <Modal open={modal==="addWaitlist"} onClose={()=>setModal(null)} title="Додати в резерв" variant={studentsMobileModalVariant}><WaitlistForm onCancel={()=>setModal(null)} onDone={async(d)=>{try{const w=await db.insertWaitlist(d);setWaitlist(p=>[w,...p]);setModal(null);}catch(e){console.error("Failed to add waitlist entry:", e);alert(`Не вдалося додати в резерв: ${e?.message || e}`);}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="editWaitlist"} onClose={()=>{setModal(null);setEditItem(null)}} title="Редагувати запис резерву" variant={studentsMobileModalVariant}><WaitlistForm key={editItem?.id || "edit-waitlist"} initial={editItem} onCancel={()=>{setModal(null);setEditItem(null)}} onDone={async(patch)=>{try{const updated=await db.updateWaitlist(editItem.id,patch);setWaitlist(prev=>prev.map(row=>row.id===updated.id?updated:row));setModal(null);setEditItem(null);}catch(e){console.error("Failed to update waitlist entry:",e);alert(`Не вдалося зберегти запис резерву: ${e?.message || e}`);throw e;}}} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>
       <Modal open={modal==="addTrialBooking"} onClose={()=>setModal(null)} title="Запис на пробне" variant={trialBookingMobileModalVariant}><TrialBookingForm onCancel={()=>setModal(null)} onDone={addTrialBookingAction} students={students} groups={activeGroups} studentGrps={studentGrps} directionsList={directionsList}/></Modal>

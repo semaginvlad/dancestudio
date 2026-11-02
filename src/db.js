@@ -823,6 +823,34 @@ export async function deleteTrainerGroup(trainerId, groupId) {
   if (error) throw error;
 }
 
+// ─── ADMIN PRICING ───
+export async function fetchServicePrices() {
+  const { data, error } = await supabase
+    .from('service_prices')
+    .select('service_code,service_name,price_uah')
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  return (data || []).map((row) => ({
+    serviceCode: row.service_code,
+    serviceName: row.service_name,
+    priceUah: Number(row.price_uah),
+  }))
+}
+
+export async function updateServicePrice(serviceCode, priceUah) {
+  const price = Number(priceUah)
+  if (!serviceCode) throw new Error('serviceCode is required')
+  if (!Number.isInteger(price) || price < 0) throw new Error('Ціна має бути цілим невід’ємним числом')
+  const { data, error } = await supabase
+    .from('service_prices')
+    .update({ price_uah: price, updated_at: new Date().toISOString() })
+    .eq('service_code', serviceCode)
+    .select('service_code,service_name,price_uah')
+    .single()
+  if (error) throw error
+  return { serviceCode: data.service_code, serviceName: data.service_name, priceUah: Number(data.price_uah) }
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
