@@ -1274,6 +1274,32 @@ export async function insertAttendance(a) {
   }
 }
 
+export async function insertAutoAttendance({ studentId, groupId, date, quantity = 1 }) {
+  if (!studentId || !groupId || !date) throw new Error('studentId, groupId and date are required')
+  const { data, error } = await supabase.rpc('crm_record_auto_attendance', {
+    p_student_id: studentId,
+    p_group_id: groupId,
+    p_date: date,
+    p_quantity: quantity,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) throw new Error('Auto attendance RPC did not return a row')
+  if (row.sub_id) await syncSubUsedTrainings(row.sub_id)
+  return {
+    id: row.id,
+    subId: row.sub_id,
+    studentId: row.student_id,
+    date: row.date,
+    guestName: row.guest_name,
+    guestType: row.guest_type,
+    groupId: row.group_id,
+    quantity: row.quantity || 1,
+    entryType: row.entry_type || 'debt',
+    priceSnapshotUah: row.price_snapshot_uah ?? null,
+  }
+}
+
 
 export async function convertDebtAttendanceToSubscription({ studentId, groupId, subId, startDate, endDate }) {
   if (!studentId || !groupId || !subId || !startDate || !endDate) {

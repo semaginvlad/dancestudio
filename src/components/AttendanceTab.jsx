@@ -1278,6 +1278,10 @@ export default function AttendanceTab({
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
+
+  useEffect(() => {
+    if (!isAdmin && entryMode !== "auto") setEntryMode("auto");
+  }, [entryMode, isAdmin]);
   const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
@@ -2622,6 +2626,14 @@ export default function AttendanceTab({
   };
 
   const makeTempAttendanceId = () => `temp_attendance_${Date.now()}_${uid()}`;
+  const persistAttendanceRecord = (payload) => isAdmin
+    ? db.insertAttendance(payload)
+    : db.insertAutoAttendance({
+        studentId: payload.studentId,
+        groupId: payload.groupId,
+        date: payload.date,
+        quantity: payload.quantity,
+      });
 
   const buildOptimisticAttendanceRecord = (payload) => ({
     id: makeTempAttendanceId(),
@@ -2719,7 +2731,7 @@ export default function AttendanceTab({
           backendMutationStarted = true;
           await db.deleteAttendance(rec.id);
           if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
-          const savedRecord = await db.insertAttendance(payload);
+          const savedRecord = await persistAttendanceRecord(payload);
           replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
           rollbackOptimisticChange = null;
           if (rec.subId) {
@@ -2768,7 +2780,7 @@ export default function AttendanceTab({
 
       if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
       backendMutationStarted = true;
-      const savedRecord = await db.insertAttendance(payload);
+      const savedRecord = await persistAttendanceRecord(payload);
       replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       rollbackOptimisticChange = null;
       shouldReconcileDuplicate = false;
@@ -2904,7 +2916,7 @@ export default function AttendanceTab({
         applyAttendanceStateChange({ addRows: [optimisticRecord] });
         rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
         backendMutationStarted = true;
-        const savedRecord = await db.insertAttendance(payload);
+        const savedRecord = await persistAttendanceRecord(payload);
         replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       }
 
@@ -3545,12 +3557,13 @@ export default function AttendanceTab({
             value={entryMode}
             onChange={(e) => setEntryMode(e.target.value)}
             style={styles.control}
+            disabled={!isAdmin}
           >
             <option value="auto">Авто</option>
-            <option value="subscription">Абонемент</option>
-            <option value="single">Разове</option>
-            <option value="trial">Пробне</option>
-            <option value="debt">Борг</option>
+            {isAdmin && <option value="subscription">Абонемент</option>}
+            {isAdmin && <option value="single">Разове</option>}
+            {isAdmin && <option value="trial">Пробне</option>}
+            {isAdmin && <option value="debt">Борг</option>}
           </select>
 
           <button
