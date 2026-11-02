@@ -58,7 +58,7 @@ test("relinked historical attendance keeps its snapshot while legacy attendance 
 });
 
 test("returning to an existing subscription plan restores its original financial snapshot", () => {
-  const initial = { id: "sub-1", planType: "8pack", basePrice: 1500, amount: 1350 };
+  const initial = { id: "sub-1", planType: "8pack", basePrice: 1500, amount: 1350, discountPct: 10 };
   const prices = { "4pack": 1200, "8pack": 1800, "12pack": 2200 };
 
   assert.deepEqual(resolvePlanTypePrice({ planType: "12pack", initial, priceByPlan: prices, discountPct: 10 }), {
@@ -66,5 +66,25 @@ test("returning to an existing subscription plan restores its original financial
   });
   assert.deepEqual(resolvePlanTypePrice({ planType: "8pack", initial, priceByPlan: prices, discountPct: 10 }), {
     basePrice: 1500, amount: 1350, source: "initial_snapshot",
+  });
+});
+
+test("editing can change plan only with a loaded valid catalog price, including a real zero price", async () => {
+  const initial = { id: "sub-1", planType: "8pack", basePrice: 1500, amount: 1500, discountPct: 0 };
+  assert.deepEqual(resolvePlanTypePrice({ planType: "12pack", initial, priceByPlan: {}, discountPct: 0 }), {
+    basePrice: null, amount: null, source: "missing_catalog",
+  });
+  assert.deepEqual(resolvePlanTypePrice({ planType: "12pack", initial, priceByPlan: { "12pack": 0 }, discountPct: 0 }), {
+    basePrice: 0, amount: 0, source: "current_catalog",
+  });
+  const form = await readFile(new URL("../src/components/Forms.jsx", import.meta.url), "utf8");
+  assert.match(form, /const canSubmitWithPrice = isOriginalPlanType \|\| hasCatalogPrice/);
+  assert.match(form, /if \(resolved\.source === "missing_catalog"\) return/);
+});
+
+test("returning to the original plan applies an explicitly changed discount to historical base price", () => {
+  const initial = { id: "sub-1", planType: "8pack", basePrice: 1500, amount: 1350, discountPct: 10 };
+  assert.deepEqual(resolvePlanTypePrice({ planType: "8pack", initial, priceByPlan: {}, discountPct: 20 }), {
+    basePrice: 1500, amount: 1200, source: "initial_base_current_discount",
   });
 });

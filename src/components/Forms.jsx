@@ -108,7 +108,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
   const hasCatalogPrice = Number.isInteger(priceByPlan[planType]) && priceByPlan[planType] >= 0;
-  const canSubmitWithPrice = isEditingExisting || hasCatalogPrice;
+  const isOriginalPlanType = isEditingExisting && planType === initial?.planType;
+  const canSubmitWithPrice = isOriginalPlanType || hasCatalogPrice;
   const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
   const selectablePlanTypes = PLAN_TYPES.filter((p) => ["4pack", "8pack", "12pack"].includes(p.id));
   const visiblePlanTypes = isEditingExisting && isLegacyPlanType
@@ -151,13 +152,10 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   // Existing records retain their historical price. A newly selected plan uses the current catalog price.
   useEffect(() => {
     const resolved = resolvePlanTypePrice({ planType, initial, priceByPlan, discountPct });
+    if (resolved.source === "missing_catalog") return;
     setBasePrice(resolved.basePrice);
     setAmount(resolved.amount);
-  }, [planType]);
-
-  useEffect(() => {
-    setAmount(basePrice - Math.round((basePrice * Number(discountPct || 0)) / 100));
-  }, [discountPct]);
+  }, [planType, discountPct]);
 
   useEffect(() => {
     if (!isEndDateManualOverride) setManualEndDate(autoEndDate);
