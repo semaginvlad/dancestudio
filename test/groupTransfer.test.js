@@ -81,7 +81,9 @@ test('Attendance and merge flows use the atomic membership/subscription RPC help
 
   assert.match(attendance, /commit: \(\) => db\.moveGroupMembershipsAndSubscriptions\(/);
   assert.doesNotMatch(attendance, /await db\.addStudentGroup\(studentId, newGroupId\)[\s\S]{0,500}await db\.removeStudentGroup/);
-  assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 2, 'merge and undo are atomic');
+  assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 1, 'forward merge uses the atomic move RPC');
+  assert.match(app, /await db\.undoGroupMergeAtomically\(operation\.id/);
+  assert.doesNotMatch(app, /await db\.markGroupMergeOperationUndone\(/);
   assert.equal((app.match(/await commitGroupMergeThenRefresh\(\{/g) || []).length, 2, 'merge and undo commit locally before refresh');
   assert.match(attendance, /await commitServerMutationThenRefresh\(\{/);
   assert.match(db, /supabase\.rpc\('crm_move_group_memberships_and_subscriptions'/);

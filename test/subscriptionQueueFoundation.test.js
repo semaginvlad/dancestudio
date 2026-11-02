@@ -35,7 +35,35 @@ const setup = async () => {
       group_id text not null,
       unique (student_id, group_id)
     );
-    create table public.group_merge_operations (id text primary key);
+    create table public.groups (
+      id text primary key,
+      schedule jsonb not null default '[]'::jsonb,
+      is_active boolean not null default true,
+      archived_at timestamptz
+    );
+    create table public.group_merge_operations (
+      id text primary key,
+      created_at timestamptz not null default now(),
+      source_group_id text not null,
+      target_group_id text not null,
+      selected_student_ids jsonb not null default '[]'::jsonb,
+      new_target_links_student_ids jsonb not null default '[]'::jsonb,
+      removed_source_links_student_ids jsonb not null default '[]'::jsonb,
+      moved_subscription_ids jsonb not null default '[]'::jsonb,
+      previous_subscription_group_ids jsonb not null default '{}'::jsonb,
+      previous_target_schedule jsonb not null default '[]'::jsonb,
+      new_target_schedule jsonb not null default '[]'::jsonb,
+      previous_source_archive_state jsonb,
+      source_was_archived_before boolean not null default false,
+      schedule_mode text not null default 'keep_target_schedule',
+      executed_by text,
+      undone_at timestamptz,
+      undone_by text,
+      status text not null default 'completed',
+      completed_at timestamptz,
+      failed_at timestamptz,
+      error_message text
+    );
     insert into public.subscriptions (id, student_id, group_id, created_at)
     values ('${ids.legacy}', '${ids.studentA}', 'legacy-group', '2020-01-01T00:00:00Z');
   `);
@@ -249,6 +277,106 @@ test("invalid subscription transfer rolls back before membership changes", async
     [ids.studentA],
   )).rows.map((row) => row.group_id);
   assert.deepEqual(memberships, ["source-group"]);
+  await db.close();
+});
+
+test("atomic undo rolls back restored subscriptions when a later group write fails and retry completes", async () => {
+  const db = await setup();
+  await db.exec(`
+    insert into public.groups (id, schedule, is_active)
+    values
+      ('source-group', '[]'::jsonb, false),
+      ('target-group', '[{"day":2}]'::jsonb, true);
+    insert into public.student_groups (student_id, group_id)
+    values ('${ids.studentA}', 'target-group');
+    insert into public.subscriptions (id, student_id, group_id)
+    values ('${ids.aGroupOne}', '${ids.studentA}', 'target-group');
+    insert into public.group_merge_operations (
+      id,
+      source_group_id,
+      target_group_id,
+      selected_student_ids,
+      new_target_links_student_ids,
+      moved_subscription_ids,
+      previous_target_schedule,
+      previous_source_archive_state,
+      source_was_archived_before,
+      schedule_mode,
+      status,
+      completed_at,
+      previous_subscription_predecessor_ids
+    ) values (
+      'merge-atomic-undo',
+      'source-group',
+      'target-group',
+      '["${ids.studentA}"]'::jsonb,
+      '["${ids.studentA}"]'::jsonb,
+      '["${ids.aGroupOne}"]'::jsonb,
+      '[{"day":1}]'::jsonb,
+      '{"mode":"is_active","isArchived":false}'::jsonb,
+      false,
+      'use_source_schedule',
+      'completed',
+      now(),
+      '{"${ids.aGroupOne}":null}'::jsonb
+    );
+
+    create function public.fail_target_group_restore()
+    returns trigger language plpgsql as $$
+    begin
+      if new.id = 'target-group' then
+        raise exception 'injected group restore failure';
+      end if;
+      return new;
+    end
+    $$;
+    create trigger fail_target_group_restore_trigger
+    before update on public.groups
+    for each row execute function public.fail_target_group_restore();
+  `);
+
+  await assert.rejects(
+    db.query("select * from public.crm_undo_group_merge($1, $2)", ["merge-atomic-undo", "admin-1"]),
+    /injected group restore failure/i,
+  );
+
+  const afterFailure = (await db.query(`
+    select
+      (select group_id from public.subscriptions where id = '${ids.aGroupOne}') as subscription_group,
+      (select group_id from public.student_groups where student_id = '${ids.studentA}') as membership_group,
+      (select status from public.group_merge_operations where id = 'merge-atomic-undo') as operation_status
+  `)).rows[0];
+  assert.deepEqual(afterFailure, {
+    subscription_group: "target-group",
+    membership_group: "target-group",
+    operation_status: "completed",
+  }, "the failed transaction leaves the original completed merge fully intact");
+
+  await db.exec("drop trigger fail_target_group_restore_trigger on public.groups;");
+  const retried = await db.query(
+    "select status, undone_at from public.crm_undo_group_merge($1, $2)",
+    ["merge-atomic-undo", "admin-1"],
+  );
+  assert.equal(retried.rows[0].status, "undone");
+  assert.ok(retried.rows[0].undone_at);
+
+  const recovered = (await db.query(`
+    select
+      (select group_id from public.subscriptions where id = '${ids.aGroupOne}') as subscription_group,
+      (select group_id from public.student_groups where student_id = '${ids.studentA}') as membership_group,
+      (select schedule from public.groups where id = 'target-group') as target_schedule,
+      (select is_active from public.groups where id = 'source-group') as source_active
+  `)).rows[0];
+  assert.equal(recovered.subscription_group, "source-group");
+  assert.equal(recovered.membership_group, "source-group");
+  assert.deepEqual(recovered.target_schedule, [{ day: 1 }]);
+  assert.equal(recovered.source_active, true);
+
+  const idempotentRetry = await db.query(
+    "select status from public.crm_undo_group_merge($1, $2)",
+    ["merge-atomic-undo", "admin-1"],
+  );
+  assert.equal(idempotentRetry.rows[0].status, "undone");
   await db.close();
 });
 

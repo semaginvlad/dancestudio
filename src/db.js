@@ -441,6 +441,17 @@ export async function markGroupMergeOperationUndone(id, { undoneBy } = {}) {
   return mapGroupMergeOperation(data)
 }
 
+export async function undoGroupMergeAtomically(id, { undoneBy } = {}) {
+  const { data, error } = await supabase.rpc('crm_undo_group_merge', {
+    p_operation_id: id,
+    p_undone_by: undoneBy || null,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.id) throw new Error('crm_undo_group_merge did not return the merge operation')
+  return mapGroupMergeOperation(row)
+}
+
 export async function insertGroup(group) {
   const payload = {
     id: group.id,

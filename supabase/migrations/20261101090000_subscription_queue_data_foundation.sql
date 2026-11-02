@@ -230,3 +230,111 @@ grant execute on function public.crm_move_group_memberships_and_subscriptions(
 
 alter table public.group_merge_operations
   add column if not exists previous_subscription_predecessor_ids jsonb not null default '{}'::jsonb;
+
+create or replace function public.crm_undo_group_merge(
+  p_operation_id text,
+  p_undone_by text default null
+)
+returns setof public.group_merge_operations
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_operation public.group_merge_operations%rowtype;
+  v_selected_student_ids uuid[];
+  v_new_target_student_ids uuid[];
+  v_moved_subscription_ids uuid[];
+  v_archive_mode text;
+  v_group_rows integer := 0;
+begin
+  select *
+  into v_operation
+  from public.group_merge_operations
+  where id = p_operation_id
+  for update;
+
+  if not found then
+    raise exception 'Group merge operation % was not found', p_operation_id
+      using errcode = 'P0002';
+  end if;
+
+  -- Retrying after a lost response/refresh is safe and does not move the same
+  -- subscriptions a second time.
+  if v_operation.status = 'undone' and v_operation.undone_at is not null then
+    return next v_operation;
+    return;
+  end if;
+
+  if v_operation.status <> 'completed' or v_operation.undone_at is not null then
+    raise exception 'Group merge operation % is not undoable from status %', p_operation_id, v_operation.status
+      using errcode = '23514';
+  end if;
+
+  select coalesce(array_agg(value::uuid), '{}'::uuid[])
+  into v_selected_student_ids
+  from jsonb_array_elements_text(v_operation.selected_student_ids);
+
+  select coalesce(array_agg(value::uuid), '{}'::uuid[])
+  into v_new_target_student_ids
+  from jsonb_array_elements_text(v_operation.new_target_links_student_ids);
+
+  select coalesce(array_agg(value::uuid), '{}'::uuid[])
+  into v_moved_subscription_ids
+  from jsonb_array_elements_text(v_operation.moved_subscription_ids);
+
+  perform *
+  from public.crm_move_group_memberships_and_subscriptions(
+    v_operation.target_group_id,
+    v_operation.source_group_id,
+    v_selected_student_ids,
+    v_new_target_student_ids,
+    v_moved_subscription_ids,
+    coalesce(v_operation.previous_subscription_predecessor_ids, '{}'::jsonb)
+  );
+
+  if v_operation.schedule_mode <> 'keep_target_schedule' then
+    update public.groups
+    set schedule = v_operation.previous_target_schedule
+    where id = v_operation.target_group_id;
+
+    if not found then
+      raise exception 'Target group % was not found while undoing merge', v_operation.target_group_id
+        using errcode = 'P0002';
+    end if;
+  end if;
+
+  v_archive_mode := v_operation.previous_source_archive_state ->> 'mode';
+  if v_archive_mode = 'is_active' then
+    update public.groups
+    set is_active = not v_operation.source_was_archived_before
+    where id = v_operation.source_group_id;
+    get diagnostics v_group_rows = row_count;
+  elsif v_archive_mode = 'archived_at' then
+    update public.groups
+    set archived_at = case when v_operation.source_was_archived_before then current_date::timestamptz else null end
+    where id = v_operation.source_group_id;
+    get diagnostics v_group_rows = row_count;
+  elsif v_archive_mode = 'active' then
+    execute 'update public.groups set active = $1 where id = $2'
+      using not v_operation.source_was_archived_before, v_operation.source_group_id;
+    get diagnostics v_group_rows = row_count;
+  end if;
+
+  if v_archive_mode is not null and v_group_rows = 0 then
+    raise exception 'Source group % was not found while undoing merge', v_operation.source_group_id
+      using errcode = 'P0002';
+  end if;
+
+  update public.group_merge_operations
+  set status = 'undone',
+      undone_at = now(),
+      undone_by = p_undone_by
+  where id = v_operation.id
+  returning * into v_operation;
+
+  return next v_operation;
+end
+$$;
+
+revoke execute on function public.crm_undo_group_merge(text, text) from public, anon;
+grant execute on function public.crm_undo_group_merge(text, text) to authenticated;

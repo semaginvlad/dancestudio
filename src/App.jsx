@@ -1413,7 +1413,7 @@ export default function App() {
 
   const undoGroupMerge = async (operation) => {
     if (!operation || operation.undoneAt || operation.status !== "completed") return;
-    if (!db.moveGroupMembershipsAndSubscriptions || !db.updateGroup || !db.markGroupMergeOperationUndone) {
+    if (!db.undoGroupMergeAtomically) {
       alert("Не вистачає db helper-ів для скасування merge.");
       return;
     }
@@ -1424,25 +1424,14 @@ export default function App() {
     try {
       await commitGroupMergeThenRefresh({
         commit: async () => {
-          await db.moveGroupMembershipsAndSubscriptions({
-            sourceGroupId: operation.targetGroupId,
-            targetGroupId: operation.sourceGroupId,
-            addTargetStudentIds: operation.selectedStudentIds || [],
-            removeSourceStudentIds: operation.newTargetLinksStudentIds || [],
-            subscriptionIds: operation.movedSubscriptionIds || [],
-            restorePreviousSubscriptionIds: operation.previousSubscriptionPredecessorIds || {},
-          });
-
+          const updatedOperation = await db.undoGroupMergeAtomically(operation.id, { undoneBy: user?.id || user?.email || null });
           const updatedTargetGroup = operation.scheduleMode !== "keep_target_schedule"
-            ? await db.updateGroup(operation.targetGroupId, getExplicitMergeSchedulePatch(operation.scheduleMode, operation.previousTargetSchedule))
+            ? { ...(groups.find((group) => String(group.id) === String(operation.targetGroupId)) || {}), schedule: operation.previousTargetSchedule }
             : null;
           const archiveMode = operation.previousSourceArchiveState?.mode;
-          let updatedSourceGroup = null;
-          if (archiveMode) {
-            const restorePatch = buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore);
-            if (restorePatch) updatedSourceGroup = await db.updateGroup(operation.sourceGroupId, restorePatch);
-          }
-          const updatedOperation = await db.markGroupMergeOperationUndone(operation.id, { undoneBy: user?.id || user?.email || null });
+          const sourceGroup = groups.find((group) => String(group.id) === String(operation.sourceGroupId)) || {};
+          const restorePatch = archiveMode ? buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore) : null;
+          const updatedSourceGroup = restorePatch ? { ...sourceGroup, ...restorePatch } : null;
           return { updatedOperation, updatedTargetGroup, updatedSourceGroup };
         },
         applyCommitted: ({ updatedOperation, updatedTargetGroup, updatedSourceGroup }) => {
