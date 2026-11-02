@@ -52,16 +52,15 @@ export const projectGroupArchiveState = (group, { wasArchived = false } = {}) =>
   const archiveMarker = wasArchived
     ? (group?.archived_at ?? group?.archivedAt ?? new Date().toISOString())
     : null;
-  return {
-    ...(group || {}),
-    is_active: !wasArchived,
-    isActive: !wasArchived,
-    active: !wasArchived,
-    archived_at: archiveMarker,
-    archivedAt: archiveMarker,
-    archived: wasArchived,
-    isArchived: wasArchived,
-  };
+  const projected = { ...(group || {}) };
+  if (Object.prototype.hasOwnProperty.call(projected, "is_active")) projected.is_active = !wasArchived;
+  if (Object.prototype.hasOwnProperty.call(projected, "isActive")) projected.isActive = !wasArchived;
+  if (Object.prototype.hasOwnProperty.call(projected, "active")) projected.active = !wasArchived;
+  if (Object.prototype.hasOwnProperty.call(projected, "archived_at")) projected.archived_at = archiveMarker;
+  if (Object.prototype.hasOwnProperty.call(projected, "archivedAt")) projected.archivedAt = archiveMarker;
+  if (Object.prototype.hasOwnProperty.call(projected, "archived")) projected.archived = wasArchived;
+  if (Object.prototype.hasOwnProperty.call(projected, "isArchived")) projected.isArchived = wasArchived;
+  return projected;
 };
 
 export async function commitServerMutationThenRefresh({

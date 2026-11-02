@@ -5,6 +5,7 @@ import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
 import { splitPaymentGroups } from '../src/shared/groupSchedule.js';
 import { resolveStudentGroupsResponse } from '../src/studentGroups.js';
+import { buildGroupArchivePatch, getGroupArchiveMeta, normalizeGroupArchiveAliases } from '../src/groupArchive.js';
 import { readFile } from 'node:fs/promises';
 import {
   commitGroupMergeThenRefresh,
@@ -229,6 +230,27 @@ test('successful undo clears every local archive alias before canonical refresh'
     ['source'],
     'Payments treats the locally restored source as current without a reload',
   );
+});
+
+test('archived_at-only undo preserves production shape for the next merge write', () => {
+  const productionGroup = normalizeGroupArchiveAliases({
+    id: 'source',
+    name: 'Source',
+    archived_at: '2026-10-01T00:00:00Z',
+  });
+  const restored = projectGroupArchiveState(productionGroup, { wasArchived: false });
+
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archivedAt, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'is_active'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'isActive'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'active'), false);
+
+  const nextMergeMeta = getGroupArchiveMeta(restored);
+  const updateGroupPayload = buildGroupArchivePatch(nextMergeMeta.mode, true, '2026-11-02');
+  assert.deepEqual(nextMergeMeta, { mode: 'archived_at', isArchived: false });
+  assert.deepEqual(updateGroupPayload, { archived_at: '2026-11-02' });
+  assert.equal(Object.prototype.hasOwnProperty.call(updateGroupPayload, 'is_active'), false);
 });
 
 test('membership refresh errors preserve the locally committed merge projection', async () => {

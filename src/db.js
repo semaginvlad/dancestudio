@@ -3,6 +3,7 @@ import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInq
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 import { resolveStudioRoomsResponse } from './studioRooms'
 import { resolveStudentGroupsResponse } from './studentGroups'
+import { normalizeGroupArchiveAliases } from './groupArchive'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -250,7 +251,7 @@ export async function moveGroupMembershipsAndSubscriptions({
 }
 
 // ─── GROUPS ───
-const mapGroup = (g) => ({
+const mapGroup = (g) => normalizeGroupArchiveAliases({
   ...g,
   directionId: g.direction_id,
   trainerPct: g.trainer_pct,
@@ -259,8 +260,6 @@ const mapGroup = (g) => ({
   publicJoinStatus: g.public_join_status ?? g.publicJoinStatus ?? 'open',
   showOnPublicSite: g.show_on_public_site ?? g.showOnPublicSite ?? false,
   ageCategory: g.age_category ?? g.ageCategory ?? null,
-  archivedAt: g.archived_at ?? g.archivedAt ?? null,
-  isActive: g.is_active ?? g.isActive ?? true,
   startDate: g.start_date ?? g.startDate ?? null,
 })
 
