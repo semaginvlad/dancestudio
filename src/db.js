@@ -2,6 +2,8 @@ import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 import { resolveStudioRoomsResponse } from './studioRooms'
+import { resolveStudentGroupsResponse } from './studentGroups'
+import { normalizeGroupArchiveAliases } from './groupArchive'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -211,8 +213,7 @@ export async function deleteStudent(id) {
 // ─── STUDENT GROUPS ───
 export async function fetchStudentGroups() {
   const { data, error } = await supabase.from('student_groups').select('*')
-  if (error) { console.warn('student_groups:', error.message); return []; }
-  return data.map(sg => ({ id: sg.id, studentId: sg.student_id, groupId: sg.group_id }))
+  return resolveStudentGroupsResponse({ data, error })
 }
 
 export async function addStudentGroup(studentId, groupId) {
@@ -229,8 +230,28 @@ export async function removeStudentGroup(studentId, groupId) {
   if (error) throw error
 }
 
+export async function moveGroupMembershipsAndSubscriptions({
+  sourceGroupId,
+  targetGroupId,
+  addTargetStudentIds = [],
+  removeSourceStudentIds = [],
+  subscriptionIds = [],
+  restorePreviousSubscriptionIds = {},
+}) {
+  const { data, error } = await supabase.rpc('crm_move_group_memberships_and_subscriptions', {
+    p_source_group_id: sourceGroupId,
+    p_target_group_id: targetGroupId,
+    p_add_target_student_ids: addTargetStudentIds,
+    p_remove_source_student_ids: removeSourceStudentIds,
+    p_subscription_ids: subscriptionIds,
+    p_restore_previous_subscription_ids: restorePreviousSubscriptionIds,
+  })
+  if (error) throw error
+  return data || []
+}
+
 // ─── GROUPS ───
-const mapGroup = (g) => ({
+const mapGroup = (g) => normalizeGroupArchiveAliases({
   ...g,
   directionId: g.direction_id,
   trainerPct: g.trainer_pct,
@@ -239,8 +260,6 @@ const mapGroup = (g) => ({
   publicJoinStatus: g.public_join_status ?? g.publicJoinStatus ?? 'open',
   showOnPublicSite: g.show_on_public_site ?? g.showOnPublicSite ?? false,
   ageCategory: g.age_category ?? g.ageCategory ?? null,
-  archivedAt: g.archived_at ?? g.archivedAt ?? null,
-  isActive: g.is_active ?? g.isActive ?? true,
   startDate: g.start_date ?? g.startDate ?? null,
 })
 
@@ -337,6 +356,7 @@ const mapGroupMergeOperation = (row) => ({
   removedSourceLinksStudentIds: row.removed_source_links_student_ids || [],
   movedSubscriptionIds: row.moved_subscription_ids || [],
   previousSubscriptionGroupIds: row.previous_subscription_group_ids || {},
+  previousSubscriptionPredecessorIds: row.previous_subscription_predecessor_ids || {},
   previousTargetSchedule: row.previous_target_schedule || [],
   newTargetSchedule: row.new_target_schedule || [],
   previousSourceArchiveState: row.previous_source_archive_state || null,
@@ -370,6 +390,7 @@ export async function insertGroupMergeOperation(operation) {
     removed_source_links_student_ids: operation.removedSourceLinksStudentIds || [],
     moved_subscription_ids: operation.movedSubscriptionIds || [],
     previous_subscription_group_ids: operation.previousSubscriptionGroupIds || {},
+    previous_subscription_predecessor_ids: operation.previousSubscriptionPredecessorIds || {},
     previous_target_schedule: operation.previousTargetSchedule || [],
     new_target_schedule: operation.newTargetSchedule || [],
     previous_source_archive_state: operation.previousSourceArchiveState || null,
@@ -417,6 +438,17 @@ export async function markGroupMergeOperationUndone(id, { undoneBy } = {}) {
     .single()
   if (error) throw error
   return mapGroupMergeOperation(data)
+}
+
+export async function undoGroupMergeAtomically(id, { undoneBy } = {}) {
+  const { data, error } = await supabase.rpc('crm_undo_group_merge', {
+    p_operation_id: id,
+    p_undone_by: undoneBy || null,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.id) throw new Error('crm_undo_group_merge did not return the merge operation')
+  return mapGroupMergeOperation(row)
 }
 
 export async function insertGroup(group) {
@@ -864,6 +896,8 @@ const SAFE_SUBS_COLUMNS = [
   'total_trainings',
   'used_trainings',
   'notification_sent',
+  'paid_at',
+  'previous_subscription_id',
   'created_at',
 ].join(',')
 
@@ -898,6 +932,8 @@ export async function insertSub(s) {
     paid: s.paid,
     pay_method: s.payMethod || 'card',
     notification_sent: false,
+    paid_at: s.paidAt || null,
+    previous_subscription_id: s.previousSubscriptionId || null,
     notes: s.notes,
   };
   const { data, error } = await supabase.from('subscriptions').insert({
@@ -926,9 +962,12 @@ export async function updateSub(id, s) {
   if (s.paid !== undefined) payload.paid = s.paid
   if (s.payMethod !== undefined) payload.pay_method = s.payMethod
   if (s.notificationSent !== undefined) payload.notification_sent = s.notificationSent
+  if (s.paidAt !== undefined) payload.paid_at = s.paidAt || null
+  if (s.previousSubscriptionId !== undefined) payload.previous_subscription_id = s.previousSubscriptionId || null
   if (s.notes !== undefined) payload.notes = s.notes
-  if (s.studentId !== undefined) payload.student_id = s.studentId
-  if (s.groupId !== undefined) payload.group_id = s.groupId
+  // Subscription ownership is immutable through generic edits. Group moves
+  // must use moveGroupMembershipsAndSubscriptions so memberships and queue
+  // boundaries change in one database transaction.
 
   const { data, error } = await supabase.from('subscriptions').update(payload).eq('id', id).select().single()
   if (error) throw error
@@ -959,6 +998,8 @@ function mapSub(s) {
     paid: s.paid,
     payMethod: s.pay_method,
     notificationSent: s.notification_sent,
+    paidAt: s.paid_at || null,
+    previousSubscriptionId: s.previous_subscription_id || null,
     notes: s.notes,
     created_at: s.created_at,
   }

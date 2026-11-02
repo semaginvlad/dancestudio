@@ -70,6 +70,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
 export function SubForm({ initial, onDone, onCancel, onPendingChange, students, groups, studentGrps, subs = [], servicePrices = [] }) {
   const submitGuard = useRef(null);
   if (!submitGuard.current) submitGuard.current = createSynchronousGuard();
+  const isEditingExisting = Boolean(initial?.id);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [studentId, setStudentId] = useState(initial?.studentId || "");
@@ -78,6 +79,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   const [startDate, setStartDate] = useState(initial?.startDate || today());
   const priceByPlan = Object.fromEntries(servicePrices.map((row) => [row.serviceCode, Number(row.priceUah)]));
   const initialCatalogPrice = priceByPlan[initial?.planType || "8pack"] ?? 0;
+  const [paidAt, setPaidAt] = useState(initial?.paidAt || (isEditingExisting ? "" : today()));
+  const [previousSubscriptionId, setPreviousSubscriptionId] = useState(initial?.previousSubscriptionId || "");
   const [amount, setAmount] = useState(Number(initial?.amount ?? initialCatalogPrice));
   const [paid] = useState(initial?.paid ?? true);
   const [payMethod, setPayMethod] = useState(initial?.payMethod || "card");
@@ -103,7 +106,6 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
-  const isEditingExisting = Boolean(initial?.id);
   const hasCatalogPrice = Number.isInteger(priceByPlan[planType]) && priceByPlan[planType] >= 0;
   const canSubmitWithPrice = isEditingExisting || hasCatalogPrice;
   const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
@@ -112,6 +114,18 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
     ? [PLAN_TYPES.find((p) => p.id === planType), ...selectablePlanTypes].filter(Boolean)
     : selectablePlanTypes;
   const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? initialCatalogPrice));
+  const predecessorOptions = subs.filter((subscription) => (
+    String(subscription?.studentId || "") === String(studentId)
+    && String(subscription?.groupId || "") === String(groupId)
+    && String(subscription?.id || "") !== String(initial?.id || "")
+  ));
+
+  useEffect(() => {
+    if (!previousSubscriptionId) return;
+    if (!predecessorOptions.some((subscription) => String(subscription.id) === String(previousSubscriptionId))) {
+      setPreviousSubscriptionId("");
+    }
+  }, [groupId, studentId]);
 
   // 🆕 Обчислюємо дату закінчення залежно від активації
   const selectedEndDate = isEndDateManualOverride ? manualEndDate : autoEndDate;
@@ -151,8 +165,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
 
   return (
     <div>
-      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} /></Field>
-      <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} /></Field>
+      <Field label="Учениця *"><StudentSelectWithSearch students={students} value={studentId} onChange={setStudentId} studentGrps={studentGrps} groups={groups} disabled={isEditingExisting} /></Field>
+      <Field label="Група *"><GroupSelect groups={groups} value={groupId} onChange={setGroupId} disabled={isEditingExisting} /></Field>
       <Field label="Тип Абонемента">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           {visiblePlanTypes.map((p) => {
@@ -185,7 +199,7 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
       </Field>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <Field label="Дата покупки">
+        <Field label="Початок дії">
           <input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} />
         </Field>
         <Field label="Кінець (вручну)">
@@ -200,6 +214,22 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
             }}
             onClick={e => e.target.showPicker && e.target.showPicker()}
           />
+        </Field>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Field label="Дата оплати *">
+          <input style={{ ...inputSt, cursor: "pointer", height: "52px" }} type="date" value={paidAt} onChange={e => setPaidAt(e.target.value)} onClick={e => e.target.showPicker && e.target.showPicker()} />
+        </Field>
+        <Field label="Попередній абонемент у черзі">
+          <select style={{ ...inputSt, height: "52px" }} value={previousSubscriptionId} onChange={e => setPreviousSubscriptionId(e.target.value)}>
+            <option value="">Немає / не визначено</option>
+            {predecessorOptions.map((subscription) => (
+              <option key={subscription.id} value={subscription.id}>
+                {subscription.paidAt || subscription.startDate || "Без дати"} · {subscription.planType || "Абонемент"}
+              </option>
+            ))}
+          </select>
         </Field>
       </div>
 
@@ -274,8 +304,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
       {submitError && <div role="alert" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "rgba(234,84,85,0.12)", color: theme.danger, fontWeight: 700 }}>{submitError}</div>}
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel} disabled={submitting}>Скасувати</button>
-        <button type="button" disabled={submitting || !studentId || !groupId || !canSubmitWithPrice} style={{ ...btnP, opacity: studentId && groupId && !submitting && canSubmitWithPrice ? 1 : .4 }} onClick={async () => {
-          if (!studentId || !groupId || !canSubmitWithPrice) return;
+        <button type="button" disabled={submitting || !studentId || !groupId || !canSubmitWithPrice || (!isEditingExisting && !paidAt)} style={{ ...btnP, opacity: studentId && groupId && canSubmitWithPrice && (isEditingExisting || paidAt) && !submitting ? 1 : .4 }} onClick={async () => {
+          if (!studentId || !groupId || !canSubmitWithPrice || (!isEditingExisting && !paidAt)) return;
           if (selectedUsedTrainings > selectedTotalTrainings) {
             alert("Використані тренування не можуть перевищувати загальну кількість.");
             return;
@@ -294,7 +324,8 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
           setSubmitError("");
           try {
             await onDone({
-              studentId, groupId, planType, startDate,
+              studentId, groupId, planType, startDate, paidAt: paidAt || null,
+              previousSubscriptionId: previousSubscriptionId || null,
               endDate: selectedEndDate,
               activationDate: selectedActivationDate,
               totalTrainings: selectedTotalTrainings,
