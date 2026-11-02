@@ -67,13 +67,22 @@ set search_path = public
 as $$
 declare
   v_service_code text;
+  v_is_admin boolean;
 begin
-  if new.student_id is not null or new.price_snapshot_uah is not null then
+  v_service_code := lower(coalesce(new.entry_type, new.guest_type, ''));
+  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
+    or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
+
+  if v_service_code not in ('trial', 'single') then
+    if not v_is_admin then
+      new.price_snapshot_uah := null;
+    end if;
     return new;
   end if;
 
-  v_service_code := lower(coalesce(new.entry_type, new.guest_type, ''));
-  if v_service_code not in ('trial', 'single') then
+  -- Only a trusted admin may explicitly preserve a supplied historical value.
+  -- Trainer/client input is always replaced with the authoritative catalog price.
+  if v_is_admin and new.price_snapshot_uah is not null then
     return new;
   end if;
 
@@ -92,6 +101,33 @@ drop trigger if exists attendance_snapshot_guest_price on public.attendance;
 create trigger attendance_snapshot_guest_price
 before insert on public.attendance
 for each row execute function public.crm_snapshot_guest_attendance_price();
+
+create or replace function public.crm_protect_attendance_price_snapshot()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_is_admin boolean;
+begin
+  if new.price_snapshot_uah is not distinct from old.price_snapshot_uah then
+    return new;
+  end if;
+
+  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
+    or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
+  if not v_is_admin then
+    raise exception 'Only an administrator may change attendance.price_snapshot_uah' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists attendance_protect_price_snapshot on public.attendance;
+create trigger attendance_protect_price_snapshot
+before update of price_snapshot_uah on public.attendance
+for each row execute function public.crm_protect_attendance_price_snapshot();
 
 create or replace function public.crm_ensure_one_off_payment_for_attendance(
   p_attendance_id uuid

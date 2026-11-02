@@ -88,3 +88,27 @@ test("returning to the original plan applies an explicitly changed discount to h
     basePrice: 1500, amount: 1200, source: "initial_base_current_discount",
   });
 });
+
+test("attendance snapshots are server-owned for trainers and preserve trusted historical conversions", async () => {
+  const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
+  const insertStart = sql.indexOf("create or replace function public.crm_snapshot_guest_attendance_price");
+  const updateStart = sql.indexOf("create or replace function public.crm_protect_attendance_price_snapshot");
+  const ensureStart = sql.indexOf("create or replace function public.crm_ensure_one_off_payment_for_attendance");
+  const insertTrigger = sql.slice(insertStart, updateStart);
+  const updateTrigger = sql.slice(updateStart, ensureStart);
+  const ensureRpc = sql.slice(ensureStart);
+
+  assert.match(insertTrigger, /if v_is_admin and new\.price_snapshot_uah is not null then[\s\S]*return new/);
+  assert.match(insertTrigger, /select price_uah into new\.price_snapshot_uah[\s\S]*from public\.service_prices/);
+  assert.ok(
+    insertTrigger.indexOf("select price_uah into new.price_snapshot_uah") > insertTrigger.indexOf("if v_is_admin and new.price_snapshot_uah is not null"),
+    "non-admin supplied values are overwritten by the catalog lookup",
+  );
+  assert.match(updateTrigger, /new\.price_snapshot_uah is not distinct from old\.price_snapshot_uah[\s\S]*return new/);
+  assert.match(updateTrigger, /if not v_is_admin then[\s\S]*errcode = '42501'/);
+  assert.match(updateTrigger, /before update of price_snapshot_uah on public\.attendance/);
+
+  assert.match(ensureRpc, /if v_att\.price_snapshot_uah is not null then[\s\S]*v_amount := v_att\.price_snapshot_uah/);
+  assert.match(insertTrigger, /if new\.price_snapshot_uah is null then[\s\S]*raise exception/);
+  assert.doesNotMatch(insertTrigger, /coalesce\([^\n]*price_snapshot_uah/);
+});
