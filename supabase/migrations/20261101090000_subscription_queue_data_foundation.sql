@@ -315,8 +315,7 @@ begin
     get diagnostics v_group_rows = row_count;
   elsif v_archive_mode = 'archived_at' then
     update public.groups
-    set is_active = not v_operation.source_was_archived_before,
-        archived_at = case when v_operation.source_was_archived_before then coalesce(archived_at, current_date::timestamptz) else null end
+    set archived_at = case when v_operation.source_was_archived_before then coalesce(archived_at, current_date::timestamptz) else null end
     where id = v_operation.source_group_id;
     get diagnostics v_group_rows = row_count;
   elsif v_archive_mode = 'active' then

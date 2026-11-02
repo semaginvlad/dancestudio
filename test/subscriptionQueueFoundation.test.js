@@ -18,7 +18,7 @@ const ids = {
   legacy: "20000000-0000-0000-0000-000000000005",
 };
 
-const setup = async () => {
+const setup = async ({ groupsWithIsActive = true } = {}) => {
   const db = new PGlite();
   await db.exec(`
     create role anon;
@@ -38,7 +38,7 @@ const setup = async () => {
     create table public.groups (
       id text primary key,
       schedule jsonb not null default '[]'::jsonb,
-      is_active boolean not null default true,
+      ${groupsWithIsActive ? "is_active boolean not null default true," : ""}
       archived_at timestamptz
     );
     create table public.group_merge_operations (
@@ -379,6 +379,64 @@ test("atomic undo rolls back restored subscriptions when a later group write fai
     ["merge-atomic-undo", "admin-1"],
   );
   assert.equal(idempotentRetry.rows[0].status, "undone");
+  await db.close();
+});
+
+test("archived_at undo works with the production groups schema that has no is_active column", async () => {
+  const db = await setup({ groupsWithIsActive: false });
+  await db.exec(`
+    insert into public.groups (id, schedule, archived_at)
+    values
+      ('source-group', '[]'::jsonb, '2026-10-01T00:00:00Z'),
+      ('target-group', '[]'::jsonb, null);
+    insert into public.student_groups (student_id, group_id)
+    values ('${ids.studentA}', 'target-group');
+    insert into public.subscriptions (id, student_id, group_id)
+    values ('${ids.aGroupOne}', '${ids.studentA}', 'target-group');
+    insert into public.group_merge_operations (
+      id,
+      source_group_id,
+      target_group_id,
+      selected_student_ids,
+      new_target_links_student_ids,
+      moved_subscription_ids,
+      previous_source_archive_state,
+      source_was_archived_before,
+      schedule_mode,
+      status,
+      completed_at,
+      previous_subscription_predecessor_ids
+    ) values (
+      'merge-production-archive-shape',
+      'source-group',
+      'target-group',
+      '["${ids.studentA}"]'::jsonb,
+      '["${ids.studentA}"]'::jsonb,
+      '["${ids.aGroupOne}"]'::jsonb,
+      '{"mode":"archived_at","isArchived":false}'::jsonb,
+      false,
+      'keep_target_schedule',
+      'completed',
+      now(),
+      '{"${ids.aGroupOne}":null}'::jsonb
+    );
+  `);
+
+  const result = await db.query(
+    "select status from public.crm_undo_group_merge($1, $2)",
+    ["merge-production-archive-shape", "admin-1"],
+  );
+  assert.equal(result.rows[0].status, "undone");
+
+  const restored = (await db.query(`
+    select
+      (select archived_at from public.groups where id = 'source-group') as archived_at,
+      (select group_id from public.subscriptions where id = '${ids.aGroupOne}') as subscription_group,
+      (select group_id from public.student_groups where student_id = '${ids.studentA}') as membership_group
+  `)).rows[0];
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.subscription_group, "source-group");
+  assert.equal(restored.membership_group, "source-group");
   await db.close();
 });
 

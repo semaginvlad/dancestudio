@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 import { resolveStudioRoomsResponse } from './studioRooms'
+import { resolveStudentGroupsResponse } from './studentGroups'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -211,8 +212,7 @@ export async function deleteStudent(id) {
 // ─── STUDENT GROUPS ───
 export async function fetchStudentGroups() {
   const { data, error } = await supabase.from('student_groups').select('*')
-  if (error) { console.warn('student_groups:', error.message); return []; }
-  return data.map(sg => ({ id: sg.id, studentId: sg.student_id, groupId: sg.group_id }))
+  return resolveStudentGroupsResponse({ data, error })
 }
 
 export async function addStudentGroup(studentId, groupId) {

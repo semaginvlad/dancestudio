@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
 import { splitPaymentGroups } from '../src/shared/groupSchedule.js';
+import { resolveStudentGroupsResponse } from '../src/studentGroups.js';
 import { readFile } from 'node:fs/promises';
 import {
   commitGroupMergeThenRefresh,
@@ -227,5 +228,36 @@ test('successful undo clears every local archive alias before canonical refresh'
     splitPaymentGroups([restored], []).current.map((group) => group.id),
     ['source'],
     'Payments treats the locally restored source as current without a reload',
+  );
+});
+
+test('membership refresh errors preserve the locally committed merge projection', async () => {
+  let memberships = [{ id: 'source-link', studentId: 'student-1', groupId: 'source' }];
+  let refreshFailure = '';
+
+  const result = await commitServerMutationThenRefresh({
+    commit: async () => ({ ok: true }),
+    applyCommitted: () => {
+      memberships = projectMovedMemberships(memberships, {
+        sourceGroupId: 'source',
+        targetGroupId: 'target',
+        addTargetStudentIds: ['student-1'],
+        removeSourceStudentIds: ['student-1'],
+      });
+    },
+    refresh: async () => resolveStudentGroupsResponse({
+      data: null,
+      error: new Error('membership database unavailable'),
+    }),
+    applyRefresh: (rows) => { memberships = rows; },
+    onRefreshFailure: (error) => { refreshFailure = error.message; },
+  });
+
+  assert.equal(result.refreshed, false);
+  assert.equal(refreshFailure, 'membership database unavailable');
+  assert.deepEqual(
+    memberships.map(({ studentId, groupId }) => ({ studentId, groupId })),
+    [{ studentId: 'student-1', groupId: 'target' }],
+    'the committed local membership is not replaced with an empty list',
   );
 });
