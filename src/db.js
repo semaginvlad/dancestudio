@@ -855,6 +855,34 @@ export async function deleteTrainerGroup(trainerId, groupId) {
   if (error) throw error;
 }
 
+// ─── ADMIN PRICING ───
+export async function fetchServicePrices() {
+  const { data, error } = await supabase
+    .from('service_prices')
+    .select('service_code,service_name,price_uah')
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  return (data || []).map((row) => ({
+    serviceCode: row.service_code,
+    serviceName: row.service_name,
+    priceUah: Number(row.price_uah),
+  }))
+}
+
+export async function updateServicePrice(serviceCode, priceUah) {
+  const price = Number(priceUah)
+  if (!serviceCode) throw new Error('serviceCode is required')
+  if (!Number.isInteger(price) || price < 0) throw new Error('Ціна має бути цілим невід’ємним числом')
+  const { data, error } = await supabase
+    .from('service_prices')
+    .update({ price_uah: price, updated_at: new Date().toISOString() })
+    .eq('service_code', serviceCode)
+    .select('service_code,service_name,price_uah')
+    .single()
+  if (error) throw error
+  return { serviceCode: data.service_code, serviceName: data.service_name, priceUah: Number(data.price_uah) }
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
@@ -1021,6 +1049,7 @@ export async function fetchAttendance() {
     groupId: a.group_id,
     quantity: a.quantity || 1,
     entryType: a.entry_type || 'subscription',
+    priceSnapshotUah: a.price_snapshot_uah ?? null,
   }))
 }
 
@@ -1241,9 +1270,41 @@ export async function insertAttendance(a) {
     groupId: data.group_id,
     quantity: data.quantity || 1,
     entryType: data.entry_type || 'subscription',
+    priceSnapshotUah: data.price_snapshot_uah ?? null,
   }
 }
 
+export async function updateAttendanceQuantity(id, quantity) {
+  const normalizedQuantity = Number(quantity);
+  if (!id || !Number.isInteger(normalizedQuantity) || normalizedQuantity < 1) {
+    throw new Error('Valid attendance id and positive integer quantity are required');
+  }
+
+  // Update only quantity. In particular, keep the row id and its immutable
+  // price_snapshot_uah so historical one-off pricing/payment remains intact.
+  const { data, error } = await supabase
+    .from('attendance')
+    .update({ quantity: normalizedQuantity })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  if (data?.sub_id) {
+    await syncSubUsedTrainings(data.sub_id);
+  }
+  return {
+    id: data.id,
+    subId: data.sub_id,
+    studentId: data.student_id,
+    date: data.date,
+    guestName: data.guest_name,
+    guestType: data.guest_type,
+    groupId: data.group_id,
+    quantity: data.quantity || 1,
+    entryType: data.entry_type || 'subscription',
+    priceSnapshotUah: data.price_snapshot_uah ?? null,
+  };
+}
 
 export async function convertDebtAttendanceToSubscription({ studentId, groupId, subId, startDate, endDate }) {
   if (!studentId || !groupId || !subId || !startDate || !endDate) {

@@ -40,11 +40,11 @@ const DIRECTIONS = [
 ];
 
 const PLAN_TYPES = [
-  { id: "trial", name: "Пробне", trainings: 1, price: 150 },
-  { id: "single", name: "Разове", trainings: 1, price: 300 },
-  { id: "4pack", name: "Абонемент 4", trainings: 4, price: 1000 },
-  { id: "8pack", name: "Абонемент 8", trainings: 8, price: 1500 },
-  { id: "12pack", name: "Абонемент 12", trainings: 12, price: 1800 },
+  { id: "trial", name: "Пробне", trainings: 1 },
+  { id: "single", name: "Разове", trainings: 1 },
+  { id: "4pack", name: "Абонемент 4", trainings: 4 },
+  { id: "8pack", name: "Абонемент 8", trainings: 8 },
+  { id: "12pack", name: "Абонемент 12", trainings: 12 },
 ];
 
 const PAY_METHODS = [

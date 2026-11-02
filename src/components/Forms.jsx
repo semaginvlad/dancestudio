@@ -4,6 +4,7 @@ import { addMonth, today } from "../shared/utils";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { Field, GroupSelect, Pill, StudentSelectWithSearch } from "./UI";
 import { createSynchronousGuard, subscriptionErrorMessage } from "../subscriptionMutations";
+import { resolvePlanTypePrice } from "../subscriptionPricing";
 
 export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) {
   const nameParts = initial?.name ? initial.name.split(' ') : [];
@@ -67,7 +68,7 @@ export function StudentForm({ initial, onDone, onCancel, studentGrps, groups }) 
   );
 }
 
-export function SubForm({ initial, onDone, onCancel, onPendingChange, students, groups, studentGrps, subs = [] }) {
+export function SubForm({ initial, onDone, onCancel, onPendingChange, students, groups, studentGrps, subs = [], servicePrices = [] }) {
   const submitGuard = useRef(null);
   if (!submitGuard.current) submitGuard.current = createSynchronousGuard();
   const isEditingExisting = Boolean(initial?.id);
@@ -77,9 +78,11 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   const [groupId, setGroupId] = useState(initial?.groupId || "");
   const [planType, setPlanType] = useState(initial?.planType || "8pack");
   const [startDate, setStartDate] = useState(initial?.startDate || today());
+  const priceByPlan = Object.fromEntries(servicePrices.map((row) => [row.serviceCode, Number(row.priceUah)]));
+  const initialCatalogPrice = priceByPlan[initial?.planType || "8pack"] ?? 0;
   const [paidAt, setPaidAt] = useState(initial?.paidAt || (isEditingExisting ? "" : today()));
   const [previousSubscriptionId, setPreviousSubscriptionId] = useState(initial?.previousSubscriptionId || "");
-  const [amount, setAmount] = useState(initial?.amount || 1500);
+  const [amount, setAmount] = useState(Number(initial?.amount ?? initialCatalogPrice));
   const [paid] = useState(initial?.paid ?? true);
   const [payMethod, setPayMethod] = useState(initial?.payMethod || "card");
   const [discountPct, setDiscountPct] = useState(Number(initial?.discountPct || 0));
@@ -104,12 +107,15 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
   const [manualUsedTrainings, setManualUsedTrainings] = useState(initial?.usedTrainings || 0);
 
   const plan = PLAN_TYPES.find(p => p.id === planType);
+  const hasCatalogPrice = Number.isInteger(priceByPlan[planType]) && priceByPlan[planType] >= 0;
+  const isOriginalPlanType = isEditingExisting && planType === initial?.planType;
+  const canSubmitWithPrice = isOriginalPlanType || hasCatalogPrice;
   const isLegacyPlanType = !["4pack", "8pack", "12pack"].includes(planType);
   const selectablePlanTypes = PLAN_TYPES.filter((p) => ["4pack", "8pack", "12pack"].includes(p.id));
   const visiblePlanTypes = isEditingExisting && isLegacyPlanType
     ? [PLAN_TYPES.find((p) => p.id === planType), ...selectablePlanTypes].filter(Boolean)
     : selectablePlanTypes;
-  const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? (plan?.price || 0)));
+  const [basePrice, setBasePrice] = useState(Number(initial?.basePrice ?? initialCatalogPrice));
   const predecessorOptions = subs.filter((subscription) => (
     String(subscription?.studentId || "") === String(studentId)
     && String(subscription?.groupId || "") === String(groupId)
@@ -143,13 +149,12 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
     return !(aEnd < bStart || aStart > bEnd);
   });
 
-  // 🔧 Перераховуємо amount при зміні planType АБО discountPct (і при редагуванні теж)
+  // Existing records retain their historical price. A newly selected plan uses the current catalog price.
   useEffect(() => {
-    const p = PLAN_TYPES.find((x) => x.id === planType);
-    if (!p) return;
-    const nextBase = Number(p.price || 0);
-    setBasePrice(nextBase);
-    setAmount(nextBase - Math.round((nextBase * Number(discountPct || 0)) / 100));
+    const resolved = resolvePlanTypePrice({ planType, initial, priceByPlan, discountPct });
+    if (resolved.source === "missing_catalog") return;
+    setBasePrice(resolved.basePrice);
+    setAmount(resolved.amount);
   }, [planType, discountPct]);
 
   useEffect(() => {
@@ -184,7 +189,7 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
                   {String(p.trainings || "").replace(/[^\d]/g, "") || "•"}
                 </div>
                 <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>{isLegacyOption ? p.name : "заняття"}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: theme.textMain }}>{p.price}₴</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: theme.textMain }}>{priceByPlan[p.id] ?? "—"}₴</div>
               </button>
             );
           })}
@@ -293,11 +298,12 @@ export function SubForm({ initial, onDone, onCancel, onPendingChange, students, 
           </div>
         </Field>
       </div>
+      {!canSubmitWithPrice && <div role="alert" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "rgba(234,84,85,0.12)", color: theme.danger, fontWeight: 700 }}>Не вдалося завантажити актуальну ціну. Оновіть сторінку перед створенням абонемента.</div>}
       {submitError && <div role="alert" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "rgba(234,84,85,0.12)", color: theme.danger, fontWeight: 700 }}>{submitError}</div>}
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24, position: "sticky", bottom: 0, background: theme.card, paddingTop: 12, paddingBottom: "calc(8px + env(safe-area-inset-bottom))", zIndex: 2 }}>
         <button type="button" style={btnS} onClick={onCancel} disabled={submitting}>Скасувати</button>
-        <button type="button" disabled={submitting || !studentId || !groupId || (!isEditingExisting && !paidAt)} style={{ ...btnP, opacity: studentId && groupId && (isEditingExisting || paidAt) && !submitting ? 1 : .4 }} onClick={async () => {
-          if (!studentId || !groupId || (!isEditingExisting && !paidAt)) return;
+        <button type="button" disabled={submitting || !studentId || !groupId || !canSubmitWithPrice || (!isEditingExisting && !paidAt)} style={{ ...btnP, opacity: studentId && groupId && canSubmitWithPrice && (isEditingExisting || paidAt) && !submitting ? 1 : .4 }} onClick={async () => {
+          if (!studentId || !groupId || !canSubmitWithPrice || (!isEditingExisting && !paidAt)) return;
           if (selectedUsedTrainings > selectedTotalTrainings) {
             alert("Використані тренування не можуть перевищувати загальну кількість.");
             return;
