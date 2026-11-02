@@ -150,9 +150,13 @@ begin
     return;
   end if;
 
-  select sp.price_uah into v_amount
-  from public.service_prices sp
-  where sp.service_code = v_entry_type;
+  if v_att.price_snapshot_uah is not null then
+    v_amount := v_att.price_snapshot_uah;
+  else
+    select sp.price_uah into v_amount
+    from public.service_prices sp
+    where sp.service_code = v_entry_type;
+  end if;
   if v_amount is null then
     raise exception 'Price is not configured for service %', v_entry_type using errcode = 'P0001';
   end if;

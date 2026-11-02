@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { getGuestAttendanceRevenue } from "../src/guestRevenue.js";
+import { calculateGuestTrainerShare, getGuestAttendanceRevenue } from "../src/guestRevenue.js";
 import { resolvePlanTypePrice } from "../src/subscriptionPricing.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261102090000_admin_service_prices.sql", import.meta.url);
@@ -31,6 +31,30 @@ test("guest revenue prefers immutable snapshots and preserves legacy trial/singl
   assert.match(sql, /when 'trial' then 150[\s\S]*when 'single' then 300/);
   assert.match(sql, /before insert on public\.attendance/);
   assert.match(sql, /select price_uah into new\.price_snapshot_uah[\s\S]*from public\.service_prices/);
+});
+
+test("a present zero-price snapshot stays zero and never falls back or pays trainer share", () => {
+  const row = { guestType: "single", priceSnapshotUah: 0 };
+  assert.deepEqual(getGuestAttendanceRevenue(row), {
+    amount: 0, revenueSource: "attendance.price_snapshot_uah", warning: null,
+  });
+  assert.equal(calculateGuestTrainerShare(row, 50), 0);
+});
+
+test("relinked historical attendance keeps its snapshot while legacy attendance uses current catalog", async () => {
+  const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
+  const snapshotBranch = sql.indexOf("if v_att.price_snapshot_uah is not null then");
+  const snapshotAssignment = sql.indexOf("v_amount := v_att.price_snapshot_uah", snapshotBranch);
+  const catalogFallback = sql.indexOf("select sp.price_uah into v_amount", snapshotBranch);
+  assert.ok(snapshotBranch > 0 && snapshotAssignment > snapshotBranch, "snapshot is used when present");
+  assert.ok(catalogFallback > snapshotAssignment, "catalog lookup is only the NULL-snapshot fallback");
+  assert.match(sql.slice(snapshotBranch, catalogFallback), /else\s*$/m);
+
+  const resolvePaymentAmount = (snapshot, currentCatalogPrice) => snapshot ?? currentCatalogPrice;
+  assert.equal(resolvePaymentAmount(150, 200), 150, "historical snapshot wins after catalog changes to 200");
+  assert.equal(resolvePaymentAmount(null, 200), 200, "legacy NULL snapshot uses current catalog price");
+  assert.equal(getGuestAttendanceRevenue({ guestType: "trial", priceSnapshotUah: 150 }).amount, 150);
+  assert.equal(getGuestAttendanceRevenue({ guestType: "trial" }).amount, 150);
 });
 
 test("returning to an existing subscription plan restores its original financial snapshot", () => {

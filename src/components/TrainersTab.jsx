@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import * as db from "../db";
 import { buildAnalyticsFoundation, getAttendanceEffectiveType, getTrainerAnalyticsCard, resolveAttendanceClassification } from "../shared/analytics";
 import { PLAN_TYPES, WEEKDAYS, theme as appTheme } from "../shared/constants";
-import { getGuestAttendanceRevenue } from "../guestRevenue";
+import { calculateGuestTrainerShare, getGuestAttendanceRevenue } from "../guestRevenue";
 import { useStickyState } from "../shared/utils";
 import { resolveGroupTrainer } from "../shared/groupTrainer";
 import { isTrainerArchived } from "../shared/trainers";
@@ -124,7 +124,9 @@ const calcTrainerShare = ({ source = "subscription", row = {}, trainerPct = 0 })
   const attendanceRevenue = source === "attendance_guest_oneoff" ? getGuestAttendanceRevenue(row) : null;
   const effectivePaidAmount = source === "attendance_guest_oneoff" ? attendanceRevenue.amount : getEffectivePaidAmount(row);
   const trainerNominalShare = Math.round((nominal * pctValue) / 100);
-  let trainerShare = Math.round((effectivePaidAmount * pctValue) / 100);
+  let trainerShare = source === "attendance_guest_oneoff"
+    ? calculateGuestTrainerShare(row, pctValue)
+    : Math.round((effectivePaidAmount * pctValue) / 100);
   let formulaBranch = source === "attendance_guest_oneoff"
     ? "attendance_guest_oneoff: trainerShare = attendanceRevenue * trainerPct / 100"
     : "subscription: trainerShare = effectivePaidAmount * trainerPct / 100";

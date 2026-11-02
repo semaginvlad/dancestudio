@@ -6,8 +6,10 @@ const money = (value) => {
 };
 
 export function getGuestAttendanceRevenue(row = {}) {
-  const snapshot = money(row.priceSnapshotUah ?? row.price_snapshot_uah);
-  if (snapshot > 0) return { amount: snapshot, revenueSource: "attendance.price_snapshot_uah", warning: null };
+  const rawSnapshot = row.priceSnapshotUah ?? row.price_snapshot_uah;
+  if (rawSnapshot !== null && rawSnapshot !== undefined) {
+    return { amount: Math.max(0, Number(rawSnapshot) || 0), revenueSource: "attendance.price_snapshot_uah", warning: null };
+  }
 
   const explicitAmount = money(row.amount ?? row.price ?? row.paymentAmount ?? row.payment_amount);
   if (explicitAmount > 0) return { amount: explicitAmount, revenueSource: "attendance.amount|price|paymentAmount", warning: null };
@@ -17,4 +19,9 @@ export function getGuestAttendanceRevenue(row = {}) {
   if (fallback > 0) return { amount: fallback, revenueSource: `fallback.legacy_guest_price.${type}`, warning: null };
 
   return { amount: 0, revenueSource: "missing", warning: "guest one-off has no price snapshot; salary revenue = 0" };
+}
+
+export function calculateGuestTrainerShare(row = {}, trainerPct = 0) {
+  const pct = Math.max(0, Math.min(100, Number(trainerPct || 0)));
+  return Math.round((getGuestAttendanceRevenue(row).amount * pct) / 100);
 }
