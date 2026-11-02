@@ -29,7 +29,7 @@ test("guest revenue prefers immutable snapshots and preserves legacy trial/singl
 
   const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
   assert.match(sql, /add column if not exists price_snapshot_uah/);
-  assert.match(sql, /when 'trial' then 150[\s\S]*when 'single' then 300/);
+  assert.doesNotMatch(sql, /update public\.attendance/);
   assert.match(sql, /before insert on public\.attendance/);
   assert.match(sql, /select price_uah into new\.price_snapshot_uah[\s\S]*from public\.service_prices/);
 });
@@ -90,21 +90,25 @@ test("returning to the original plan applies an explicitly changed discount to h
   });
 });
 
-test("attendance snapshots are server-owned for trainers and preserve trusted historical conversions", async () => {
+test("guest trial/single creation is admin-only and snapshots current catalog price", async () => {
   const sql = (await readFile(migrationUrl, "utf8")).toLowerCase();
   const insertStart = sql.indexOf("create or replace function public.crm_snapshot_guest_attendance_price");
   const updateStart = sql.indexOf("create or replace function public.crm_protect_attendance_price_snapshot");
+  const typeGuardStart = sql.indexOf("create or replace function public.crm_restrict_trainer_attendance_types");
   const ensureStart = sql.indexOf("create or replace function public.crm_ensure_one_off_payment_for_attendance");
   const insertTrigger = sql.slice(insertStart, updateStart);
-  const updateTrigger = sql.slice(updateStart, ensureStart);
+  const updateTrigger = sql.slice(updateStart, typeGuardStart);
+  const typeGuard = sql.slice(typeGuardStart, ensureStart);
   const ensureRpc = sql.slice(ensureStart);
 
-  assert.match(insertTrigger, /if not v_is_admin then[\s\S]*new\.price_snapshot_uah := null;[\s\S]*return new/);
-  assert.match(insertTrigger, /if v_is_admin and new\.price_snapshot_uah is not null then[\s\S]*return new/);
+  assert.match(insertTrigger, /if not v_is_admin then[\s\S]*guest, trial and single attendance are administrator-only[\s\S]*errcode = '42501'/);
   assert.match(insertTrigger, /select price_uah into new\.price_snapshot_uah[\s\S]*from public\.service_prices/);
   assert.match(updateTrigger, /new\.price_snapshot_uah is not distinct from old\.price_snapshot_uah[\s\S]*return new/);
-  assert.match(updateTrigger, /if not v_is_admin then[\s\S]*errcode = '42501'/);
+  assert.match(updateTrigger, /attendance\.price_snapshot_uah is immutable[\s\S]*errcode = '23514'/);
   assert.match(updateTrigger, /before update of price_snapshot_uah on public\.attendance/);
+  assert.match(typeGuard, /if v_is_admin then[\s\S]*return new/);
+  assert.match(typeGuard, /before update of student_id, guest_name, guest_type, entry_type on public\.attendance/);
+  assert.match(typeGuard, /guest, trial and single attendance are administrator-only[\s\S]*errcode = '42501'/);
 
   assert.match(ensureRpc, /if v_att\.price_snapshot_uah is not null then[\s\S]*v_amount := v_att\.price_snapshot_uah/);
   assert.match(insertTrigger, /if new\.price_snapshot_uah is null then[\s\S]*raise exception/);

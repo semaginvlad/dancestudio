@@ -45,19 +45,10 @@ with check (
   or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin'
 );
 
--- Guest attendance has no subscription row, so snapshot its price separately.
--- Existing rows predate this catalog and retain the historical defaults.
+-- Guest attendance has no subscription row, so snapshot new admin-created
+-- trial/single prices separately. Historical rows are intentionally untouched.
 alter table public.attendance
   add column if not exists price_snapshot_uah integer check (price_snapshot_uah >= 0);
-
-update public.attendance
-set price_snapshot_uah = case lower(coalesce(entry_type, guest_type, ''))
-  when 'trial' then 150
-  when 'single' then 300
-end
-where student_id is null
-  and price_snapshot_uah is null
-  and lower(coalesce(entry_type, guest_type, '')) in ('trial', 'single');
 
 create or replace function public.crm_snapshot_guest_attendance_price()
 returns trigger
@@ -69,13 +60,19 @@ declare
   v_service_code text;
   v_is_admin boolean;
 begin
-  v_service_code := lower(coalesce(new.entry_type, new.guest_type, ''));
+  v_service_code := case
+    when lower(coalesce(new.entry_type, '')) in ('trial', 'single') then lower(new.entry_type)
+    when lower(coalesce(new.guest_type, '')) in ('trial', 'single') then lower(new.guest_type)
+    else ''
+  end;
   v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
     or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
 
   if not v_is_admin then
-    -- Client-supplied trainer values are never authoritative. Existing
-    -- attendance/payment behavior stays unchanged; only the price is discarded.
+    if new.student_id is null or new.guest_name is not null or new.guest_type is not null
+       or v_service_code in ('trial', 'single') then
+      raise exception 'Guest, trial and single attendance are administrator-only' using errcode = '42501';
+    end if;
     new.price_snapshot_uah := null;
     return new;
   end if;
@@ -84,12 +81,7 @@ begin
     return new;
   end if;
 
-  -- Only a trusted admin may explicitly preserve a supplied historical value.
-  -- Trainer/client input is always replaced with the authoritative catalog price.
-  if v_is_admin and new.price_snapshot_uah is not null then
-    return new;
-  end if;
-
+  -- Even admin client input is not authoritative for a new financial row.
   select price_uah into new.price_snapshot_uah
   from public.service_prices
   where service_code = v_service_code;
@@ -112,19 +104,11 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  v_is_admin boolean;
 begin
   if new.price_snapshot_uah is not distinct from old.price_snapshot_uah then
     return new;
   end if;
-
-  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
-    or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
-  if not v_is_admin then
-    raise exception 'Only an administrator may change attendance.price_snapshot_uah' using errcode = '42501';
-  end if;
-  return new;
+  raise exception 'attendance.price_snapshot_uah is immutable' using errcode = '23514';
 end;
 $$;
 
@@ -132,6 +116,40 @@ drop trigger if exists attendance_protect_price_snapshot on public.attendance;
 create trigger attendance_protect_price_snapshot
 before update of price_snapshot_uah on public.attendance
 for each row execute function public.crm_protect_attendance_price_snapshot();
+
+create or replace function public.crm_restrict_trainer_attendance_types()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_is_admin boolean;
+  v_service_code text;
+begin
+  v_is_admin := lower(coalesce(auth.jwt() ->> 'email', '')) = lower('semagin.vlad@gmail.com')
+    or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
+  if v_is_admin then
+    return new;
+  end if;
+
+  v_service_code := case
+    when lower(coalesce(new.entry_type, '')) in ('trial', 'single') then lower(new.entry_type)
+    when lower(coalesce(new.guest_type, '')) in ('trial', 'single') then lower(new.guest_type)
+    else ''
+  end;
+  if new.student_id is null or new.guest_name is not null or new.guest_type is not null
+     or v_service_code in ('trial', 'single') then
+    raise exception 'Guest, trial and single attendance are administrator-only' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists attendance_restrict_trainer_types on public.attendance;
+create trigger attendance_restrict_trainer_types
+before update of student_id, guest_name, guest_type, entry_type on public.attendance
+for each row execute function public.crm_restrict_trainer_attendance_types();
 
 create or replace function public.crm_ensure_one_off_payment_for_attendance(
   p_attendance_id uuid
