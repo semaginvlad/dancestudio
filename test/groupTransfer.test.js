@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
 import { readFile } from 'node:fs/promises';
+import { commitGroupMergeThenRefresh } from '../src/groupMergeMutations.js';
 
 const latinGroup = (id, overrides = {}) => ({
   id,
@@ -76,6 +77,25 @@ test('Attendance and merge flows use the atomic membership/subscription RPC help
   assert.match(attendance, /await db\.moveGroupMembershipsAndSubscriptions\(/);
   assert.doesNotMatch(attendance, /await db\.addStudentGroup\(studentId, newGroupId\)[\s\S]{0,500}await db\.removeStudentGroup/);
   assert.equal((app.match(/await db\.moveGroupMembershipsAndSubscriptions\(/g) || []).length, 2, 'merge and undo are atomic');
+  assert.match(app, /await commitGroupMergeThenRefresh\(\{/);
   assert.match(db, /supabase\.rpc\('crm_move_group_memberships_and_subscriptions'/);
   assert.doesNotMatch(db, /payload\.group_id\s*=\s*s\.groupId/);
+});
+
+test('successful merge stays completed and undoable when canonical refresh fails', async () => {
+  let operation = { id: 'merge-1', status: 'pending' };
+  let refreshWarning = '';
+
+  const result = await commitGroupMergeThenRefresh({
+    commit: async () => ({ ...operation, status: 'completed' }),
+    applyCommitted: (completed) => { operation = completed; },
+    refresh: async () => { throw new Error('temporary read failure'); },
+    applyRefresh: () => assert.fail('failed refresh must not apply rows'),
+    onRefreshFailure: (error) => { refreshWarning = error.message; },
+  });
+
+  assert.equal(result.refreshed, false);
+  assert.equal(operation.status, 'completed');
+  assert.equal(operation.status === 'completed', true, 'undoGroupMerge remains enabled');
+  assert.equal(refreshWarning, 'temporary read failure');
 });
