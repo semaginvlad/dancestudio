@@ -306,18 +306,27 @@ begin
   v_archive_mode := v_operation.previous_source_archive_state ->> 'mode';
   if v_archive_mode = 'is_active' then
     update public.groups
-    set is_active = not v_operation.source_was_archived_before
+    set is_active = not v_operation.source_was_archived_before,
+        archived_at = case
+          when v_operation.source_was_archived_before then coalesce(archived_at, current_date::timestamptz)
+          else null
+        end
     where id = v_operation.source_group_id;
     get diagnostics v_group_rows = row_count;
   elsif v_archive_mode = 'archived_at' then
     update public.groups
-    set archived_at = case when v_operation.source_was_archived_before then current_date::timestamptz else null end
+    set is_active = not v_operation.source_was_archived_before,
+        archived_at = case when v_operation.source_was_archived_before then coalesce(archived_at, current_date::timestamptz) else null end
     where id = v_operation.source_group_id;
     get diagnostics v_group_rows = row_count;
   elsif v_archive_mode = 'active' then
     execute 'update public.groups set active = $1 where id = $2'
       using not v_operation.source_was_archived_before, v_operation.source_group_id;
     get diagnostics v_group_rows = row_count;
+    update public.groups
+    set is_active = not v_operation.source_was_archived_before,
+        archived_at = case when v_operation.source_was_archived_before then coalesce(archived_at, current_date::timestamptz) else null end
+    where id = v_operation.source_group_id;
   end if;
 
   if v_archive_mode is not null and v_group_rows = 0 then

@@ -60,7 +60,7 @@ import {
 } from "./push";
 import { applyPwaUpdate, subscribeToPwaUpdates } from "./pwaUpdate";
 import { canEditSubscription, commitThenRefresh, composeSubscriptionNotice, createSynchronousGuard, refreshSubscriptionsOnly, subscriptionErrorMessage } from "./subscriptionMutations";
-import { commitGroupMergeThenRefresh, projectMovedMemberships, projectMovedSubscriptions } from "./groupMergeMutations";
+import { commitGroupMergeThenRefresh, projectGroupArchiveState, projectMovedMemberships, projectMovedSubscriptions } from "./groupMergeMutations";
 
 const translitMap = {
   а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z", и: "y", і: "i", ї: "yi", й: "y",
@@ -1430,8 +1430,9 @@ export default function App() {
             : null;
           const archiveMode = operation.previousSourceArchiveState?.mode;
           const sourceGroup = groups.find((group) => String(group.id) === String(operation.sourceGroupId)) || {};
-          const restorePatch = archiveMode ? buildGroupArchivePatch(archiveMode, !!operation.sourceWasArchivedBefore) : null;
-          const updatedSourceGroup = restorePatch ? { ...sourceGroup, ...restorePatch } : null;
+          const updatedSourceGroup = archiveMode
+            ? projectGroupArchiveState(sourceGroup, { wasArchived: !!operation.sourceWasArchivedBefore })
+            : null;
           return { updatedOperation, updatedTargetGroup, updatedSourceGroup };
         },
         applyCommitted: ({ updatedOperation, updatedTargetGroup, updatedSourceGroup }) => {

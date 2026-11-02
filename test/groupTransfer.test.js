@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import { getInternalGroupLabel } from '../src/shared/groupLabels.js';
 import { getTransferTargetGroups } from '../src/shared/groupTrainer.js';
+import { splitPaymentGroups } from '../src/shared/groupSchedule.js';
 import { readFile } from 'node:fs/promises';
 import {
   commitGroupMergeThenRefresh,
   commitServerMutationThenRefresh,
+  projectGroupArchiveState,
   projectMovedMemberships,
   projectMovedSubscriptions,
 } from '../src/groupMergeMutations.js';
@@ -199,4 +201,31 @@ test('attendance transfer remains repeatable after subscriptions refresh fails',
   assert.equal(visibleGroupId, 'source');
   assert.deepEqual(normalizeMoveState(local), normalizeMoveState(initial));
   assert.deepEqual(local, server);
+});
+
+test('successful undo clears every local archive alias before canonical refresh', () => {
+  const restored = projectGroupArchiveState({
+    id: 'source',
+    name: 'Source',
+    is_active: false,
+    isActive: false,
+    active: false,
+    archived_at: '2026-10-01T00:00:00Z',
+    archivedAt: '2026-10-01T00:00:00Z',
+    archived: true,
+    isArchived: true,
+  }, { wasArchived: false });
+
+  assert.equal(restored.is_active, true);
+  assert.equal(restored.isActive, true);
+  assert.equal(restored.active, true);
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archivedAt, null);
+  assert.equal(restored.archived, false);
+  assert.equal(restored.isArchived, false);
+  assert.deepEqual(
+    splitPaymentGroups([restored], []).current.map((group) => group.id),
+    ['source'],
+    'Payments treats the locally restored source as current without a reload',
+  );
 });

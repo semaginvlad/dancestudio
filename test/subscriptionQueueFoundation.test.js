@@ -283,10 +283,10 @@ test("invalid subscription transfer rolls back before membership changes", async
 test("atomic undo rolls back restored subscriptions when a later group write fails and retry completes", async () => {
   const db = await setup();
   await db.exec(`
-    insert into public.groups (id, schedule, is_active)
+    insert into public.groups (id, schedule, is_active, archived_at)
     values
-      ('source-group', '[]'::jsonb, false),
-      ('target-group', '[{"day":2}]'::jsonb, true);
+      ('source-group', '[]'::jsonb, false, '2026-10-01T00:00:00Z'),
+      ('target-group', '[{"day":2}]'::jsonb, true, null);
     insert into public.student_groups (student_id, group_id)
     values ('${ids.studentA}', 'target-group');
     insert into public.subscriptions (id, student_id, group_id)
@@ -365,12 +365,14 @@ test("atomic undo rolls back restored subscriptions when a later group write fai
       (select group_id from public.subscriptions where id = '${ids.aGroupOne}') as subscription_group,
       (select group_id from public.student_groups where student_id = '${ids.studentA}') as membership_group,
       (select schedule from public.groups where id = 'target-group') as target_schedule,
-      (select is_active from public.groups where id = 'source-group') as source_active
+      (select is_active from public.groups where id = 'source-group') as source_active,
+      (select archived_at from public.groups where id = 'source-group') as source_archived_at
   `)).rows[0];
   assert.equal(recovered.subscription_group, "source-group");
   assert.equal(recovered.membership_group, "source-group");
   assert.deepEqual(recovered.target_schedule, [{ day: 1 }]);
   assert.equal(recovered.source_active, true);
+  assert.equal(recovered.source_archived_at, null);
 
   const idempotentRetry = await db.query(
     "select status from public.crm_undo_group_merge($1, $2)",

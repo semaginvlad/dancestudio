@@ -48,6 +48,22 @@ export const projectMovedSubscriptions = (rows, {
   ));
 };
 
+export const projectGroupArchiveState = (group, { wasArchived = false } = {}) => {
+  const archiveMarker = wasArchived
+    ? (group?.archived_at ?? group?.archivedAt ?? new Date().toISOString())
+    : null;
+  return {
+    ...(group || {}),
+    is_active: !wasArchived,
+    isActive: !wasArchived,
+    active: !wasArchived,
+    archived_at: archiveMarker,
+    archivedAt: archiveMarker,
+    archived: wasArchived,
+    isArchived: wasArchived,
+  };
+};
+
 export async function commitServerMutationThenRefresh({
   commit,
   applyCommitted,
