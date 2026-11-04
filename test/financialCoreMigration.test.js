@@ -139,6 +139,24 @@ test("hourly room rates snapshot 1h, 1.5h and 2h bookings and survive later rate
   } finally { await db.close(); }
 });
 
+test("two hours in room 1 snapshot to 1000 UAH server-side", async () => {
+  const db = await database();
+  try {
+    await db.exec("set app.test_authenticated='on'; set app.test_admin='off'");
+    await db.exec("insert into room_bookings(start_time,end_time,room_name,event_type) values ('10:00','12:00','Зал 1','room_booking')");
+    assert.equal((await db.query("select price from room_bookings")).rows[0].price, 1000);
+  } finally { await db.close(); }
+});
+
+test("two hours in room 2 snapshot to 500 UAH server-side", async () => {
+  const db = await database();
+  try {
+    await db.exec("set app.test_authenticated='on'; set app.test_admin='off'");
+    await db.exec("insert into room_bookings(start_time,end_time,room_name,event_type) values ('10:00','12:00','Зал 2','room_booking')");
+    assert.equal((await db.query("select price from room_bookings")).rows[0].price, 500);
+  } finally { await db.close(); }
+});
+
 test("trainer edits preserve server price snapshot and inactive tariff is rejected only for new bookings", async () => {
   const db = await database();
   try {
