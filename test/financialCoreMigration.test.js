@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { mergeTariffsIntoDrafts } from "../src/pricingDrafts.js";
+import { resolveBookingTypeForMutation } from "../src/studioRooms.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql", import.meta.url);
 const sql = await readFile(migrationUrl, "utf8");
 const dbSource = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
+const scheduleSource = await readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
 const scheduleBookingBlocksSql = await readFile(new URL("../supabase/migrations/20261002090000_schedule_booking_blocks.sql", import.meta.url), "utf8");
 const removeOccurrenceFunction = scheduleBookingBlocksSql.match(/create or replace function public\.crm_remove_room_booking_occurrence\(p_id uuid,p_occurrence_date date\)[\s\S]*?end \$\$;/i)?.[0];
 
@@ -231,6 +233,32 @@ test("splitting a recurring series preserves inactive tariff and original price 
       { date: "2026-01-22", recurrence_until: "2026-01-29", booking_type: "individual_1_2", price: 250 },
     ]);
     await assert.rejects(db.exec("insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type) values ('2026-02-01','10:00','11:00','Зал 2','individual_training','individual_1_2')"), /inactive booking tariff/i);
+  } finally { await db.close(); }
+});
+
+test("event-details cancellation preserves inactive booking type and price snapshot", async () => {
+  const tariffs = [
+    { id: "individual_1_2", isActive: false },
+    { id: "small_group_3_9", isActive: true },
+  ];
+  assert.equal(resolveBookingTypeForMutation(tariffs, "individual_1_2", { isExisting: true }), "individual_1_2");
+  assert.equal(resolveBookingTypeForMutation(tariffs, "individual_1_2"), "small_group_3_9");
+  const detailsFlow = scheduleSource.slice(scheduleSource.indexOf("const updateBookingEventWithGuard"), scheduleSource.indexOf("const removeSingleRecurringBookingOccurrence"));
+  assert.match(detailsFlow, /normalizeBookingPayload\([\s\S]*\{ isExisting: true \}\)/);
+
+  const db = await database();
+  try {
+    await db.exec("set app.test_authenticated='on'; set app.test_admin='on'");
+    const original = (await db.query(`
+      insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,status)
+      values ('2026-02-01','10:00','11:00','Зал 2','individual_training','individual_1_2','active')
+      returning id,price
+    `)).rows[0];
+    await db.exec("update room_booking_tariffs set is_active=false where code='individual_1_2'");
+    await db.query("update room_bookings set status='cancelled',booking_type='individual_1_2',price=$2 where id=$1", [original.id, original.price]);
+    assert.deepEqual((await db.query("select status,booking_type,price from room_bookings where id=$1", [original.id])).rows, [
+      { status: "cancelled", booking_type: "individual_1_2", price: 250 },
+    ]);
   } finally { await db.close(); }
 });
 

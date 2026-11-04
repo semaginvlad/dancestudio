@@ -9,7 +9,7 @@ import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
+import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveBookingTypeForMutation, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -1010,7 +1010,7 @@ export default function ScheduleTab({
     isAdmin,
     isAssignedToTrainer: isEventAssignedToCurrentTrainer(event),
   });
-  const normalizeBookingPayload = (source) => {
+  const normalizeBookingPayload = (source, { isExisting = false } = {}) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
       : "room_booking";
@@ -1031,10 +1031,7 @@ export default function ScheduleTab({
       roomName: normalizeRoomName(source.roomName || primaryRoomName) || primaryRoomName,
     };
     if (eventType === "individual_training") {
-      const availableTypes = editingId ? tariffTypes : activeTariffTypes;
-      const bookingType = availableTypes.some((type) => type.id === source.bookingType)
-        ? source.bookingType
-        : activeTariffTypes[0]?.id || "individual_1_2";
+      const bookingType = resolveBookingTypeForMutation(tariffTypes, source.bookingType, { isExisting });
       return {
         ...base,
         bookingType,
@@ -1195,7 +1192,7 @@ export default function ScheduleTab({
       date: editingId && draft.originalParentDate ? draft.originalParentDate : draft.date,
       title: normalizedTitle,
       roomName: fallbackRoomName,
-    });
+    }, { isExisting: Boolean(editingId) });
     try {
       const result = await runBookingMutation(payload, (override) => editingId
         ? onUpdateBooking?.(editingId, payload, { overrideBookingBlock: override })
@@ -1319,7 +1316,7 @@ export default function ScheduleTab({
     const payload = normalizeBookingPayload({
       ...buildRecurringContinuationPayload(event, event.parentDate || event.date),
       ...patch,
-    });
+    }, { isExisting: true });
     setDetailsMutationError("");
     try {
       const result = await runBookingMutation(
@@ -1341,7 +1338,7 @@ export default function ScheduleTab({
     const parentId = event.parentId || event.id;
     if (!parentId || !isRecurringBookingEvent(event)) return false;
     const occurrenceDate = String(event.date || "").slice(0, 10);
-    const payload = normalizeBookingPayload(buildRecurringContinuationPayload(event, event.parentDate || event.date));
+    const payload = normalizeBookingPayload(buildRecurringContinuationPayload(event, event.parentDate || event.date), { isExisting: true });
     const result = await runBookingMutation(
       payload,
       () => onRemoveBookingOccurrence?.(parentId, occurrenceDate),
