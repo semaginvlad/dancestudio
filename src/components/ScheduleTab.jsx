@@ -28,7 +28,7 @@ const DEFAULT_TYPES = [
     label: "Індивідуальне 1–2 особи",
     peopleMin: 1,
     peopleMax: 2,
-    price: 200,
+    price: 250,
   },
   {
     id: "small_group_3_9",
@@ -395,6 +395,7 @@ export default function ScheduleTab({
   onUpsertTrainingLessonPlan,
   currentUser = null,
   scheduleScale = 100,
+  bookingTariffs = [],
 }) {
   const DEFAULT_ROOM = "Основна зала";
   const NO_ROOM = "Без залу";
@@ -459,10 +460,9 @@ export default function ScheduleTab({
   const allowedEventTypes = isAdmin
     ? ["room_booking", "individual_training", "cleaning", "custom_admin_event"]
     : ["room_booking", "individual_training"];
-  const [bookingTypes, setBookingTypes] = useStickyState(
-    DEFAULT_TYPES,
-    "ds_schedule_booking_options_v1",
-  );
+  const bookingTypes = bookingTariffs.length
+    ? bookingTariffs
+    : DEFAULT_TYPES.map((type) => isAdmin ? type : { ...type, price: null });
   const tariffTypes = useMemo(
     () => bookingTypes.filter((type) => type.id !== "cleaning"),
     [bookingTypes],
@@ -883,8 +883,10 @@ export default function ScheduleTab({
     });
   }, [eventsByDay, isAdmin, isMobile, mobileFilterType, mobileFilterValue, safeGroups.length]);
 
-  const getTariffPrice = (bookingType) =>
-    tariffTypes.find((type) => type.id === bookingType)?.price || 0;
+  const getTariffPrice = (bookingType) => {
+    const price = tariffTypes.find((type) => type.id === bookingType)?.price;
+    return price == null ? null : Number(price);
+  };
   const allKnownRooms = useMemo(() => {
     const set = new Set(activeStudioRooms.map((x) => normalizeRoomName(x?.name)).filter(Boolean));
     eventsByDay.forEach((arr) => {
@@ -2786,21 +2788,19 @@ export default function ScheduleTab({
                     }))
                   }
                 />
-                <input
+                {isAdmin ? <input
                   style={editorInputSt}
                   type="number"
                   placeholder="Ціна"
                   value={draft.price ?? ""}
-                  readOnly={!isAdmin}
-                  disabled={!isAdmin}
                   onChange={(e) =>
                     setDraft((p) => ({
                       ...p,
                       price: Number(e.target.value || 0),
                     }))
                   }
-                />
-                <select
+                /> : null}
+                {isAdmin ? <select
                   style={editorInputSt}
                   value={draft.paymentMethod || "none"}
                   onChange={(e) =>
@@ -2810,7 +2810,7 @@ export default function ScheduleTab({
                   <option value="card">Карта</option>
                   <option value="cash">Готівка</option>
                   <option value="none">Без оплати</option>
-                </select>
+                </select> : null}
               </>
             )}
             {draft.eventType === "room_booking" && isAdmin && (
@@ -3754,54 +3754,6 @@ export default function ScheduleTab({
         </div>
       ) : null}
 
-      {isAdmin && (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
-          <b>Типи резерву / ціни</b>
-          {bookingTypes.map((t, i) => (
-            <div
-              key={t.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "2fr 120px",
-                gap: 8,
-                marginTop: 6,
-              }}
-            >
-              <input
-                style={editorInputSt}
-                value={t.label}
-                onChange={(e) =>
-                  setBookingTypes((p) =>
-                    p.map((x, idx) =>
-                      idx === i ? { ...x, label: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-              <input
-                style={editorInputSt}
-                type="number"
-                value={t.price}
-                onChange={(e) =>
-                  setBookingTypes((p) =>
-                    p.map((x, idx) =>
-                      idx === i
-                        ? { ...x, price: Number(e.target.value || 0) }
-                        : x,
-                    ),
-                  )
-                }
-              />
-            </div>
-          ))}
-          <button
-            style={{ ...btnS, marginTop: 8 }}
-            onClick={() => setBookingTypes(DEFAULT_TYPES)}
-          >
-            Reset to defaults
-          </button>
-        </div>
-      )}
     </div>
   );
 }

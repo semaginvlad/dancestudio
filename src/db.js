@@ -883,6 +883,59 @@ export async function updateServicePrice(serviceCode, priceUah) {
   return { serviceCode: data.service_code, serviceName: data.service_name, priceUah: Number(data.price_uah) }
 }
 
+const mapRoomBookingTariff = (row) => ({
+  id: row.code,
+  code: row.code,
+  label: row.name,
+  price: row.price_uah == null ? null : Number(row.price_uah),
+  peopleMin: row.people_min == null ? null : Number(row.people_min),
+  peopleMax: row.people_max == null ? null : Number(row.people_max),
+  isActive: row.is_active !== false,
+  sortOrder: Number(row.sort_order || 0),
+});
+
+export async function fetchRoomBookingTariffs() {
+  const { data, error } = await supabase.rpc('crm_fetch_room_booking_tariffs')
+  if (error) throw error
+  return (data || []).map(mapRoomBookingTariff)
+}
+
+export async function updateRoomBookingTariff(code, patch = {}) {
+  const payload = { updated_at: new Date().toISOString() }
+  if (patch.label !== undefined) payload.name = String(patch.label || '').trim()
+  if (patch.price !== undefined) payload.price_uah = Number(patch.price)
+  if (patch.peopleMin !== undefined) payload.people_min = patch.peopleMin === null || patch.peopleMin === '' ? null : Number(patch.peopleMin)
+  if (patch.peopleMax !== undefined) payload.people_max = patch.peopleMax === null || patch.peopleMax === '' ? null : Number(patch.peopleMax)
+  if (patch.isActive !== undefined) payload.is_active = !!patch.isActive
+  const { data, error } = await supabase.from('room_booking_tariffs').update(payload).eq('code', code).select('*').single()
+  if (error) throw error
+  return mapRoomBookingTariff(data)
+}
+
+const mapTrainerFinancialSetting = (row) => ({
+  trainerId: row.trainer_id,
+  individualIncomeEnabled: !!row.individual_income_enabled,
+  trainerShareUah: Number(row.trainer_share_uah || 0),
+});
+
+export async function fetchTrainerFinancialSettings() {
+  const { data, error } = await supabase.from('trainer_financial_settings').select('*')
+  if (error) throw error
+  return (data || []).map(mapTrainerFinancialSetting)
+}
+
+export async function upsertTrainerFinancialSetting(trainerId, patch = {}) {
+  const payload = {
+    trainer_id: trainerId,
+    individual_income_enabled: !!patch.individualIncomeEnabled,
+    trainer_share_uah: Number(patch.trainerShareUah || 0),
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase.from('trainer_financial_settings').upsert(payload, { onConflict: 'trainer_id' }).select('*').single()
+  if (error) throw error
+  return mapTrainerFinancialSetting(data)
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
