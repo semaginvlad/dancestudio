@@ -265,4 +265,106 @@ create trigger room_bookings_snapshot_hourly_price
 before insert or update of price on public.room_bookings
 for each row execute function public.crm_snapshot_room_booking_hourly_price();
 
+-- Trainers must never receive the server-calculated snapshot. Remove their
+-- direct table read path and expose only price-redacted RPC responses.
+drop policy if exists room_bookings_trainer_select_own on public.room_bookings;
+
+create or replace function public.crm_fetch_schedule_room_bookings()
+returns table (
+  id uuid, date date, start_time text, end_time text, trainer_id text,
+  trainer_name text, title text, type text, booking_type text,
+  people_count integer, price integer, payment_method text, event_type text,
+  note text, color text, recurrence text, recurrence_until date,
+  description text, status text, created_at timestamptz, room_name text
+)
+language sql stable security definer set search_path = public as $function$
+  with visible as (
+    select rb.*, public.crm_is_admin_session() as is_admin,
+      exists (
+        select 1 from public.trainers t
+        where t.auth_user_id = auth.uid()
+          and (rb.trainer_id::text = auth.uid()::text or t.id::text = rb.trainer_id::text)
+          and t.is_active is true and t.archived_at is null and t.access_disabled_at is null
+      ) as is_owner
+    from public.room_bookings rb
+    where public.crm_is_admin_session() or public.crm_is_active_trainer_session()
+  )
+  select v.id, v.date, v.start_time, v.end_time, v.trainer_id::text, v.trainer_name,
+    v.title, v.type, v.booking_type,
+    case when v.is_admin or v.is_owner then v.people_count else null end,
+    case when v.is_admin then v.price else null end,
+    case when v.is_admin then v.payment_method else null end,
+    v.event_type,
+    case when v.is_admin or v.is_owner then v.note else null end,
+    v.color, v.recurrence, v.recurrence_until,
+    case when v.is_admin or v.is_owner then v.description else null end,
+    v.status, v.created_at, v.room_name
+  from visible v
+  order by v.date, v.start_time;
+$function$;
+revoke execute on function public.crm_fetch_schedule_room_bookings() from public, anon;
+grant execute on function public.crm_fetch_schedule_room_bookings() to authenticated;
+
+create or replace function public.crm_trainer_can_mutate_room_booking(p_trainer_id text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.trainers t
+    where t.auth_user_id = auth.uid()
+      and p_trainer_id in (auth.uid()::text, t.id::text)
+      and t.is_active is true and t.archived_at is null and t.access_disabled_at is null
+  );
+$$;
+revoke execute on function public.crm_trainer_can_mutate_room_booking(text) from public, anon, authenticated;
+
+create or replace function public.crm_trainer_create_room_booking(p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_row public.room_bookings%rowtype;
+begin
+  if not public.crm_is_active_trainer_session() then raise exception 'Active trainer session required' using errcode='42501'; end if;
+  if coalesce(p_payload->>'eventType','') not in ('room_booking','individual_training') then raise exception 'Unsupported trainer booking type' using errcode='42501'; end if;
+  insert into public.room_bookings(
+    date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,
+    people_count,payment_method,event_type,note,color,recurrence,recurrence_until,
+    description,status,room_name
+  ) values (
+    (p_payload->>'date')::date,p_payload->>'startTime',p_payload->>'endTime',auth.uid()::text,
+    nullif(p_payload->>'trainerName',''),p_payload->>'title',coalesce(nullif(p_payload->>'type',''),'individual'),
+    nullif(p_payload->>'bookingType',''),nullif(p_payload->>'peopleCount','')::integer,
+    nullif(p_payload->>'paymentMethod',''),p_payload->>'eventType',nullif(p_payload->>'note',''),
+    nullif(p_payload->>'color',''),coalesce(nullif(p_payload->>'recurrence',''),'none'),
+    nullif(p_payload->>'recurrenceUntil','')::date,nullif(p_payload->>'description',''),
+    coalesce(nullif(p_payload->>'status',''),'active'),coalesce(nullif(p_payload->>'roomName',''),'Основна зала')
+  ) returning * into v_row;
+  return to_jsonb(v_row) - 'price';
+end $$;
+
+create or replace function public.crm_trainer_update_room_booking(p_id uuid, p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_old public.room_bookings%rowtype; v_row public.room_bookings%rowtype;
+begin
+  select * into v_old from public.room_bookings where id=p_id for update;
+  if v_old.id is null then raise exception 'Booking not found' using errcode='P0002'; end if;
+  if not public.crm_trainer_can_mutate_room_booking(v_old.trainer_id::text) then raise exception 'Cannot update this booking' using errcode='42501'; end if;
+  if coalesce(p_payload->>'eventType',v_old.event_type) not in ('room_booking','individual_training') then raise exception 'Unsupported trainer booking type' using errcode='42501'; end if;
+  update public.room_bookings set
+    date=coalesce(nullif(p_payload->>'date','')::date,v_old.date),
+    start_time=coalesce(p_payload->>'startTime',v_old.start_time), end_time=coalesce(p_payload->>'endTime',v_old.end_time),
+    trainer_id=v_old.trainer_id, trainer_name=coalesce(p_payload->>'trainerName',v_old.trainer_name),
+    title=coalesce(p_payload->>'title',v_old.title), type=coalesce(p_payload->>'type',v_old.type),
+    booking_type=case when p_payload ? 'bookingType' then nullif(p_payload->>'bookingType','') else v_old.booking_type end,
+    people_count=case when p_payload ? 'peopleCount' then nullif(p_payload->>'peopleCount','')::integer else v_old.people_count end,
+    payment_method=case when p_payload ? 'paymentMethod' then nullif(p_payload->>'paymentMethod','') else v_old.payment_method end,
+    event_type=coalesce(p_payload->>'eventType',v_old.event_type), note=case when p_payload ? 'note' then nullif(p_payload->>'note','') else v_old.note end,
+    color=case when p_payload ? 'color' then nullif(p_payload->>'color','') else v_old.color end,
+    recurrence=coalesce(p_payload->>'recurrence',v_old.recurrence),
+    recurrence_until=case when p_payload ? 'recurrenceUntil' then nullif(p_payload->>'recurrenceUntil','')::date else v_old.recurrence_until end,
+    description=case when p_payload ? 'description' then nullif(p_payload->>'description','') else v_old.description end,
+    status=coalesce(p_payload->>'status',v_old.status), room_name=coalesce(p_payload->>'roomName',v_old.room_name)
+  where id=p_id returning * into v_row;
+  return to_jsonb(v_row) - 'price';
+end $$;
+
+revoke execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb) from public, anon;
+grant execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb) to authenticated;
+
 commit;

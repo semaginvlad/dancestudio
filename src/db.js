@@ -1609,6 +1609,12 @@ export async function insertRoomBooking(payload) {
   return mapRoomBooking(data);
 }
 
+export async function insertTrainerRoomBooking(payload) {
+  const { data, error } = await supabase.rpc('crm_trainer_create_room_booking', { p_payload: payload });
+  if (error) throw error;
+  return mapRoomBooking(data || {});
+}
+
 export async function updateRoomBooking(id, payload) {
   const next = {};
   if (payload.date !== undefined) next.date = payload.date;
@@ -1633,6 +1639,14 @@ export async function updateRoomBooking(id, payload) {
   const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
   if (error) throw error;
   return mapRoomBooking(data);
+}
+
+export async function updateTrainerRoomBooking(id, payload) {
+  const safePayload = { ...payload };
+  delete safePayload.price;
+  const { data, error } = await supabase.rpc('crm_trainer_update_room_booking', { p_id: id, p_payload: safePayload });
+  if (error) throw error;
+  return mapRoomBooking(data || {});
 }
 
 const roomBookingRpcParams = (payload = {}) => ({

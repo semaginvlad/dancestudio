@@ -8,6 +8,7 @@ import { resolveBookingTypeForMutation } from "../src/studioRooms.js";
 const migrationUrl = new URL("../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql", import.meta.url);
 const sql = await readFile(migrationUrl, "utf8");
 const dbSource = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
+const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 const scheduleSource = await readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
 const scheduleBookingBlocksSql = await readFile(new URL("../supabase/migrations/20261002090000_schedule_booking_blocks.sql", import.meta.url), "utf8");
 const removeOccurrenceFunction = scheduleBookingBlocksSql.match(/create or replace function public\.crm_remove_room_booking_occurrence\(p_id uuid,p_occurrence_date date\)[\s\S]*?end \$\$;/i)?.[0];
@@ -44,7 +45,7 @@ async function database() {
       trainer_id text, trainer_name text, title text, type text, room_name text,
       event_type text, booking_type text, people_count integer, price integer,
       payment_method text, note text, color text, recurrence text default 'none',
-      recurrence_until date, description text, status text default 'active'
+      recurrence_until date, description text, status text default 'active', created_at timestamptz default now()
     );
     create table public.trainers(id uuid primary key, auth_user_id uuid, is_active boolean default true, archived_at timestamptz, access_disabled_at timestamptz);
     create table public.studio_rooms(
@@ -259,6 +260,43 @@ test("event-details cancellation preserves inactive booking type and price snaps
     assert.deepEqual((await db.query("select status,booking_type,price from room_bookings where id=$1", [original.id])).rows, [
       { status: "cancelled", booking_type: "individual_1_2", price: 250 },
     ]);
+  } finally { await db.close(); }
+});
+
+test("trainer create, read and update responses hide price while admin sees stored snapshot", async () => {
+  assert.match(appSource, /isAdmin \? await db\.insertRoomBooking\(safePayload\) : await db\.insertTrainerRoomBooking\(safePayload\)/);
+  assert.match(appSource, /isAdmin \? await db\.updateRoomBooking\(id, safePayload\) : await db\.updateTrainerRoomBooking\(id, safePayload\)/);
+  const trainerUpdateClient = dbSource.slice(dbSource.indexOf("export async function updateTrainerRoomBooking"), dbSource.indexOf("const roomBookingRpcParams"));
+  assert.match(trainerUpdateClient, /delete safePayload\.price/);
+  const db = await database();
+  try {
+    await db.exec(`
+      insert into trainers(id,auth_user_id) values ('30000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001');
+      alter table room_bookings enable row level security;
+      create policy room_bookings_admin_test on room_bookings for all to authenticated
+        using (crm_is_admin_session()) with check (crm_is_admin_session());
+      create policy room_bookings_trainer_insert_test on room_bookings for insert to authenticated
+        with check (trainer_id=auth.uid()::text);
+      create policy room_bookings_trainer_update_test on room_bookings for update to authenticated
+        using (trainer_id=auth.uid()::text) with check (trainer_id=auth.uid()::text);
+      grant select,insert,update on room_bookings to authenticated;
+      set app.test_authenticated='on'; set app.test_admin='off'; set role authenticated;
+    `);
+    const created = (await db.query(`select crm_trainer_create_room_booking(
+      '{"date":"2026-03-01","startTime":"10:00","endTime":"11:00","roomName":"Зал 2","eventType":"individual_training","bookingType":"individual_1_2","title":"Private"}'::jsonb
+    ) as booking`)).rows[0].booking;
+    assert.equal(Object.hasOwn(created, "price"), false);
+    assert.equal((await db.query("select price from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows[0].price, null);
+    assert.deepEqual((await db.query("select price from room_bookings")).rows, []);
+
+    const updated = (await db.query(`select crm_trainer_update_room_booking($1,
+      '{"title":"Updated","price":null,"eventType":"individual_training","bookingType":"individual_1_2"}'::jsonb
+    ) as booking`, [created.id])).rows[0].booking;
+    assert.equal(Object.hasOwn(updated, "price"), false);
+
+    await db.exec("reset role; set app.test_admin='on'; set role authenticated");
+    assert.equal((await db.query("select price from room_bookings where id=$1", [created.id])).rows[0].price, 250);
+    assert.equal((await db.query("select price from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows[0].price, 250);
   } finally { await db.close(); }
 });
 

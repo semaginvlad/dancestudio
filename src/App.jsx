@@ -2149,7 +2149,7 @@ export default function App() {
     if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
     const created = options.overrideBookingBlock
       ? await db.adminOverrideInsertRoomBooking(safePayload)
-      : await db.insertRoomBooking(safePayload);
+      : isAdmin ? await db.insertRoomBooking(safePayload) : await db.insertTrainerRoomBooking(safePayload);
     setRoomBookings((prev) => [...prev, created].sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)));
     return created;
   };
@@ -2184,7 +2184,7 @@ export default function App() {
     if (options.overrideBookingBlock && !isAdmin) throw new Error("Обхід закритих годин доступний лише адміністратору.");
     const updated = options.overrideBookingBlock
       ? await db.adminOverrideUpdateRoomBooking(id, safePayload)
-      : await db.updateRoomBooking(id, safePayload);
+      : isAdmin ? await db.updateRoomBooking(id, safePayload) : await db.updateTrainerRoomBooking(id, safePayload);
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
     return updated;
   };
