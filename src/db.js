@@ -1644,9 +1644,16 @@ export async function updateRoomBooking(id, payload) {
 export async function updateTrainerRoomBooking(id, payload) {
   const safePayload = { ...payload };
   delete safePayload.price;
+  delete safePayload.paymentMethod;
   const { data, error } = await supabase.rpc('crm_trainer_update_room_booking', { p_id: id, p_payload: safePayload });
   if (error) throw error;
   return mapRoomBooking(data || {});
+}
+
+export async function mutateTrainerRoomBooking(id, action) {
+  const { data, error } = await supabase.rpc('crm_trainer_mutate_room_booking', { p_id: id, p_action: action });
+  if (error) throw error;
+  return data;
 }
 
 const roomBookingRpcParams = (payload = {}) => ({

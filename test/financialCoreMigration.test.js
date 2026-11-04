@@ -265,9 +265,13 @@ test("event-details cancellation preserves inactive booking type and price snaps
 
 test("trainer create, read and update responses hide price while admin sees stored snapshot", async () => {
   assert.match(appSource, /isAdmin \? await db\.insertRoomBooking\(safePayload\) : await db\.insertTrainerRoomBooking\(safePayload\)/);
-  assert.match(appSource, /isAdmin \? await db\.updateRoomBooking\(id, safePayload\) : await db\.updateTrainerRoomBooking\(id, safePayload\)/);
+  assert.match(appSource, /isAdmin \? await db\.updateRoomBooking\(id, safePayload\)/);
+  assert.match(appSource, /await db\.updateTrainerRoomBooking\(id, safePayload\)/);
   const trainerUpdateClient = dbSource.slice(dbSource.indexOf("export async function updateTrainerRoomBooking"), dbSource.indexOf("const roomBookingRpcParams"));
   assert.match(trainerUpdateClient, /delete safePayload\.price/);
+  assert.match(trainerUpdateClient, /delete safePayload\.paymentMethod/);
+  assert.match(appSource, /db\.mutateTrainerRoomBooking\(id, "delete"\)/);
+  assert.match(appSource, /db\.mutateTrainerRoomBooking\(id, "cancel"\)/);
   const db = await database();
   try {
     await db.exec(`
@@ -286,17 +290,27 @@ test("trainer create, read and update responses hide price while admin sees stor
       '{"date":"2026-03-01","startTime":"10:00","endTime":"11:00","roomName":"Зал 2","eventType":"individual_training","bookingType":"individual_1_2","title":"Private"}'::jsonb
     ) as booking`)).rows[0].booking;
     assert.equal(Object.hasOwn(created, "price"), false);
-    assert.equal((await db.query("select price from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows[0].price, null);
+    assert.equal(Object.hasOwn(created, "payment_method"), false);
+    await db.exec("reset role; update room_bookings set payment_method='cash' where id='" + created.id + "'; set role authenticated");
+    assert.deepEqual((await db.query("select price,payment_method from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows, [{ price: null, payment_method: null }]);
     assert.deepEqual((await db.query("select price from room_bookings")).rows, []);
 
     const updated = (await db.query(`select crm_trainer_update_room_booking($1,
-      '{"title":"Updated","price":null,"eventType":"individual_training","bookingType":"individual_1_2"}'::jsonb
+      '{"title":"Updated","price":null,"paymentMethod":"none","eventType":"individual_training","bookingType":"individual_1_2"}'::jsonb
     ) as booking`, [created.id])).rows[0].booking;
     assert.equal(Object.hasOwn(updated, "price"), false);
+    assert.equal(Object.hasOwn(updated, "payment_method"), false);
+
+    const cancelled = (await db.query("select crm_trainer_mutate_room_booking($1,'cancel') as booking", [created.id])).rows[0].booking;
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(Object.hasOwn(cancelled, "price"), false);
+    assert.equal(Object.hasOwn(cancelled, "payment_method"), false);
+    await db.exec("reset role; insert into room_bookings(id,date,start_time,end_time,trainer_id,title,event_type,room_name) values ('40000000-0000-0000-0000-000000000001','2026-03-02','10:00','11:00','99999999-9999-9999-9999-999999999999','Other','room_booking','Зал 2'); set role authenticated");
+    await assert.rejects(db.query("select crm_trainer_mutate_room_booking('40000000-0000-0000-0000-000000000001','cancel')"), /another trainer/i);
 
     await db.exec("reset role; set app.test_admin='on'; set role authenticated");
-    assert.equal((await db.query("select price from room_bookings where id=$1", [created.id])).rows[0].price, 250);
-    assert.equal((await db.query("select price from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows[0].price, 250);
+    assert.deepEqual((await db.query("select status,price,payment_method from room_bookings where id=$1", [created.id])).rows, [{ status: "cancelled", price: 250, payment_method: "cash" }]);
+    assert.deepEqual((await db.query("select price,payment_method from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows, [{ price: 250, payment_method: "cash" }]);
   } finally { await db.close(); }
 });
 

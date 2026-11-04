@@ -324,18 +324,18 @@ begin
   if coalesce(p_payload->>'eventType','') not in ('room_booking','individual_training') then raise exception 'Unsupported trainer booking type' using errcode='42501'; end if;
   insert into public.room_bookings(
     date,start_time,end_time,trainer_id,trainer_name,title,type,booking_type,
-    people_count,payment_method,event_type,note,color,recurrence,recurrence_until,
+    people_count,event_type,note,color,recurrence,recurrence_until,
     description,status,room_name
   ) values (
     (p_payload->>'date')::date,p_payload->>'startTime',p_payload->>'endTime',auth.uid()::text,
     nullif(p_payload->>'trainerName',''),p_payload->>'title',coalesce(nullif(p_payload->>'type',''),'individual'),
     nullif(p_payload->>'bookingType',''),nullif(p_payload->>'peopleCount','')::integer,
-    nullif(p_payload->>'paymentMethod',''),p_payload->>'eventType',nullif(p_payload->>'note',''),
+    p_payload->>'eventType',nullif(p_payload->>'note',''),
     nullif(p_payload->>'color',''),coalesce(nullif(p_payload->>'recurrence',''),'none'),
     nullif(p_payload->>'recurrenceUntil','')::date,nullif(p_payload->>'description',''),
     coalesce(nullif(p_payload->>'status',''),'active'),coalesce(nullif(p_payload->>'roomName',''),'Основна зала')
   ) returning * into v_row;
-  return to_jsonb(v_row) - 'price';
+  return to_jsonb(v_row) - 'price' - 'payment_method';
 end $$;
 
 create or replace function public.crm_trainer_update_room_booking(p_id uuid, p_payload jsonb)
@@ -353,7 +353,6 @@ begin
     title=coalesce(p_payload->>'title',v_old.title), type=coalesce(p_payload->>'type',v_old.type),
     booking_type=case when p_payload ? 'bookingType' then nullif(p_payload->>'bookingType','') else v_old.booking_type end,
     people_count=case when p_payload ? 'peopleCount' then nullif(p_payload->>'peopleCount','')::integer else v_old.people_count end,
-    payment_method=case when p_payload ? 'paymentMethod' then nullif(p_payload->>'paymentMethod','') else v_old.payment_method end,
     event_type=coalesce(p_payload->>'eventType',v_old.event_type), note=case when p_payload ? 'note' then nullif(p_payload->>'note','') else v_old.note end,
     color=case when p_payload ? 'color' then nullif(p_payload->>'color','') else v_old.color end,
     recurrence=coalesce(p_payload->>'recurrence',v_old.recurrence),
@@ -361,10 +360,27 @@ begin
     description=case when p_payload ? 'description' then nullif(p_payload->>'description','') else v_old.description end,
     status=coalesce(p_payload->>'status',v_old.status), room_name=coalesce(p_payload->>'roomName',v_old.room_name)
   where id=p_id returning * into v_row;
-  return to_jsonb(v_row) - 'price';
+  return to_jsonb(v_row) - 'price' - 'payment_method';
 end $$;
 
-revoke execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb) from public, anon;
-grant execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb) to authenticated;
+create or replace function public.crm_trainer_mutate_room_booking(p_id uuid, p_action text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_old public.room_bookings%rowtype; v_row public.room_bookings%rowtype;
+begin
+  select * into v_old from public.room_bookings where id=p_id for update;
+  if v_old.id is null then raise exception 'Booking not found' using errcode='P0002'; end if;
+  if not public.crm_trainer_can_mutate_room_booking(v_old.trainer_id::text) then raise exception 'Cannot mutate another trainer booking' using errcode='42501'; end if;
+  if p_action = 'cancel' then
+    update public.room_bookings set status='cancelled' where id=p_id returning * into v_row;
+    return to_jsonb(v_row) - 'price' - 'payment_method';
+  elsif p_action = 'delete' then
+    delete from public.room_bookings where id=p_id;
+    return jsonb_build_object('id',p_id,'deleted',true);
+  end if;
+  raise exception 'Unsupported booking action' using errcode='22023';
+end $$;
+
+revoke execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb), public.crm_trainer_mutate_room_booking(uuid,text) from public, anon;
+grant execute on function public.crm_trainer_create_room_booking(jsonb), public.crm_trainer_update_room_booking(uuid,jsonb), public.crm_trainer_mutate_room_booking(uuid,text) to authenticated;
 
 commit;
