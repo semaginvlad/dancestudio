@@ -1982,12 +1982,16 @@ export async function setStudioRoomBookingTrainerExceptions(roomId, trainerIds =
   return Array.isArray(data) ? data.map(String) : [];
 }
 
+// Keep room-management RETURNING compatible with the intentionally narrow
+// authenticated column grant. Hourly rates are read only via the admin-aware RPC.
+const STUDIO_ROOM_MANAGEMENT_COLUMNS = 'id,name,is_active,booking_open,sort_order,created_at';
+
 export async function createStudioRoom(name) {
   const roomName = String(name || '').trim();
   if (!roomName) throw new Error('name is required');
   const { data: existing, error: existingError } = await supabase
     .from('studio_rooms')
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .ilike('name', roomName)
     .limit(1)
     .maybeSingle();
@@ -1998,7 +2002,7 @@ export async function createStudioRoom(name) {
       .from('studio_rooms')
       .update({ is_active: true, name: roomName })
       .eq('id', existing.id)
-      .select('*')
+      .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
       .single();
     if (error) throw error;
     return mapStudioRoom(data);
@@ -2007,7 +2011,7 @@ export async function createStudioRoom(name) {
   const { data, error } = await supabase
     .from('studio_rooms')
     .insert({ name: roomName, is_active: true })
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .single();
   if (error) throw error;
   return mapStudioRoom(data);
@@ -2023,7 +2027,7 @@ export async function updateStudioRoom(id, patch = {}) {
     .from('studio_rooms')
     .update(next)
     .eq('id', id)
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .single();
   if (error) throw error;
   return mapStudioRoom(data);

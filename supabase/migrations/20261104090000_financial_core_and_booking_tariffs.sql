@@ -229,6 +229,16 @@ begin
     return new;
   end if;
 
+  -- Splitting an existing recurring series is not a new sale. The protected
+  -- scheduling RPC supplies the original snapshots and a signed continuation
+  -- context; retain them even if the tariff has since become inactive.
+  if current_setting('crm.occurrence_removal_continuation', true) = 'on'
+     and public.crm_occurrence_removal_signature(
+       new.date, new.start_time, new.end_time, new.room_name, new.recurrence,
+       new.recurrence_until, new.status, new.trainer_id::text
+     ) = current_setting('crm.occurrence_removal_signature', true)
+  then return new; end if;
+
   if coalesce(new.event_type, '') not in ('room_booking', 'individual_training') then return new; end if;
 
   if new.event_type = 'individual_training' and new.booking_type is not null then

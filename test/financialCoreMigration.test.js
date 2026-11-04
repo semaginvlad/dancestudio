@@ -6,6 +6,9 @@ import { mergeTariffsIntoDrafts } from "../src/pricingDrafts.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql", import.meta.url);
 const sql = await readFile(migrationUrl, "utf8");
+const dbSource = await readFile(new URL("../src/db.js", import.meta.url), "utf8");
+const scheduleBookingBlocksSql = await readFile(new URL("../supabase/migrations/20261002090000_schedule_booking_blocks.sql", import.meta.url), "utf8");
+const removeOccurrenceFunction = scheduleBookingBlocksSql.match(/create or replace function public\.crm_remove_room_booking_occurrence\(p_id uuid,p_occurrence_date date\)[\s\S]*?end \$\$;/i)?.[0];
 
 async function database() {
   const db = new PGlite();
@@ -26,12 +29,22 @@ async function database() {
     grant execute on function auth.uid() to authenticated;
     create function public.crm_is_active_trainer_session() returns boolean language sql stable as $$ select auth.uid() is not null $$;
     create function public.crm_canonical_room_name(text) returns text language sql immutable as $$ select lower(btrim($1)) $$;
+    create function public.crm_occurrence_removal_signature(date,text,text,text,text,date,text,text) returns text language sql immutable as $$
+      select concat_ws('|',$1::text,$2,$3,lower(btrim($4)),$5,$6::text,$7,$8)
+    $$;
+    create function public.crm_schedule_booking_occurs_on(date,date,text) returns boolean language sql immutable as $$ select $2 >= $1 $$;
+    create function public.crm_schedule_booking_step_date(date,text,integer) returns date language sql immutable as $$
+      select case lower($2) when 'daily' then $1 + $3 when 'monthly' then ($1 + ($3 || ' month')::interval)::date else $1 + (7 * $3) end
+    $$;
     create table public.attendance(id uuid primary key);
     create table public.room_bookings(
-      id uuid primary key default gen_random_uuid(), start_time text, end_time text,
-      room_name text, event_type text, booking_type text, price integer
+      id uuid primary key default gen_random_uuid(), date date, start_time text, end_time text,
+      trainer_id text, trainer_name text, title text, type text, room_name text,
+      event_type text, booking_type text, people_count integer, price integer,
+      payment_method text, note text, color text, recurrence text default 'none',
+      recurrence_until date, description text, status text default 'active'
     );
-    create table public.trainers(id uuid primary key);
+    create table public.trainers(id uuid primary key, auth_user_id uuid, is_active boolean default true, archived_at timestamptz, access_disabled_at timestamptz);
     create table public.studio_rooms(
       id uuid primary key default gen_random_uuid(), name text, is_active boolean default true,
       booking_open boolean default true, sort_order integer default 0, created_at timestamptz default now()
@@ -44,6 +57,8 @@ async function database() {
     insert into studio_rooms(name,sort_order) values ('Зал 1',10),('Зал 2',20),('Зал 3',30);
   `);
   await db.exec(sql);
+  assert.ok(removeOccurrenceFunction, "occurrence removal RPC must be available to regression tests");
+  await db.exec(removeOccurrenceFunction);
   return db;
 }
 
@@ -113,6 +128,32 @@ test("trainer cannot read financial data or prices, while canonical admin can ma
   } finally { await db.close(); }
 });
 
+test("admin room create, update and reactivate use permitted columns while trainer response hides hourly rate", async () => {
+  const roomManagement = dbSource.slice(dbSource.indexOf("export async function createStudioRoom"), dbSource.indexOf("export async function updateStudioRoomHourlyRate"));
+  assert.doesNotMatch(roomManagement, /\.select\(['"]\*['"]\)/);
+  assert.match(roomManagement, /select\(STUDIO_ROOM_MANAGEMENT_COLUMNS\)/);
+
+  const db = await database();
+  try {
+    await db.exec(`
+      alter table studio_rooms enable row level security;
+      create policy studio_rooms_admin_test on studio_rooms for all to authenticated
+        using (crm_is_admin_session()) with check (crm_is_admin_session());
+      grant select(id,name,is_active,booking_open,sort_order,created_at), insert, update on studio_rooms to authenticated;
+      set app.test_authenticated='on'; set app.test_admin='on'; set role authenticated;
+    `);
+    const created = (await db.query("insert into studio_rooms(name,is_active) values ('Нова зала',true) returning id,name,is_active,booking_open,sort_order,created_at")).rows[0];
+    assert.equal(created.name, "Нова зала");
+    await db.query("update studio_rooms set name='Оновлена зала',is_active=false where id=$1 returning id,name,is_active,booking_open,sort_order,created_at", [created.id]);
+    const reactivated = (await db.query("update studio_rooms set is_active=true where id=$1 returning id,name,is_active,booking_open,sort_order,created_at", [created.id])).rows[0];
+    assert.equal(reactivated.is_active, true);
+
+    await db.exec("reset role; set app.test_admin='off'; set role authenticated");
+    assert.ok((await db.query("select hourly_rate_uah from crm_fetch_studio_rooms(false)")).rows.every((row) => row.hourly_rate_uah === null));
+    await assert.rejects(db.query("select hourly_rate_uah from studio_rooms"), /permission denied/i);
+  } finally { await db.close(); }
+});
+
 test("migration never trusts user_metadata and creates no booking financial automation", () => {
   assert.doesNotMatch(sql, /user_metadata/i);
   assert.doesNotMatch(sql, /insert into public\.financial_operations/i);
@@ -169,6 +210,27 @@ test("trainer edits preserve server price snapshot and inactive tariff is reject
     await assert.rejects(db.exec("insert into room_bookings(start_time,end_time,room_name,event_type,booking_type) values ('12:00','13:00','Зал 2','individual_training','individual_1_2')"), /inactive booking tariff/i);
     await db.exec("update room_bookings set start_time='10:15'");
     assert.equal((await db.query("select price from room_bookings")).rows[0].price, 250);
+  } finally { await db.close(); }
+});
+
+test("splitting a recurring series preserves inactive tariff and original price snapshots", async () => {
+  const db = await database();
+  try {
+    await db.exec("set app.test_authenticated='on'; set app.test_admin='on'");
+    const original = (await db.query(`
+      insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,price,recurrence,recurrence_until,status)
+      values ('2026-01-01','10:00','11:00','Зал 2','individual_training','individual_1_2',null,'weekly','2026-01-29','active')
+      returning id,price
+    `)).rows[0];
+    assert.equal(original.price, 250);
+    await db.exec("update room_booking_tariffs set is_active=false where code='individual_1_2'; update studio_rooms set hourly_rate_uah=900 where name='Зал 2'");
+
+    assert.equal((await db.query("select crm_remove_room_booking_occurrence($1,'2026-01-15') as removed", [original.id])).rows[0].removed, true);
+    assert.deepEqual((await db.query("select date::text,recurrence_until::text,booking_type,price from room_bookings order by date")).rows, [
+      { date: "2026-01-01", recurrence_until: "2026-01-08", booking_type: "individual_1_2", price: 250 },
+      { date: "2026-01-22", recurrence_until: "2026-01-29", booking_type: "individual_1_2", price: 250 },
+    ]);
+    await assert.rejects(db.exec("insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type) values ('2026-02-01','10:00','11:00','Зал 2','individual_training','individual_1_2')"), /inactive booking tariff/i);
   } finally { await db.close(); }
 });
 
