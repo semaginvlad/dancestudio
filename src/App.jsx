@@ -2130,15 +2130,16 @@ export default function App() {
       ? payload.eventType
       : "room_booking";
     const payloadTrainerId = payload?.trainerId || payload?.trainer_id || null;
-    return {
+    const safePayload = {
       ...payload,
       trainerId: isAssignedToCurrentTrainer(payloadTrainerId) ? payloadTrainerId : user?.id || null,
       eventType,
       bookingType: eventType === "individual_training" ? payload.bookingType || null : null,
       peopleCount: eventType === "individual_training" ? payload.peopleCount || null : null,
-      price: eventType === "individual_training" ? payload.price || null : null,
       paymentMethod: eventType === "individual_training" ? payload.paymentMethod || "none" : "none",
     };
+    delete safePayload.price;
+    return safePayload;
   };
 
   const addRoomBookingAction = async (payload, options = {}) => {

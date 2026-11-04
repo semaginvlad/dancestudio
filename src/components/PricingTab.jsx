@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { btnP, inputSt, theme } from "../shared/constants";
-import { mergeCatalogIntoPriceDrafts } from "../pricingDrafts";
+import { mergeCatalogIntoPriceDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
 
 export default function PricingTab({ prices, onSave, bookingTariffs = [], onSaveBookingTariff, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
   const [drafts, setDrafts] = useState({});
@@ -8,6 +8,7 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
   const [tariffDrafts, setTariffDrafts] = useState({});
+  const tariffDirtyCodesRef = useRef(new Set());
   const [trainerDrafts, setTrainerDrafts] = useState({});
 
   useEffect(() => {
@@ -15,7 +16,7 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
   }, [prices]);
 
   useEffect(() => {
-    setTariffDrafts(Object.fromEntries(bookingTariffs.map((row) => [row.code || row.id, { ...row }])))
+    setTariffDrafts((current) => mergeTariffsIntoDrafts(bookingTariffs, current, tariffDirtyCodesRef.current));
   }, [bookingTariffs]);
 
   useEffect(() => {
@@ -54,10 +55,12 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
       return;
     }
     setSaving(`tariff:${code}`);
+    tariffDirtyCodesRef.current.delete(code);
     try {
-      await onSaveBookingTariff(code, draft);
+      const saved = await onSaveBookingTariff(code, draft);
+      setTariffDrafts((current) => ({ ...current, [code]: { ...(saved || draft) } }));
       setMessage(`Тариф «${draft.label}» збережено.`);
-    } catch (error) { setMessage(error?.message || "Не вдалося зберегти тариф."); }
+    } catch (error) { tariffDirtyCodesRef.current.add(code); setMessage(error?.message || "Не вдалося зберегти тариф."); }
     finally { setSaving(""); }
   };
 
@@ -98,14 +101,14 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
       <div style={{ display: "grid", gap: 10 }}>
         {bookingTariffs.map((row) => { const code = row.code || row.id; const draft = tariffDrafts[code] || row; return (
           <div key={code} style={{ padding: 14, borderRadius: 16, border: `1px solid ${theme.border}`, background: theme.card, display: "grid", gap: 8 }}>
-            <input aria-label={`Назва тарифу ${code}`} style={inputSt} value={draft.label || ""} onChange={(event) => setTariffDrafts((current) => ({ ...current, [code]: { ...draft, label: event.target.value } }))} />
+            <input aria-label={`Назва тарифу ${code}`} style={inputSt} value={draft.label || ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, label: event.target.value } })); }} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(90px,1fr))", gap: 8 }}>
-              <input aria-label="Ціна" type="number" min="0" step="1" style={inputSt} value={draft.price ?? ""} onChange={(event) => setTariffDrafts((current) => ({ ...current, [code]: { ...draft, price: Number(event.target.value) } }))} />
-              <input aria-label="Мінімум людей" type="number" min="1" style={inputSt} value={draft.peopleMin ?? ""} onChange={(event) => setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMin: event.target.value === "" ? null : Number(event.target.value) } }))} />
-              <input aria-label="Максимум людей" type="number" min="1" style={inputSt} value={draft.peopleMax ?? ""} onChange={(event) => setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMax: event.target.value === "" ? null : Number(event.target.value) } }))} />
+              <input aria-label="Ціна" type="number" min="0" step="1" style={inputSt} value={draft.price ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, price: Number(event.target.value) } })); }} />
+              <input aria-label="Мінімум людей" type="number" min="1" style={inputSt} value={draft.peopleMin ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMin: event.target.value === "" ? null : Number(event.target.value) } })); }} />
+              <input aria-label="Максимум людей" type="number" min="1" style={inputSt} value={draft.peopleMax ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMax: event.target.value === "" ? null : Number(event.target.value) } })); }} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <label><input type="checkbox" checked={draft.isActive !== false} onChange={(event) => setTariffDrafts((current) => ({ ...current, [code]: { ...draft, isActive: event.target.checked } }))} /> Активний</label>
+              <label><input type="checkbox" checked={draft.isActive !== false} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, isActive: event.target.checked } })); }} /> Активний</label>
               <button type="button" style={btnP} disabled={saving === `tariff:${code}`} onClick={() => saveTariff(code)}>Зберегти</button>
             </div>
           </div>

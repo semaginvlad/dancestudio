@@ -1566,6 +1566,7 @@ const mapStudioRoom = (row) => ({
   isActive: row.is_active !== false,
   bookingOpen: row.booking_open !== false,
   allowedTrainerIds: Array.isArray(row.allowed_trainer_ids) ? row.allowed_trainer_ids.map(String) : [],
+  hourlyRateUah: row.hourly_rate_uah == null ? null : Number(row.hourly_rate_uah),
   sortOrder: Number(row.sort_order || 0),
   createdAt: row.created_at || null,
 });
@@ -2026,6 +2027,17 @@ export async function updateStudioRoom(id, patch = {}) {
     .single();
   if (error) throw error;
   return mapStudioRoom(data);
+}
+
+export async function updateStudioRoomHourlyRate(id, hourlyRateUah) {
+  const rate = Number(hourlyRateUah);
+  if (!Number.isInteger(rate) || rate < 0) throw new Error('Погодинний тариф має бути цілим невід’ємним числом');
+  const { data, error } = await supabase.rpc('crm_admin_update_studio_room_hourly_rate', {
+    p_room_id: id,
+    p_hourly_rate_uah: rate,
+  });
+  if (error) throw error;
+  return Number(data);
 }
 
 

@@ -161,10 +161,98 @@ language sql stable security definer set search_path = public as $$
     case when public.crm_is_admin_session() then t.price_uah else null end,
     t.people_min, t.people_max, t.is_active, t.sort_order
   from public.room_booking_tariffs t
-  where public.crm_is_admin_session() or t.is_active
   order by t.sort_order;
 $$;
 revoke execute on function public.crm_fetch_room_booking_tariffs() from public, anon;
 grant execute on function public.crm_fetch_room_booking_tariffs() to authenticated;
+
+-- Hourly room rates are configuration of a room record, never a name-based
+-- rule. Existing installations are initialized by stable room ordering: the
+-- first room is 500 UAH/hour and the next rooms are 250 UAH/hour.
+alter table public.studio_rooms
+  add column hourly_rate_uah integer not null default 250 check (hourly_rate_uah >= 0);
+
+with ordered_rooms as (
+  select id, row_number() over (order by sort_order, created_at, id) as position
+  from public.studio_rooms
+  where is_active is true
+)
+update public.studio_rooms room
+set hourly_rate_uah = case when ordered.position = 1 then 500 else 250 end
+from ordered_rooms ordered
+where room.id = ordered.id and ordered.position <= 3;
+
+create or replace function public.crm_admin_update_studio_room_hourly_rate(p_room_id uuid, p_hourly_rate_uah integer)
+returns integer language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_is_admin_session() then raise exception 'Only an administrator may update room hourly rates' using errcode = '42501'; end if;
+  if p_hourly_rate_uah is null or p_hourly_rate_uah < 0 then raise exception 'Hourly rate must be non-negative' using errcode = '22023'; end if;
+  update public.studio_rooms set hourly_rate_uah = p_hourly_rate_uah where id = p_room_id;
+  if not found then raise exception 'Studio room not found' using errcode = 'P0002'; end if;
+  return p_hourly_rate_uah;
+end $$;
+revoke execute on function public.crm_admin_update_studio_room_hourly_rate(uuid, integer) from public, anon;
+grant execute on function public.crm_admin_update_studio_room_hourly_rate(uuid, integer) to authenticated;
+
+-- Replace the existing room RPC shape so only admins receive the hourly rate.
+drop function if exists public.crm_fetch_studio_rooms(boolean);
+create or replace function public.crm_fetch_studio_rooms(p_include_inactive boolean default false)
+returns table (
+  id uuid, name text, is_active boolean, booking_open boolean, sort_order integer,
+  created_at timestamptz, allowed_trainer_ids uuid[], hourly_rate_uah integer
+)
+language sql stable security definer set search_path = public
+as $function$
+  select r.id, r.name, r.is_active, r.booking_open, r.sort_order, r.created_at,
+    coalesce((select array_agg(e.trainer_id order by e.trainer_id)
+      from public.studio_room_booking_trainer_exceptions e where e.room_id = r.id), '{}'),
+    case when public.crm_is_admin_session() then r.hourly_rate_uah else null end
+  from public.studio_rooms r
+  where (public.crm_is_admin_session() or public.crm_is_active_trainer_session())
+    and (r.is_active or (coalesce(p_include_inactive, false) and public.crm_is_admin_session()))
+  order by r.sort_order, r.created_at, r.name;
+$function$;
+revoke execute on function public.crm_fetch_studio_rooms(boolean) from public, anon;
+grant execute on function public.crm_fetch_studio_rooms(boolean) to authenticated;
+
+create or replace function public.crm_snapshot_room_booking_hourly_price()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_rate integer;
+  v_minutes integer;
+  v_type_active boolean;
+begin
+  if tg_op = 'UPDATE' then
+    -- A trainer may edit scheduling fields, but the original server snapshot is
+    -- immutable to that actor even though it is not present in the UI payload.
+    if not public.crm_is_admin_session() then new.price := old.price; end if;
+    return new;
+  end if;
+
+  if coalesce(new.event_type, '') not in ('room_booking', 'individual_training') then return new; end if;
+
+  if new.event_type = 'individual_training' and new.booking_type is not null then
+    select is_active into v_type_active from public.room_booking_tariffs where code = new.booking_type;
+    if coalesce(v_type_active, false) is not true then
+      raise exception 'Inactive booking tariff cannot be used for a new booking' using errcode = '23514';
+    end if;
+  end if;
+
+  select hourly_rate_uah into v_rate
+  from public.studio_rooms
+  where public.crm_canonical_room_name(name) = public.crm_canonical_room_name(new.room_name)
+    and is_active is true;
+  if v_rate is null then raise exception 'Active room hourly rate is not configured' using errcode = '23514'; end if;
+
+  v_minutes := extract(epoch from (new.end_time::time - new.start_time::time))::integer / 60;
+  if v_minutes <= 0 then raise exception 'Booking duration must be positive' using errcode = '23514'; end if;
+  new.price := round(v_rate::numeric * v_minutes / 60)::integer;
+  return new;
+end $$;
+
+drop trigger if exists room_bookings_snapshot_hourly_price on public.room_bookings;
+create trigger room_bookings_snapshot_hourly_price
+before insert or update of price on public.room_bookings
+for each row execute function public.crm_snapshot_room_booking_hourly_price();
 
 commit;

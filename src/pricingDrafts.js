@@ -5,3 +5,10 @@ export function mergeCatalogIntoPriceDrafts(prices = [], drafts = {}, dirtyCodes
     return [code, keepDraft ? drafts[code] : String(row.priceUah)];
   }));
 }
+
+export function mergeTariffsIntoDrafts(tariffs = [], drafts = {}, dirtyCodes = new Set()) {
+  return Object.fromEntries(tariffs.map((row) => {
+    const code = row.code || row.id;
+    return [code, dirtyCodes.has(code) && drafts[code] ? drafts[code] : { ...row }];
+  }));
+}
