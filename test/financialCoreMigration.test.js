@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { mergeTariffsIntoDrafts } from "../src/pricingDrafts.js";
 import { resolveBookingTypeForMutation } from "../src/studioRooms.js";
+import { mapRoomBooking } from "../src/roomBookings.js";
 
 const migrationUrl = new URL("../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql", import.meta.url);
 const sql = await readFile(migrationUrl, "utf8");
@@ -312,6 +313,27 @@ test("trainer create, read and update responses hide price while admin sees stor
     assert.deepEqual((await db.query("select status,price,payment_method from room_bookings where id=$1", [created.id])).rows, [{ status: "cancelled", price: 250, payment_method: "cash" }]);
     assert.deepEqual((await db.query("select price,payment_method from crm_fetch_schedule_room_bookings() where id=$1", [created.id])).rows, [{ price: 250, payment_method: "cash" }]);
   } finally { await db.close(); }
+});
+
+test("trainer cancellation maps RPC row to canonical booking and remains visible without reload", () => {
+  const current = [{ id: "booking-1", startTime: "10:00", status: "active" }];
+  const rpcRow = {
+    id: "booking-1", date: "2026-03-01", start_time: "10:00", end_time: "11:30",
+    trainer_id: "trainer-1", trainer_name: "Trainer", title: "Private",
+    event_type: "individual_training", booking_type: "individual_1_2",
+    room_name: "Зал 2", status: "cancelled",
+  };
+  const cancelled = mapRoomBooking(rpcRow);
+  const next = current.map((booking) => booking.id === cancelled.id ? cancelled : booking);
+  assert.deepEqual(next[0], {
+    id: "booking-1", date: "2026-03-01", startTime: "10:00", endTime: "11:30",
+    trainerId: "trainer-1", trainerName: "Trainer", title: "Private", type: "individual",
+    bookingType: "individual_1_2", peopleCount: null, price: null, paymentMethod: null,
+    eventType: "individual_training", note: "", color: null, recurrence: "none",
+    recurrenceUntil: null, description: "", status: "cancelled", roomName: "Зал 2", createdAt: null,
+  });
+  const mutationClient = dbSource.slice(dbSource.indexOf("export async function mutateTrainerRoomBooking"), dbSource.indexOf("const roomBookingRpcParams"));
+  assert.match(mutationClient, /action === 'cancel' \? mapRoomBooking\(data \|\| \{\}\) : data/);
 });
 
 test("saving one tariff preserves dirty drafts in other rows", () => {

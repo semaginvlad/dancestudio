@@ -4,6 +4,7 @@ import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageC
 import { resolveStudioRoomsResponse } from './studioRooms'
 import { resolveStudentGroupsResponse } from './studentGroups'
 import { normalizeGroupArchiveAliases } from './groupArchive'
+import { mapRoomBooking } from './roomBookings'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -1536,30 +1537,6 @@ export async function restoreCancelledTraining(cancelledId) {
 }
 
 // ─── ROOM BOOKINGS ───
-const mapRoomBooking = (b) => ({
-  id: b.id,
-  date: b.date,
-  startTime: b.start_time,
-  endTime: b.end_time,
-  trainerId: b.trainer_id || null,
-  trainerName: b.trainer_name || null,
-  title: b.title || "",
-  type: b.type || "individual",
-  bookingType: b.booking_type || b.type || "individual",
-  peopleCount: Number(b.people_count || 0) || null,
-  price: Number(b.price || 0) || null,
-  paymentMethod: b.payment_method || null,
-  eventType: b.event_type || null,
-  note: b.note || "",
-  color: b.color || null,
-  recurrence: b.recurrence || "none",
-  recurrenceUntil: b.recurrence_until || null,
-  description: b.description || "",
-  status: b.status || "active",
-  roomName: b.room_name || b.room || b.location || b.hall || null,
-  createdAt: b.created_at || null,
-});
-
 const mapStudioRoom = (row) => ({
   id: row.id,
   name: row.name,
@@ -1653,7 +1630,7 @@ export async function updateTrainerRoomBooking(id, payload) {
 export async function mutateTrainerRoomBooking(id, action) {
   const { data, error } = await supabase.rpc('crm_trainer_mutate_room_booking', { p_id: id, p_action: action });
   if (error) throw error;
-  return data;
+  return action === 'cancel' ? mapRoomBooking(data || {}) : data;
 }
 
 const roomBookingRpcParams = (payload = {}) => ({
