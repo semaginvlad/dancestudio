@@ -142,10 +142,106 @@ test('recurring occurrences get separate operations and partial removal affects 
   } finally { await db.close(); }
 });
 
+test('finite weekly series stops at its inclusive end and never emits the next occurrence', async () => {
+  const db = await database();
+  try {
+    await insertIndividual(db, ",'weekly','2026-11-20'");
+    assert.deepEqual((await db.query('select occurrence_date::text from financial_operations order by occurrence_date')).rows, [
+      { occurrence_date: '2026-11-10' }, { occurrence_date: '2026-11-17' },
+    ]);
+    assert.equal((await db.query("select count(*)::int count from financial_operations where occurrence_date > '2026-11-20'")).rows[0].count, 0);
+  } finally { await db.close(); }
+});
+
+test('open daily series keeps a rolling 30-day horizon, extends safely, and never duplicates an active occurrence', async () => {
+  const db = await database();
+  try {
+    const booking = (await db.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,people_count,title,trainer_id,trainer_name,status,recurrence,recurrence_until)
+      values (current_date,'10:00','11:00','Зал 2','individual_training','individual_1_2',1,'Open','20000000-0000-0000-0000-000000000001','Костя','active','daily',null) returning id`)).rows[0];
+    assert.deepEqual((await db.query(`select count(*)::int count,min(occurrence_date-current_date)::int min_day,max(occurrence_date-current_date)::int max_day
+      from financial_operations where status in ('pending','posted')`)).rows[0], { count: 30, min_day: 0, max_day: 29 });
+
+    await db.query('select crm_reconcile_individual_training_income($1,current_date)', [booking.id]);
+    await db.query('select crm_reconcile_individual_training_income($1,current_date)', [booking.id]);
+    assert.equal((await db.query("select count(*)::int count from financial_operations where status in ('pending','posted')")).rows[0].count, 30);
+
+    await db.query('select crm_reconcile_individual_training_income($1,current_date+15)', [booking.id]);
+    await db.query('select crm_reconcile_individual_training_income($1,current_date+15)', [booking.id]);
+    assert.deepEqual((await db.query(`select count(*)::int count,max(occurrence_date-current_date)::int max_day
+      from financial_operations where status in ('pending','posted')`)).rows[0], { count: 45, max_day: 44 });
+    assert.equal((await db.query(`select count(*)::int count from (
+      select room_booking_series_id,occurrence_date from financial_operations where status in ('pending','posted')
+      group by room_booking_series_id,occurrence_date having count(*)>1
+    ) duplicates`)).rows[0].count, 0);
+  } finally { await db.close(); }
+});
+
+test('admin pending-list load reconciles an open series back to its 30-day horizon', async () => {
+  const db = await database();
+  try {
+    await db.exec(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status,recurrence)
+      values (current_date,'10:00','11:00','Зал 2','individual_training','individual_1_2','Open fetch','20000000-0000-0000-0000-000000000001','active','daily');
+      update financial_operations set status='voided' where occurrence_date=current_date+29; set app.test_admin='on';`);
+    await db.query('select * from crm_fetch_pending_individual_income()');
+    assert.equal((await db.query("select count(*)::int count from financial_operations where status in ('pending','posted')")).rows[0].count, 30);
+    assert.equal((await db.query("select count(*)::int count from financial_operations where occurrence_date=current_date+29 and status='pending'")).rows[0].count, 1);
+  } finally { await db.close(); }
+});
+
+test('delete cancels financially linked bookings, voids pending, preserves posted, and still physically deletes reserve', async () => {
+  const db = await database();
+  try {
+    const pending = (await insertIndividual(db)).rows[0];
+    await db.exec("set app.test_admin='on'");
+    const pendingDelete = (await db.query('select crm_admin_delete_room_booking($1) result', [pending.id])).rows[0].result;
+    assert.equal(pendingDelete.cancelled, true);
+    assert.equal((await db.query('select status from room_bookings where id=$1', [pending.id])).rows[0].status, 'cancelled');
+    assert.equal((await db.query('select status from financial_operations where room_booking_id=$1', [pending.id])).rows[0].status, 'voided');
+
+    await db.exec("set app.test_admin='off'");
+    const posted = (await db.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status)
+      values ('2026-11-15','10:00','11:00','Зал 2','individual_training','individual_1_2','Posted delete','20000000-0000-0000-0000-000000000001','active') returning id`)).rows[0];
+    await db.exec("set app.test_admin='on'");
+    await db.query("select crm_admin_confirm_individual_income((select id from financial_operations where room_booking_id=$1),250,'card','2026-11-05')", [posted.id]);
+    await db.query('select crm_admin_delete_room_booking($1)', [posted.id]);
+    assert.equal((await db.query('select status from room_bookings where id=$1', [posted.id])).rows[0].status, 'cancelled');
+    assert.equal((await db.query('select status from financial_operations where room_booking_id=$1', [posted.id])).rows[0].status, 'posted');
+
+    const reserve = (await db.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,title,trainer_id,status)
+      values ('2026-11-16','10:00','11:00','Зал 2','room_booking','Reserve delete','20000000-0000-0000-0000-000000000001','active') returning id`)).rows[0];
+    const reserveDelete = (await db.query('select crm_admin_delete_room_booking($1) result', [reserve.id])).rows[0].result;
+    assert.equal(reserveDelete.deleted, true);
+    assert.equal((await db.query('select count(*)::int count from room_bookings where id=$1', [reserve.id])).rows[0].count, 0);
+
+    await db.exec("set app.test_admin='off'");
+    const trainerOwned = (await db.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status)
+      values ('2026-11-18','10:00','11:00','Зал 2','individual_training','individual_1_2','Trainer delete','20000000-0000-0000-0000-000000000001','active') returning id`)).rows[0];
+    const trainerDelete = (await db.query("select crm_trainer_mutate_room_booking($1,'delete') result", [trainerOwned.id])).rows[0].result;
+    assert.equal(trainerDelete.cancelled, true);
+    assert.equal(Object.hasOwn(trainerDelete, 'price'), false);
+    assert.equal((await db.query('select status from room_bookings where id=$1', [trainerOwned.id])).rows[0].status, 'cancelled');
+  } finally { await db.close(); }
+});
+
+test('partial recurring cancellation preserves a posted target and leaves other occurrences pending', async () => {
+  const db = await database();
+  try {
+    const series = (await insertIndividual(db, ",'weekly','2026-11-24'")).rows[0];
+    await db.exec("set app.test_admin='on'");
+    await db.query("select crm_admin_confirm_individual_income((select id from financial_operations where occurrence_date='2026-11-17'),250,'cash','2026-11-05')");
+    await db.query("select crm_remove_room_booking_occurrence($1,'2026-11-17')", [series.id]);
+    assert.deepEqual((await db.query("select occurrence_date::text,status from financial_operations where status in ('pending','posted') order by occurrence_date")).rows, [
+      { occurrence_date: '2026-11-10', status: 'pending' }, { occurrence_date: '2026-11-17', status: 'posted' }, { occurrence_date: '2026-11-24', status: 'pending' },
+    ]);
+  } finally { await db.close(); }
+});
+
 test('client confirmation defaults to today and validates only cash/card with editable amount', () => {
   assert.deepEqual(buildIndividualIncomeConfirmation({ amountUah: 250 }, '2026-11-05'), { amountUah: '250', paymentMethod: 'cash', operationDate: '2026-11-05' });
   assert.equal(isValidIndividualIncomeConfirmation({ amountUah: '300.50', paymentMethod: 'card', operationDate: '2026-11-06' }), true);
   assert.equal(isValidIndividualIncomeConfirmation({ amountUah: '250', paymentMethod: 'transfer', operationDate: '2026-11-06' }), false);
   assert.match(dbSource, /delete safePayload\.price;[\s\S]*delete safePayload\.paymentMethod/);
+  assert.match(dbSource, /crm_admin_delete_room_booking/);
+  assert.match(appSource, /if \(result\?\.cancelled\)[\s\S]*status: "cancelled"/);
   assert.match(appSource, /<PendingIndividualIncome/);
 });

@@ -1691,6 +1691,7 @@ export async function updateTrainerRoomBooking(id, payload) {
 export async function mutateTrainerRoomBooking(id, action) {
   const { data, error } = await supabase.rpc('crm_trainer_mutate_room_booking', { p_id: id, p_action: action });
   if (error) throw error;
+  if (action === 'delete' && data?.cancelled) return { ...data, booking: mapRoomBooking(data) };
   return action === 'cancel' ? mapRoomBooking(data || {}) : data;
 }
 
@@ -1743,8 +1744,9 @@ export async function removeRoomBookingOccurrence(id, occurrenceDate) {
 }
 
 export async function deleteRoomBooking(id) {
-  const { error } = await supabase.from('room_bookings').delete().eq('id', id);
+  const { data, error } = await supabase.rpc('crm_admin_delete_room_booking', { p_id: id });
   if (error) throw error;
+  return data?.cancelled ? { ...data, booking: mapRoomBooking(data) } : data;
 }
 
 const mapScheduleBookingBlock = (row = {}) => ({

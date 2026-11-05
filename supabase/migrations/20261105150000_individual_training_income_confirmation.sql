@@ -34,26 +34,58 @@ create index financial_operations_pending_individual_idx
   where status = 'pending' and category_code = 'individual_training';
 
 create or replace function public.crm_individual_training_occurrence_dates(
-  p_start date, p_recurrence text, p_until date
+  p_start date, p_recurrence text, p_until date, p_as_of date default current_date
 )
 returns setof date language plpgsql stable security definer set search_path = public as $$
 declare
-  v_date date := p_start;
-  v_limit date := coalesce(p_until, p_start);
-  v_count integer := 0;
+  v_mode text := lower(coalesce(p_recurrence, 'none'));
+  v_window_start date;
+  v_limit date;
+  v_date date;
+  v_month date;
+  v_candidate date;
 begin
   if p_start is null then return; end if;
-  loop
-    return next v_date;
-    exit when v_date >= v_limit or lower(coalesce(p_recurrence, 'none')) = 'none';
-    v_date := public.crm_schedule_booking_step_date(v_date, p_recurrence, 1);
-    v_count := v_count + 1;
-    if v_date is null or v_count > 730 then
-      raise exception 'Individual training recurrence is too large' using errcode = '22023';
-    end if;
+  if v_mode = 'none' then
+    if p_until is null or p_start <= p_until then return next p_start; end if;
+    return;
+  end if;
+  if v_mode not in ('daily', 'weekly', 'monthly') then return; end if;
+
+  -- Finite series always use their exact inclusive bounds. Open-ended series
+  -- use a rolling 30-calendar-day window: today through today + 29 days.
+  v_window_start := case when p_until is null then greatest(p_start, p_as_of) else p_start end;
+  v_limit := case when p_until is null then p_as_of + 29 else p_until end;
+  if v_window_start > v_limit then return; end if;
+
+  if v_mode = 'daily' then
+    for v_date in select day::date from generate_series(v_window_start, v_limit, interval '1 day') day loop
+      return next v_date;
+    end loop;
+    return;
+  end if;
+
+  if v_mode = 'weekly' then
+    v_date := p_start + (greatest(0, ceil((v_window_start - p_start) / 7.0)::integer) * 7);
+    while v_date <= v_limit loop
+      return next v_date;
+      v_date := v_date + 7;
+    end loop;
+    return;
+  end if;
+
+  -- Monthly recurrence keeps the original day-of-month and skips months where
+  -- that day does not exist, matching the existing schedule occurrence model.
+  v_month := date_trunc('month', v_window_start)::date;
+  while v_month <= date_trunc('month', v_limit)::date loop
+    v_candidate := (v_month + (extract(day from p_start)::integer - 1))::date;
+    if extract(day from v_candidate) = extract(day from p_start)
+       and v_candidate >= v_window_start and v_candidate <= v_limit
+    then return next v_candidate; end if;
+    v_month := (v_month + interval '1 month')::date;
   end loop;
 end $$;
-revoke execute on function public.crm_individual_training_occurrence_dates(date,text,date) from public, anon, authenticated;
+revoke execute on function public.crm_individual_training_occurrence_dates(date,text,date,date) from public, anon, authenticated;
 
 create or replace function public.crm_individual_income_trainer_enabled(p_trainer_id text)
 returns boolean language sql stable security definer set search_path = public as $$
@@ -70,7 +102,9 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 revoke execute on function public.crm_individual_income_trainer_enabled(text) from public, anon, authenticated;
 
-create or replace function public.crm_reconcile_individual_training_income(p_booking_id uuid)
+create or replace function public.crm_reconcile_individual_training_income(
+  p_booking_id uuid, p_as_of date default current_date
+)
 returns void language plpgsql security definer set search_path = public as $$
 declare
   v_booking public.room_bookings%rowtype;
@@ -93,13 +127,14 @@ begin
     and not exists (
       select 1
       from public.room_bookings segment
-      cross join lateral public.crm_individual_training_occurrence_dates(
-        segment.date, segment.recurrence, segment.recurrence_until
-      ) occurrence(day)
       where segment.financial_series_id = v_booking.financial_series_id
         and segment.event_type = 'individual_training'
         and segment.status is distinct from 'cancelled'
-        and occurrence.day = operation.occurrence_date
+        and operation.occurrence_date >= segment.date
+        and (segment.recurrence_until is null or operation.occurrence_date <= segment.recurrence_until)
+        and public.crm_schedule_booking_occurs_on(
+          segment.date, operation.occurrence_date, segment.recurrence
+        )
     );
 
   if v_booking.event_type is distinct from 'individual_training'
@@ -118,7 +153,7 @@ begin
 
   for v_date in
     select day from public.crm_individual_training_occurrence_dates(
-      v_booking.date, v_booking.recurrence, v_booking.recurrence_until
+      v_booking.date, v_booking.recurrence, v_booking.recurrence_until, p_as_of
     ) occurrence(day)
   loop
     select operation.id into v_existing_id
@@ -160,7 +195,7 @@ begin
     end if;
   end loop;
 end $$;
-revoke execute on function public.crm_reconcile_individual_training_income(uuid) from public, anon, authenticated;
+revoke execute on function public.crm_reconcile_individual_training_income(uuid,date) from public, anon, authenticated;
 
 create or replace function public.crm_sync_individual_training_income()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -173,14 +208,15 @@ begin
       and not exists (
         select 1
         from public.room_bookings segment
-        cross join lateral public.crm_individual_training_occurrence_dates(
-          segment.date, segment.recurrence, segment.recurrence_until
-        ) occurrence(day)
         where segment.financial_series_id = old.financial_series_id
           and segment.id <> old.id
           and segment.event_type = 'individual_training'
           and segment.status is distinct from 'cancelled'
-          and occurrence.day = financial_operations.occurrence_date
+          and financial_operations.occurrence_date >= segment.date
+          and (segment.recurrence_until is null or financial_operations.occurrence_date <= segment.recurrence_until)
+          and public.crm_schedule_booking_occurs_on(
+            segment.date, financial_operations.occurrence_date, segment.recurrence
+          )
       );
     return old;
   end if;
@@ -192,6 +228,23 @@ create trigger room_bookings_sync_individual_income
 after insert or update of date,start_time,end_time,trainer_id,trainer_name,title,
   booking_type,people_count,price,event_type,recurrence,recurrence_until,status,room_name
 on public.room_bookings for each row execute function public.crm_sync_individual_training_income();
+
+create or replace function public.crm_preserve_financial_room_booking_delete()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if old.event_type = 'individual_training' and exists (
+    select 1 from public.financial_operations operation
+    where operation.room_booking_id = old.id
+  ) then
+    update public.room_bookings set status = 'cancelled' where id = old.id;
+    return null;
+  end if;
+  return old;
+end $$;
+
+create trigger room_bookings_preserve_financial_delete
+before delete on public.room_bookings for each row
+execute function public.crm_preserve_financial_room_booking_delete();
 
 do $reconcile_existing$
 declare v_booking_id uuid;
@@ -255,17 +308,69 @@ begin
   return true;
 end $$;
 
+-- Keep the existing trainer delete API, but turn deletion into cancellation
+-- when the row is already part of the financial audit trail.
+create or replace function public.crm_trainer_mutate_room_booking(p_id uuid, p_action text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_old public.room_bookings%rowtype; v_row public.room_bookings%rowtype;
+begin
+  select * into v_old from public.room_bookings where id=p_id for update;
+  if v_old.id is null then raise exception 'Booking not found' using errcode='P0002'; end if;
+  if not public.crm_trainer_can_mutate_room_booking(v_old.trainer_id::text) then raise exception 'Cannot mutate another trainer booking' using errcode='42501'; end if;
+  if p_action = 'cancel' then
+    update public.room_bookings set status='cancelled' where id=p_id returning * into v_row;
+    return (to_jsonb(v_row) - 'price' - 'payment_method') || jsonb_build_object('deleted',false,'cancelled',true);
+  elsif p_action = 'delete' then
+    if exists(select 1 from public.financial_operations operation where operation.room_booking_id=p_id) then
+      update public.room_bookings set status='cancelled' where id=p_id returning * into v_row;
+      return (to_jsonb(v_row) - 'price' - 'payment_method') || jsonb_build_object('deleted',false,'cancelled',true);
+    end if;
+    delete from public.room_bookings where id=p_id;
+    return jsonb_build_object('id',p_id,'deleted',true,'cancelled',false);
+  end if;
+  raise exception 'Unsupported booking action' using errcode='22023';
+end $$;
+
+create or replace function public.crm_admin_delete_room_booking(p_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_old public.room_bookings%rowtype; v_row public.room_bookings%rowtype;
+begin
+  if not public.crm_is_admin_session() then raise exception 'Only an administrator may delete this booking' using errcode='42501'; end if;
+  select * into v_old from public.room_bookings where id=p_id for update;
+  if v_old.id is null then raise exception 'Booking not found' using errcode='P0002'; end if;
+  if v_old.event_type='individual_training' and exists(
+    select 1 from public.financial_operations operation where operation.room_booking_id=p_id
+  ) then
+    update public.room_bookings set status='cancelled' where id=p_id returning * into v_row;
+    return to_jsonb(v_row) || jsonb_build_object('deleted',false,'cancelled',true);
+  end if;
+  delete from public.room_bookings where id=p_id;
+  return jsonb_build_object('id',p_id,'deleted',true,'cancelled',false);
+end $$;
+revoke execute on function public.crm_admin_delete_room_booking(uuid) from public, anon;
+grant execute on function public.crm_admin_delete_room_booking(uuid) to authenticated;
+
 create or replace function public.crm_fetch_pending_individual_income()
 returns table(
   id uuid, title text, trainer_name text, occurrence_date date,
   start_time text, end_time text, room_name text, people_count integer,
   amount_uah numeric
 )
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public as $$
+declare v_booking_id uuid;
 begin
   if not public.crm_is_admin_session() then
     raise exception 'Only an administrator may view pending income' using errcode = '42501';
   end if;
+  -- Normal admin-list loading reconciles eligible series; open series extend
+  -- back to the rolling horizon. The unique index makes repeated fetches safe.
+  for v_booking_id in
+    select booking.id from public.room_bookings booking
+    where booking.event_type='individual_training'
+      and booking.status is distinct from 'cancelled'
+  loop
+    perform public.crm_reconcile_individual_training_income(v_booking_id, current_date);
+  end loop;
   return query
   select operation.id, operation.event_title_snapshot, operation.trainer_name_snapshot,
     operation.occurrence_date, operation.event_start_time_snapshot,

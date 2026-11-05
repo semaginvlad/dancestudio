@@ -2176,9 +2176,14 @@ export default function App() {
       return;
     }
     if (isAdmin && !window.confirm("Видалити резерв залу?")) return;
-    if (isAdmin) await db.deleteRoomBooking(id);
-    else await db.mutateTrainerRoomBooking(id, "delete");
-    setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
+    const result = isAdmin ? await db.deleteRoomBooking(id) : await db.mutateTrainerRoomBooking(id, "delete");
+    if (result?.cancelled) {
+      const cancelledBooking = result.booking || { ...booking, status: "cancelled" };
+      setRoomBookings((prev) => prev.map((item) => String(item.id) === String(id) ? cancelledBooking : item));
+    } else {
+      setRoomBookings((prev) => prev.filter((x) => String(x.id) !== String(id)));
+    }
+    return result;
   };
 
   const updateRoomBookingAction = async (id, payload, options = {}) => {
