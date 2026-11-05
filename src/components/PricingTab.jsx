@@ -1,14 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { btnP, inputSt, theme } from "../shared/constants";
-import { mergeCatalogIntoPriceDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
+import { isRoomRateRowSaving, mergeCatalogIntoPriceDrafts, mergeRoomRatesIntoDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
 
-export default function PricingTab({ prices, onSave, bookingTariffs = [], onSaveBookingTariff, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
+export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStudioRoomHourlyRate, bookingTariffs = [], onSaveBookingTariff, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
   const [drafts, setDrafts] = useState({});
   const dirtyCodesRef = useRef(new Set());
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
   const [tariffDrafts, setTariffDrafts] = useState({});
   const tariffDirtyCodesRef = useRef(new Set());
+  const [roomRateDrafts, setRoomRateDrafts] = useState({});
+  const roomRateDirtyIdsRef = useRef(new Set());
   const [trainerDrafts, setTrainerDrafts] = useState({});
 
   useEffect(() => {
@@ -18,6 +20,10 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
   useEffect(() => {
     setTariffDrafts((current) => mergeTariffsIntoDrafts(bookingTariffs, current, tariffDirtyCodesRef.current));
   }, [bookingTariffs]);
+
+  useEffect(() => {
+    setRoomRateDrafts((current) => mergeRoomRatesIntoDrafts(studioRooms, current, roomRateDirtyIdsRef.current));
+  }, [studioRooms]);
 
   useEffect(() => {
     const byTrainer = Object.fromEntries(trainerFinancialSettings.map((row) => [String(row.trainerId), row]));
@@ -64,6 +70,28 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
     finally { setSaving(""); }
   };
 
+  const saveRoomRate = async (room) => {
+    const id = String(room.id);
+    const rate = Number(roomRateDrafts[id]);
+    if (!Number.isInteger(rate) || rate < 0) {
+      setMessage("Погодинна ставка має бути цілим невід’ємним числом.");
+      return;
+    }
+    setSaving(`room:${id}`);
+    setMessage("");
+    roomRateDirtyIdsRef.current.delete(id);
+    try {
+      const savedRate = await onSaveStudioRoomHourlyRate(id, rate);
+      setRoomRateDrafts((current) => ({ ...current, [id]: String(savedRate ?? rate) }));
+      setMessage(`Ставку для «${room.name}» збережено.`);
+    } catch (error) {
+      roomRateDirtyIdsRef.current.add(id);
+      setMessage(error?.message || "Не вдалося зберегти погодинну ставку.");
+    } finally {
+      setSaving("");
+    }
+  };
+
   const saveTrainerSetting = async (trainerId) => {
     const draft = trainerDrafts[trainerId];
     const share = Number(draft?.trainerShareUah);
@@ -95,6 +123,23 @@ export default function PricingTab({ prices, onSave, bookingTariffs = [], onSave
             <button type="button" style={btnP} disabled={saving === row.serviceCode} onClick={() => save(row)}>{saving === row.serviceCode ? "Збереження…" : "Зберегти"}</button>
           </div>
         ))}
+      </div>
+      <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Погодинна вартість залів</h3>
+      <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Ставка конкретного залу для нових бронювань.</p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {studioRooms.map((room) => { const id = String(room.id); const isSavingRoom = isRoomRateRowSaving(saving, id); return (
+          <div key={id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(140px, 190px) auto", gap: 12, alignItems: "center", padding: 14, borderRadius: 16, border: `1px solid ${theme.border}`, background: theme.card }}>
+            <label htmlFor={`room-rate-${id}`} style={{ color: theme.textMain, fontWeight: 700 }}>{room.name}</label>
+            <div style={{ position: "relative" }}>
+              <input id={`room-rate-${id}`} aria-label={`${room.name}, грн / год`} type="number" min="0" step="1" disabled={isSavingRoom} value={roomRateDrafts[id] ?? ""} onChange={(event) => {
+                roomRateDirtyIdsRef.current.add(id);
+                setRoomRateDrafts((current) => ({ ...current, [id]: event.target.value }));
+              }} style={{ ...inputSt, paddingRight: 82, width: "100%", boxSizing: "border-box" }} />
+              <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: theme.textMuted }}>грн / год</span>
+            </div>
+            <button type="button" style={btnP} disabled={isSavingRoom} onClick={() => saveRoomRate(room)}>{isSavingRoom ? "Збереження…" : "Зберегти"}</button>
+          </div>
+        ); })}
       </div>
       <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Типи резерву / ціни</h3>
       <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Серверні тарифи бронювання. Неактивні типи залишаються в історії.</p>

@@ -1962,6 +1962,15 @@ export default function App() {
     return saved;
   };
 
+  const saveStudioRoomHourlyRate = async (roomId, hourlyRateUah) => {
+    if (!isAdmin) throw new Error("Доступ до погодинних ставок має лише адміністратор");
+    const savedRate = await db.updateStudioRoomHourlyRate(roomId, hourlyRateUah);
+    setStudioRooms((current) => current.map((room) => String(room.id) === String(roomId)
+      ? { ...room, hourlyRateUah: savedRate }
+      : room));
+    return savedRate;
+  };
+
   const saveTrainerFinancialSetting = async (trainerId, patch) => {
     if (!isAdmin) throw new Error("Доступ до фінансових налаштувань має лише адміністратор");
     const saved = await db.upsertTrainerFinancialSetting(trainerId, patch);
@@ -2887,7 +2896,7 @@ export default function App() {
             ))}
             
             {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
-            {adminTab === "pricing" && <PricingTab prices={servicePrices} onSave={saveServicePrice} bookingTariffs={roomBookingTariffs} onSaveBookingTariff={saveRoomBookingTariff} trainers={trainers} trainerFinancialSettings={trainerFinancialSettings} onSaveTrainerFinancialSetting={saveTrainerFinancialSetting} />}
+            {adminTab === "pricing" && <PricingTab prices={servicePrices} onSave={saveServicePrice} studioRooms={studioRooms} onSaveStudioRoomHourlyRate={saveStudioRoomHourlyRate} bookingTariffs={roomBookingTariffs} onSaveBookingTariff={saveRoomBookingTariff} trainers={trainers} trainerFinancialSettings={trainerFinancialSettings} onSaveTrainerFinancialSetting={saveTrainerFinancialSetting} />}
             {adminTab === "inquiries" && <SiteInquiriesTab />}
             {adminTab === "site" && <SiteTab />}
           </div>
