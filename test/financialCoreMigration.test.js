@@ -273,6 +273,8 @@ test("trainer create, read and update responses hide price while admin sees stor
   assert.match(trainerUpdateClient, /delete safePayload\.paymentMethod/);
   assert.match(appSource, /db\.mutateTrainerRoomBooking\(id, "delete"\)/);
   assert.match(appSource, /db\.mutateTrainerRoomBooking\(id, "cancel"\)/);
+  assert.match(appSource, /options\.trainerAction === "cancel"/);
+  assert.doesNotMatch(appSource, /safePayload\.status === "cancelled" \? await db\.mutateTrainerRoomBooking/);
   const db = await database();
   try {
     await db.exec(`
@@ -306,6 +308,17 @@ test("trainer create, read and update responses hide price while admin sees stor
     assert.equal(cancelled.status, "cancelled");
     assert.equal(Object.hasOwn(cancelled, "price"), false);
     assert.equal(Object.hasOwn(cancelled, "payment_method"), false);
+    const editedCancelled = (await db.query(`select crm_trainer_update_room_booking($1,
+      '{"startTime":"12:00","endTime":"13:30","title":"Edited cancelled","note":"Updated note","color":"#123456","recurrence":"weekly","status":"cancelled","price":null,"paymentMethod":null,"eventType":"individual_training","bookingType":"individual_1_2"}'::jsonb
+    ) as booking`, [created.id])).rows[0].booking;
+    assert.deepEqual({
+      startTime: editedCancelled.start_time, endTime: editedCancelled.end_time,
+      title: editedCancelled.title, note: editedCancelled.note, color: editedCancelled.color,
+      recurrence: editedCancelled.recurrence, status: editedCancelled.status,
+    }, {
+      startTime: "12:00", endTime: "13:30", title: "Edited cancelled",
+      note: "Updated note", color: "#123456", recurrence: "weekly", status: "cancelled",
+    });
     await db.exec("reset role; insert into room_bookings(id,date,start_time,end_time,trainer_id,title,event_type,room_name) values ('40000000-0000-0000-0000-000000000001','2026-03-02','10:00','11:00','99999999-9999-9999-9999-999999999999','Other','room_booking','Зал 2'); set role authenticated");
     await assert.rejects(db.query("select crm_trainer_mutate_room_booking('40000000-0000-0000-0000-000000000001','cancel')"), /another trainer/i);
 

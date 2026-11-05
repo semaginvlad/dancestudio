@@ -1311,7 +1311,7 @@ export default function ScheduleTab({
     status: event.status || "active",
   });
 
-  const updateBookingEventWithGuard = async (event, patch) => {
+  const updateBookingEventWithGuard = async (event, patch, { trainerAction = null } = {}) => {
     const id = event.parentId || event.id;
     const payload = normalizeBookingPayload({
       ...buildRecurringContinuationPayload(event, event.parentDate || event.date),
@@ -1321,7 +1321,7 @@ export default function ScheduleTab({
     try {
       const result = await runBookingMutation(
         payload,
-        (override) => onUpdateBooking?.(id, payload, { overrideBookingBlock: override }),
+        (override) => onUpdateBooking?.(id, payload, { overrideBookingBlock: override, trainerAction }),
         setDetailsMutationBusy,
       );
       if (result?.skipped || result?.cancelled) return false;
@@ -1370,7 +1370,7 @@ export default function ScheduleTab({
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
       return removeSingleRecurringBookingOccurrence(event);
     }
-    return updateBookingEventWithGuard(event, { status: "cancelled" });
+    return updateBookingEventWithGuard(event, { status: "cancelled" }, { trainerAction: "cancel" });
   };
 
   const runDetailsOperation = async (operation) => {

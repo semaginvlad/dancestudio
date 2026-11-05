@@ -2186,7 +2186,7 @@ export default function App() {
     const updated = options.overrideBookingBlock
       ? await db.adminOverrideUpdateRoomBooking(id, safePayload)
       : isAdmin ? await db.updateRoomBooking(id, safePayload)
-        : safePayload.status === "cancelled" ? await db.mutateTrainerRoomBooking(id, "cancel")
+        : options.trainerAction === "cancel" ? await db.mutateTrainerRoomBooking(id, "cancel")
           : await db.updateTrainerRoomBooking(id, safePayload);
     setRoomBookings((prev) => prev.map((x) => (String(x.id) === String(id) ? updated : x)));
     return updated;
