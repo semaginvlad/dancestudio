@@ -1,16 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { btnP, inputSt, theme } from "../shared/constants";
-import { isRoomRateRowSaving, mergeCatalogIntoPriceDrafts, mergeRoomRatesIntoDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
+import { individualTrainingRateKey, mergeCatalogIntoPriceDrafts, mergeIndividualTrainingRatesIntoDrafts } from "../pricingDrafts";
 
-export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStudioRoomHourlyRate, bookingTariffs = [], onSaveBookingTariff, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
+export default function PricingTab({ prices, onSave, individualTrainingRates = [], onSaveIndividualTrainingRate, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
   const [drafts, setDrafts] = useState({});
   const dirtyCodesRef = useRef(new Set());
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
-  const [tariffDrafts, setTariffDrafts] = useState({});
-  const tariffDirtyCodesRef = useRef(new Set());
-  const [roomRateDrafts, setRoomRateDrafts] = useState({});
-  const roomRateDirtyIdsRef = useRef(new Set());
+  const [matrixDrafts, setMatrixDrafts] = useState({});
+  const matrixDirtyKeysRef = useRef(new Set());
   const [trainerDrafts, setTrainerDrafts] = useState({});
 
   useEffect(() => {
@@ -18,12 +16,8 @@ export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStu
   }, [prices]);
 
   useEffect(() => {
-    setTariffDrafts((current) => mergeTariffsIntoDrafts(bookingTariffs, current, tariffDirtyCodesRef.current));
-  }, [bookingTariffs]);
-
-  useEffect(() => {
-    setRoomRateDrafts((current) => mergeRoomRatesIntoDrafts(studioRooms, current, roomRateDirtyIdsRef.current));
-  }, [studioRooms]);
+    setMatrixDrafts((current) => mergeIndividualTrainingRatesIntoDrafts(individualTrainingRates, current, matrixDirtyKeysRef.current));
+  }, [individualTrainingRates]);
 
   useEffect(() => {
     const byTrainer = Object.fromEntries(trainerFinancialSettings.map((row) => [String(row.trainerId), row]));
@@ -54,43 +48,30 @@ export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStu
     }
   };
 
-  const saveTariff = async (code) => {
-    const draft = tariffDrafts[code];
-    if (!draft || !draft.label?.trim() || !Number.isInteger(Number(draft.price)) || Number(draft.price) < 0) {
-      setMessage("Перевірте назву та невід’ємну цілу ціну тарифу.");
-      return;
-    }
-    setSaving(`tariff:${code}`);
-    tariffDirtyCodesRef.current.delete(code);
-    try {
-      const saved = await onSaveBookingTariff(code, draft);
-      setTariffDrafts((current) => ({ ...current, [code]: { ...(saved || draft) } }));
-      setMessage(`Тариф «${draft.label}» збережено.`);
-    } catch (error) { tariffDirtyCodesRef.current.add(code); setMessage(error?.message || "Не вдалося зберегти тариф."); }
-    finally { setSaving(""); }
-  };
-
-  const saveRoomRate = async (room) => {
-    const id = String(room.id);
-    const rate = Number(roomRateDrafts[id]);
+  const saveMatrixRate = async (room, range) => {
+    const key = individualTrainingRateKey(room.roomId, range.peopleRangeCode);
+    const rate = Number(matrixDrafts[key]);
     if (!Number.isInteger(rate) || rate < 0) {
-      setMessage("Погодинна ставка має бути цілим невід’ємним числом.");
+      setMessage("Тариф має бути цілим невід’ємним числом.");
       return;
     }
-    setSaving(`room:${id}`);
+    setSaving(`matrix:${key}`);
     setMessage("");
-    roomRateDirtyIdsRef.current.delete(id);
+    matrixDirtyKeysRef.current.delete(key);
     try {
-      const savedRate = await onSaveStudioRoomHourlyRate(id, rate);
-      setRoomRateDrafts((current) => ({ ...current, [id]: String(savedRate ?? rate) }));
-      setMessage(`Ставку для «${room.name}» збережено.`);
+      const savedRate = await onSaveIndividualTrainingRate(room.roomId, range.peopleRangeCode, rate);
+      setMatrixDrafts((current) => ({ ...current, [key]: String(savedRate ?? rate) }));
+      setMessage(`Тариф ${range.peopleRangeLabel} для «${room.roomName}» збережено.`);
     } catch (error) {
-      roomRateDirtyIdsRef.current.add(id);
-      setMessage(error?.message || "Не вдалося зберегти погодинну ставку.");
+      matrixDirtyKeysRef.current.add(key);
+      setMessage(error?.message || "Не вдалося зберегти тариф.");
     } finally {
       setSaving("");
     }
   };
+
+  const matrixRooms = Array.from(new Map(individualTrainingRates.map((row) => [String(row.roomId), row])).values());
+  const matrixRanges = Array.from(new Map(individualTrainingRates.map((row) => [row.peopleRangeCode, row])).values());
 
   const saveTrainerSetting = async (trainerId) => {
     const draft = trainerDrafts[trainerId];
@@ -124,40 +105,21 @@ export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStu
           </div>
         ))}
       </div>
-      <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Погодинна вартість залів</h3>
-      <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Ставка конкретного залу для нових бронювань.</p>
-      <div style={{ display: "grid", gap: 10 }}>
-        {studioRooms.map((room) => { const id = String(room.id); const isSavingRoom = isRoomRateRowSaving(saving, id); return (
-          <div key={id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(140px, 190px) auto", gap: 12, alignItems: "center", padding: 14, borderRadius: 16, border: `1px solid ${theme.border}`, background: theme.card }}>
-            <label htmlFor={`room-rate-${id}`} style={{ color: theme.textMain, fontWeight: 700 }}>{room.name}</label>
-            <div style={{ position: "relative" }}>
-              <input id={`room-rate-${id}`} aria-label={`${room.name}, грн / год`} type="number" min="0" step="1" disabled={isSavingRoom} value={roomRateDrafts[id] ?? ""} onChange={(event) => {
-                roomRateDirtyIdsRef.current.add(id);
-                setRoomRateDrafts((current) => ({ ...current, [id]: event.target.value }));
-              }} style={{ ...inputSt, paddingRight: 82, width: "100%", boxSizing: "border-box" }} />
-              <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: theme.textMuted }}>грн / год</span>
-            </div>
-            <button type="button" style={btnP} disabled={isSavingRoom} onClick={() => saveRoomRate(room)}>{isSavingRoom ? "Збереження…" : "Зберегти"}</button>
-          </div>
-        ); })}
-      </div>
-      <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Типи резерву / ціни</h3>
-      <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Серверні тарифи бронювання. Неактивні типи залишаються в історії.</p>
-      <div style={{ display: "grid", gap: 10 }}>
-        {bookingTariffs.map((row) => { const code = row.code || row.id; const draft = tariffDrafts[code] || row; return (
-          <div key={code} style={{ padding: 14, borderRadius: 16, border: `1px solid ${theme.border}`, background: theme.card, display: "grid", gap: 8 }}>
-            <input aria-label={`Назва тарифу ${code}`} style={inputSt} value={draft.label || ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, label: event.target.value } })); }} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(90px,1fr))", gap: 8 }}>
-              <input aria-label="Ціна" type="number" min="0" step="1" style={inputSt} value={draft.price ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, price: Number(event.target.value) } })); }} />
-              <input aria-label="Мінімум людей" type="number" min="1" style={inputSt} value={draft.peopleMin ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMin: event.target.value === "" ? null : Number(event.target.value) } })); }} />
-              <input aria-label="Максимум людей" type="number" min="1" style={inputSt} value={draft.peopleMax ?? ""} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, peopleMax: event.target.value === "" ? null : Number(event.target.value) } })); }} />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <label><input type="checkbox" checked={draft.isActive !== false} onChange={(event) => { tariffDirtyCodesRef.current.add(code); setTariffDrafts((current) => ({ ...current, [code]: { ...draft, isActive: event.target.checked } })); }} /> Активний</label>
-              <button type="button" style={btnP} disabled={saving === `tariff:${code}`} onClick={() => saveTariff(code)}>Зберегти</button>
-            </div>
-          </div>
-        ); })}
+      <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Тарифи індивідуальних тренувань</h3>
+      <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Внутрішня погодинна ставка за залом і діапазоном людей. Резерв залу залишається безкоштовним.</p>
+      <div style={{ overflowX: "auto", border: `1px solid ${theme.border}`, borderRadius: 16, background: theme.card }}>
+        <table style={{ width: "100%", minWidth: 620, borderCollapse: "collapse" }}>
+          <thead><tr><th style={{ padding: 12, textAlign: "left" }}>Кількість людей</th>{matrixRooms.map((room) => <th key={room.roomId} style={{ padding: 12 }}>{room.roomName}</th>)}</tr></thead>
+          <tbody>{matrixRanges.map((range) => <tr key={range.peopleRangeCode}>
+            <th style={{ padding: 12, textAlign: "left" }}>{range.peopleRangeLabel}</th>
+            {matrixRooms.map((room) => { const key = individualTrainingRateKey(room.roomId, range.peopleRangeCode); const isSavingCell = saving === `matrix:${key}`; return <td key={key} style={{ padding: 8 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input aria-label={`${range.peopleRangeLabel}, ${room.roomName}, грн / год`} type="number" min="0" step="1" disabled={isSavingCell} value={matrixDrafts[key] ?? ""} onChange={(event) => { matrixDirtyKeysRef.current.add(key); setMatrixDrafts((current) => ({ ...current, [key]: event.target.value })); }} style={{ ...inputSt, minWidth: 92, width: "100%" }} />
+                <button type="button" style={{ ...btnP, padding: "8px 10px" }} disabled={isSavingCell} onClick={() => saveMatrixRate(room, range)}>{isSavingCell ? "…" : "✓"}</button>
+              </div>
+            </td>; })}
+          </tr>)}</tbody>
+        </table>
       </div>
       <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Індивідуальні тренування</h3>
       <p style={{ margin: "0 0 12px", color: theme.textMuted }}>За замовчуванням дохід вимкнений, частка тренера — 0 грн.</p>

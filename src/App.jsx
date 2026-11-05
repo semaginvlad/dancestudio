@@ -133,6 +133,7 @@ export default function App() {
   const [trainerGroups, setTrainerGroups] = useState([]);
   const [servicePrices, setServicePrices] = useState([]);
   const [roomBookingTariffs, setRoomBookingTariffs] = useState([]);
+  const [individualTrainingRates, setIndividualTrainingRates] = useState([]);
   const [trainerFinancialSettings, setTrainerFinancialSettings] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
@@ -616,7 +617,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, trainerFinance] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -633,6 +634,7 @@ export default function App() {
           .catch((error) => { console.warn("[loadAllData] fetchScheduleBookingBlocks failed", error); return { ok: false, error }; }),
         safeFetch(isCurrentAdmin ? db.fetchServicePrices : async () => [], "fetchServicePrices"),
         safeFetch(db.fetchRoomBookingTariffs, "fetchRoomBookingTariffs"),
+        safeFetch(isCurrentAdmin ? db.fetchIndividualTrainingRateMatrix : async () => [], "fetchIndividualTrainingRateMatrix"),
         safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings")
       ]);
 
@@ -721,6 +723,7 @@ export default function App() {
       setTrainerGroups(currentTrainerGroupRows);
       setServicePrices(isCurrentAdmin ? (prices || []) : []);
       setRoomBookingTariffs(bookingTariffs || []);
+      setIndividualTrainingRates(isCurrentAdmin ? (individualRates || []) : []);
       setTrainerFinancialSettings(isCurrentAdmin ? (trainerFinance || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
@@ -1955,19 +1958,14 @@ export default function App() {
     return saved;
   };
 
-  const saveRoomBookingTariff = async (code, patch) => {
+  const saveIndividualTrainingRate = async (roomId, peopleRangeCode, hourlyRateUah) => {
     if (!isAdmin) throw new Error("Доступ до тарифів має лише адміністратор");
-    const saved = await db.updateRoomBookingTariff(code, patch);
-    setRoomBookingTariffs((current) => current.map((row) => (row.code || row.id) === code ? saved : row));
-    return saved;
-  };
-
-  const saveStudioRoomHourlyRate = async (roomId, hourlyRateUah) => {
-    if (!isAdmin) throw new Error("Доступ до погодинних ставок має лише адміністратор");
-    const savedRate = await db.updateStudioRoomHourlyRate(roomId, hourlyRateUah);
-    setStudioRooms((current) => current.map((room) => String(room.id) === String(roomId)
-      ? { ...room, hourlyRateUah: savedRate }
-      : room));
+    const savedRate = await db.updateIndividualTrainingRoomRate(roomId, peopleRangeCode, hourlyRateUah);
+    setIndividualTrainingRates((current) => current.map((row) => (
+      String(row.roomId) === String(roomId) && row.peopleRangeCode === peopleRangeCode
+        ? { ...row, hourlyRateUah: savedRate }
+        : row
+    )));
     return savedRate;
   };
 
@@ -2896,7 +2894,7 @@ export default function App() {
             ))}
             
             {adminTab === "pro" && <ProAnalyticsTab proAnalytics={proAnalytics} />}
-            {adminTab === "pricing" && <PricingTab prices={servicePrices} onSave={saveServicePrice} studioRooms={studioRooms} onSaveStudioRoomHourlyRate={saveStudioRoomHourlyRate} bookingTariffs={roomBookingTariffs} onSaveBookingTariff={saveRoomBookingTariff} trainers={trainers} trainerFinancialSettings={trainerFinancialSettings} onSaveTrainerFinancialSetting={saveTrainerFinancialSetting} />}
+            {adminTab === "pricing" && <PricingTab prices={servicePrices} onSave={saveServicePrice} individualTrainingRates={individualTrainingRates} onSaveIndividualTrainingRate={saveIndividualTrainingRate} trainers={trainers} trainerFinancialSettings={trainerFinancialSettings} onSaveTrainerFinancialSetting={saveTrainerFinancialSetting} />}
             {adminTab === "inquiries" && <SiteInquiriesTab />}
             {adminTab === "site" && <SiteTab />}
           </div>
