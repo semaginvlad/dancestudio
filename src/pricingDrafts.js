@@ -20,3 +20,7 @@ export function mergeRoomRatesIntoDrafts(rooms = [], drafts = {}, dirtyRoomIds =
     return [id, keepDraft ? drafts[id] : String(room.hourlyRateUah ?? "")];
   }));
 }
+
+export function isRoomRateRowSaving(saving = "", roomId = "") {
+  return saving === `room:${String(roomId)}`;
+}

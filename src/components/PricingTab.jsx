@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { btnP, inputSt, theme } from "../shared/constants";
-import { mergeCatalogIntoPriceDrafts, mergeRoomRatesIntoDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
+import { isRoomRateRowSaving, mergeCatalogIntoPriceDrafts, mergeRoomRatesIntoDrafts, mergeTariffsIntoDrafts } from "../pricingDrafts";
 
 export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStudioRoomHourlyRate, bookingTariffs = [], onSaveBookingTariff, trainers = [], trainerFinancialSettings = [], onSaveTrainerFinancialSetting }) {
   const [drafts, setDrafts] = useState({});
@@ -127,17 +127,17 @@ export default function PricingTab({ prices, onSave, studioRooms = [], onSaveStu
       <h3 style={{ margin: "28px 0 6px", color: theme.textMain }}>Погодинна вартість залів</h3>
       <p style={{ margin: "0 0 12px", color: theme.textMuted }}>Ставка конкретного залу для нових бронювань.</p>
       <div style={{ display: "grid", gap: 10 }}>
-        {studioRooms.map((room) => { const id = String(room.id); return (
+        {studioRooms.map((room) => { const id = String(room.id); const isSavingRoom = isRoomRateRowSaving(saving, id); return (
           <div key={id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(140px, 190px) auto", gap: 12, alignItems: "center", padding: 14, borderRadius: 16, border: `1px solid ${theme.border}`, background: theme.card }}>
             <label htmlFor={`room-rate-${id}`} style={{ color: theme.textMain, fontWeight: 700 }}>{room.name}</label>
             <div style={{ position: "relative" }}>
-              <input id={`room-rate-${id}`} aria-label={`${room.name}, грн / год`} type="number" min="0" step="1" value={roomRateDrafts[id] ?? ""} onChange={(event) => {
+              <input id={`room-rate-${id}`} aria-label={`${room.name}, грн / год`} type="number" min="0" step="1" disabled={isSavingRoom} value={roomRateDrafts[id] ?? ""} onChange={(event) => {
                 roomRateDirtyIdsRef.current.add(id);
                 setRoomRateDrafts((current) => ({ ...current, [id]: event.target.value }));
               }} style={{ ...inputSt, paddingRight: 82, width: "100%", boxSizing: "border-box" }} />
               <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: theme.textMuted }}>грн / год</span>
             </div>
-            <button type="button" style={btnP} disabled={saving === `room:${id}`} onClick={() => saveRoomRate(room)}>{saving === `room:${id}` ? "Збереження…" : "Зберегти"}</button>
+            <button type="button" style={btnP} disabled={isSavingRoom} onClick={() => saveRoomRate(room)}>{isSavingRoom ? "Збереження…" : "Зберегти"}</button>
           </div>
         ); })}
       </div>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { mergeRoomRatesIntoDrafts } from "../src/pricingDrafts.js";
+import { isRoomRateRowSaving, mergeRoomRatesIntoDrafts } from "../src/pricingDrafts.js";
 
 test("pricing UI renders and saves each room hourly rate by studio room id", async () => {
   const pricingTab = await readFile(new URL("../src/components/PricingTab.jsx", import.meta.url), "utf8");
@@ -33,6 +33,17 @@ test("saving one room rate preserves unsaved drafts for other rooms", () => {
     ),
     { "room-a": "700", "room-b": "375" },
   );
+});
+
+test("an in-flight save locks only its room so the response cannot overwrite a newer draft", async () => {
+  assert.equal(isRoomRateRowSaving("room:room-a", "room-a"), true);
+  assert.equal(isRoomRateRowSaving("room:room-a", "room-b"), false);
+
+  const pricingTab = await readFile(new URL("../src/components/PricingTab.jsx", import.meta.url), "utf8");
+  assert.match(pricingTab, /const isSavingRoom = isRoomRateRowSaving\(saving, id\)/);
+  assert.match(pricingTab, /disabled=\{isSavingRoom\} value=\{roomRateDrafts\[id\]/);
+  assert.match(pricingTab, /disabled=\{isSavingRoom\} onClick=\{\(\) => saveRoomRate\(room\)\}/);
+  assert.match(pricingTab, /String\(savedRate \?\? rate\)/);
 });
 
 test("room rate uses the existing admin RPC while trainer fetch remains redacted", async () => {
