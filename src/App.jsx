@@ -52,6 +52,7 @@ import StudentsCrmTab from "./components/StudentsCrmTab";
 import SiteTab from "./components/SiteTab";
 import SiteInquiriesTab from "./components/SiteInquiriesTab";
 import PricingTab from "./components/PricingTab";
+import PendingIndividualIncome from "./components/PendingIndividualIncome";
 import {
   extractPushSubscriptionPayload,
   getPushStatus,
@@ -135,6 +136,9 @@ export default function App() {
   const [roomBookingTariffs, setRoomBookingTariffs] = useState([]);
   const [individualTrainingRates, setIndividualTrainingRates] = useState([]);
   const [trainerFinancialSettings, setTrainerFinancialSettings] = useState([]);
+  const [pendingIndividualIncome, setPendingIndividualIncome] = useState([]);
+  const [pendingIndividualIncomeLoading, setPendingIndividualIncomeLoading] = useState(false);
+  const [pendingIndividualIncomeError, setPendingIndividualIncomeError] = useState("");
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -617,7 +621,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -635,7 +639,8 @@ export default function App() {
         safeFetch(isCurrentAdmin ? db.fetchServicePrices : async () => [], "fetchServicePrices"),
         safeFetch(db.fetchRoomBookingTariffs, "fetchRoomBookingTariffs"),
         safeFetch(isCurrentAdmin ? db.fetchIndividualTrainingRateMatrix : async () => [], "fetchIndividualTrainingRateMatrix"),
-        safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings")
+        safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings"),
+        safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -725,6 +730,7 @@ export default function App() {
       setRoomBookingTariffs(bookingTariffs || []);
       setIndividualTrainingRates(isCurrentAdmin ? (individualRates || []) : []);
       setTrainerFinancialSettings(isCurrentAdmin ? (trainerFinance || []) : []);
+      setPendingIndividualIncome(isCurrentAdmin ? (pendingIncome || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
@@ -3142,6 +3148,21 @@ export default function App() {
 
           return (
             <div style={{ minWidth: 0 }}>
+              <PendingIndividualIncome
+                rows={pendingIndividualIncome}
+                loading={pendingIndividualIncomeLoading}
+                error={pendingIndividualIncomeError}
+                onRefresh={async () => {
+                  setPendingIndividualIncomeLoading(true); setPendingIndividualIncomeError("");
+                  try { setPendingIndividualIncome(await db.fetchPendingIndividualIncome()); }
+                  catch (error) { setPendingIndividualIncomeError(error?.message || "Не вдалося завантажити pending-оплати"); }
+                  finally { setPendingIndividualIncomeLoading(false); }
+                }}
+                onConfirm={async (id, payload) => {
+                  await db.confirmIndividualIncome(id, payload);
+                  setPendingIndividualIncome((current) => current.filter((row) => row.id !== id));
+                }}
+              />
               <div className="admin-mobile-header"><div><h2>Фінанси</h2><p>Доходи, борги та деталізація по групах</p></div><button type="button" className="admin-mobile-filter-toggle" onClick={() => setAdminFinanceFiltersOpen(true)}>Фільтри{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length ? <span className="admin-mobile-badge">{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length}</span> : null}</button></div>
               <div className="admin-finance-summary" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
                 <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.success,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Загалом оплачено</div><div style={{fontSize:42,fontWeight:800,color:theme.success, marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div></div>

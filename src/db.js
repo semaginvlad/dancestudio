@@ -966,6 +966,38 @@ export async function upsertTrainerFinancialSetting(trainerId, patch = {}) {
   return mapTrainerFinancialSetting(data)
 }
 
+const mapPendingIndividualIncome = (row = {}) => ({
+  id: row.id,
+  title: row.title || 'Індивідуальне тренування',
+  trainerName: row.trainer_name || '—',
+  occurrenceDate: row.occurrence_date || null,
+  startTime: row.start_time || '',
+  endTime: row.end_time || '',
+  roomName: row.room_name || '—',
+  peopleCount: Number(row.people_count || 0),
+  amountUah: Number(row.amount_uah || 0),
+});
+
+export async function fetchPendingIndividualIncome() {
+  const { data, error } = await supabase.rpc('crm_fetch_pending_individual_income');
+  if (error) throw error;
+  return (data || []).map(mapPendingIndividualIncome);
+}
+
+export async function confirmIndividualIncome(id, { amountUah, paymentMethod, operationDate }) {
+  const amount = Number(amountUah);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Сума має бути невід’ємною');
+  if (!['cash', 'card'].includes(paymentMethod)) throw new Error('Оберіть готівку або картку');
+  const { data, error } = await supabase.rpc('crm_admin_confirm_individual_income', {
+    p_operation_id: id,
+    p_amount_uah: amount,
+    p_payment_method_code: paymentMethod,
+    p_operation_date: operationDate,
+  });
+  if (error) throw error;
+  return data;
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
