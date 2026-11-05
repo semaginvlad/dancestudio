@@ -2,14 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
-import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom, setStudioRoomBookingTrainerExceptions } from "../db";
+import { fetchStudioRooms, createStudioRoom, updateStudioRoom, updateStudioRoomHourlyRate, renameStudioRoom, setStudioRoomBookingTrainerExceptions } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
 import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutateScheduleEvent, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, isBookingBlockEvent, isReadOnlyScheduleEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
+import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveBookingTypeForMutation, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -28,7 +28,7 @@ const DEFAULT_TYPES = [
     label: "Індивідуальне 1–2 особи",
     peopleMin: 1,
     peopleMax: 2,
-    price: 200,
+    price: 250,
   },
   {
     id: "small_group_3_9",
@@ -395,6 +395,7 @@ export default function ScheduleTab({
   onUpsertTrainingLessonPlan,
   currentUser = null,
   scheduleScale = 100,
+  bookingTariffs = [],
 }) {
   const DEFAULT_ROOM = "Основна зала";
   const NO_ROOM = "Без залу";
@@ -459,13 +460,16 @@ export default function ScheduleTab({
   const allowedEventTypes = isAdmin
     ? ["room_booking", "individual_training", "cleaning", "custom_admin_event"]
     : ["room_booking", "individual_training"];
-  const [bookingTypes, setBookingTypes] = useStickyState(
-    DEFAULT_TYPES,
-    "ds_schedule_booking_options_v1",
-  );
+  const bookingTypes = bookingTariffs.length
+    ? bookingTariffs
+    : DEFAULT_TYPES.map((type) => isAdmin ? type : { ...type, price: null });
   const tariffTypes = useMemo(
     () => bookingTypes.filter((type) => type.id !== "cleaning"),
     [bookingTypes],
+  );
+  const activeTariffTypes = useMemo(
+    () => tariffTypes.filter((type) => type.isActive !== false),
+    [tariffTypes],
   );
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [viewMode, setViewMode] = useState("week"); // month | week | day
@@ -488,6 +492,7 @@ export default function ScheduleTab({
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
   const [studioRooms, setStudioRooms] = useState([]);
+  const [roomRateDrafts, setRoomRateDrafts] = useState({});
   const [studioRoomsLoadStatus, setStudioRoomsLoadStatus] = useState("loading");
   const [roomTrainerExceptionsSavingIds, setRoomTrainerExceptionsSavingIds] = useState(() => new Set());
   const roomTrainerExceptionsSavingRef = useRef(new Set());
@@ -533,6 +538,9 @@ export default function ScheduleTab({
     price: 0,
     roomName: DEFAULT_ROOM,
   });
+  useEffect(() => {
+    setRoomRateDrafts(Object.fromEntries(studioRooms.map((room) => [String(room.id), room.hourlyRateUah ?? ""])));
+  }, [studioRooms]);
   const dirMap = useMemo(
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
     [safeDirections],
@@ -883,8 +891,10 @@ export default function ScheduleTab({
     });
   }, [eventsByDay, isAdmin, isMobile, mobileFilterType, mobileFilterValue, safeGroups.length]);
 
-  const getTariffPrice = (bookingType) =>
-    tariffTypes.find((type) => type.id === bookingType)?.price || 0;
+  const getTariffPrice = (bookingType) => {
+    const price = tariffTypes.find((type) => type.id === bookingType)?.price;
+    return price == null ? null : Number(price);
+  };
   const allKnownRooms = useMemo(() => {
     const set = new Set(activeStudioRooms.map((x) => normalizeRoomName(x?.name)).filter(Boolean));
     eventsByDay.forEach((arr) => {
@@ -1000,7 +1010,7 @@ export default function ScheduleTab({
     isAdmin,
     isAssignedToTrainer: isEventAssignedToCurrentTrainer(event),
   });
-  const normalizeBookingPayload = (source) => {
+  const normalizeBookingPayload = (source, { isExisting = false } = {}) => {
     const eventType = allowedEventTypes.includes(source.eventType)
       ? source.eventType
       : "room_booking";
@@ -1021,14 +1031,12 @@ export default function ScheduleTab({
       roomName: normalizeRoomName(source.roomName || primaryRoomName) || primaryRoomName,
     };
     if (eventType === "individual_training") {
-      const bookingType = tariffTypes.some((type) => type.id === source.bookingType)
-        ? source.bookingType
-        : tariffTypes[0]?.id || "individual_1_2";
+      const bookingType = resolveBookingTypeForMutation(tariffTypes, source.bookingType, { isExisting });
       return {
         ...base,
         bookingType,
         peopleCount: Number(source.peopleCount || 0) || null,
-        price: isAdmin ? Number(source.price || 0) || null : getTariffPrice(bookingType),
+        price: isAdmin ? Number(source.price || 0) || null : undefined,
         paymentMethod: source.paymentMethod || "none",
       };
     }
@@ -1184,7 +1192,7 @@ export default function ScheduleTab({
       date: editingId && draft.originalParentDate ? draft.originalParentDate : draft.date,
       title: normalizedTitle,
       roomName: fallbackRoomName,
-    });
+    }, { isExisting: Boolean(editingId) });
     try {
       const result = await runBookingMutation(payload, (override) => editingId
         ? onUpdateBooking?.(editingId, payload, { overrideBookingBlock: override })
@@ -1229,7 +1237,7 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
+      bookingType: e.bookingType || activeTariffTypes[0]?.id || "individual_1_2",
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
@@ -1258,7 +1266,7 @@ export default function ScheduleTab({
       startTime: e.startTime,
       endTime: e.endTime,
       eventType: e.eventType || "room_booking",
-      bookingType: e.bookingType || tariffTypes[0]?.id || "individual_1_2",
+      bookingType: e.bookingType || activeTariffTypes[0]?.id || "individual_1_2",
       paymentMethod: e.paymentMethod || "none",
       peopleCount: e.peopleCount || 0,
       price: e.price || 0,
@@ -1303,17 +1311,17 @@ export default function ScheduleTab({
     status: event.status || "active",
   });
 
-  const updateBookingEventWithGuard = async (event, patch) => {
+  const updateBookingEventWithGuard = async (event, patch, { trainerAction = null } = {}) => {
     const id = event.parentId || event.id;
     const payload = normalizeBookingPayload({
       ...buildRecurringContinuationPayload(event, event.parentDate || event.date),
       ...patch,
-    });
+    }, { isExisting: true });
     setDetailsMutationError("");
     try {
       const result = await runBookingMutation(
         payload,
-        (override) => onUpdateBooking?.(id, payload, { overrideBookingBlock: override }),
+        (override) => onUpdateBooking?.(id, payload, { overrideBookingBlock: override, trainerAction }),
         setDetailsMutationBusy,
       );
       if (result?.skipped || result?.cancelled) return false;
@@ -1330,7 +1338,7 @@ export default function ScheduleTab({
     const parentId = event.parentId || event.id;
     if (!parentId || !isRecurringBookingEvent(event)) return false;
     const occurrenceDate = String(event.date || "").slice(0, 10);
-    const payload = normalizeBookingPayload(buildRecurringContinuationPayload(event, event.parentDate || event.date));
+    const payload = normalizeBookingPayload(buildRecurringContinuationPayload(event, event.parentDate || event.date), { isExisting: true });
     const result = await runBookingMutation(
       payload,
       () => onRemoveBookingOccurrence?.(parentId, occurrenceDate),
@@ -1362,7 +1370,7 @@ export default function ScheduleTab({
     if (scope === "occurrence" && isRecurringBookingEvent(event)) {
       return removeSingleRecurringBookingOccurrence(event);
     }
-    return updateBookingEventWithGuard(event, { status: "cancelled" });
+    return updateBookingEventWithGuard(event, { status: "cancelled" }, { trainerAction: "cancel" });
   };
 
   const runDetailsOperation = async (operation) => {
@@ -1400,7 +1408,7 @@ export default function ScheduleTab({
       title: "",
       trainerId: isAdmin ? "" : currentTrainerId,
       trainerName: isAdmin ? "" : currentTrainerName,
-      bookingType: tariffTypes[0]?.id || "individual_1_2",
+      bookingType: activeTariffTypes[0]?.id || "individual_1_2",
       peopleCount: 1,
       price: 0,
       paymentMethod: "none",
@@ -2428,6 +2436,17 @@ export default function ScheduleTab({
       setBlockError(error?.message || "Не вдалося змінити доступність залу");
     }
   };
+  const saveRoomHourlyRate = async (room) => {
+    if (!isAdmin) return;
+    const rate = Number(roomRateDrafts[String(room.id)]);
+    if (!Number.isInteger(rate) || rate < 0) { setBlockError("Погодинний тариф має бути цілим невід’ємним числом"); return; }
+    try {
+      await updateStudioRoomHourlyRate(room.id, rate);
+      await loadStudioRooms();
+    } catch (error) {
+      setBlockError(error?.message || "Не вдалося зберегти погодинний тариф");
+    }
+  };
   const toggleRoomTrainerException = async (room, trainerId) => {
     if (!isAdmin) return;
     const roomId = String(room?.id || "");
@@ -2719,7 +2738,7 @@ export default function ScheduleTab({
             <div style={editorSectionLabelSt}>Основне</div>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 42 : 46, fontSize: isMobile ? 14 : 15, borderColor: formErrors.title ? theme.danger : editorInputSt.borderColor }} placeholder="Назва / клієнт / група" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
             {formErrors.title ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.title}</div> : null}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? p.bookingType || tariffTypes[0]?.id : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(p.bookingType || tariffTypes[0]?.id) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { const defaultType = activeTariffTypes[0]?.id; setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? (activeTariffTypes.some((type) => type.id === p.bookingType) ? p.bookingType : defaultType) : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(activeTariffTypes.some((type) => type.id === p.bookingType) ? p.bookingType : defaultType) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
             <div style={editorSectionLabelSt}>Час і місце</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
             <input style={{ ...editorInputSt, borderColor: formErrors.date ? theme.danger : editorInputSt.borderColor }} type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
@@ -2758,7 +2777,7 @@ export default function ScheduleTab({
               <>
                 <select
                   style={editorInputSt}
-                  value={draft.bookingType || tariffTypes[0]?.id || ""}
+                  value={draft.bookingType || activeTariffTypes[0]?.id || ""}
                   onChange={(e) => {
                     const nextPrice = getTariffPrice(e.target.value);
                     setDraft((p) => ({
@@ -2768,7 +2787,7 @@ export default function ScheduleTab({
                     }));
                   }}
                 >
-                  {tariffTypes.map((b) => (
+                  {(editingId ? tariffTypes.filter((type) => type.isActive !== false || type.id === draft.bookingType) : activeTariffTypes).map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.label}
                     </option>
@@ -2786,21 +2805,19 @@ export default function ScheduleTab({
                     }))
                   }
                 />
-                <input
+                {isAdmin ? <input
                   style={editorInputSt}
                   type="number"
                   placeholder="Ціна"
                   value={draft.price ?? ""}
-                  readOnly={!isAdmin}
-                  disabled={!isAdmin}
                   onChange={(e) =>
                     setDraft((p) => ({
                       ...p,
                       price: Number(e.target.value || 0),
                     }))
                   }
-                />
-                <select
+                /> : null}
+                {isAdmin ? <select
                   style={editorInputSt}
                   value={draft.paymentMethod || "none"}
                   onChange={(e) =>
@@ -2810,7 +2827,7 @@ export default function ScheduleTab({
                   <option value="card">Карта</option>
                   <option value="cash">Готівка</option>
                   <option value="none">Без оплати</option>
-                </select>
+                </select> : null}
               </>
             )}
             {draft.eventType === "room_booking" && isAdmin && (
@@ -3361,6 +3378,11 @@ export default function ScheduleTab({
                   ) : (
                     <>
                       {room.name}
+                      <label style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                        <span style={{ fontSize: 11 }}>грн/год</span>
+                        <input aria-label={`Погодинний тариф ${room.name}`} type="number" min="0" step="1" style={{ ...inputSt, width: 90, minHeight: 28, padding: "0 6px" }} value={roomRateDrafts[String(room.id)] ?? ""} onChange={(event) => setRoomRateDrafts((current) => ({ ...current, [String(room.id)]: event.target.value }))} />
+                        <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "20px" }} onClick={() => saveRoomHourlyRate(room)}>Зберегти</button>
+                      </label>
                       {room.isActive !== false ? <button type="button" role="switch" aria-checked={room.bookingOpen !== false} style={{ ...btnS, padding: "0 8px", lineHeight: "20px", color: room.bookingOpen === false ? theme.danger : theme.text }} onClick={() => toggleRoomBookingAvailability(room)}>{room.bookingOpen === false ? "Бронювання закриті" : "Бронювання відкриті"}</button> : null}
                       <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => startRenameRoom(room)}>✎</button>
                       {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
@@ -3754,54 +3776,6 @@ export default function ScheduleTab({
         </div>
       ) : null}
 
-      {isAdmin && (
-        <div style={{ ...cardSt, border: `1px solid ${theme.border}` }}>
-          <b>Типи резерву / ціни</b>
-          {bookingTypes.map((t, i) => (
-            <div
-              key={t.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "2fr 120px",
-                gap: 8,
-                marginTop: 6,
-              }}
-            >
-              <input
-                style={editorInputSt}
-                value={t.label}
-                onChange={(e) =>
-                  setBookingTypes((p) =>
-                    p.map((x, idx) =>
-                      idx === i ? { ...x, label: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-              <input
-                style={editorInputSt}
-                type="number"
-                value={t.price}
-                onChange={(e) =>
-                  setBookingTypes((p) =>
-                    p.map((x, idx) =>
-                      idx === i
-                        ? { ...x, price: Number(e.target.value || 0) }
-                        : x,
-                    ),
-                  )
-                }
-              />
-            </div>
-          ))}
-          <button
-            style={{ ...btnS, marginTop: 8 }}
-            onClick={() => setBookingTypes(DEFAULT_TYPES)}
-          >
-            Reset to defaults
-          </button>
-        </div>
-      )}
     </div>
   );
 }

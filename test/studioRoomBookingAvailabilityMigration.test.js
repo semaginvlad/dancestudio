@@ -142,5 +142,5 @@ test("schedule UI hides closed rooms from booking choices and marks them in the 
   assert.match(schedule, /refreshStudioRoomBookingAvailability\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
   assert.match(schedule, /resolveStudioRoomBookingSelection\(studioRooms, selectedRoom, \{ isAdmin, trainerIds: currentTrainerScopeIds, trainerAccessKnown: trainerRoomAccessKnown \}\)/);
   assert.match(schedule, /availableBookingRooms[\s\S]*isStudioRoomBookingOpenForActor/);
-  assert.match(schedule, /return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
+  assert.match(schedule, /return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}, \{ trainerAction: "cancel" \}\)/);
 });

@@ -176,7 +176,7 @@ test("editor and status actions share explicit override and retain UI on failure
   assert.match(source,/const updateBookingEventWithGuard = async[\s\S]*runBookingMutation\([\s\S]*overrideBookingBlock: override/);
   assert.match(source,/updateBookingEventWithGuard\(event, \{ status: "tentative" \}\)/);
   assert.match(source,/updateBookingEventWithGuard\(event, \{ status: "active" \}\)/);
-  assert.match(source,/return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}\)/);
+  assert.match(source,/return updateBookingEventWithGuard\(event, \{ status: "cancelled" \}, \{ trainerAction: "cancel" \}\)/);
   assert.match(source,/detailsMutationError \? <div role="alert"/);
   assert.match(source,/if \(await updateBookingEventWithGuard[\s\S]*setSelectedEventDetails\(null\)/);
   assert.doesNotMatch(source,/setSelectedEventDetails\(null\); await onUpdateBooking\(event\.parentId \|\| event\.id, \{ status:/);

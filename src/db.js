@@ -4,6 +4,7 @@ import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageC
 import { resolveStudioRoomsResponse } from './studioRooms'
 import { resolveStudentGroupsResponse } from './studentGroups'
 import { normalizeGroupArchiveAliases } from './groupArchive'
+import { mapRoomBooking } from './roomBookings'
 
 // ─── AUTH ───
 export const signIn = async (email, password) => {
@@ -883,6 +884,59 @@ export async function updateServicePrice(serviceCode, priceUah) {
   return { serviceCode: data.service_code, serviceName: data.service_name, priceUah: Number(data.price_uah) }
 }
 
+const mapRoomBookingTariff = (row) => ({
+  id: row.code,
+  code: row.code,
+  label: row.name,
+  price: row.price_uah == null ? null : Number(row.price_uah),
+  peopleMin: row.people_min == null ? null : Number(row.people_min),
+  peopleMax: row.people_max == null ? null : Number(row.people_max),
+  isActive: row.is_active !== false,
+  sortOrder: Number(row.sort_order || 0),
+});
+
+export async function fetchRoomBookingTariffs() {
+  const { data, error } = await supabase.rpc('crm_fetch_room_booking_tariffs')
+  if (error) throw error
+  return (data || []).map(mapRoomBookingTariff)
+}
+
+export async function updateRoomBookingTariff(code, patch = {}) {
+  const payload = { updated_at: new Date().toISOString() }
+  if (patch.label !== undefined) payload.name = String(patch.label || '').trim()
+  if (patch.price !== undefined) payload.price_uah = Number(patch.price)
+  if (patch.peopleMin !== undefined) payload.people_min = patch.peopleMin === null || patch.peopleMin === '' ? null : Number(patch.peopleMin)
+  if (patch.peopleMax !== undefined) payload.people_max = patch.peopleMax === null || patch.peopleMax === '' ? null : Number(patch.peopleMax)
+  if (patch.isActive !== undefined) payload.is_active = !!patch.isActive
+  const { data, error } = await supabase.from('room_booking_tariffs').update(payload).eq('code', code).select('*').single()
+  if (error) throw error
+  return mapRoomBookingTariff(data)
+}
+
+const mapTrainerFinancialSetting = (row) => ({
+  trainerId: row.trainer_id,
+  individualIncomeEnabled: !!row.individual_income_enabled,
+  trainerShareUah: Number(row.trainer_share_uah || 0),
+});
+
+export async function fetchTrainerFinancialSettings() {
+  const { data, error } = await supabase.from('trainer_financial_settings').select('*')
+  if (error) throw error
+  return (data || []).map(mapTrainerFinancialSetting)
+}
+
+export async function upsertTrainerFinancialSetting(trainerId, patch = {}) {
+  const payload = {
+    trainer_id: trainerId,
+    individual_income_enabled: !!patch.individualIncomeEnabled,
+    trainer_share_uah: Number(patch.trainerShareUah || 0),
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase.from('trainer_financial_settings').upsert(payload, { onConflict: 'trainer_id' }).select('*').single()
+  if (error) throw error
+  return mapTrainerFinancialSetting(data)
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
@@ -1483,36 +1537,13 @@ export async function restoreCancelledTraining(cancelledId) {
 }
 
 // ─── ROOM BOOKINGS ───
-const mapRoomBooking = (b) => ({
-  id: b.id,
-  date: b.date,
-  startTime: b.start_time,
-  endTime: b.end_time,
-  trainerId: b.trainer_id || null,
-  trainerName: b.trainer_name || null,
-  title: b.title || "",
-  type: b.type || "individual",
-  bookingType: b.booking_type || b.type || "individual",
-  peopleCount: Number(b.people_count || 0) || null,
-  price: Number(b.price || 0) || null,
-  paymentMethod: b.payment_method || null,
-  eventType: b.event_type || null,
-  note: b.note || "",
-  color: b.color || null,
-  recurrence: b.recurrence || "none",
-  recurrenceUntil: b.recurrence_until || null,
-  description: b.description || "",
-  status: b.status || "active",
-  roomName: b.room_name || b.room || b.location || b.hall || null,
-  createdAt: b.created_at || null,
-});
-
 const mapStudioRoom = (row) => ({
   id: row.id,
   name: row.name,
   isActive: row.is_active !== false,
   bookingOpen: row.booking_open !== false,
   allowedTrainerIds: Array.isArray(row.allowed_trainer_ids) ? row.allowed_trainer_ids.map(String) : [],
+  hourlyRateUah: row.hourly_rate_uah == null ? null : Number(row.hourly_rate_uah),
   sortOrder: Number(row.sort_order || 0),
   createdAt: row.created_at || null,
 });
@@ -1555,6 +1586,12 @@ export async function insertRoomBooking(payload) {
   return mapRoomBooking(data);
 }
 
+export async function insertTrainerRoomBooking(payload) {
+  const { data, error } = await supabase.rpc('crm_trainer_create_room_booking', { p_payload: payload });
+  if (error) throw error;
+  return mapRoomBooking(data || {});
+}
+
 export async function updateRoomBooking(id, payload) {
   const next = {};
   if (payload.date !== undefined) next.date = payload.date;
@@ -1579,6 +1616,21 @@ export async function updateRoomBooking(id, payload) {
   const { data, error } = await supabase.from('room_bookings').update(next).eq('id', id).select('*').single();
   if (error) throw error;
   return mapRoomBooking(data);
+}
+
+export async function updateTrainerRoomBooking(id, payload) {
+  const safePayload = { ...payload };
+  delete safePayload.price;
+  delete safePayload.paymentMethod;
+  const { data, error } = await supabase.rpc('crm_trainer_update_room_booking', { p_id: id, p_payload: safePayload });
+  if (error) throw error;
+  return mapRoomBooking(data || {});
+}
+
+export async function mutateTrainerRoomBooking(id, action) {
+  const { data, error } = await supabase.rpc('crm_trainer_mutate_room_booking', { p_id: id, p_action: action });
+  if (error) throw error;
+  return action === 'cancel' ? mapRoomBooking(data || {}) : data;
 }
 
 const roomBookingRpcParams = (payload = {}) => ({
@@ -1928,12 +1980,16 @@ export async function setStudioRoomBookingTrainerExceptions(roomId, trainerIds =
   return Array.isArray(data) ? data.map(String) : [];
 }
 
+// Keep room-management RETURNING compatible with the intentionally narrow
+// authenticated column grant. Hourly rates are read only via the admin-aware RPC.
+const STUDIO_ROOM_MANAGEMENT_COLUMNS = 'id,name,is_active,booking_open,sort_order,created_at';
+
 export async function createStudioRoom(name) {
   const roomName = String(name || '').trim();
   if (!roomName) throw new Error('name is required');
   const { data: existing, error: existingError } = await supabase
     .from('studio_rooms')
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .ilike('name', roomName)
     .limit(1)
     .maybeSingle();
@@ -1944,7 +2000,7 @@ export async function createStudioRoom(name) {
       .from('studio_rooms')
       .update({ is_active: true, name: roomName })
       .eq('id', existing.id)
-      .select('*')
+      .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
       .single();
     if (error) throw error;
     return mapStudioRoom(data);
@@ -1953,7 +2009,7 @@ export async function createStudioRoom(name) {
   const { data, error } = await supabase
     .from('studio_rooms')
     .insert({ name: roomName, is_active: true })
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .single();
   if (error) throw error;
   return mapStudioRoom(data);
@@ -1969,10 +2025,21 @@ export async function updateStudioRoom(id, patch = {}) {
     .from('studio_rooms')
     .update(next)
     .eq('id', id)
-    .select('*')
+    .select(STUDIO_ROOM_MANAGEMENT_COLUMNS)
     .single();
   if (error) throw error;
   return mapStudioRoom(data);
+}
+
+export async function updateStudioRoomHourlyRate(id, hourlyRateUah) {
+  const rate = Number(hourlyRateUah);
+  if (!Number.isInteger(rate) || rate < 0) throw new Error('Погодинний тариф має бути цілим невід’ємним числом');
+  const { data, error } = await supabase.rpc('crm_admin_update_studio_room_hourly_rate', {
+    p_room_id: id,
+    p_hourly_rate_uah: rate,
+  });
+  if (error) throw error;
+  return Number(data);
 }
 
 

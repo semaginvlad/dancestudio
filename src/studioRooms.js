@@ -78,3 +78,11 @@ export function resolveStudioRoomBookingSelection(rooms = [], selectedRoom = "al
   }
   return String(activeOpenRooms[0]?.name || "").trim().replace(/\s+/g, " ");
 }
+
+export function resolveBookingTypeForMutation(tariffs = [], requestedType = "", { isExisting = false } = {}) {
+  if (isExisting && requestedType) return requestedType;
+  const active = (Array.isArray(tariffs) ? tariffs : []).filter((tariff) => tariff?.isActive !== false);
+  return active.some((tariff) => tariff.id === requestedType)
+    ? requestedType
+    : active[0]?.id || "individual_1_2";
+}
