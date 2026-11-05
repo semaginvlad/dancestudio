@@ -913,6 +913,35 @@ export async function updateRoomBookingTariff(code, patch = {}) {
   return mapRoomBookingTariff(data)
 }
 
+const mapIndividualTrainingRate = (row) => ({
+  roomId: row.room_id,
+  roomName: row.room_name,
+  roomIsActive: row.room_is_active !== false,
+  peopleRangeCode: row.people_range_code,
+  peopleRangeLabel: row.people_range_label,
+  peopleMin: Number(row.people_min),
+  peopleMax: row.people_max == null ? null : Number(row.people_max),
+  hourlyRateUah: row.hourly_rate_uah == null ? null : Number(row.hourly_rate_uah),
+});
+
+export async function fetchIndividualTrainingRateMatrix() {
+  const { data, error } = await supabase.rpc('crm_fetch_individual_training_rate_matrix');
+  if (error) throw error;
+  return (data || []).map(mapIndividualTrainingRate);
+}
+
+export async function updateIndividualTrainingRoomRate(roomId, peopleRangeCode, hourlyRateUah) {
+  const rate = Number(hourlyRateUah);
+  if (!Number.isInteger(rate) || rate < 0) throw new Error('Тариф має бути цілим невід’ємним числом');
+  const { data, error } = await supabase.rpc('crm_admin_update_individual_training_room_rate', {
+    p_room_id: roomId,
+    p_people_range_code: peopleRangeCode,
+    p_hourly_rate_uah: rate,
+  });
+  if (error) throw error;
+  return Number(data);
+}
+
 const mapTrainerFinancialSetting = (row) => ({
   trainerId: row.trainer_id,
   individualIncomeEnabled: !!row.individual_income_enabled,

@@ -2,14 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
-import { fetchStudioRooms, createStudioRoom, updateStudioRoom, updateStudioRoomHourlyRate, renameStudioRoom, setStudioRoomBookingTrainerExceptions } from "../db";
+import { fetchStudioRooms, createStudioRoom, updateStudioRoom, renameStudioRoom, setStudioRoomBookingTrainerExceptions } from "../db";
 import { UNKNOWN_ROOM_NAME, resolveOverrideRoomName, resolveScheduleRoomName } from "../scheduleRoom";
 import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutateScheduleEvent, collisionStatusPresentation, compactDayPreview, EVENT_STATUS_STYLES, getTrainerInitials, isBookingBlockEvent, isReadOnlyScheduleEvent, monthPreview, navigateCalendar, navigationLabels, overlapEventLayout, requireScheduleSaveResult, resolveWeekRoomNames, roomLaneLayout, sortCalendarEvents, weekEventGeometry, weekLaneSelection } from "../scheduleCalendar";
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
 import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
-import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveBookingTypeForMutation, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
+import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -21,28 +21,24 @@ const DEFAULT_TYPES = [
     label: "Прибирання",
     peopleMin: null,
     peopleMax: null,
-    price: 0,
   },
   {
     id: "individual_1_2",
-    label: "Індивідуальне 1–2 особи",
+    label: "1–2",
     peopleMin: 1,
     peopleMax: 2,
-    price: 250,
   },
   {
     id: "small_group_3_9",
-    label: "Міні-група 3–9 осіб",
+    label: "3–9",
     peopleMin: 3,
     peopleMax: 9,
-    price: 500,
   },
   {
     id: "group_10_plus",
-    label: "Група 10+ осіб",
+    label: "10+",
     peopleMin: 10,
     peopleMax: null,
-    price: 1000,
   },
 ];
 const toLocalDateKey = (date) => {
@@ -467,10 +463,7 @@ export default function ScheduleTab({
     () => bookingTypes.filter((type) => type.id !== "cleaning"),
     [bookingTypes],
   );
-  const activeTariffTypes = useMemo(
-    () => tariffTypes.filter((type) => type.isActive !== false),
-    [tariffTypes],
-  );
+  const activeTariffTypes = useMemo(() => DEFAULT_TYPES.slice(1), []);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [viewMode, setViewMode] = useState("week"); // month | week | day
   const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));
@@ -492,7 +485,6 @@ export default function ScheduleTab({
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
   const [studioRooms, setStudioRooms] = useState([]);
-  const [roomRateDrafts, setRoomRateDrafts] = useState({});
   const [studioRoomsLoadStatus, setStudioRoomsLoadStatus] = useState("loading");
   const [roomTrainerExceptionsSavingIds, setRoomTrainerExceptionsSavingIds] = useState(() => new Set());
   const roomTrainerExceptionsSavingRef = useRef(new Set());
@@ -538,9 +530,6 @@ export default function ScheduleTab({
     price: 0,
     roomName: DEFAULT_ROOM,
   });
-  useEffect(() => {
-    setRoomRateDrafts(Object.fromEntries(studioRooms.map((room) => [String(room.id), room.hourlyRateUah ?? ""])));
-  }, [studioRooms]);
   const dirMap = useMemo(
     () => new Map(safeDirections.map((d) => [String(d.id), d.name || d.id])),
     [safeDirections],
@@ -891,10 +880,6 @@ export default function ScheduleTab({
     });
   }, [eventsByDay, isAdmin, isMobile, mobileFilterType, mobileFilterValue, safeGroups.length]);
 
-  const getTariffPrice = (bookingType) => {
-    const price = tariffTypes.find((type) => type.id === bookingType)?.price;
-    return price == null ? null : Number(price);
-  };
   const allKnownRooms = useMemo(() => {
     const set = new Set(activeStudioRooms.map((x) => normalizeRoomName(x?.name)).filter(Boolean));
     eventsByDay.forEach((arr) => {
@@ -1031,12 +1016,14 @@ export default function ScheduleTab({
       roomName: normalizeRoomName(source.roomName || primaryRoomName) || primaryRoomName,
     };
     if (eventType === "individual_training") {
-      const bookingType = resolveBookingTypeForMutation(tariffTypes, source.bookingType, { isExisting });
+      const bookingType = isExisting && source.bookingType
+        ? source.bookingType
+        : (activeTariffTypes.some((type) => type.id === source.bookingType) ? source.bookingType : "individual_1_2");
       return {
         ...base,
         bookingType,
-        peopleCount: Number(source.peopleCount || 0) || null,
-        price: isAdmin ? Number(source.price || 0) || null : undefined,
+        peopleCount: activeTariffTypes.find((type) => type.id === bookingType)?.peopleMin || source.peopleCount || null,
+        price: undefined,
         paymentMethod: source.paymentMethod || "none",
       };
     }
@@ -1045,7 +1032,7 @@ export default function ScheduleTab({
         ...base,
         bookingType: null,
         peopleCount: null,
-        price: isAdmin ? Number(source.price || 0) || null : null,
+        price: null,
         paymentMethod: "none",
       };
     }
@@ -2436,17 +2423,6 @@ export default function ScheduleTab({
       setBlockError(error?.message || "Не вдалося змінити доступність залу");
     }
   };
-  const saveRoomHourlyRate = async (room) => {
-    if (!isAdmin) return;
-    const rate = Number(roomRateDrafts[String(room.id)]);
-    if (!Number.isInteger(rate) || rate < 0) { setBlockError("Погодинний тариф має бути цілим невід’ємним числом"); return; }
-    try {
-      await updateStudioRoomHourlyRate(room.id, rate);
-      await loadStudioRooms();
-    } catch (error) {
-      setBlockError(error?.message || "Не вдалося зберегти погодинний тариф");
-    }
-  };
   const toggleRoomTrainerException = async (room, trainerId) => {
     if (!isAdmin) return;
     const roomId = String(room?.id || "");
@@ -2738,7 +2714,7 @@ export default function ScheduleTab({
             <div style={editorSectionLabelSt}>Основне</div>
             <input style={{ ...editorInputSt, minHeight: isMobile ? 42 : 46, fontSize: isMobile ? 14 : 15, borderColor: formErrors.title ? theme.danger : editorInputSt.borderColor }} placeholder="Назва / клієнт / група" value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} />
             {formErrors.title ? <div style={{ color: theme.danger, fontSize: 12 }}>{formErrors.title}</div> : null}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { const defaultType = activeTariffTypes[0]?.id; setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? (activeTariffTypes.some((type) => type.id === p.bookingType) ? p.bookingType : defaultType) : null, peopleCount: eventType === "individual_training" ? p.peopleCount || 1 : null, price: eventType === "individual_training" ? getTariffPrice(activeTariffTypes.some((type) => type.id === p.bookingType) ? p.bookingType : defaultType) : 0, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{allowedEventTypes.map((eventType) => { const ac = typeAccent[eventType] || typeAccent.room_booking; const active = draft.eventType === eventType; return <button key={eventType} type="button" style={{ ...editorBtnSt, minHeight: isMobile ? 30 : 32, padding: isMobile ? "0 8px" : "0 10px", gap: 5, borderColor: active ? ac.border : theme.border, color: active ? ac.text : theme.textLight, background: active ? ac.bg : (isDarkTheme ? "rgba(15,23,42,.3)" : "rgba(255,255,255,.54)"), boxShadow: active ? `0 0 0 1px ${ac.border}66, 0 0 14px ${ac.border}22` : "none" }} onClick={() => { const defaultType = "individual_1_2"; setDraft((p) => ({ ...p, eventType, bookingType: eventType === "individual_training" ? (activeTariffTypes.some((type) => type.id === p.bookingType) ? p.bookingType : defaultType) : null, peopleCount: eventType === "individual_training" ? (activeTariffTypes.find((type) => type.id === p.bookingType)?.peopleMin || 1) : null, price: null, paymentMethod: eventType === "individual_training" ? p.paymentMethod || "none" : "none" })); }}><span style={{ fontSize: 11, color: ac.border }}>{eventTypeIcon[eventType] || "•"}</span>{isMobile ? getEventTypeLabel(eventType).replace("Індивідуальне тренування", "Індивід.").replace("Кастомна подія", "Інше") : getEventTypeLabel(eventType)}</button>; })}</div>
             <div style={editorSectionLabelSt}>Час і місце</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 }}>
             <input style={{ ...editorInputSt, borderColor: formErrors.date ? theme.danger : editorInputSt.borderColor }} type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} />
@@ -2779,43 +2755,28 @@ export default function ScheduleTab({
                   style={editorInputSt}
                   value={draft.bookingType || activeTariffTypes[0]?.id || ""}
                   onChange={(e) => {
-                    const nextPrice = getTariffPrice(e.target.value);
+                    const selectedRange = activeTariffTypes.find((type) => type.id === e.target.value);
                     setDraft((p) => ({
                       ...p,
                       bookingType: e.target.value,
-                      price: nextPrice,
+                      peopleCount: selectedRange?.peopleMin || 1,
                     }));
                   }}
                 >
-                  {(editingId ? tariffTypes.filter((type) => type.isActive !== false || type.id === draft.bookingType) : activeTariffTypes).map((b) => (
+                  {editingId && draft.bookingType && !activeTariffTypes.some((type) => type.id === draft.bookingType) ? <option value={draft.bookingType} disabled>{tariffTypes.find((type) => type.id === draft.bookingType)?.label || draft.bookingType} (історичний)</option> : null}
+                  {activeTariffTypes.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.label}
                     </option>
                   ))}
                 </select>
-                <input
-                  style={editorInputSt}
-                  type="number"
-                  placeholder="К-ть людей"
-                  value={draft.peopleCount ?? ""}
-                  onChange={(e) =>
-                    setDraft((p) => ({
-                      ...p,
-                      peopleCount: Number(e.target.value || 0),
-                    }))
-                  }
-                />
                 {isAdmin ? <input
                   style={editorInputSt}
                   type="number"
-                  placeholder="Ціна"
+                  aria-label="Розрахована сума"
+                  placeholder="Сума розраховується сервером"
                   value={draft.price ?? ""}
-                  onChange={(e) =>
-                    setDraft((p) => ({
-                      ...p,
-                      price: Number(e.target.value || 0),
-                    }))
-                  }
+                  readOnly
                 /> : null}
                 {isAdmin ? <select
                   style={editorInputSt}
@@ -2829,20 +2790,6 @@ export default function ScheduleTab({
                   <option value="none">Без оплати</option>
                 </select> : null}
               </>
-            )}
-            {draft.eventType === "room_booking" && isAdmin && (
-              <input
-                style={editorInputSt}
-                type="number"
-                placeholder="Ціна"
-                value={draft.price ?? ""}
-                onChange={(e) =>
-                  setDraft((p) => ({
-                    ...p,
-                    price: Number(e.target.value || 0),
-                  }))
-                }
-              />
             )}
             <input
               style={editorInputSt}
@@ -3378,11 +3325,6 @@ export default function ScheduleTab({
                   ) : (
                     <>
                       {room.name}
-                      <label style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                        <span style={{ fontSize: 11 }}>грн/год</span>
-                        <input aria-label={`Погодинний тариф ${room.name}`} type="number" min="0" step="1" style={{ ...inputSt, width: 90, minHeight: 28, padding: "0 6px" }} value={roomRateDrafts[String(room.id)] ?? ""} onChange={(event) => setRoomRateDrafts((current) => ({ ...current, [String(room.id)]: event.target.value }))} />
-                        <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "20px" }} onClick={() => saveRoomHourlyRate(room)}>Зберегти</button>
-                      </label>
                       {room.isActive !== false ? <button type="button" role="switch" aria-checked={room.bookingOpen !== false} style={{ ...btnS, padding: "0 8px", lineHeight: "20px", color: room.bookingOpen === false ? theme.danger : theme.text }} onClick={() => toggleRoomBookingAvailability(room)}>{room.bookingOpen === false ? "Бронювання закриті" : "Бронювання відкриті"}</button> : null}
                       <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => startRenameRoom(room)}>✎</button>
                       {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
