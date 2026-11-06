@@ -3,33 +3,92 @@ begin;
 -- Commercial individual trainings become studio income only after an admin
 -- confirms the server-created pending operation. Existing finance scenarios are
 -- deliberately untouched.
-alter table public.room_bookings
-  add column financial_series_id uuid;
 
-update public.room_bookings set financial_series_id = id where financial_series_id is null;
+-- A schema/backfill-only update must not be interpreted as a new booking or a
+-- move into a closed room. Scheduling changes and reactivation remain guarded;
+-- cancellation remains explicitly allowed. This replaces the latest canonical
+-- function from the closed-room trainer-exceptions migration.
+create or replace function public.crm_enforce_studio_room_booking_open()
+returns trigger language plpgsql security definer set search_path = public
+as $function$
+begin
+  if coalesce(new.status, 'active') = 'cancelled' then return new; end if;
+  if tg_op = 'UPDATE'
+     and current_setting('crm.individual_income_reconciliation', true) = 'on'
+     and new.date is not distinct from old.date
+     and new.start_time is not distinct from old.start_time
+     and new.end_time is not distinct from old.end_time
+     and public.crm_canonical_room_name(new.room_name)=public.crm_canonical_room_name(old.room_name)
+     and new.trainer_id is not distinct from old.trainer_id
+     and new.status is not distinct from old.status
+     and new.recurrence is not distinct from old.recurrence
+     and new.recurrence_until is not distinct from old.recurrence_until
+  then return new; end if;
+  if tg_op = 'UPDATE' and new.start_time is not distinct from old.start_time and new.end_time is not distinct from old.end_time
+     and public.crm_canonical_room_name(new.room_name)=public.crm_canonical_room_name(old.room_name)
+     and new.status is not distinct from old.status and new.recurrence is not distinct from old.recurrence
+     and public.crm_schedule_booking_update_only_shrinks(old.date,old.recurrence_until,new.date,new.recurrence_until,new.recurrence)
+  then return new; end if;
+  if tg_op='INSERT' and current_setting('crm.occurrence_removal_continuation',true)='on'
+     and public.crm_occurrence_removal_signature(new.date,new.start_time,new.end_time,new.room_name,new.recurrence,new.recurrence_until,new.status,new.trainer_id::text)=current_setting('crm.occurrence_removal_signature',true)
+  then return new; end if;
+  if tg_op='UPDATE' and coalesce(current_setting('crm.room_rename_old_name',true),'')<>''
+     and coalesce(current_setting('crm.room_rename_new_name',true),'')<>''
+     and public.crm_canonical_room_name(old.room_name)=current_setting('crm.room_rename_old_name',true)
+     and public.crm_canonical_room_name(new.room_name)=current_setting('crm.room_rename_new_name',true)
+  then return new; end if;
+  if public.crm_is_admin_session() then return new; end if;
+  if exists(select 1 from public.studio_rooms r where r.is_active and not r.booking_open
+      and public.crm_canonical_room_name(r.name)=public.crm_canonical_room_name(new.room_name)) then
+    if exists(
+      select 1 from public.studio_rooms r
+      join public.studio_room_booking_trainer_exceptions e on e.room_id=r.id
+      join public.trainers t on t.id=e.trainer_id
+      where public.crm_canonical_room_name(r.name)=public.crm_canonical_room_name(new.room_name)
+        and t.auth_user_id=auth.uid() and t.is_active is true and t.archived_at is null and t.access_disabled_at is null
+        and new.trainer_id::text in (auth.uid()::text, t.id::text)
+    ) then return new; end if;
+    raise exception 'Цей зал тимчасово недоступний для бронювання. Оберіть інший зал.' using errcode='P0001';
+  end if;
+  return new;
+end;
+$function$;
+
+alter table public.room_bookings
+  add column if not exists financial_series_id uuid;
+
+do $backfill_financial_series$
+begin
+  perform set_config('crm.individual_income_reconciliation','on',true);
+  update public.room_bookings set financial_series_id = id where financial_series_id is null;
+  perform set_config('crm.individual_income_reconciliation','',true);
+exception when others then
+  perform set_config('crm.individual_income_reconciliation','',true);
+  raise;
+end $backfill_financial_series$;
 alter table public.room_bookings alter column financial_series_id set default gen_random_uuid();
 alter table public.room_bookings alter column financial_series_id set not null;
 
 drop index if exists public.financial_operations_active_room_booking_uidx;
 
 alter table public.financial_operations
-  add column room_booking_series_id uuid,
-  add column occurrence_date date,
-  add column event_title_snapshot text,
-  add column trainer_id_snapshot text,
-  add column trainer_name_snapshot text,
-  add column event_start_time_snapshot text,
-  add column event_end_time_snapshot text,
-  add column room_name_snapshot text,
-  add column people_count_snapshot integer;
+  add column if not exists room_booking_series_id uuid,
+  add column if not exists occurrence_date date,
+  add column if not exists event_title_snapshot text,
+  add column if not exists trainer_id_snapshot text,
+  add column if not exists trainer_name_snapshot text,
+  add column if not exists event_start_time_snapshot text,
+  add column if not exists event_end_time_snapshot text,
+  add column if not exists room_name_snapshot text,
+  add column if not exists people_count_snapshot integer;
 
-create unique index financial_operations_active_booking_occurrence_uidx
+create unique index if not exists financial_operations_active_booking_occurrence_uidx
   on public.financial_operations(room_booking_series_id, occurrence_date)
   where room_booking_series_id is not null
     and occurrence_date is not null
     and status in ('pending', 'posted');
 
-create index financial_operations_pending_individual_idx
+create index if not exists financial_operations_pending_individual_idx
   on public.financial_operations(status, category_code, occurrence_date, event_start_time_snapshot)
   where status = 'pending' and category_code = 'individual_training';
 
@@ -224,6 +283,7 @@ begin
   return new;
 end $$;
 
+drop trigger if exists room_bookings_sync_individual_income on public.room_bookings;
 create trigger room_bookings_sync_individual_income
 after insert or update of date,start_time,end_time,trainer_id,trainer_name,title,
   booking_type,people_count,price,event_type,recurrence,recurrence_until,status,room_name
@@ -242,6 +302,7 @@ begin
   return old;
 end $$;
 
+drop trigger if exists room_bookings_preserve_financial_delete on public.room_bookings;
 create trigger room_bookings_preserve_financial_delete
 before delete on public.room_bookings for each row
 execute function public.crm_preserve_financial_room_booking_delete();

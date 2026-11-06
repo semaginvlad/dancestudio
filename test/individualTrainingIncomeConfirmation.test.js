@@ -10,7 +10,7 @@ const incomeSql = await readFile(new URL('../supabase/migrations/20261105150000_
 const dbSource = await readFile(new URL('../src/db.js', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
 
-async function database() {
+async function database({ beforeIncome } = {}) {
   const db = new PGlite();
   await db.exec(`
     create role anon; create role authenticated;
@@ -36,6 +36,9 @@ async function database() {
     create function public.crm_schedule_booking_step_date(date,text,integer) returns date language sql immutable as $$
       select case lower(coalesce($2,'none')) when 'daily' then $1+$3 when 'monthly' then ($1+($3||' month')::interval)::date else $1+(7*$3) end
     $$;
+    create function public.crm_schedule_booking_update_only_shrinks(date,date,date,date,text) returns boolean language sql immutable as $$
+      select $3 >= $1 and ($2 is null or ($4 is not null and $4 <= $2)) and ($3 > $1 or $4 is distinct from $2)
+    $$;
     grant usage on schema auth to authenticated;
     grant execute on function auth.uid() to authenticated;
     create table public.attendance(id uuid primary key);
@@ -54,13 +57,14 @@ async function database() {
   `);
   await db.exec(coreSql);
   await db.exec(matrixSql);
-  await db.exec(incomeSql);
   await db.exec(`
     set app.test_authenticated='on'; set app.test_admin='off';
     insert into trainers(id,auth_user_id) values ('20000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001');
     insert into trainer_financial_settings(trainer_id,individual_income_enabled,trainer_share_uah)
       values ('20000000-0000-0000-0000-000000000001',true,0);
   `);
+  if (beforeIncome) await beforeIncome(db);
+  await db.exec(incomeSql);
   return db;
 }
 
@@ -78,6 +82,42 @@ test('enabled individual training creates one pending snapshot while reserve cre
     }]);
     await db.exec(`insert into room_bookings(date,start_time,end_time,room_name,event_type,title,trainer_id,status) values ('2026-11-11','10:00','11:00','Зал 2','room_booking','Резерв','20000000-0000-0000-0000-000000000001','active')`);
     assert.equal((await db.query('select count(*)::int count from financial_operations')).rows[0].count, 1);
+  } finally { await db.close(); }
+});
+
+test('migration reconciles historical training in a now-closed room without weakening new-booking guard', async () => {
+  let historicalId;
+  const db = await database({ beforeIncome: async (databaseClient) => {
+    await databaseClient.exec(`
+      create or replace function public.crm_enforce_studio_room_booking_open()
+      returns trigger language plpgsql security definer set search_path=public as $$
+      begin
+        if coalesce(new.status,'active')='cancelled' then return new; end if;
+        if exists(select 1 from studio_rooms room where room.is_active and not room.booking_open
+          and crm_canonical_room_name(room.name)=crm_canonical_room_name(new.room_name)) then
+          raise exception 'Цей зал тимчасово недоступний для бронювання. Оберіть інший зал.' using errcode='P0001';
+        end if;
+        return new;
+      end $$;
+      create trigger trg_enforce_studio_room_booking_open before insert or update on room_bookings
+        for each row execute function crm_enforce_studio_room_booking_open();
+    `);
+    historicalId = (await databaseClient.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status)
+      values ('2026-11-05','10:00','11:00','Зал 2','individual_training','individual_1_2','Historical','20000000-0000-0000-0000-000000000001','active') returning id`)).rows[0].id;
+    await databaseClient.exec("update studio_rooms set booking_open=false where name='Зал 2'");
+  }});
+  try {
+    assert.deepEqual((await db.query('select status,amount_uah::text amount from financial_operations where room_booking_id=$1', [historicalId])).rows, [
+      { status: 'pending', amount: '250.00' },
+    ]);
+    await assert.rejects(db.exec(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status)
+      values ('2026-11-06','12:00','13:00','Зал 2','individual_training','individual_1_2','Blocked','20000000-0000-0000-0000-000000000001','active')`), /тимчасово недоступний/i);
+    await assert.rejects(db.query("update room_bookings set start_time='10:30' where id=$1", [historicalId]), /тимчасово недоступний/i);
+    await db.query("update room_bookings set status='cancelled' where id=$1", [historicalId]);
+    assert.equal((await db.query('select status from financial_operations where room_booking_id=$1', [historicalId])).rows[0].status, 'voided');
+
+    await db.exec(incomeSql);
+    assert.equal((await db.query("select count(*)::int count from financial_operations where room_booking_id=$1 and status in ('pending','posted')", [historicalId])).rows[0].count, 0);
   } finally { await db.close(); }
 });
 
