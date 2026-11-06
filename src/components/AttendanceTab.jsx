@@ -1272,6 +1272,7 @@ export default function AttendanceTab({
   trialBookings = [],
   setTrialBookings,
   attendanceScale = 100,
+  onFinancialJournalChange,
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -2358,6 +2359,7 @@ export default function AttendanceTab({
       const createdStudent = await db.createStudentForGroup(gid, { name });
       const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
       await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
+      refreshFinancialJournal();
       setGuestRosterByGroup((prev) => ({
         ...(prev || {}),
         [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id && normalizeName(r.guestName) !== normalizeName(guestRow.guestName)),
@@ -2650,6 +2652,11 @@ export default function AttendanceTab({
   };
 
   const makeTempAttendanceId = () => `temp_attendance_${Date.now()}_${uid()}`;
+  const refreshFinancialJournal = () => {
+    if (typeof onFinancialJournalChange === "function") {
+      Promise.resolve(onFinancialJournalChange()).catch((error) => console.warn("refresh one-off income failed:", error?.message || error));
+    }
+  };
 
   const buildOptimisticAttendanceRecord = (payload) => ({
     id: makeTempAttendanceId(),
@@ -2750,6 +2757,7 @@ export default function AttendanceTab({
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
+            if (isFinancialAttendance(rec)) refreshFinancialJournal();
           }
         }
         for (const subId of subIdsToSync) {
@@ -2792,6 +2800,7 @@ export default function AttendanceTab({
           return;
         }
         savedRecord = await db.createPaidOneOffAttendance(payload, payment);
+        refreshFinancialJournal();
       } else {
         savedRecord = await db.insertAttendance(payload);
       }
@@ -2910,6 +2919,7 @@ export default function AttendanceTab({
         rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: [existing] });
         backendMutationStarted = true;
         await db.deleteAttendance(existing.id);
+        refreshFinancialJournal();
       } else {
         const entry = guestRow.guestEntryType || guestEntryType || "trial";
         if (entry === "trial") {
@@ -2939,6 +2949,7 @@ export default function AttendanceTab({
           return;
         }
         const savedRecord = await db.createPaidOneOffAttendance(payload, payment);
+        refreshFinancialJournal();
         replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       }
 

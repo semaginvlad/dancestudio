@@ -36,6 +36,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
+import { buildCanonicalRevenueEntries, getRevenueDate } from "./revenue";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -139,6 +140,7 @@ export default function App() {
   const [pendingIndividualIncome, setPendingIndividualIncome] = useState([]);
   const [pendingIndividualIncomeLoading, setPendingIndividualIncomeLoading] = useState(false);
   const [pendingIndividualIncomeError, setPendingIndividualIncomeError] = useState("");
+  const [postedOneOffIncome, setPostedOneOffIncome] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -621,7 +623,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome, oneOffIncome] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -640,7 +642,8 @@ export default function App() {
         safeFetch(db.fetchRoomBookingTariffs, "fetchRoomBookingTariffs"),
         safeFetch(isCurrentAdmin ? db.fetchIndividualTrainingRateMatrix : async () => [], "fetchIndividualTrainingRateMatrix"),
         safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings"),
-        safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome")
+        safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome"),
+        safeFetch(isCurrentAdmin ? db.fetchPostedOneOffIncome : async () => [], "fetchPostedOneOffIncome")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -731,6 +734,7 @@ export default function App() {
       setIndividualTrainingRates(isCurrentAdmin ? (individualRates || []) : []);
       setTrainerFinancialSettings(isCurrentAdmin ? (trainerFinance || []) : []);
       setPendingIndividualIncome(isCurrentAdmin ? (pendingIncome || []) : []);
+      setPostedOneOffIncome(isCurrentAdmin ? (oneOffIncome || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
@@ -1576,6 +1580,11 @@ export default function App() {
     return Object.values(grouped).sort((a,b) => (a.group?.name||"").localeCompare(b.group?.name||""));
   }, [notifications]);
 
+  const revenueEntries = useMemo(
+    () => buildCanonicalRevenueEntries(subs, postedOneOffIncome),
+    [subs, postedOneOffIncome]
+  );
+
   const analytics = useMemo(()=>{
     const analyticsFoundation = buildAnalyticsFoundation({
       students,
@@ -1588,19 +1597,19 @@ export default function App() {
       periodType: "month",
       anchorDate: today(),
     });
-    const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
+    const totalRev=revenueEntries.reduce((a,s)=>a+(s.amount||0),0);
     const unpaid=subs.filter(s=>!s.paid&&getSubStatus(s)!=="expired").reduce((a,s)=>a+(s.amount||0),0);
     const byDir={};directionsList.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
     const splits=[]; groups.forEach(g=>{
-      const gSubs=subs.filter(s=>s.groupId===g.id&&s.paid);
+      const gSubs=revenueEntries.filter(s=>s.groupId===g.id);
       const total=gSubs.reduce((a,s)=>a+(s.amount||0),0);
       if(total>0){splits.push({group:g,total,trainer:Math.round(total*(g.trainerPct||50)/100),studio:Math.round(total*(100-(g.trainerPct||50))/100), subs: gSubs})}
     });
     let totalLTV = 0; let usersWithPurchases = 0; let trialUsers = 0; let convertedUsers = 0;
     Object.values(studentMap).forEach(st => {
-      const stSubs = subs.filter(s => s.studentId === st.id);
+      const stSubs = revenueEntries.filter(s => s.studentId === st.id);
       if(stSubs.length > 0) {
-        const moneySpent = stSubs.filter(s => s.paid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+        const moneySpent = stSubs.reduce((acc, curr) => acc + (curr.amount || 0), 0);
         if(moneySpent > 0) { totalLTV += moneySpent; usersWithPurchases++; }
         if (stSubs.some(s => s.planType === "trial")) { trialUsers++; if (stSubs.some(s => s.planType !== "trial")) convertedUsers++; }
       }
@@ -1614,8 +1623,8 @@ export default function App() {
     const currMonthAttn = attn.filter(a => a.date?.startsWith(currMonth));
     const currMonthCancelled = new Set(cancelled.filter(c => c.date?.startsWith(currMonth)).map(c => c.date + c.groupId)).size;
 
-    const currMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(currMonth) || s.startDate?.startsWith(currMonth))).reduce((a,s)=>a+(s.amount||0),0);
-    const prevMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(prevMonth) || s.startDate?.startsWith(prevMonth))).reduce((a,s)=>a+(s.amount||0),0);
+    const currMonthRev = revenueEntries.filter(s => getRevenueDate(s).startsWith(currMonth)).reduce((a,s)=>a+(s.amount||0),0);
+    const prevMonthRev = revenueEntries.filter(s => getRevenueDate(s).startsWith(prevMonth)).reduce((a,s)=>a+(s.amount||0),0);
 
     const chartData = analyticsFoundation.ui.charts.line.series.map((row) => ({
       day: row.x,
@@ -1641,7 +1650,7 @@ export default function App() {
       currMonthDetails, chartData, maxChartVal,
       foundation: analyticsFoundation,
     };
-  },[students,subs,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
+  },[students,subs,revenueEntries,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
 
   // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
   const proAnalytics = useMemo(() => {
@@ -1651,8 +1660,8 @@ export default function App() {
     const getTopSpenders = (months) => {
       const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
       const totals = {};
-      subs.forEach(s => { 
-        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
+      revenueEntries.forEach(s => {
+        if (s.studentId && getRevenueDate(s) >= toLocalISO(dateLimit)) {
           totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
         }
       });
@@ -1729,7 +1738,7 @@ export default function App() {
     const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
 
     return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
-  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
+  }, [subs, revenueEntries, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
@@ -2611,6 +2620,7 @@ export default function App() {
         {isAdmin && tab==="dashboard" && (
           <DashboardTab
             subs={subs}
+            revenueEntries={revenueEntries}
             students={students}
             studentGrps={studentGrps}
             groups={activeGroups}
@@ -2664,7 +2674,7 @@ export default function App() {
             bookingTariffs={roomBookingTariffs}
           />
         )}
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} onFinancialJournalChange={isAdmin ? async () => setPostedOneOffIncome(await db.fetchPostedOneOffIncome()) : undefined} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
@@ -2777,6 +2787,7 @@ export default function App() {
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
+                revenueEntries={revenueEntries}
                 attn={attn}
                 analyticsFoundation={analytics.foundation}
                 cancelled={cancelled}
@@ -3192,7 +3203,7 @@ export default function App() {
                   return (
                     <div key={sp.group.id} className="admin-finance-card" style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
                       <div className="admin-finance-card-header" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
-                        <div><div className="admin-finance-title-row" style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap"}}><span className="admin-finance-title" style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><span className="admin-finance-direction-badge"><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></span></div><div className="admin-finance-meta" style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
+                        <div><div className="admin-finance-title-row" style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap"}}><span className="admin-finance-title" style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><span className="admin-finance-direction-badge"><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></span></div><div className="admin-finance-meta" style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплат: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
                         <div className="admin-finance-total" style={{textAlign: "right"}}><div className="admin-finance-total-label" style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div className="admin-finance-total-value" style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
                       </div>
                       <div className="admin-finance-progress" style={{height: 12, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>

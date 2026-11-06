@@ -34,7 +34,7 @@ begin
     if not public.crm_is_admin_session() then
       raise exception 'Trial and single attendance is administrator-only' using errcode = '42501';
     end if;
-    if current_setting('crm.atomic_one_off_attendance', true) <> 'on' then
+    if current_setting('crm.atomic_one_off_attendance', true) is distinct from 'on' then
       raise exception 'Paid trial/single attendance requires payment confirmation' using errcode = 'P0001';
     end if;
   end if;
@@ -115,6 +115,32 @@ end $$;
 revoke all on function public.crm_admin_create_paid_one_off_attendance(uuid,date,text,text,numeric,text,date,text,integer) from public, anon;
 grant execute on function public.crm_admin_create_paid_one_off_attendance(uuid,date,text,text,numeric,text,date,text,integer) to authenticated;
 
+create or replace function public.crm_admin_fetch_posted_one_off_income()
+returns table(
+  id uuid, category_code text, direction text, amount_uah numeric,
+  operation_date date, status text, payment_method_code text,
+  attendance_id uuid, attendance_source_id uuid, student_id uuid, group_id text
+)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_is_admin_session() then
+    raise exception 'Only an administrator may read paid trial/single income' using errcode = '42501';
+  end if;
+  return query
+  select operation.id, operation.category_code, operation.direction,
+    operation.amount_uah, operation.operation_date, operation.status,
+    operation.payment_method_code, operation.attendance_id,
+    operation.attendance_source_id, attendance.student_id, attendance.group_id
+  from public.financial_operations operation
+  join public.attendance attendance on attendance.id = operation.attendance_id
+  where operation.status = 'posted'
+    and operation.direction = 'income'
+    and operation.category_code in ('trial', 'single');
+end $$;
+
+revoke all on function public.crm_admin_fetch_posted_one_off_income() from public, anon;
+grant execute on function public.crm_admin_fetch_posted_one_off_income() to authenticated;
+
 create or replace function public.crm_void_one_off_finance_before_attendance_delete()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_type text := lower(nullif(btrim(coalesce(old.entry_type, old.guest_type, '')), ''));
@@ -142,6 +168,16 @@ begin
   if not public.crm_is_admin_session() then
     raise exception 'Only an administrator may delete paid trial/single attendance' using errcode = '42501';
   end if;
+  -- Preserve the pre-journal cleanup for historical one-day subscriptions.
+  -- Journal-backed attendance must never touch that legacy representation.
+  if not exists (
+    select 1 from public.financial_operations operation
+    where operation.attendance_id = p_attendance_id
+       or operation.attendance_source_id = p_attendance_id
+  ) then
+    perform public.crm_remove_one_off_payment_if_orphan(p_attendance_id);
+  end if;
+
   delete from public.attendance
   where id = p_attendance_id
     and lower(coalesce(entry_type, guest_type, '')) in ('trial', 'single');
@@ -151,6 +187,51 @@ end $$;
 
 revoke all on function public.crm_admin_delete_paid_one_off_attendance(uuid) from public, anon;
 grant execute on function public.crm_admin_delete_paid_one_off_attendance(uuid) to authenticated;
+
+create or replace function public.crm_admin_relink_guest_one_off_attendance(
+  p_group_id text,
+  p_student_id uuid,
+  p_attendance_ids uuid[]
+)
+returns setof public.attendance
+language plpgsql security definer set search_path = public as $$
+declare
+  v_att public.attendance%rowtype;
+begin
+  if not public.crm_is_admin_session() then
+    raise exception 'Only an administrator may convert guest attendance' using errcode = '42501';
+  end if;
+  if p_group_id is null or p_student_id is null or coalesce(cardinality(p_attendance_ids), 0) = 0 then
+    return;
+  end if;
+
+  for v_att in
+    update public.attendance
+    set student_id = p_student_id,
+        entry_type = lower(coalesce(nullif(btrim(entry_type), ''), nullif(btrim(guest_type), ''))),
+        guest_name = null,
+        guest_type = null,
+        sub_id = null
+    where group_id = p_group_id
+      and student_id is null
+      and id = any(p_attendance_ids)
+      and lower(coalesce(entry_type, guest_type, '')) in ('trial', 'single')
+    returning *
+  loop
+    -- Only genuinely legacy attendance gets a legacy one-day subscription.
+    if not exists (
+      select 1 from public.financial_operations operation
+      where operation.attendance_id = v_att.id
+         or operation.attendance_source_id = v_att.id
+    ) then
+      perform public.crm_ensure_one_off_payment_for_attendance(v_att.id);
+    end if;
+    return next v_att;
+  end loop;
+end $$;
+
+revoke all on function public.crm_admin_relink_guest_one_off_attendance(text,uuid,uuid[]) from public, anon;
+grant execute on function public.crm_admin_relink_guest_one_off_attendance(text,uuid,uuid[]) to authenticated;
 
 -- Trainers may keep working with ordinary attendance in owned groups, but paid
 -- one-off rows (including their amount snapshot) are not visible to them.
