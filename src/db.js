@@ -1389,6 +1389,36 @@ export async function insertAttendance(a) {
   }
 }
 
+export async function createPaidOneOffAttendance(a, payment) {
+  const entryType = String(a.entryType || '').trim().toLowerCase();
+  const { data, error } = await supabase.rpc('crm_admin_create_paid_one_off_attendance', {
+    p_student_id: a.studentId || null,
+    p_date: a.date,
+    p_group_id: a.groupId || null,
+    p_entry_type: entryType,
+    p_amount_uah: Number(payment.amountUah),
+    p_payment_method: payment.paymentMethod,
+    p_operation_date: payment.operationDate,
+    p_guest_name: a.guestName || null,
+    p_quantity: a.quantity || 1,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('RPC did not return attendance');
+  return {
+    id: row.id,
+    subId: row.sub_id,
+    studentId: row.student_id,
+    date: row.date,
+    guestName: row.guest_name,
+    guestType: row.guest_type,
+    groupId: row.group_id,
+    quantity: row.quantity || 1,
+    entryType: row.entry_type,
+    priceSnapshotUah: row.price_snapshot_uah ?? null,
+  };
+}
+
 export async function updateAttendanceQuantity(id, quantity) {
   const normalizedQuantity = Number(quantity);
   if (!id || !Number.isInteger(normalizedQuantity) || normalizedQuantity < 1) {
@@ -1465,6 +1495,12 @@ export async function deleteAttendance(id) {
     .select('id, sub_id, student_id, group_id, date, entry_type, guest_type')
     .eq('id', id)
     .maybeSingle();
+  const oneOffType = String(existing?.entry_type || existing?.guest_type || '').toLowerCase();
+  if (existing && (oneOffType === 'trial' || oneOffType === 'single')) {
+    const { error } = await supabase.rpc('crm_admin_delete_paid_one_off_attendance', { p_attendance_id: id });
+    if (error) throw error;
+    return;
+  }
   if (existing) {
     await removeOneOffPaymentIfOrphan(existing);
   }
