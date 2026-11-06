@@ -36,7 +36,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
-import { buildCanonicalRevenueEntries, getRevenueDate } from "./revenue";
+import { buildCanonicalRevenueEntries, findUnpaidOneOffAttendance, getRevenueDate } from "./revenue";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -1864,15 +1864,11 @@ export default function App() {
       const nearPack = subsExt.some((p) => String(p.studentId) === String(s.studentId) && String(p.groupId) === String(s.groupId) && ["4pack","8pack","12pack"].includes(String(p.planType||"").toLowerCase()) && String(p.startDate || "") <= dateKey && String(p.endDate || "9999-12-31") >= dateKey);
       if (nearPack) anomalies.push({ type: "oneoff_near_pack_subscription", rows: [s] });
     });
-    attn.forEach((a) => {
-      const t = String(a.entryType || a.guestType || "").toLowerCase();
-      if (t !== "trial" && t !== "single") return;
-      const dateKey = String(a.date || "").slice(0, 10);
-      const hasPayment = subsExt.some((s) => String(s.studentId) === String(a.studentId) && String(s.groupId) === String(a.groupId) && String(s.planType || "").toLowerCase() === t && String(s.activationDate || s.startDate || "").slice(0, 10) === dateKey);
-      if (!hasPayment) anomalies.push({ type: "attendance_oneoff_without_payment", rows: [a] });
+    findUnpaidOneOffAttendance(attn, subsExt, postedOneOffIncome).forEach((a) => {
+      anomalies.push({ type: "attendance_oneoff_without_payment", rows: [a] });
     });
     return anomalies;
-  }, [filteredSubs, attn, subsExt]);
+  }, [filteredSubs, attn, subsExt, postedOneOffIncome]);
   const anomalyLabelMap = {
     duplicate_oneoff_same_day: "Дубль разового / пробного в один день",
     multiple_payments_same_day: "Кілька оплат в один день",

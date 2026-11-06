@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { buildOneOffAttendancePayment, isValidOneOffAttendancePayment } from '../src/oneOffAttendancePayment.js';
-import { buildCanonicalRevenueEntries } from '../src/revenue.js';
+import {
+  buildCanonicalRevenueEntries,
+  findUnpaidOneOffAttendance,
+  getRevenueDate,
+} from '../src/revenue.js';
 
 const coreSql = await readFile(new URL('../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql', import.meta.url), 'utf8');
 const migrationSql = await readFile(new URL('../supabase/migrations/20261106100000_paid_one_off_attendance_journal.sql', import.meta.url), 'utf8');
@@ -160,6 +164,30 @@ test('canonical revenue includes posted trial/single exactly once and retains un
   assert.match(appSource, /buildCanonicalRevenueEntries\(subs, postedOneOffIncome\)/);
   assert.match(appSource, /currMonthRev = revenueEntries/);
   assert.match(dashboardSource, /revenueRows\.filter/);
+});
+
+test('subscription revenue keeps activation/start/paid date priority while journal uses operation date', () => {
+  const [subscription] = buildCanonicalRevenueEntries([{
+    id: 'legacy-sub', paid: true, amount: 1200,
+    startDate: '2026-11-03', paidAt: '2026-10-29',
+  }], []);
+  const [journal] = buildCanonicalRevenueEntries([], [{
+    id: 'journal', categoryCode: 'single', direction: 'income', status: 'posted',
+    amountUah: 400, operationDate: '2026-10-31', startDate: '2026-11-03',
+  }]);
+  assert.equal(getRevenueDate(subscription), '2026-11-03', 'legacy subscription stays in its start month');
+  assert.equal(getRevenueDate(journal), '2026-10-31', 'journal income uses its operation date');
+});
+
+test('payment audit accepts posted journal attendance and still flags genuinely unpaid attendance', () => {
+  const paidAttendance = { id: 'att-paid', studentId: 'student-1', groupId: 'group-a', date: '2026-11-06', entryType: 'trial' };
+  const unpaidAttendance = { id: 'att-unpaid', studentId: 'student-2', groupId: 'group-a', date: '2026-11-06', entryType: 'single' };
+  const journal = [{
+    id: 'operation-1', attendanceId: paidAttendance.id, categoryCode: 'trial',
+    direction: 'income', status: 'posted', operationDate: '2026-11-06',
+  }];
+  assert.deepEqual(findUnpaidOneOffAttendance([paidAttendance, unpaidAttendance], [], journal), [unpaidAttendance]);
+  assert.match(appSource, /findUnpaidOneOffAttendance\(attn, subsExt, postedOneOffIncome\)/);
 });
 
 test('amount, method and date are validated and an operation failure rolls attendance back atomically', async () => {

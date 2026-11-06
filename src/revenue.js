@@ -1,17 +1,56 @@
 const money = (value) => Number(value || 0) || 0;
 
-export const getRevenueDate = (entry = {}) => String(
-  entry.operationDate
-  || entry.operation_date
-  || entry.activationDate
+export const getSubscriptionRevenueDate = (entry = {}) => String(
+  entry.activationDate
   || entry.activation_date
-  || entry.paidAt
-  || entry.paid_at
   || entry.startDate
   || entry.start_date
+  || entry.paidAt
+  || entry.paid_at
   || entry.created_at
   || ""
 ).slice(0, 10);
+
+export const getFinancialRevenueDate = (entry = {}) => String(
+  entry.operationDate || entry.operation_date || ""
+).slice(0, 10);
+
+export const getRevenueDate = (entry = {}) => String(
+  entry.revenueDate
+  || entry.revenue_date
+  || (entry.source === "financial_journal" || entry.financialTransactionId
+    ? getFinancialRevenueDate(entry)
+    : getSubscriptionRevenueDate(entry))
+  || ""
+).slice(0, 10);
+
+export const hasOneOffAttendancePayment = (attendance = {}, subscriptions = [], financialTransactions = []) => {
+  const type = String(attendance.entryType || attendance.entry_type || attendance.guestType || attendance.guest_type || "").toLowerCase();
+  if (!attendance.id || !["trial", "single"].includes(type)) return false;
+
+  const journalPayment = (financialTransactions || []).some((row) => (
+    row?.status === "posted"
+    && row?.direction === "income"
+    && String(row.attendanceId || row.attendance_id || "") === String(attendance.id)
+  ));
+  if (journalPayment) return true;
+
+  const dateKey = String(attendance.date || "").slice(0, 10);
+  return (subscriptions || []).some((row) => (
+    String(row.studentId || row.student_id || "") === String(attendance.studentId || attendance.student_id || "")
+    && String(row.groupId || row.group_id || "") === String(attendance.groupId || attendance.group_id || "")
+    && String(row.planType || row.plan_type || "").toLowerCase() === type
+    && getSubscriptionRevenueDate(row) === dateKey
+  ));
+};
+
+export const findUnpaidOneOffAttendance = (attendanceRows = [], subscriptions = [], financialTransactions = []) => (
+  (attendanceRows || []).filter((attendance) => {
+    const type = String(attendance.entryType || attendance.entry_type || attendance.guestType || attendance.guest_type || "").toLowerCase();
+    return ["trial", "single"].includes(type)
+      && !hasOneOffAttendancePayment(attendance, subscriptions, financialTransactions);
+  })
+);
 
 export const getLegacyAttendanceId = (subscription = {}) => {
   const match = String(subscription.notes || "").match(/(?:^|\s)auto_one_off_from_attendance:([0-9a-f-]{36})(?:\s|$)/i);
@@ -39,7 +78,7 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
       const attendanceId = getLegacyAttendanceId(row);
       return !attendanceId || !journalAttendanceIds.has(attendanceId);
     })
-    .map((row) => ({ ...row, source: "subscription", amount: money(row.amount), revenueDate: getRevenueDate(row) }));
+    .map((row) => ({ ...row, source: "subscription", amount: money(row.amount), revenueDate: getSubscriptionRevenueDate(row) }));
 
   const postedRows = journalRows.map((row) => ({
     id: `financial:${row.id}`,
@@ -53,7 +92,7 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
     paid: true,
     payMethod: row.paymentMethod || row.payment_method_code || null,
     operationDate: row.operationDate || row.operation_date || null,
-    revenueDate: getRevenueDate(row),
+    revenueDate: getFinancialRevenueDate(row),
   }));
 
   return [...legacyRows, ...postedRows];
