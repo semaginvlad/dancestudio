@@ -6,9 +6,57 @@ begin;
 alter table public.financial_operations
   add column if not exists attendance_source_id uuid;
 
+-- PostgreSQL will not change the column type while production RLS policies
+-- depend on it. Remove only those dependent policies and recreate their
+-- existing restricted trainer access immediately after the type change.
+drop policy if exists attendance_trainer_update_own_groups on public.attendance;
+drop policy if exists attendance_trainer_delete_own_groups on public.attendance;
+
 alter table public.attendance
   alter column price_snapshot_uah type numeric(12,2)
   using price_snapshot_uah::numeric;
+
+create policy attendance_trainer_update_own_groups
+on public.attendance
+for update
+to authenticated
+using (
+  group_id is not null
+  and public.rls_owns_group(group_id)
+  and student_id is not null
+  and guest_name is null
+  and guest_type is null
+  and price_snapshot_uah is null
+  and lower(coalesce(entry_type, '')) not in ('trial', 'single')
+)
+with check (
+  group_id is not null
+  and public.rls_owns_group(group_id)
+  and student_id is not null
+  and guest_name is null
+  and guest_type is null
+  and price_snapshot_uah is null
+  and lower(coalesce(entry_type, '')) not in ('trial', 'single')
+  and public.rls_can_record_attendance(student_id, group_id)
+  and (
+    sub_id is null
+    or public.rls_can_access_subscription(sub_id, student_id, group_id)
+  )
+);
+
+create policy attendance_trainer_delete_own_groups
+on public.attendance
+for delete
+to authenticated
+using (
+  group_id is not null
+  and public.rls_owns_group(group_id)
+  and student_id is not null
+  and guest_name is null
+  and guest_type is null
+  and price_snapshot_uah is null
+  and lower(coalesce(entry_type, '')) not in ('trial', 'single')
+);
 
 update public.financial_operations
 set attendance_source_id = attendance_id

@@ -31,6 +31,8 @@ async function database() {
     grant execute on function auth.uid() to authenticated;
     create function public.crm_is_active_trainer_session() returns boolean language sql stable as $$ select auth.uid() is not null $$;
     create function public.rls_owns_group(text) returns boolean language sql stable as $$ select $1='group-a' $$;
+    create function public.rls_can_record_attendance(uuid,text) returns boolean language sql stable as $$ select $1 is not null and $2='group-a' $$;
+    create function public.rls_can_access_subscription(uuid,uuid,text) returns boolean language sql stable as $$ select $1 is not null and $2 is not null and $3='group-a' $$;
     create table public.attendance(
       id uuid primary key default gen_random_uuid(), sub_id uuid, student_id uuid, date date not null,
       guest_name text, guest_type text, group_id text, quantity integer default 1,
@@ -50,6 +52,11 @@ async function database() {
     alter table attendance enable row level security;
     create policy attendance_admin_all on attendance for all to authenticated using (crm_is_admin_session()) with check (crm_is_admin_session());
     create policy attendance_trainer_select_own_groups on attendance for select to authenticated using (rls_owns_group(group_id));
+    create policy attendance_trainer_update_own_groups on attendance for update to authenticated
+      using (rls_owns_group(group_id) and price_snapshot_uah is null)
+      with check (rls_owns_group(group_id) and price_snapshot_uah is null);
+    create policy attendance_trainer_delete_own_groups on attendance for delete to authenticated
+      using (rls_owns_group(group_id) and price_snapshot_uah is null);
     grant select,insert,update,delete on attendance to authenticated;
     create table service_prices(service_code text primary key, price_uah integer);
     insert into service_prices values ('trial',200),('single',400);
@@ -98,6 +105,45 @@ test('trial and single create posted cash/card snapshots without one-off subscri
     ]);
     assert.doesNotMatch(migrationSql, /insert into public\.subscriptions/i);
     assert.match(dbSource, /createPaidOneOffAttendance[\s\S]*crm_admin_create_paid_one_off_attendance/);
+  } finally { await db.close(); }
+});
+
+test('migration recreates dependent trainer update/delete policies without weakening access', async () => {
+  const db = await database();
+  try {
+    const policies = (await db.query(`select policyname, cmd, qual, with_check
+      from pg_policies
+      where schemaname='public' and tablename='attendance'
+        and policyname in ('attendance_trainer_update_own_groups','attendance_trainer_delete_own_groups')
+      order by policyname`)).rows;
+    assert.equal(policies.length, 2, 'both production policies survive the numeric type migration');
+    const deletePolicy = policies.find((row) => row.policyname === 'attendance_trainer_delete_own_groups');
+    const updatePolicy = policies.find((row) => row.policyname === 'attendance_trainer_update_own_groups');
+    for (const policy of policies) {
+      assert.match(policy.qual, /rls_owns_group/);
+      assert.match(policy.qual, /price_snapshot_uah IS NULL/i);
+      assert.match(policy.qual, /entry_type.*trial.*single/is);
+    }
+    assert.match(updatePolicy.with_check, /rls_can_record_attendance/);
+    assert.match(updatePolicy.with_check, /rls_can_access_subscription/);
+    assert.equal(deletePolicy.with_check, null);
+
+    await db.exec(`
+      insert into attendance(id,student_id,date,group_id,entry_type) values
+        ('50000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','2026-11-06','group-a','subscription'),
+        ('50000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','2026-11-06','group-b','subscription');
+      select set_config('crm.atomic_one_off_attendance','on',false);
+      insert into attendance(id,student_id,date,group_id,entry_type,price_snapshot_uah)
+        values ('50000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','2026-11-06','group-a','trial',200);
+      set role authenticated;
+      set app.test_admin='off';
+    `);
+    assert.equal((await db.query(`update attendance set quantity=2 where id='50000000-0000-0000-0000-000000000001' returning id`)).rows.length, 1);
+    assert.equal((await db.query(`update attendance set quantity=2 where id='50000000-0000-0000-0000-000000000002' returning id`)).rows.length, 0);
+    assert.equal((await db.query(`update attendance set quantity=2 where id='50000000-0000-0000-0000-000000000003' returning id`)).rows.length, 0);
+    assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000002' returning id`)).rows.length, 0);
+    assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000003' returning id`)).rows.length, 0);
+    assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000001' returning id`)).rows.length, 1);
   } finally { await db.close(); }
 });
 
