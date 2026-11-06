@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { buildOneOffAttendancePayment, isValidOneOffAttendancePayment } from '../src/oneOffAttendancePayment.js';
 import {
   buildCanonicalRevenueEntries,
+  buildPaymentRows,
   findUnpaidOneOffAttendance,
   getRevenueDate,
 } from '../src/revenue.js';
@@ -56,6 +57,13 @@ async function database() {
     alter table attendance enable row level security;
     create policy attendance_admin_all on attendance for all to authenticated using (crm_is_admin_session()) with check (crm_is_admin_session());
     create policy attendance_trainer_select_own_groups on attendance for select to authenticated using (rls_owns_group(group_id));
+    create policy attendance_trainer_insert_own_groups on attendance for insert to authenticated
+      with check (
+        group_id is not null and rls_owns_group(group_id)
+        and ((student_id is null and sub_id is null)
+          or (rls_can_record_attendance(student_id,group_id)
+            and (sub_id is null or rls_can_access_subscription(sub_id,student_id,group_id))))
+      );
     create policy attendance_trainer_update_own_groups on attendance for update to authenticated
       using (rls_owns_group(group_id) and price_snapshot_uah is null)
       with check (rls_owns_group(group_id) and price_snapshot_uah is null);
@@ -190,6 +198,29 @@ test('payment audit accepts posted journal attendance and still flags genuinely 
   assert.match(appSource, /findUnpaidOneOffAttendance\(attn, subsExt, postedOneOffIncome\)/);
 });
 
+test('payment rows include posted journal details once and preserve subscription payments', () => {
+  const attendanceId = '60000000-0000-0000-0000-000000000001';
+  const subscription = { id: 'pack', studentId: 'student-2', groupId: 'group-b', planType: '8pack', amount: 1800, paid: true };
+  const duplicateLegacy = { id: 'legacy', studentId: 'student-1', groupId: 'group-a', planType: 'trial', amount: 200, paid: true, notes: `auto_one_off_from_attendance:${attendanceId}` };
+  const rows = buildPaymentRows([subscription, duplicateLegacy], [{
+    id: 'operation-1', attendanceId, studentId: 'student-1', groupId: 'group-a', guestName: null,
+    categoryCode: 'trial', amountUah: 250, operationDate: '2026-11-06', paymentMethod: 'card',
+    direction: 'income', status: 'posted',
+  }]);
+  assert.equal(rows.length, 2, 'legacy duplicate is replaced, not added beside journal payment');
+  assert.equal(rows.filter((row) => row.id === 'pack').length, 1, 'existing subscription payment is unchanged');
+  assert.deepEqual(rows.find((row) => row.isJournalPayment), {
+    id: 'financial:operation-1', source: 'financial_journal', isJournalPayment: true,
+    financialTransactionId: 'operation-1', attendanceId, studentId: 'student-1', guestName: null,
+    groupId: 'group-a', planType: 'trial', amount: 250, paid: true, payMethod: 'card',
+    activationDate: '2026-11-06', startDate: '2026-11-06', endDate: '2026-11-06',
+    operationDate: '2026-11-06', status: 'completed',
+  });
+  assert.equal(rows.filter((row) => row.paid).reduce((sum, row) => sum + row.amount, 0), 2050);
+  assert.match(appSource, /buildPaymentRows\(subsExt, postedOneOffIncome\)/);
+  assert.match(appSource, /!sub\.isJournalPayment &&/);
+});
+
 test('amount, method and date are validated and an operation failure rolls attendance back atomically', async () => {
   const db = await database();
   try {
@@ -262,6 +293,26 @@ test('trainer cannot create or see paid one-off attendance or financial data', a
     assert.deepEqual((await db.query('select * from financial_operations')).rows, []);
     await assert.rejects(createPaid(db, 'trial', 200), /administrator/i);
     await assert.rejects(db.exec(`insert into attendance(student_id,date,group_id,entry_type) values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','trial')`), /administrator|row-level security/i);
+  } finally { await db.close(); }
+});
+
+test('trainer insert guard rejects spoofed financial and incomplete payloads but keeps Auto subscription/debt flow', async () => {
+  const db = await database();
+  try {
+    await db.exec("set app.test_admin='off'; set role authenticated");
+    const base = `insert into attendance(student_id,date,group_id,entry_type,guest_type,sub_id,price_snapshot_uah)`;
+    await assert.rejects(db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','subscription','trial',null,null)`), /administrator/i);
+    await assert.rejects(db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','single',null,null,null)`), /administrator/i);
+    await assert.rejects(db.exec(`${base} values (null,'2026-11-05','group-a','debt',null,null,null)`), /administrator/i);
+    await assert.rejects(db.exec(`insert into attendance(student_id,date,group_id,entry_type,guest_name) values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','debt','Spoofed guest')`), /administrator/i);
+    await assert.rejects(db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','subscription',null,null,null)`), /administrator/i);
+    await assert.rejects(db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','debt',null,null,200)`), /administrator/i);
+
+    await db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-05','group-a','subscription',null,'70000000-0000-0000-0000-000000000001',null)`);
+    await db.exec(`${base} values ('10000000-0000-0000-0000-000000000001','2026-11-06','group-a','debt',null,null,null)`);
+    assert.deepEqual((await db.query('select entry_type from attendance order by date')).rows, [
+      { entry_type: 'subscription' }, { entry_type: 'debt' },
+    ]);
   } finally { await db.close(); }
 });
 

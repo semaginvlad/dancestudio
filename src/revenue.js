@@ -57,6 +57,44 @@ export const getLegacyAttendanceId = (subscription = {}) => {
   return match?.[1]?.toLowerCase() || null;
 };
 
+export const buildPaymentRows = (subscriptions = [], financialTransactions = []) => {
+  const postedJournal = (financialTransactions || []).filter((row) => (
+    row?.status === "posted"
+    && row?.direction === "income"
+    && ["trial", "single"].includes(String(row.categoryCode || row.category_code || "").toLowerCase())
+  ));
+  const journalAttendanceIds = new Set(postedJournal
+    .map((row) => String(row.attendanceId || row.attendance_id || "").toLowerCase())
+    .filter(Boolean));
+  const legacyAndSubscriptions = (subscriptions || []).filter((row) => {
+    const attendanceId = getLegacyAttendanceId(row);
+    return !attendanceId || !journalAttendanceIds.has(attendanceId);
+  });
+  const journalRows = postedJournal.map((row) => {
+    const operationDate = getFinancialRevenueDate(row);
+    return {
+      id: `financial:${row.id}`,
+      source: "financial_journal",
+      isJournalPayment: true,
+      financialTransactionId: row.id,
+      attendanceId: row.attendanceId || row.attendance_id || null,
+      studentId: row.studentId || row.student_id || null,
+      guestName: row.guestName || row.guest_name || null,
+      groupId: row.groupId || row.group_id || null,
+      planType: row.categoryCode || row.category_code,
+      amount: money(row.amountUah ?? row.amount_uah),
+      paid: true,
+      payMethod: row.paymentMethod || row.payment_method_code || null,
+      activationDate: operationDate,
+      startDate: operationDate,
+      endDate: operationDate,
+      operationDate,
+      status: "completed",
+    };
+  });
+  return [...legacyAndSubscriptions, ...journalRows];
+};
+
 /**
  * Canonical studio income rows. Paid subscriptions remain the legacy source;
  * posted trial/single journal rows replace only an auto-one-off linked to the

@@ -76,12 +76,26 @@ create index if not exists financial_operations_attendance_source_idx
 -- debt attendance keeps its existing path and behavior.
 create or replace function public.crm_guard_paid_one_off_attendance_insert()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare v_type text := lower(nullif(btrim(coalesce(new.entry_type, new.guest_type, '')), ''));
+declare
+  v_entry_type text := lower(nullif(btrim(coalesce(new.entry_type, '')), ''));
+  v_guest_type text := lower(nullif(btrim(coalesce(new.guest_type, '')), ''));
+  v_is_financial boolean;
 begin
-  if v_type in ('trial', 'single') then
-    if not public.crm_is_admin_session() then
-      raise exception 'Trial and single attendance is administrator-only' using errcode = '42501';
+  v_is_financial := v_entry_type in ('trial', 'single') or v_guest_type in ('trial', 'single');
+
+  if not public.crm_is_admin_session() then
+    if v_is_financial
+       or new.student_id is null
+       or new.guest_name is not null
+       or new.guest_type is not null
+       or new.price_snapshot_uah is not null
+       or (v_entry_type = 'subscription' and new.sub_id is null) then
+      raise exception 'Guest, trial, single and financial attendance are administrator-only' using errcode = '42501';
     end if;
+    return new;
+  end if;
+
+  if v_is_financial then
     if current_setting('crm.atomic_one_off_attendance', true) is distinct from 'on' then
       raise exception 'Paid trial/single attendance requires payment confirmation' using errcode = 'P0001';
     end if;
@@ -167,7 +181,8 @@ create or replace function public.crm_admin_fetch_posted_one_off_income()
 returns table(
   id uuid, category_code text, direction text, amount_uah numeric,
   operation_date date, status text, payment_method_code text,
-  attendance_id uuid, attendance_source_id uuid, student_id uuid, group_id text
+  attendance_id uuid, attendance_source_id uuid, student_id uuid, group_id text,
+  guest_name text
 )
 language plpgsql stable security definer set search_path = public as $$
 begin
@@ -178,7 +193,8 @@ begin
   select operation.id, operation.category_code, operation.direction,
     operation.amount_uah, operation.operation_date, operation.status,
     operation.payment_method_code, operation.attendance_id,
-    operation.attendance_source_id, attendance.student_id, attendance.group_id
+    operation.attendance_source_id, attendance.student_id, attendance.group_id,
+    attendance.guest_name
   from public.financial_operations operation
   join public.attendance attendance on attendance.id = operation.attendance_id
   where operation.status = 'posted'

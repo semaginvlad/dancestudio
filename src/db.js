@@ -1013,6 +1013,7 @@ export async function fetchPostedOneOffIncome() {
     attendanceSourceId: row.attendance_source_id,
     studentId: row.student_id || null,
     groupId: row.group_id || null,
+    guestName: row.guest_name || null,
   }));
 }
 
