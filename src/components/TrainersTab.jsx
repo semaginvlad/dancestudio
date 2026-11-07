@@ -56,7 +56,7 @@ const rangeOverlaps = (leftStart, leftEnd, rightStart, rightEnd) => {
 };
 const pct = (v, total) => (total > 0 ? Math.round((v / total) * 100) : 0);
 const pctFloat = (v, total) => (total > 0 ? Number(((v / total) * 100).toFixed(1)) : 0);
-const getSubRefDate = (s) => s.startDate || String(s.created_at || "").slice(0, 10);
+const getSubRefDate = (s) => s.revenueDate || s.operationDate || s.startDate || String(s.created_at || "").slice(0, 10);
 const getRawAttendanceType = (a) => a.entryType || a.guestType || "subscription";
 const money = (v) => Number(v || 0) || 0;
 const getNominalAmount = (sub = {}) =>
@@ -253,6 +253,7 @@ export default function TrainersTab({
   students = [],
   studentGrps = [],
   subs = [],
+  revenueEntries = [],
   attn = [],
   cancelled = [],
   onTrainerDeleted,
@@ -664,13 +665,17 @@ export default function TrainersTab({
     ];
   }, [foundationCurrent.metrics.renewals, foundationPrev.metrics.renewals, groupCards, range.end, range.start, renewalsRiskBlock.noRenewal, scopedData.scopedAttn, scopedData.scopedSubs]);
 
+  const scopedRevenueEntries = useMemo(
+    () => revenueEntries.filter((row) => trainerBoundGroups.some((group) => String(group.id) === String(row.groupId))),
+    [revenueEntries, trainerBoundGroups],
+  );
   const paidSubsCurrent = useMemo(
-    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), range.start, range.end)),
-    [range.end, range.start, scopedData.scopedSubs],
+    () => scopedRevenueEntries.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), range.start, range.end)),
+    [range.end, range.start, scopedRevenueEntries],
   );
   const paidSubsPrev = useMemo(
-    () => scopedData.scopedSubs.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
-    [rangePrev.end, rangePrev.start, scopedData.scopedSubs],
+    () => scopedRevenueEntries.filter((s) => REVENUE_PLAN_TYPES.has(normalizeRevenuePlanType(s.planType)) && isRealRevenuePayment(s) && inRange(getSubRefDate(s), rangePrev.start, rangePrev.end)),
+    [rangePrev.end, rangePrev.start, scopedRevenueEntries],
   );
 
   const revenueAnalytics = useMemo(() => {
@@ -690,6 +695,7 @@ export default function TrainersTab({
       possibleDuplicates: [],
     };
     const seenGuestIdsCurrent = new Set();
+    const journalAttendanceIds = new Set(scopedRevenueEntries.filter((row) => row.source === "financial_journal").map((row) => String(row.attendanceSourceId || "")));
     const seenGuestSignatureCurrent = new Map();
     let monthCurrent = 0;
     let monthPrev = 0;
@@ -714,6 +720,7 @@ export default function TrainersTab({
     });
     const addGuestOneOff = (rows, collector, periodLabel) => {
       rows.forEach((a) => {
+        if (journalAttendanceIds.has(String(a.id || ""))) return;
         if (a.studentId || a.student_id) return;
         const rawEntryType = String(a.entryType || "").trim().toLowerCase();
         if ((rawEntryType === "trial" || rawEntryType === "single") && !a.guestType) {
@@ -811,7 +818,7 @@ export default function TrainersTab({
         guestOneOffSummary: guestOneOffStats,
       },
     };
-  }, [paidSubsCurrent, paidSubsPrev, trainerBoundGroups, scopedData.scopedAttn, scopedData.scopedSubs, range.start, range.end, rangePrev.start, rangePrev.end]);
+  }, [paidSubsCurrent, paidSubsPrev, scopedRevenueEntries, trainerBoundGroups, scopedData.scopedAttn, scopedData.scopedSubs, range.start, range.end, rangePrev.start, rangePrev.end]);
 
   const attendanceUsageAnalytics = useMemo(() => {
     const periodRows = scopedData.scopedAttn.filter((a) => inRange(a.date, range.start, range.end));

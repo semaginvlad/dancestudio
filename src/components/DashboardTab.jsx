@@ -3,6 +3,7 @@ import { cardSt, theme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 import AIInsightsPanel from "./AIInsightsPanel";
 import GlobalAIAssistant from "./GlobalAIAssistant";
+import { getRevenueDate } from "../revenue";
 
 const dayMs = 86400000;
 const toDate = (s) => new Date(`${s}T00:00:00`);
@@ -15,15 +16,6 @@ const inRange = (v, start, end) => !!v && v >= start && v <= end;
 const pctDelta = (curr, prev) => (prev > 0 ? Number((((curr - prev) / prev) * 100).toFixed(1)) : null);
 const rank = (v) => (v >= 100 ? "виконано" : v >= 70 ? "в процесі" : "ризик");
 const ringColor = (v) => (v >= 100 ? theme.success : v >= 70 ? theme.warning : theme.danger);
-// Revenue is based on activation_date (service delivery),
-// not on payment/creation time. This matches studio accounting and trainer payouts.
-const getRevenueDate = (sub = {}) => String(
-  sub.activationDate
-  || sub.activation_date
-  || sub.startDate
-  || sub.start_date
-  || ""
-).slice(0, 10);
 const isPaidSub = (sub = {}) => (sub.paid === false ? false : true);
 const money = (v) => Number(v || 0) || 0;
 const getNominalAmount = (sub = {}) =>
@@ -78,7 +70,7 @@ const MobileAccordionCard = ({ title, summary, children, open, onToggle }) => (
   </div>
 );
 
-export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
+export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], revenueEntries = null, attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
   const [mode, setMode] = useState("this_month");
   const [from, setFrom] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1)));
@@ -86,6 +78,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const [targets, setTargets] = useStickyState({ revenueTarget: 120000, attendanceTarget: 500, activeStudentsTarget: 140, recruitmentTarget: 40 }, "ds_dashboard_targets_v2");
   const [financeOverrides, setFinanceOverrides] = useStickyState({ operationalExpenses: 0, ownerSalaryVlad: 0, ownerSalaryKostia: 0, otherExpenses: 0 }, "ds_dashboard_finance_overrides_v1");
   const [mobileSignalOpen, setMobileSignalOpen] = useState({ works: false, weak: false, risk: false });
+  const revenueRows = revenueEntries || subs;
 
   const period = useMemo(() => {
     if (mode === "custom") return { start: from, end: to };
@@ -98,7 +91,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
   const prev = useMemo(() => getPrevPeriod(period.start, period.end), [period]);
 
   const calc = (range) => {
-    const pSubs = subs.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), range.start, range.end));
+    const pSubs = revenueRows.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), range.start, range.end));
     const pAttn = attn.filter((a) => inRange(String(a.date || "").slice(0, 10), range.start, range.end));
     const revenue = pSubs.reduce((s, x) => s + Number(x.amount || 0), 0);
     const payments = pSubs.length;
@@ -118,16 +111,16 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
     };
   };
 
-  const curr = useMemo(() => calc(period), [period, subs, attn, groups, directionsList]);
-  const prevData = useMemo(() => calc(prev), [prev, subs, attn, groups, directionsList]);
+  const curr = useMemo(() => calc(period), [period, revenueRows, attn, groups, directionsList]);
+  const prevData = useMemo(() => calc(prev), [prev, revenueRows, attn, groups, directionsList]);
   const trainerSalaryTotal = useMemo(() => {
-    const inPeriodSubs = subs.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), period.start, period.end));
+    const inPeriodSubs = revenueRows.filter((s) => isPaidSub(s) && inRange(getRevenueDate(s), period.start, period.end));
     return inPeriodSubs.reduce((sum, s) => {
       const group = groups.find((g) => String(g.id) === String(s.groupId));
       const pct = Number(group?.trainerPct || 0);
       return sum + getTrainerShareAmount(s, pct);
     }, 0);
-  }, [subs, groups, period.start, period.end]);
+  }, [revenueRows, groups, period.start, period.end]);
   const grossRevenue = curr.revenue;
   const netProfit = grossRevenue - trainerSalaryTotal - money(financeOverrides.operationalExpenses) - money(financeOverrides.ownerSalaryVlad) - money(financeOverrides.ownerSalaryKostia) - money(financeOverrides.otherExpenses);
 

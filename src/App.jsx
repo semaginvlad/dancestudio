@@ -36,6 +36,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
+import { buildCanonicalRevenueEntries, buildPaymentRows, findUnpaidOneOffAttendance, getRevenueDate } from "./revenue";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -139,6 +140,7 @@ export default function App() {
   const [pendingIndividualIncome, setPendingIndividualIncome] = useState([]);
   const [pendingIndividualIncomeLoading, setPendingIndividualIncomeLoading] = useState(false);
   const [pendingIndividualIncomeError, setPendingIndividualIncomeError] = useState("");
+  const [postedOneOffIncome, setPostedOneOffIncome] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -621,7 +623,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome, oneOffIncome] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(db.fetchAttendance, "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -640,7 +642,8 @@ export default function App() {
         safeFetch(db.fetchRoomBookingTariffs, "fetchRoomBookingTariffs"),
         safeFetch(isCurrentAdmin ? db.fetchIndividualTrainingRateMatrix : async () => [], "fetchIndividualTrainingRateMatrix"),
         safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings"),
-        safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome")
+        safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome"),
+        safeFetch(isCurrentAdmin ? db.fetchPostedOneOffIncome : async () => [], "fetchPostedOneOffIncome")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -731,6 +734,7 @@ export default function App() {
       setIndividualTrainingRates(isCurrentAdmin ? (individualRates || []) : []);
       setTrainerFinancialSettings(isCurrentAdmin ? (trainerFinance || []) : []);
       setPendingIndividualIncome(isCurrentAdmin ? (pendingIncome || []) : []);
+      setPostedOneOffIncome(isCurrentAdmin ? (oneOffIncome || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
@@ -1576,6 +1580,11 @@ export default function App() {
     return Object.values(grouped).sort((a,b) => (a.group?.name||"").localeCompare(b.group?.name||""));
   }, [notifications]);
 
+  const revenueEntries = useMemo(
+    () => buildCanonicalRevenueEntries(subs, postedOneOffIncome),
+    [subs, postedOneOffIncome]
+  );
+
   const analytics = useMemo(()=>{
     const analyticsFoundation = buildAnalyticsFoundation({
       students,
@@ -1588,19 +1597,19 @@ export default function App() {
       periodType: "month",
       anchorDate: today(),
     });
-    const totalRev=subs.filter(s=>s.paid).reduce((a,s)=>a+(s.amount||0),0);
+    const totalRev=revenueEntries.reduce((a,s)=>a+(s.amount||0),0);
     const unpaid=subs.filter(s=>!s.paid&&getSubStatus(s)!=="expired").reduce((a,s)=>a+(s.amount||0),0);
     const byDir={};directionsList.forEach(d=>{const gids=groups.filter(g=>g.directionId===d.id).map(g=>g.id);const ds=activeSubs.filter(s=>gids.includes(s.groupId));byDir[d.id]={students:new Set(ds.map(s=>s.studentId)).size}});
     const splits=[]; groups.forEach(g=>{
-      const gSubs=subs.filter(s=>s.groupId===g.id&&s.paid);
+      const gSubs=revenueEntries.filter(s=>s.groupId===g.id);
       const total=gSubs.reduce((a,s)=>a+(s.amount||0),0);
       if(total>0){splits.push({group:g,total,trainer:Math.round(total*(g.trainerPct||50)/100),studio:Math.round(total*(100-(g.trainerPct||50))/100), subs: gSubs})}
     });
     let totalLTV = 0; let usersWithPurchases = 0; let trialUsers = 0; let convertedUsers = 0;
     Object.values(studentMap).forEach(st => {
-      const stSubs = subs.filter(s => s.studentId === st.id);
+      const stSubs = revenueEntries.filter(s => s.studentId === st.id);
       if(stSubs.length > 0) {
-        const moneySpent = stSubs.filter(s => s.paid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+        const moneySpent = stSubs.reduce((acc, curr) => acc + (curr.amount || 0), 0);
         if(moneySpent > 0) { totalLTV += moneySpent; usersWithPurchases++; }
         if (stSubs.some(s => s.planType === "trial")) { trialUsers++; if (stSubs.some(s => s.planType !== "trial")) convertedUsers++; }
       }
@@ -1614,8 +1623,8 @@ export default function App() {
     const currMonthAttn = attn.filter(a => a.date?.startsWith(currMonth));
     const currMonthCancelled = new Set(cancelled.filter(c => c.date?.startsWith(currMonth)).map(c => c.date + c.groupId)).size;
 
-    const currMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(currMonth) || s.startDate?.startsWith(currMonth))).reduce((a,s)=>a+(s.amount||0),0);
-    const prevMonthRev = subs.filter(s => s.paid && (s.created_at?.startsWith(prevMonth) || s.startDate?.startsWith(prevMonth))).reduce((a,s)=>a+(s.amount||0),0);
+    const currMonthRev = revenueEntries.filter(s => getRevenueDate(s).startsWith(currMonth)).reduce((a,s)=>a+(s.amount||0),0);
+    const prevMonthRev = revenueEntries.filter(s => getRevenueDate(s).startsWith(prevMonth)).reduce((a,s)=>a+(s.amount||0),0);
 
     const chartData = analyticsFoundation.ui.charts.line.series.map((row) => ({
       day: row.x,
@@ -1641,7 +1650,7 @@ export default function App() {
       currMonthDetails, chartData, maxChartVal,
       foundation: analyticsFoundation,
     };
-  },[students,subs,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
+  },[students,subs,revenueEntries,activeSubs,groups, studentMap, cancelled, attn, studentGrps, trainers, trainerGroups]);
 
   // ФІКС ПРО АНАЛІТИКИ: Захищаємо від крашу, якщо напрямок або група видалена
   const proAnalytics = useMemo(() => {
@@ -1651,8 +1660,8 @@ export default function App() {
     const getTopSpenders = (months) => {
       const dateLimit = new Date(); dateLimit.setMonth(dateLimit.getMonth() - months);
       const totals = {};
-      subs.forEach(s => { 
-        if (s.paid && s.startDate && s.startDate >= toLocalISO(dateLimit)) {
+      revenueEntries.forEach(s => {
+        if (s.studentId && getRevenueDate(s) >= toLocalISO(dateLimit)) {
           totals[s.studentId] = (totals[s.studentId] || 0) + (s.amount || 0); 
         }
       });
@@ -1729,7 +1738,7 @@ export default function App() {
     const popularDays = WEEKDAYS.map((name, i) => ({ day: name, count: dayCounts[i] })).sort((a,b) => b.count - a.count);
 
     return { topSpenders: { 1: getTopSpenders(1), 3: getTopSpenders(3), 6: getTopSpenders(6), 12: getTopSpenders(12) }, bestAttenders, upsellCandidates, churnRisk, popularDays };
-  }, [subs, attn, groups, studentMap, activeSubs, dirMap]);
+  }, [subs, revenueEntries, attn, groups, studentMap, activeSubs, dirMap]);
 
   const filteredStudents=useMemo(()=>{
     let r=students; if(searchQ) r=r.filter(s=>getDisplayName(s).toLowerCase().includes(searchQ.toLowerCase()));
@@ -1773,10 +1782,12 @@ export default function App() {
     };
   }, [filteredStudents, studentGrps, groupMap, activeSubs]);
 
+  const paymentRows = useMemo(() => buildPaymentRows(subsExt, postedOneOffIncome), [subsExt, postedOneOffIncome]);
+
   const filteredSubs=useMemo(()=>{
     const from = filterFromDate || "";
     const to = filterToDate || "";
-    let r=subsExt;
+    let r=paymentRows;
     if(filterPlanType!=="all")r=r.filter(s=>String(s.planType||"").toLowerCase()===filterPlanType);
     if(filterPaid!=="all")r=r.filter(s=>filterPaid==="paid"?!!s.paid:!s.paid);
     if(filterDir!=="all"){const gids=groups.filter(g=>g.directionId===filterDir).map(g=>g.id);r=r.filter(s=>gids.includes(s.groupId))}
@@ -1789,9 +1800,9 @@ export default function App() {
     }
     if(from)r=r.filter(s=>(s.activationDate||s.startDate||"")>=from);
     if(to)r=r.filter(s=>(s.activationDate||s.startDate||"")<=to);
-    if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>getDisplayName(studentMap[s.studentId]).toLowerCase().includes(q))}
+    if(searchQ){const q=searchQ.toLowerCase();r=r.filter(s=>(s.guestName || getDisplayName(studentMap[s.studentId])).toLowerCase().includes(q))}
     return r.sort((a,b)=>({warning:0,active:1,expired:2}[a.status]??3)-({warning:0,active:1,expired:2}[b.status]??3));
-  },[subsExt,filterPlanType,filterPaid,filterDir,filterGroup,filterStatus,filterPayMethod,filterTrainer,filterFromDate,filterToDate,searchQ,groups,studentMap,trainerGroups]);
+  },[paymentRows,filterPlanType,filterPaid,filterDir,filterGroup,filterStatus,filterPayMethod,filterTrainer,filterFromDate,filterToDate,searchQ,groups,studentMap,trainerGroups]);
 
 
   const resetPaymentsFilters = () => {
@@ -1834,7 +1845,7 @@ export default function App() {
   const paymentAnomalies = useMemo(() => {
     const anomalies = [];
     const byKey = {};
-    filteredSubs.forEach((s) => {
+    filteredSubs.filter((s) => !s.isJournalPayment).forEach((s) => {
       const dateKey = String(s.activationDate || s.startDate || "").slice(0, 10);
       const key = `${s.studentId}|${s.groupId}|${dateKey}`;
       if (!byKey[key]) byKey[key] = [];
@@ -1846,7 +1857,7 @@ export default function App() {
       if ((pt === "trial" || pt === "single") && rows.length > 1) anomalies.push({ type: "duplicate_oneoff_same_day", rows });
       if (rows.length > 1) anomalies.push({ type: "multiple_payments_same_day", rows });
     });
-    filteredSubs.forEach((s) => {
+    filteredSubs.filter((s) => !s.isJournalPayment).forEach((s) => {
       const pt = String(s.planType || "").toLowerCase();
       if (pt !== "trial" && pt !== "single") return;
       const dateKey = String(s.activationDate || s.startDate || "").slice(0, 10);
@@ -1855,15 +1866,11 @@ export default function App() {
       const nearPack = subsExt.some((p) => String(p.studentId) === String(s.studentId) && String(p.groupId) === String(s.groupId) && ["4pack","8pack","12pack"].includes(String(p.planType||"").toLowerCase()) && String(p.startDate || "") <= dateKey && String(p.endDate || "9999-12-31") >= dateKey);
       if (nearPack) anomalies.push({ type: "oneoff_near_pack_subscription", rows: [s] });
     });
-    attn.forEach((a) => {
-      const t = String(a.entryType || a.guestType || "").toLowerCase();
-      if (t !== "trial" && t !== "single") return;
-      const dateKey = String(a.date || "").slice(0, 10);
-      const hasPayment = subsExt.some((s) => String(s.studentId) === String(a.studentId) && String(s.groupId) === String(a.groupId) && String(s.planType || "").toLowerCase() === t && String(s.activationDate || s.startDate || "").slice(0, 10) === dateKey);
-      if (!hasPayment) anomalies.push({ type: "attendance_oneoff_without_payment", rows: [a] });
+    findUnpaidOneOffAttendance(attn, subsExt, postedOneOffIncome).forEach((a) => {
+      anomalies.push({ type: "attendance_oneoff_without_payment", rows: [a] });
     });
     return anomalies;
-  }, [filteredSubs, attn, subsExt]);
+  }, [filteredSubs, attn, subsExt, postedOneOffIncome]);
   const anomalyLabelMap = {
     duplicate_oneoff_same_day: "Дубль разового / пробного в один день",
     multiple_payments_same_day: "Кілька оплат в один день",
@@ -2611,6 +2618,7 @@ export default function App() {
         {isAdmin && tab==="dashboard" && (
           <DashboardTab
             subs={subs}
+            revenueEntries={revenueEntries}
             students={students}
             studentGrps={studentGrps}
             groups={activeGroups}
@@ -2664,7 +2672,7 @@ export default function App() {
             bookingTariffs={roomBookingTariffs}
           />
         )}
-        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
+        {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} onFinancialJournalChange={isAdmin ? async () => setPostedOneOffIncome(await db.fetchPostedOneOffIncome()) : undefined} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}
         {isAdmin && tab==="messages" && (
           <MessagesTab
             students={students}
@@ -2777,6 +2785,7 @@ export default function App() {
                 students={students}
                 studentGrps={studentGrps}
                 subs={subsExt}
+                revenueEntries={revenueEntries}
                 attn={attn}
                 analyticsFoundation={analytics.foundation}
                 cancelled={cancelled}
@@ -3077,14 +3086,14 @@ export default function App() {
                   </button>
                   {isExpanded && <div className="payments-dir-body">
                     <div style={{overflowX: "auto", padding: "0 24px 24px 24px"}} className="payments-desktop-table-inner">
-                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}><thead><tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}><th style={{padding: "16px 14px", width: 40}}>#</th><th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 14px", fontWeight: 700}}>Група</th><th style={{padding: "16px 14px", fontWeight: 700}}>Абонемент</th><th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th><th style={{padding: "16px 14px", fontWeight: 700}}>Термін</th><th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th><th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th></tr></thead><tbody>{finalSubs.map((sub, index) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}><td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td><td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{getDisplayName(st)}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{fmt(sub.startDate)} — {fmt(sub.endDate)}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</td><td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}><button disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{background:"none",border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:18,marginRight:16}} onClick={()=>openSubscriptionEdit(sub)}>✏️</button><button disabled={deletingSubscriptionIds.has(String(sub.id))} style={{background:"none",border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></td></tr> })}</tbody></table>
+                      <table style={{width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left"}}><thead><tr style={{color: theme.textLight, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.5}}><th style={{padding: "16px 14px", width: 40}}>#</th><th style={{padding: "16px 14px", fontWeight: 700}}>Учениця</th><th style={{padding: "16px 14px", fontWeight: 700}}>Група</th><th style={{padding: "16px 14px", fontWeight: 700}}>Тип оплати</th><th style={{padding: "16px 14px", fontWeight: 700}}>Заняття</th><th style={{padding: "16px 14px", fontWeight: 700}}>Дата</th><th style={{padding: "16px 14px", fontWeight: 700}}>Статус</th><th style={{padding: "16px 14px", fontWeight: 700, textAlign: "right"}}>Дії</th></tr></thead><tbody>{finalSubs.map((sub, index) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; const methodLabel=sub.payMethod === "card" ? "Картка" : sub.payMethod === "cash" ? "Готівка" : sub.payMethod === "transfer" ? "Переказ" : (sub.payMethod || "Метод не вказано"); return <tr key={sub.id} style={{borderTop: `1px solid ${theme.bg}`}}><td style={{padding: "16px 14px", color: theme.textLight, fontWeight: 700}}>{index + 1}</td><td style={{padding: "16px 14px", color: theme.textMain, fontWeight: 600, whiteSpace:"nowrap"}}>{sub.guestName || getDisplayName(st) || "—"}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500}}>{gr?.name || "—"}</span></td><td style={{padding: "16px 14px"}}>{sub.isJournalPayment ? <div><strong>{planLabel} · {Number(sub.amount || 0).toLocaleString()} ₴</strong><div style={{color:theme.textMuted,fontSize:12,marginTop:3}}>{methodLabel} · Attendance {String(sub.attendanceId || "").slice(0,8)}</div></div> : <span style={{color: theme.textMuted, fontWeight: 500}}>{planLabel}</span>}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}>{sub.isJournalPayment ? "—" : <><span style={{color: theme.textMain, fontWeight: 800, fontSize: 16}}>{sub.usedTrainings}</span><span style={{color: theme.textLight, fontWeight: 500}}> / {sub.totalTrainings}</span></>}</td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}><span style={{color: theme.textMuted, fontWeight: 500, fontFamily:"monospace"}}>{sub.isJournalPayment ? fmt(sub.operationDate) : <>{fmt(sub.startDate)} — {fmt(sub.endDate)}</>}</span></td><td style={{padding: "16px 14px", whiteSpace:"nowrap"}}>{sub.isJournalPayment ? <Badge color={theme.success}>Проведено</Badge> : <><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<span style={{marginLeft: 8}}><Badge color={theme.danger}>Борг</Badge></span>}</>}</td><td style={{padding: "16px 14px", textAlign: "right", whiteSpace:"nowrap"}}>{!sub.isJournalPayment && <><button disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{background:"none",border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:18,marginRight:16}} onClick={()=>openSubscriptionEdit(sub)}>✏️</button><button disabled={deletingSubscriptionIds.has(String(sub.id))} style={{background:"none",border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:18,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></>}</td></tr> })}</tbody></table>
                     </div>
-                    {finalSubs.map((sub) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; return <button type="button" key={`card_${sub.id}`} className="payment-card" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} aria-disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{ opacity: canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .55, cursor: canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed" }} onClick={()=>openSubscriptionEdit(sub)}>
-                      <div className="payment-card-top"><div className="payment-student">{getDisplayName(st) || "—"}</div><div className="payment-amount">{Number(sub.amount || 0).toLocaleString()} ₴</div></div>
+                    {finalSubs.map((sub) => { const st=studentMap[sub.studentId], gr=groupMap[sub.groupId], planLabel=PLAN_TYPES.find(p=>p.id===sub.planType)?.name||sub.planType; const methodLabel=sub.payMethod === "card" ? "Картка" : sub.payMethod === "cash" ? "Готівка" : sub.payMethod === "transfer" ? "Переказ" : (sub.payMethod || "Метод не вказано"); const cardBody = <>
+                      <div className="payment-card-top"><div className="payment-student">{sub.guestName || getDisplayName(st) || "—"}</div><div className="payment-amount">{Number(sub.amount || 0).toLocaleString()} ₴</div></div>
                       <div className="payment-muted-row"><span>{fmt(sub.activationDate || sub.startDate)}</span><span>· {gr?.name || "Без групи"}</span><span>· {planLabel}</span></div>
-                      <div className="payment-muted-row"><span>{sub.payMethod === "card" ? "Картка" : sub.payMethod === "cash" ? "Готівка" : sub.payMethod === "transfer" ? "Переказ" : (sub.payMethod || "Метод не вказано")}</span><span>· {sub.usedTrainings}/{sub.totalTrainings} занять</span><span>· {fmt(sub.startDate)}—{fmt(sub.endDate)}</span></div>
-                      <div className="payment-card-bottom"><div style={{display:"flex", gap:6, flexWrap:"wrap", minWidth:0}}><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<Badge color={theme.danger}>Борг</Badge>}</div><div className="payments-card-menu" onClick={(e)=>e.stopPropagation()}><button type="button" aria-label="Редагувати оплату" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:16,color:theme.textMain}} onClick={()=>openSubscriptionEdit(sub)}>⋯</button><button type="button" aria-label="Видалити оплату" disabled={deletingSubscriptionIds.has(String(sub.id))} style={{border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:16,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></div></div>
-                    </button> })}
+                      <div className="payment-muted-row"><span>{methodLabel}</span>{sub.isJournalPayment ? <span>· Attendance {String(sub.attendanceId || "").slice(0,8)}</span> : <><span>· {sub.usedTrainings}/{sub.totalTrainings} занять</span><span>· {fmt(sub.startDate)}—{fmt(sub.endDate)}</span></>}</div>
+                      <div className="payment-card-bottom"><div style={{display:"flex", gap:6, flexWrap:"wrap", minWidth:0}}>{sub.isJournalPayment ? <Badge color={theme.success}>Journal · проведено</Badge> : <><Badge color={STATUS_COLORS[sub.status]}>{STATUS_LABELS[sub.status]}</Badge>{!sub.paid&&<Badge color={theme.danger}>Борг</Badge>}</>}</div>{!sub.isJournalPayment && <div className="payments-card-menu" onClick={(e)=>e.stopPropagation()}><button type="button" aria-label="Редагувати оплату" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{border:"none",cursor:canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed",opacity:canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .45,fontSize:16,color:theme.textMain}} onClick={()=>openSubscriptionEdit(sub)}>⋯</button><button type="button" aria-label="Видалити оплату" disabled={deletingSubscriptionIds.has(String(sub.id))} style={{border:"none",cursor:deletingSubscriptionIds.has(String(sub.id)) ? "not-allowed" : "pointer",opacity:deletingSubscriptionIds.has(String(sub.id)) ? .45 : 1,fontSize:16,color:theme.danger}} onClick={()=>deleteSubAction(sub.id)}>🗑</button></div>}</div>
+                    </>; return sub.isJournalPayment ? <div key={`card_${sub.id}`} className="payment-card">{cardBody}</div> : <button type="button" key={`card_${sub.id}`} className="payment-card" disabled={!canEditSubscription(sub, deletingSubscriptionIds)} aria-disabled={!canEditSubscription(sub, deletingSubscriptionIds)} style={{ opacity: canEditSubscription(sub, deletingSubscriptionIds) ? 1 : .55, cursor: canEditSubscription(sub, deletingSubscriptionIds) ? "pointer" : "not-allowed" }} onClick={()=>openSubscriptionEdit(sub)}>{cardBody}</button> })}
                   </div>}
                 </div>
               );
@@ -3192,7 +3201,7 @@ export default function App() {
                   return (
                     <div key={sp.group.id} className="admin-finance-card" style={{background: theme.card, borderRadius: 28, padding: "28px", display: "flex", flexDirection: "column", gap: 24, boxShadow: "0 10px 40px rgba(168, 177, 206, 0.15)"}}>
                       <div className="admin-finance-card-header" style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12}}>
-                        <div><div className="admin-finance-title-row" style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap"}}><span className="admin-finance-title" style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><span className="admin-finance-direction-badge"><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></span></div><div className="admin-finance-meta" style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплачених абонементів: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
+                        <div><div className="admin-finance-title-row" style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap"}}><span className="admin-finance-title" style={{color:theme.textMain,fontWeight:800, fontSize: 20}}>{sp.group.name}</span><span className="admin-finance-direction-badge"><Badge color={dir?.color||"#888"}>{dir?.name}</Badge></span></div><div className="admin-finance-meta" style={{fontSize: 14, color: theme.textMuted, fontWeight: 500}}>Оплат: <strong style={{color: theme.textMain}}>{sp.subs.length}</strong></div></div>
                         <div className="admin-finance-total" style={{textAlign: "right"}}><div className="admin-finance-total-label" style={{fontSize: 12, color: theme.textLight, textTransform: "uppercase", fontWeight: 700}}>Загальний збір</div><div className="admin-finance-total-value" style={{fontSize: 28, fontWeight: 800, color: theme.textMain, marginTop: 4}}>{sp.total.toLocaleString()} ₴</div></div>
                       </div>
                       <div className="admin-finance-progress" style={{height: 12, width: "100%", display: "flex", borderRadius: 100, overflow: "hidden"}}>

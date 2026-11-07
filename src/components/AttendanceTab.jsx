@@ -18,6 +18,7 @@ import { getTransferTargetGroups, groupsShareTrainer } from "../shared/groupTrai
 import { canConvertTrialBooking } from "../shared/trialBookings";
 import { commitServerMutationThenRefresh, projectMovedMemberships, projectMovedSubscriptions } from "../groupMergeMutations";
 import { FINANCIAL_ATTENDANCE_ADMIN_MESSAGE, isFinancialAttendance } from "../attendanceFinancialGuard";
+import { buildOneOffAttendancePayment, isValidOneOffAttendancePayment } from "../oneOffAttendancePayment";
 
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
@@ -1271,6 +1272,7 @@ export default function AttendanceTab({
   trialBookings = [],
   setTrialBookings,
   attendanceScale = 100,
+  onFinancialJournalChange,
 }) {
   const styles = useMemo(
     () => makeStyles(),
@@ -1279,6 +1281,8 @@ export default function AttendanceTab({
   const [gid, setGid] = useStickyState("", "ds_attn_gid_v2");
   const [centerMonth, setCenterMonth] = useState(today().slice(0, 7));
   const [entryMode, setEntryMode] = useState("auto");
+  const [servicePrices, setServicePrices] = useState([]);
+  const [oneOffPayment, setOneOffPayment] = useState(null);
   const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
@@ -1328,6 +1332,30 @@ export default function AttendanceTab({
   const menuPopupRef = useRef(null);
   const groupPickerRef = useRef(null);
   const tableWrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    db.fetchServicePrices().then(setServicePrices).catch((error) => {
+      console.warn("fetch service prices for attendance failed:", error?.message || error);
+    });
+  }, [isAdmin]);
+
+  const requestOneOffPayment = (payload) => new Promise((resolve) => {
+    setOneOffPayment({
+      payload,
+      draft: buildOneOffAttendancePayment({
+        entryType: payload.entryType,
+        attendanceDate: payload.date,
+        servicePrices,
+      }),
+      resolve,
+    });
+  });
+
+  const closeOneOffPayment = (result = null) => {
+    oneOffPayment?.resolve?.(result);
+    setOneOffPayment(null);
+  };
 
   useEffect(() => {
     const el = tableWrapRef.current;
@@ -2331,6 +2359,7 @@ export default function AttendanceTab({
       const createdStudent = await db.createStudentForGroup(gid, { name });
       const link = { id: `sg_${uid()}`, studentId: createdStudent.id, groupId: gid };
       await db.relinkGuestAttendanceToStudent({ groupId: gid, studentId: createdStudent.id, attendanceIds: safeRowIds });
+      refreshFinancialJournal();
       setGuestRosterByGroup((prev) => ({
         ...(prev || {}),
         [gid]: (prev?.[gid] || []).filter((r) => r.id !== guestRow.id && normalizeName(r.guestName) !== normalizeName(guestRow.guestName)),
@@ -2623,6 +2652,11 @@ export default function AttendanceTab({
   };
 
   const makeTempAttendanceId = () => `temp_attendance_${Date.now()}_${uid()}`;
+  const refreshFinancialJournal = () => {
+    if (typeof onFinancialJournalChange === "function") {
+      Promise.resolve(onFinancialJournalChange()).catch((error) => console.warn("refresh one-off income failed:", error?.message || error));
+    }
+  };
 
   const buildOptimisticAttendanceRecord = (payload) => ({
     id: makeTempAttendanceId(),
@@ -2723,6 +2757,7 @@ export default function AttendanceTab({
         for (const rec of existing) {
           if (rec.id) {
             await db.deleteAttendance(rec.id);
+            if (isFinancialAttendance(rec)) refreshFinancialJournal();
           }
         }
         for (const subId of subIdsToSync) {
@@ -2754,7 +2789,21 @@ export default function AttendanceTab({
 
       if (DEBUG_ATTENDANCE_PAYLOAD) console.log("[AttendanceTab] insert payload", payload);
       backendMutationStarted = true;
-      const savedRecord = await db.insertAttendance(payload);
+      let savedRecord;
+      if (nextEntry.entryType === "trial" || nextEntry.entryType === "single") {
+        if (!isAdmin) throw new Error(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+        const payment = await requestOneOffPayment(payload);
+        if (!payment) {
+          rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
+          rollbackOptimisticChange = null;
+          backendMutationStarted = false;
+          return;
+        }
+        savedRecord = await db.createPaidOneOffAttendance(payload, payment);
+        refreshFinancialJournal();
+      } else {
+        savedRecord = await db.insertAttendance(payload);
+      }
       replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       rollbackOptimisticChange = null;
       shouldReconcileDuplicate = false;
@@ -2870,6 +2919,7 @@ export default function AttendanceTab({
         rollbackOptimisticChange = () => rollbackAttendanceStateChange({ restoreRows: [existing] });
         backendMutationStarted = true;
         await db.deleteAttendance(existing.id);
+        refreshFinancialJournal();
       } else {
         const entry = guestRow.guestEntryType || guestEntryType || "trial";
         if (entry === "trial") {
@@ -2890,7 +2940,16 @@ export default function AttendanceTab({
         applyAttendanceStateChange({ addRows: [optimisticRecord] });
         rollbackOptimisticChange = () => rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
         backendMutationStarted = true;
-        const savedRecord = await db.insertAttendance(payload);
+        if (!isAdmin) throw new Error(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+        const payment = await requestOneOffPayment(payload);
+        if (!payment) {
+          rollbackAttendanceStateChange({ removeIds: [optimisticRecord.id] });
+          rollbackOptimisticChange = null;
+          backendMutationStarted = false;
+          return;
+        }
+        const savedRecord = await db.createPaidOneOffAttendance(payload, payment);
+        refreshFinancialJournal();
         replaceOptimisticAttendanceRecord(optimisticRecord.id, savedRecord);
       }
 
@@ -3534,8 +3593,8 @@ export default function AttendanceTab({
           >
             <option value="auto">Авто</option>
             <option value="subscription">Абонемент</option>
-            <option value="single">Разове</option>
-            <option value="trial">Пробне</option>
+            {isAdmin && <option value="single">Разове</option>}
+            {isAdmin && <option value="trial">Пробне</option>}
             <option value="debt">Борг</option>
           </select>
 
@@ -3595,6 +3654,35 @@ export default function AttendanceTab({
           <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
+      {isAdmin && oneOffPayment && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(15,23,42,.62)", display: "grid", placeItems: "center", padding: 16 }}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (isValidOneOffAttendancePayment(oneOffPayment.draft)) closeOneOffPayment(oneOffPayment.draft);
+            }}
+            style={{ width: "min(420px, 100%)", borderRadius: 18, padding: 20, background: theme.card, color: theme.textMain, border: `1px solid ${theme.border}`, boxShadow: "0 24px 64px rgba(0,0,0,.35)" }}
+          >
+            <h3 style={{ margin: "0 0 6px" }}>{oneOffPayment.payload.entryType === "trial" ? "Оплата пробного" : "Оплата разового"}</h3>
+            <p style={{ margin: "0 0 18px", color: theme.textMuted }}>Після підтвердження відвідування та дохід збережуться одночасно.</p>
+            <label style={{ display: "grid", gap: 6, marginBottom: 14 }}>Сума, грн
+              <input type="number" min="0" step="0.01" required value={oneOffPayment.draft.amountUah} onChange={(e) => setOneOffPayment((state) => ({ ...state, draft: { ...state.draft, amountUah: e.target.value } }))} style={styles.control} />
+            </label>
+            <label style={{ display: "grid", gap: 6, marginBottom: 14 }}>Спосіб оплати
+              <select value={oneOffPayment.draft.paymentMethod} onChange={(e) => setOneOffPayment((state) => ({ ...state, draft: { ...state.draft, paymentMethod: e.target.value } }))} style={styles.control}>
+                <option value="cash">Готівка</option><option value="card">Картка</option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 6, marginBottom: 18 }}>Дата оплати
+              <input type="date" required value={oneOffPayment.draft.operationDate} onChange={(e) => setOneOffPayment((state) => ({ ...state, draft: { ...state.draft, operationDate: e.target.value } }))} style={styles.control} />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" onClick={() => closeOneOffPayment(null)} style={styles.control}>Скасувати</button>
+              <button type="submit" disabled={!isValidOneOffAttendancePayment(oneOffPayment.draft)} style={{ ...styles.control, background: theme.primary, color: "#fff", fontWeight: 700 }}>Підтвердити</button>
+            </div>
+          </form>
+        </div>, document.body
+      )}
 
             {groupPickerOpen && createPortal(
         <div className="attendance-group-panel" style={{ ...styles.groupPickerPanel, top: groupPickerPos.top, left: groupPickerPos.left, width: groupPickerPos.width }}>

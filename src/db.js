@@ -998,6 +998,25 @@ export async function confirmIndividualIncome(id, { amountUah, paymentMethod, op
   return data;
 }
 
+export async function fetchPostedOneOffIncome() {
+  const { data, error } = await supabase.rpc('crm_admin_fetch_posted_one_off_income');
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    categoryCode: row.category_code,
+    direction: row.direction,
+    amountUah: Number(row.amount_uah || 0),
+    operationDate: row.operation_date,
+    status: row.status,
+    paymentMethod: row.payment_method_code,
+    attendanceId: row.attendance_id || null,
+    attendanceSourceId: row.attendance_source_id,
+    studentId: row.student_id || null,
+    groupId: row.group_id || null,
+    guestName: row.guest_name || null,
+  }));
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',
@@ -1389,6 +1408,36 @@ export async function insertAttendance(a) {
   }
 }
 
+export async function createPaidOneOffAttendance(a, payment) {
+  const entryType = String(a.entryType || '').trim().toLowerCase();
+  const { data, error } = await supabase.rpc('crm_admin_create_paid_one_off_attendance', {
+    p_student_id: a.studentId || null,
+    p_date: a.date,
+    p_group_id: a.groupId || null,
+    p_entry_type: entryType,
+    p_amount_uah: Number(payment.amountUah),
+    p_payment_method: payment.paymentMethod,
+    p_operation_date: payment.operationDate,
+    p_guest_name: a.guestName || null,
+    p_quantity: a.quantity || 1,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('RPC did not return attendance');
+  return {
+    id: row.id,
+    subId: row.sub_id,
+    studentId: row.student_id,
+    date: row.date,
+    guestName: row.guest_name,
+    guestType: row.guest_type,
+    groupId: row.group_id,
+    quantity: row.quantity || 1,
+    entryType: row.entry_type,
+    priceSnapshotUah: row.price_snapshot_uah ?? null,
+  };
+}
+
 export async function updateAttendanceQuantity(id, quantity) {
   const normalizedQuantity = Number(quantity);
   if (!id || !Number.isInteger(normalizedQuantity) || normalizedQuantity < 1) {
@@ -1465,6 +1514,12 @@ export async function deleteAttendance(id) {
     .select('id, sub_id, student_id, group_id, date, entry_type, guest_type')
     .eq('id', id)
     .maybeSingle();
+  const oneOffType = String(existing?.entry_type || existing?.guest_type || '').toLowerCase();
+  if (existing && (oneOffType === 'trial' || oneOffType === 'single')) {
+    const { error } = await supabase.rpc('crm_admin_delete_paid_one_off_attendance', { p_attendance_id: id });
+    if (error) throw error;
+    return;
+  }
   if (existing) {
     await removeOneOffPaymentIfOrphan(existing);
   }
@@ -1478,31 +1533,13 @@ export async function deleteAttendance(id) {
 export async function relinkGuestAttendanceToStudent({ groupId, studentId, attendanceIds = [] }) {
   if (!groupId || !studentId || !Array.isArray(attendanceIds) || !attendanceIds.length) return [];
   const ids = [...new Set(attendanceIds.filter(Boolean))];
-  const { data: candidates, error: readErr } = await supabase
-    .from('attendance')
-    .select('*')
-    .eq('group_id', groupId)
-    .is('student_id', null)
-    .in('id', ids);
-  if (readErr) throw readErr;
-  const rowIds = (candidates || []).map((r) => r.id);
-  if (!rowIds.length) return [];
-
-  const { data, error } = await supabase
-    .from('attendance')
-    .update({
-      student_id: studentId,
-      guest_name: null,
-      guest_type: null,
-      sub_id: null,
-    })
-    .in('id', rowIds)
-    .select('*');
+  const { data, error } = await supabase.rpc('crm_admin_relink_guest_one_off_attendance', {
+    p_group_id: groupId,
+    p_student_id: studentId,
+    p_attendance_ids: ids,
+  });
   if (error) throw error;
   const rows = data || [];
-  for (const row of rows) {
-    await ensureOneOffPaymentForAttendance(row);
-  }
   return rows.map((a) => ({
     id: a.id,
     subId: a.sub_id,
