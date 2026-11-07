@@ -43,6 +43,15 @@ async function database() {
       guest_name text, guest_type text, group_id text, quantity integer default 1,
       entry_type text default 'subscription', price_snapshot_uah integer
     );
+    create function public.crm_protect_attendance_price_snapshot()
+    returns trigger language plpgsql security definer set search_path=public as $$
+    begin
+      if new.price_snapshot_uah is not distinct from old.price_snapshot_uah then return new; end if;
+      raise exception 'attendance.price_snapshot_uah is immutable' using errcode='23514';
+    end $$;
+    create trigger attendance_protect_price_snapshot
+      before update of price_snapshot_uah on public.attendance
+      for each row execute function public.crm_protect_attendance_price_snapshot();
     create table public.room_bookings(
       id uuid primary key default gen_random_uuid(), date date, start_time text, end_time text,
       trainer_id text, trainer_name text, title text, type text, room_name text,
@@ -156,6 +165,34 @@ test('migration recreates dependent trainer update/delete policies without weake
     assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000002' returning id`)).rows.length, 0);
     assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000003' returning id`)).rows.length, 0);
     assert.equal((await db.query(`delete from attendance where id='50000000-0000-0000-0000-000000000001' returning id`)).rows.length, 1);
+  } finally { await db.close(); }
+});
+
+test('migration recreates the production snapshot trigger, stays rerunnable and keeps snapshots immutable', async () => {
+  const db = await database();
+  try {
+    const attendance = (await createPaid(db, 'trial', 225)).rows[0];
+    const triggerRows = (await db.query(`select tgname from pg_trigger
+      where tgrelid='public.attendance'::regclass
+        and tgname='attendance_protect_price_snapshot' and not tgisinternal`)).rows;
+    assert.deepEqual(triggerRows, [{ tgname: 'attendance_protect_price_snapshot' }]);
+    await assert.rejects(
+      db.query('update attendance set price_snapshot_uah=250 where id=$1', [attendance.id]),
+      /price_snapshot_uah is immutable/i,
+    );
+    await db.query('update attendance set quantity=2 where id=$1', [attendance.id]);
+    assert.deepEqual((await db.query('select price_snapshot_uah::text snapshot,quantity from attendance where id=$1', [attendance.id])).rows, [
+      { snapshot: '225.00', quantity: 2 },
+    ]);
+
+    await db.exec(migrationSql);
+    assert.equal((await db.query(`select count(*)::int count from pg_trigger
+      where tgrelid='public.attendance'::regclass
+        and tgname='attendance_protect_price_snapshot' and not tgisinternal`)).rows[0].count, 1);
+    await assert.rejects(
+      db.query('update attendance set price_snapshot_uah=275 where id=$1', [attendance.id]),
+      /price_snapshot_uah is immutable/i,
+    );
   } finally { await db.close(); }
 });
 

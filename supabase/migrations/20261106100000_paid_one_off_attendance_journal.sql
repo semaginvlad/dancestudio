@@ -11,10 +11,33 @@ alter table public.financial_operations
 -- existing restricted trainer access immediately after the type change.
 drop policy if exists attendance_trainer_update_own_groups on public.attendance;
 drop policy if exists attendance_trainer_delete_own_groups on public.attendance;
+drop policy if exists attendance_trainer_select_own_groups on public.attendance;
+drop trigger if exists attendance_protect_price_snapshot on public.attendance;
 
 alter table public.attendance
   alter column price_snapshot_uah type numeric(12,2)
   using price_snapshot_uah::numeric;
+
+-- Restore the canonical immutable historical snapshot guard. Server-side flows
+-- may update other attendance fields, but no ordinary UPDATE may replace a
+-- captured price (including an administrator or trainer update).
+create or replace function public.crm_protect_attendance_price_snapshot()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.price_snapshot_uah is not distinct from old.price_snapshot_uah then
+    return new;
+  end if;
+  raise exception 'attendance.price_snapshot_uah is immutable' using errcode = '23514';
+end;
+$$;
+
+create trigger attendance_protect_price_snapshot
+before update of price_snapshot_uah on public.attendance
+for each row execute function public.crm_protect_attendance_price_snapshot();
 
 create policy attendance_trainer_update_own_groups
 on public.attendance
@@ -48,6 +71,20 @@ create policy attendance_trainer_delete_own_groups
 on public.attendance
 for delete
 to authenticated
+using (
+  group_id is not null
+  and public.rls_owns_group(group_id)
+  and student_id is not null
+  and guest_name is null
+  and guest_type is null
+  and price_snapshot_uah is null
+  and lower(coalesce(entry_type, '')) not in ('trial', 'single')
+);
+
+-- Trainers may keep viewing ordinary attendance in owned groups, but paid
+-- one-off rows (including their amount snapshot) stay administrator-only.
+create policy attendance_trainer_select_own_groups
+on public.attendance for select to authenticated
 using (
   group_id is not null
   and public.rls_owns_group(group_id)
@@ -296,20 +333,5 @@ end $$;
 
 revoke all on function public.crm_admin_relink_guest_one_off_attendance(text,uuid,uuid[]) from public, anon;
 grant execute on function public.crm_admin_relink_guest_one_off_attendance(text,uuid,uuid[]) to authenticated;
-
--- Trainers may keep working with ordinary attendance in owned groups, but paid
--- one-off rows (including their amount snapshot) are not visible to them.
-drop policy if exists attendance_trainer_select_own_groups on public.attendance;
-create policy attendance_trainer_select_own_groups
-on public.attendance for select to authenticated
-using (
-  group_id is not null
-  and public.rls_owns_group(group_id)
-  and student_id is not null
-  and guest_name is null
-  and guest_type is null
-  and price_snapshot_uah is null
-  and lower(coalesce(entry_type, '')) not in ('trial', 'single')
-);
 
 commit;
