@@ -42,7 +42,7 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
 
   return <section style={{ ...cardSt, background: theme.card, marginBottom: 24, display: 'grid', gap: 14 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Індивідуальні тренування · {rows.length}</div></div>
+      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оренда залів та індивідуальні тренування · {rows.length}</div></div>
       <button type="button" style={btnS} onClick={onRefresh} disabled={loading}>{loading ? 'Оновлення…' : 'Оновити'}</button>
     </div>
     {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}

@@ -3,14 +3,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation } from '../src/individualIncome.js';
+import { buildCanonicalRevenueEntries } from '../src/revenue.js';
 
 const coreSql = await readFile(new URL('../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql', import.meta.url), 'utf8');
 const matrixSql = await readFile(new URL('../supabase/migrations/20261105120000_individual_training_rate_matrix.sql', import.meta.url), 'utf8');
 const incomeSql = await readFile(new URL('../supabase/migrations/20261105150000_individual_training_income_confirmation.sql', import.meta.url), 'utf8');
+const rentalSql = await readFile(new URL('../supabase/migrations/20261109120000_room_rental_pending_income.sql', import.meta.url), 'utf8');
 const dbSource = await readFile(new URL('../src/db.js', import.meta.url), 'utf8');
 const appSource = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+const dashboardSource = await readFile(new URL('../src/components/DashboardTab.jsx', import.meta.url), 'utf8');
 
-async function database({ beforeIncome } = {}) {
+async function database({ beforeIncome, beforeRental } = {}) {
   const db = new PGlite();
   await db.exec(`
     create role anon; create role authenticated;
@@ -65,6 +68,8 @@ async function database({ beforeIncome } = {}) {
   `);
   if (beforeIncome) await beforeIncome(db);
   await db.exec(incomeSql);
+  if (beforeRental) await beforeRental(db);
+  await db.exec(rentalSql);
   return db;
 }
 
@@ -73,19 +78,40 @@ const insertIndividual = (db, extra = '') => db.query(`
   values ('2026-11-10','10:00','11:00','Зал 2','individual_training','individual_1_2',2,'Персональне','20000000-0000-0000-0000-000000000001','Костя','active'${extra}) returning *
 `);
 
-test('enabled individual training creates one pending snapshot while reserve creates none', async () => {
+test('new individual booking creates one pending room rental for any trainer while reserve creates none', async () => {
   const db = await database();
   try {
     await insertIndividual(db);
-    assert.deepEqual((await db.query(`select status,amount_uah::text amount,trainer_share_uah::text share,occurrence_date::text,event_title_snapshot,people_count_snapshot from financial_operations`)).rows, [{
-      status: 'pending', amount: '250.00', share: '0.00', occurrence_date: '2026-11-10', event_title_snapshot: 'Персональне', people_count_snapshot: 2,
+    assert.deepEqual((await db.query(`select category_code,status,amount_uah::text amount,trainer_share_uah::text share,occurrence_date::text,event_title_snapshot,people_count_snapshot from financial_operations`)).rows, [{
+      category_code: 'room_rental', status: 'pending', amount: '250.00', share: '0.00', occurrence_date: '2026-11-10', event_title_snapshot: 'Персональне', people_count_snapshot: 2,
     }]);
+    await db.exec(`insert into trainers(id,auth_user_id) values ('20000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002');
+      insert into trainer_financial_settings(trainer_id,individual_income_enabled) values ('20000000-0000-0000-0000-000000000002',false);
+      insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,people_count,title,trainer_id,status)
+      values ('2026-11-12','12:00','13:00','Зал 2','individual_training','individual_1_2',1,'Будь-який тренер','20000000-0000-0000-0000-000000000002','active')`);
+    assert.equal((await db.query("select count(*)::int count from financial_operations where category_code='room_rental'")).rows[0].count, 2);
     await db.exec(`insert into room_bookings(date,start_time,end_time,room_name,event_type,title,trainer_id,status) values ('2026-11-11','10:00','11:00','Зал 2','room_booking','Резерв','20000000-0000-0000-0000-000000000001','active')`);
-    assert.equal((await db.query('select count(*)::int count from financial_operations')).rows[0].count, 1);
+    assert.equal((await db.query('select count(*)::int count from financial_operations')).rows[0].count, 2);
   } finally { await db.close(); }
 });
 
-test('migration reconciles historical training in a now-closed room without weakening new-booking guard', async () => {
+test('room-rental migration does not backfill an existing booking', async () => {
+  let historicalId;
+  const db = await database({ beforeRental: async (databaseClient) => {
+    await databaseClient.exec('alter table room_bookings disable trigger room_bookings_sync_individual_income');
+    historicalId = (await databaseClient.query(`insert into room_bookings(date,start_time,end_time,room_name,event_type,booking_type,title,trainer_id,status)
+      values ('2026-11-01','10:00','11:00','Зал 2','individual_training','individual_1_2','До PR','20000000-0000-0000-0000-000000000001','active') returning id`)).rows[0].id;
+    await databaseClient.exec('alter table room_bookings enable trigger room_bookings_sync_individual_income');
+  }});
+  try {
+    assert.equal((await db.query('select room_rental_finance_enabled from room_bookings where id=$1', [historicalId])).rows[0].room_rental_finance_enabled, false);
+    await db.exec("set app.test_admin='on'");
+    await db.query('select * from crm_fetch_pending_individual_income()');
+    assert.equal((await db.query('select count(*)::int count from financial_operations where room_booking_id=$1', [historicalId])).rows[0].count, 0);
+  } finally { await db.close(); }
+});
+
+test('room-rental migration leaves legacy finance untouched without weakening new-booking guard', async () => {
   let historicalId;
   const db = await database({ beforeIncome: async (databaseClient) => {
     await databaseClient.exec(`
@@ -114,10 +140,9 @@ test('migration reconciles historical training in a now-closed room without weak
       values ('2026-11-06','12:00','13:00','Зал 2','individual_training','individual_1_2','Blocked','20000000-0000-0000-0000-000000000001','active')`), /тимчасово недоступний/i);
     await assert.rejects(db.query("update room_bookings set start_time='10:30' where id=$1", [historicalId]), /тимчасово недоступний/i);
     await db.query("update room_bookings set status='cancelled' where id=$1", [historicalId]);
-    assert.equal((await db.query('select status from financial_operations where room_booking_id=$1', [historicalId])).rows[0].status, 'voided');
-
-    await db.exec(incomeSql);
-    assert.equal((await db.query("select count(*)::int count from financial_operations where room_booking_id=$1 and status in ('pending','posted')", [historicalId])).rows[0].count, 0);
+    assert.deepEqual((await db.query('select category_code,status from financial_operations where room_booking_id=$1', [historicalId])).rows, [
+      { category_code: 'individual_training', status: 'voided' },
+    ]);
   } finally { await db.close(); }
 });
 
@@ -284,4 +309,16 @@ test('client confirmation defaults to today and validates only cash/card with ed
   assert.match(dbSource, /crm_admin_delete_room_booking/);
   assert.match(appSource, /if \(result\?\.cancelled\)[\s\S]*status: "cancelled"/);
   assert.match(appSource, /<PendingIndividualIncome/);
+});
+
+test('dashboard includes posted room rental once in its card and gross revenue', () => {
+  const entries = buildCanonicalRevenueEntries([
+    { id: 'subscription', paid: true, amount: 1000, startDate: '2026-11-01' },
+  ], [
+    { id: 'rental', categoryCode: 'room_rental', direction: 'income', status: 'posted', amountUah: 250, operationDate: '2026-11-02' },
+  ]);
+  assert.equal(entries.reduce((sum, row) => sum + row.amount, 0), 1250);
+  assert.equal(entries.filter((row) => row.categoryCode === 'room_rental').length, 1);
+  assert.match(dashboardSource, /data-dashboard-room-rental/);
+  assert.match(dashboardSource, /roomRentalRevenue/);
 });
