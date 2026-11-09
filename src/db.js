@@ -1156,16 +1156,16 @@ export async function syncSubUsedTrainings(subId) {
 }
 
 // ─── ATTENDANCE ───
-export async function fetchAttendance() {
+export async function fetchAttendance({ includeFinancial = false } = {}) {
   const chunk = 1000;
   let from = 0;
   let rows = [];
 
   while (true) {
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('*')
-      .range(from, from + chunk - 1);
+    const request = includeFinancial
+      ? supabase.from('attendance').select('*').range(from, from + chunk - 1)
+      : supabase.rpc('crm_fetch_my_attendance').range(from, from + chunk - 1);
+    const { data, error } = await request;
     if (error) throw error;
     const part = data || [];
     rows = rows.concat(part);
@@ -1173,18 +1173,21 @@ export async function fetchAttendance() {
     from += chunk;
   }
 
-  return rows.map(a => ({
-    id: a.id,
-    subId: a.sub_id,
-    studentId: a.student_id,
-    date: a.date,
-    guestName: a.guest_name,
-    guestType: a.guest_type,
-    groupId: a.group_id,
-    quantity: a.quantity || 1,
-    entryType: a.entry_type || 'subscription',
-    priceSnapshotUah: a.price_snapshot_uah ?? null,
-  }))
+  return rows.map(a => {
+    const attendance = {
+      id: a.id,
+      subId: a.sub_id,
+      studentId: a.student_id,
+      date: a.date,
+      guestName: a.guest_name,
+      guestType: a.guest_type,
+      groupId: a.group_id,
+      quantity: a.quantity || 1,
+      entryType: a.entry_type || 'subscription',
+    };
+    if (includeFinancial) attendance.priceSnapshotUah = a.price_snapshot_uah ?? null;
+    return attendance;
+  })
 }
 
 const mapAttendanceChangeLog = (row) => ({

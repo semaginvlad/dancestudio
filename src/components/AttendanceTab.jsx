@@ -2630,7 +2630,7 @@ export default function AttendanceTab({
 
   const reloadFromDb = async () => {
     const [freshAttn, freshSubs, freshCancelled] = await Promise.all([
-      db.fetchAttendance(),
+      db.fetchAttendance({ includeFinancial: isAdmin }),
       fetchSubscriptions(),
       db.fetchCancelled(),
     ]);
