@@ -995,26 +995,29 @@ export async function confirmIndividualIncome(id, { amountUah, paymentMethod, op
     p_operation_date: operationDate,
   });
   if (error) throw error;
-  return data;
+  const row = Array.isArray(data) ? data[0] : data;
+  return mapPostedIncome(row || {});
 }
+
+const mapPostedIncome = (row = {}) => ({
+  id: row.id,
+  categoryCode: row.category_code,
+  direction: row.direction,
+  amountUah: Number(row.amount_uah || 0),
+  operationDate: row.operation_date,
+  status: row.status,
+  paymentMethod: row.payment_method_code,
+  attendanceId: row.attendance_id || null,
+  attendanceSourceId: row.attendance_source_id,
+  studentId: row.student_id || null,
+  groupId: row.group_id || null,
+  guestName: row.guest_name || null,
+});
 
 export async function fetchPostedOneOffIncome() {
   const { data, error } = await supabase.rpc('crm_admin_fetch_posted_one_off_income');
   if (error) throw error;
-  return (data || []).map((row) => ({
-    id: row.id,
-    categoryCode: row.category_code,
-    direction: row.direction,
-    amountUah: Number(row.amount_uah || 0),
-    operationDate: row.operation_date,
-    status: row.status,
-    paymentMethod: row.payment_method_code,
-    attendanceId: row.attendance_id || null,
-    attendanceSourceId: row.attendance_source_id,
-    studentId: row.student_id || null,
-    groupId: row.group_id || null,
-    guestName: row.guest_name || null,
-  }));
+  return (data || []).map(mapPostedIncome);
 }
 
 // ─── SUBSCRIPTIONS ───

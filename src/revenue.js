@@ -136,3 +136,10 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
 
   return [...legacyRows, ...postedRows];
 };
+
+export const upsertPostedFinancialTransaction = (transactions = [], transaction) => {
+  if (!transaction?.id) return transactions;
+  const index = transactions.findIndex((row) => String(row.id) === String(transaction.id));
+  if (index < 0) return [...transactions, transaction];
+  return transactions.map((row, rowIndex) => rowIndex === index ? transaction : row);
+};

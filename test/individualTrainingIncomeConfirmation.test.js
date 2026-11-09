@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation } from '../src/individualIncome.js';
-import { buildCanonicalRevenueEntries } from '../src/revenue.js';
+import { buildCanonicalRevenueEntries, upsertPostedFinancialTransaction } from '../src/revenue.js';
 
 const coreSql = await readFile(new URL('../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql', import.meta.url), 'utf8');
 const matrixSql = await readFile(new URL('../supabase/migrations/20261105120000_individual_training_rate_matrix.sql', import.meta.url), 'utf8');
@@ -321,4 +321,18 @@ test('dashboard includes posted room rental once in its card and gross revenue',
   assert.equal(entries.filter((row) => row.categoryCode === 'room_rental').length, 1);
   assert.match(dashboardSource, /data-dashboard-room-rental/);
   assert.match(dashboardSource, /roomRentalRevenue/);
+});
+
+test('successful confirmation immediately updates posted canonical revenue without reload', () => {
+  const posted = {
+    id: 'rental-confirmed', categoryCode: 'room_rental', direction: 'income',
+    status: 'posted', amountUah: 325, operationDate: '2026-11-09', paymentMethod: 'card',
+  };
+  const localPosted = upsertPostedFinancialTransaction([], posted);
+  const entries = buildCanonicalRevenueEntries([], localPosted);
+  assert.equal(localPosted.length, 1);
+  assert.equal(entries.reduce((sum, row) => sum + row.amount, 0), 325);
+  assert.equal(upsertPostedFinancialTransaction(localPosted, posted).length, 1, 'same operation is never duplicated');
+  assert.match(appSource, /const postedOperation = await db\.confirmIndividualIncome\(id, payload\);[\s\S]*setPostedOneOffIncome/);
+  assert.match(dbSource, /return mapPostedIncome\(row \|\| \{\}\)/);
 });
