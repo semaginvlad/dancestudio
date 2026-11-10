@@ -104,7 +104,7 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
   const journalRows = (financialTransactions || []).filter((row) => (
     row?.status === "posted"
     && row?.direction === "income"
-    && ["trial", "single", "room_rental"].includes(String(row.categoryCode || row.category_code || "").toLowerCase())
+    && ["trial", "single", "room_rental", "manual_income"].includes(String(row.categoryCode || row.category_code || "").toLowerCase())
   ));
   const journalAttendanceIds = new Set(journalRows
     .map((row) => String(row.attendanceSourceId || row.attendance_source_id || row.attendanceId || row.attendance_id || "").toLowerCase())

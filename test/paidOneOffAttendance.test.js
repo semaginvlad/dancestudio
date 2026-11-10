@@ -206,7 +206,7 @@ test('canonical revenue includes posted trial/single exactly once and retains un
   assert.equal(entries.reduce((sum, row) => sum + row.amount, 0), 1850);
   assert.equal(entries.filter((row) => row.attendanceSourceId === attendanceId).length, 1);
   assert.equal(entries.filter((row) => row.groupId === 'group-a').reduce((sum, row) => sum + row.amount, 0), 1450);
-  assert.match(appSource, /buildCanonicalRevenueEntries\(subs, postedOneOffIncome\)/);
+  assert.match(appSource, /buildCanonicalRevenueEntries\(subs, \[\.\.\.withoutManualDuplicates\(postedOneOffIncome, manualFinancialOperations\), \.\.\.manualFinancialOperations\]\)/);
   assert.match(appSource, /currMonthRev = revenueEntries/);
   assert.match(dashboardSource, /revenueRows\.filter/);
 });

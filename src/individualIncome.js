@@ -2,8 +2,8 @@ import { toLocalISO } from './shared/utils.js';
 
 export const buildIndividualIncomeConfirmation = (row, today = toLocalISO(new Date())) => ({
   amountUah: String(Number(row?.amountUah || 0)),
-  paymentMethod: 'cash',
-  operationDate: today,
+  paymentMethod: ['cash', 'card'].includes(row?.paymentMethod) ? row.paymentMethod : 'cash',
+  operationDate: row?.operationDate || today,
 });
 
 export const isValidIndividualIncomeConfirmation = (draft) => (

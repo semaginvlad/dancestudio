@@ -333,6 +333,6 @@ test('successful confirmation immediately updates posted canonical revenue witho
   assert.equal(localPosted.length, 1);
   assert.equal(entries.reduce((sum, row) => sum + row.amount, 0), 325);
   assert.equal(upsertPostedFinancialTransaction(localPosted, posted).length, 1, 'same operation is never duplicated');
-  assert.match(appSource, /const postedOperation = await db\.confirmIndividualIncome\(id, payload\);[\s\S]*setPostedOneOffIncome/);
+  assert.match(appSource, /const postedOperation = await db\.confirmIndividualIncome\(row\.id, payload\);[\s\S]*setPostedOneOffIncome/);
   assert.match(dbSource, /return mapPostedIncome\(row \|\| \{\}\)/);
 });

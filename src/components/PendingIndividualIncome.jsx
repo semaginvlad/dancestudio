@@ -21,12 +21,15 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
     setSubmitError('');
   };
 
+  const isDraftValid = isValidIndividualIncomeConfirmation(draft)
+    && (selected?.pendingType !== 'manual' || Number(draft?.amountUah) > 0);
+
   const submit = async () => {
-    if (!selected || !isValidIndividualIncomeConfirmation(draft)) return;
+    if (!selected || !isDraftValid) return;
     setBusy(true);
     setSubmitError('');
     try {
-      await onConfirm(selected.id, {
+      await onConfirm(selected, {
         amountUah: Number(draft.amountUah),
         paymentMethod: draft.paymentMethod,
         operationDate: draft.operationDate,
@@ -42,7 +45,7 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
 
   return <section style={{ ...cardSt, background: theme.card, marginBottom: 24, display: 'grid', gap: 14 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оренда залів та індивідуальні тренування · {rows.length}</div></div>
+      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оренда залів, ручні доходи та витрати · {rows.length}</div></div>
       <button type="button" style={btnS} onClick={onRefresh} disabled={loading}>{loading ? 'Оновлення…' : 'Оновити'}</button>
     </div>
     {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
@@ -51,8 +54,8 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
       {rows.map((row) => <article key={row.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 16, padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, alignItems: 'center' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ color: theme.textMain, fontWeight: 800 }}>{row.title}</div>
-          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 5 }}>{row.trainerName} · {row.occurrenceDate} · {row.startTime}–{row.endTime}</div>
-          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 3 }}>{row.roomName} · {row.peopleCount} ос. · початкова сума {row.amountUah.toLocaleString('uk-UA')} ₴</div>
+          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 5 }}>{row.details || `${row.trainerName} · ${row.occurrenceDate} · ${row.startTime}–${row.endTime}`}</div>
+          <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 3 }}>{row.secondaryDetails || `${row.roomName} · ${row.peopleCount} ос. · початкова сума ${row.amountUah.toLocaleString('uk-UA')} ₴`}</div>
         </div>
         <button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>
       </article>)}
@@ -64,7 +67,7 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
         <label style={{ color: theme.textMuted, fontSize: 13 }}>Спосіб оплати<select aria-label="Спосіб оплати" style={{ ...inputSt, marginTop: 5 }} value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}><option value="cash">Готівка</option><option value="card">Картка</option></select></label>
         <label style={{ color: theme.textMuted, fontSize: 13 }}>Дата оплати<input aria-label="Дата оплати" type="date" style={{ ...inputSt, marginTop: 5 }} value={draft.operationDate} onChange={(event) => setDraft({ ...draft, operationDate: event.target.value })} /></label>
         {submitError && <div role="alert" style={{ color: theme.danger }}>{submitError}</div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><button type="button" style={btnS} disabled={busy} onClick={() => { setSelected(null); setDraft(null); }}>Скасувати</button><button type="button" style={btnP} disabled={busy || !isValidIndividualIncomeConfirmation(draft)} onClick={submit}>{busy ? 'Збереження…' : 'Підтвердити'}</button></div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}><button type="button" style={btnS} disabled={busy} onClick={() => { setSelected(null); setDraft(null); }}>Скасувати</button><button type="button" style={btnP} disabled={busy || !isDraftValid} onClick={submit}>{busy ? 'Збереження…' : 'Підтвердити'}</button></div>
       </div>
     </div>}
   </section>;
