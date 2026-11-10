@@ -2598,7 +2598,7 @@ export default function App() {
               {id:"schedule", label:"Графік"},
               {id:"attendance", label:"Відвідування"},
               {id:"messages", label:"Повідомлення / Чати"},
-              {id:"subs", label:"Оплати"},
+              {id:"subs", label:"Фінанси"},
               {id:"students", label:"Учениці"},
               {id:"analytics", label:"📊 Instagram"}
             ].map(t=><button key={t.id} onClick={()=>{setTab(t.id);setSearchQ("")}} style={{padding: "12px 24px", background: tab===t.id ? theme.primary : "transparent", border: "none", borderRadius: 100, color: tab===t.id ? "#fff" : theme.textMuted, fontSize: 14, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", transition: "0.2s"}}>{t.label}</button>)
@@ -2961,7 +2961,7 @@ export default function App() {
           />
         )}
 
-        {/* === ОПЛАТИ === */}
+        {/* === ФІНАНСИ === */}
         {isAdmin && tab==="subs" && <div className="payments-tab">
           <style>{`
             .payments-mobile-list { display: none; }
@@ -2993,6 +2993,32 @@ export default function App() {
               .payments-issues { padding: 12px !important; border-radius: 18px !important; margin-bottom: 10px !important; }
             }
           `}</style>
+
+          <PendingIndividualIncome
+            rows={[...pendingIndividualIncome, ...manualFinancialOperations.filter((operation) => operation.status === "pending").map(toPendingManualOperation)]}
+            loading={pendingIndividualIncomeLoading}
+            error={pendingIndividualIncomeError}
+            onRefresh={async () => {
+              setPendingIndividualIncomeLoading(true); setPendingIndividualIncomeError("");
+              try {
+                const [pendingIncome, manualOperations] = await Promise.all([db.fetchPendingIndividualIncome(), db.fetchManualFinancialOperations()]);
+                setPendingIndividualIncome(pendingIncome);
+                setManualFinancialOperations(manualOperations);
+              }
+              catch (error) { setPendingIndividualIncomeError(error?.message || "Не вдалося завантажити pending-оплати"); }
+              finally { setPendingIndividualIncomeLoading(false); }
+            }}
+            onConfirm={async (row, payload) => {
+              if (row.pendingType === "manual") {
+                const postedOperation = await db.confirmManualFinancialOperation(row.id, payload);
+                setManualFinancialOperations((current) => upsertPostedFinancialTransaction(current, postedOperation));
+                return;
+              }
+              const postedOperation = await db.confirmIndividualIncome(row.id, payload);
+              setPostedOneOffIncome((current) => upsertPostedFinancialTransaction(current, postedOperation));
+              setPendingIndividualIncome((current) => current.filter((operation) => operation.id !== row.id));
+            }}
+          />
 
           <ManualFinancialOperations
             operations={manualFinancialOperations}
@@ -3120,31 +3146,6 @@ export default function App() {
 
           return (
             <div style={{ minWidth: 0 }}>
-              <PendingIndividualIncome
-                rows={[...pendingIndividualIncome, ...manualFinancialOperations.filter((operation) => operation.status === "pending").map(toPendingManualOperation)]}
-                loading={pendingIndividualIncomeLoading}
-                error={pendingIndividualIncomeError}
-                onRefresh={async () => {
-                  setPendingIndividualIncomeLoading(true); setPendingIndividualIncomeError("");
-                  try {
-                    const [pendingIncome, manualOperations] = await Promise.all([db.fetchPendingIndividualIncome(), db.fetchManualFinancialOperations()]);
-                    setPendingIndividualIncome(pendingIncome);
-                    setManualFinancialOperations(manualOperations);
-                  }
-                  catch (error) { setPendingIndividualIncomeError(error?.message || "Не вдалося завантажити pending-оплати"); }
-                  finally { setPendingIndividualIncomeLoading(false); }
-                }}
-                onConfirm={async (row, payload) => {
-                  if (row.pendingType === "manual") {
-                    const postedOperation = await db.confirmManualFinancialOperation(row.id, payload);
-                    setManualFinancialOperations((current) => upsertPostedFinancialTransaction(current, postedOperation));
-                    return;
-                  }
-                  const postedOperation = await db.confirmIndividualIncome(row.id, payload);
-                  setPostedOneOffIncome((current) => upsertPostedFinancialTransaction(current, postedOperation));
-                  setPendingIndividualIncome((current) => current.filter((operation) => operation.id !== row.id));
-                }}
-              />
               <div className="admin-mobile-header"><div><h2>Фінанси</h2><p>Доходи, борги та деталізація по групах</p></div><button type="button" className="admin-mobile-filter-toggle" onClick={() => setAdminFinanceFiltersOpen(true)}>Фільтри{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length ? <span className="admin-mobile-badge">{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length}</span> : null}</button></div>
               <div className="admin-finance-summary" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:20,marginBottom:30}}>
                 <div style={{...cardSt, background: theme.card}}><div style={{fontSize:13,color:theme.success,textTransform:"uppercase", letterSpacing: 0.5, fontWeight: 700}}>Загалом оплачено</div><div style={{fontSize:42,fontWeight:800,color:theme.success, marginTop: 8}}>{analytics.totalRev.toLocaleString()} ₴</div></div>
