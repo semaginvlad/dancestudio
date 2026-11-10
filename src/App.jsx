@@ -177,9 +177,8 @@ export default function App() {
   const [filterTrainer, setFilterTrainer] = useStickyState("all", "ds_filterTrainer");
   const [filterFromDate, setFilterFromDate] = useStickyState("", "ds_filterFromDate");
   const [filterToDate, setFilterToDate] = useStickyState("", "ds_filterToDate");
-  const [filterDatePreset, setFilterDatePreset] = useStickyState("custom", "ds_filterDatePreset");
+  const [filterDatePreset, setFilterDatePreset] = useStickyState("all", "ds_filterDatePreset");
   const [filterAudit, setFilterAudit] = useStickyState("all", "ds_filterAudit");
-  const [paymentsFiltersOpen, setPaymentsFiltersOpen] = useState(false);
   const [adminGroupSearch, setAdminGroupSearch] = useStickyState("", "ds_adminGroupSearch");
   const [adminGroupArchiveFilter, setAdminGroupArchiveFilter] = useStickyState("active", "ds_adminGroupArchiveFilter");
   const [adminGroupTrainerFilter, setAdminGroupTrainerFilter] = useStickyState("all", "ds_adminGroupTrainerFilter");
@@ -1818,7 +1817,7 @@ export default function App() {
     setFilterTrainer("all");
     setFilterPayMethod("all");
     setFilterStatus("all");
-    setFilterDatePreset("custom");
+    setFilterDatePreset("all");
     setFilterFromDate("");
     setFilterToDate("");
     setFilterAudit("all");
@@ -1832,20 +1831,9 @@ export default function App() {
     filterTrainer !== "all",
     filterPayMethod !== "all",
     filterStatus !== "all",
-    filterDatePreset !== "custom" || !!filterFromDate || !!filterToDate,
+    filterDatePreset !== "all" || !!filterFromDate || !!filterToDate,
     filterAudit !== "all",
   ].filter(Boolean).length, [filterPlanType, filterPaid, filterDir, filterGroup, filterTrainer, filterPayMethod, filterStatus, filterDatePreset, filterFromDate, filterToDate, filterAudit]);
-
-  const paymentsSummary = useMemo(() => {
-    const paidRows = filteredSubs.filter((s) => !!s.paid);
-    const unpaidRows = filteredSubs.filter((s) => !s.paid);
-    return {
-      count: filteredSubs.length,
-      paidTotal: paidRows.reduce((sum, s) => sum + Number(s.amount || 0), 0),
-      unpaidTotal: unpaidRows.reduce((sum, s) => sum + Number(s.amount || 0), 0),
-      activeCount: filteredSubs.filter((s) => s.status === "active").length,
-    };
-  }, [filteredSubs]);
 
   const paymentAnomalies = useMemo(() => {
     const anomalies = [];
@@ -1892,6 +1880,11 @@ export default function App() {
 
   useEffect(() => {
     if (filterDatePreset === "custom") return;
+    if (filterDatePreset === "all") {
+      setFilterFromDate("");
+      setFilterToDate("");
+      return;
+    }
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
     const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -2971,35 +2964,19 @@ export default function App() {
         {/* === ОПЛАТИ === */}
         {isAdmin && tab==="subs" && <div className="payments-tab">
           <style>{`
-            .payments-mobile-header, .payments-summary-grid, .payments-mobile-toolbar, .payments-mobile-list { display: none; }
-            .payments-filter-shell select, .payments-filter-shell input { max-width: 100%; }
+            .payments-mobile-list { display: none; }
+            .payments-filters { display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap; align-items:center; background:${theme.card}; padding:14px; border:1px solid ${theme.border}; border-radius:20px; box-shadow:0 10px 30px rgba(168,177,206,.12); }
+            .payments-filters > input, .payments-filters > select { width:auto !important; min-width:150px; flex:1 1 150px; }
+            .payments-filters > .payments-search { min-width:240px; flex:2 1 240px; }
             .payments-card-menu { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
             .payment-card { display: none; }
             @media (max-width: 768px) {
               main { padding-left: 10px !important; padding-right: 10px !important; overflow-x: hidden !important; }
               .payments-tab { width: 100%; max-width: 100%; overflow-x: hidden; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
-              .payments-mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-              .payments-mobile-title { min-width: 0; }
-              .payments-mobile-title h2 { margin: 0; font-size: 22px; line-height: 1.12; color: ${theme.secondary}; font-weight: 900; letter-spacing: -0.5px; }
-              .payments-mobile-title div { margin-top: 2px; font-size: 12px; color: ${theme.textMuted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-              .payments-add-btn { min-height: 44px !important; min-width: 44px; padding: 0 14px !important; border-radius: 14px !important; flex: 0 0 auto; }
-              .payments-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
-              .payments-summary-card { border-radius: 16px; padding: 10px 11px; background: ${theme.card}; border: 1px solid ${theme.border}; box-shadow: 0 6px 18px rgba(168, 177, 206, 0.10); min-width: 0; }
-              .payments-summary-label { font-size: 10px; color: ${theme.textMuted}; font-weight: 800; text-transform: uppercase; letter-spacing: .35px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-              .payments-summary-value { margin-top: 3px; font-size: 18px; line-height: 1.15; color: ${theme.textMain}; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-              .payments-mobile-toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-bottom: 10px; }
-              .payments-mobile-search { min-width: 0 !important; width: 100% !important; height: 44px !important; padding: 0 12px !important; border-radius: 14px !important; }
-              .payments-filter-button, .payments-clear-button { min-height: 44px !important; padding: 0 12px !important; border-radius: 14px !important; position: relative; white-space: nowrap; }
-              .payments-filter-badge { position: absolute; top: -6px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: ${theme.danger}; color: #fff; font-size: 11px; font-weight: 900; border: 2px solid ${theme.card}; }
-              .payments-desktop-filters, .payments-desktop-table, .payments-desktop-table-inner { display: none !important; }
-              .payments-filter-shell { display: ${paymentsFiltersOpen ? "block" : "none"}; position: fixed; inset: 0; z-index: 900; background: rgba(31,31,31,.38); padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
-              .payments-filter-panel { position: absolute; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: min(82dvh, 720px); overflow: auto; -webkit-overflow-scrolling: touch; background: ${theme.card}; border: 1px solid ${theme.border}; border-radius: 22px 22px 16px 16px; padding: 14px; box-shadow: 0 24px 48px rgba(0,0,0,.22); }
-              .payments-filter-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
-              .payments-filter-panel-head strong { font-size: 17px; color: ${theme.textMain}; }
-              .payments-filter-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
-              .payments-filter-grid select, .payments-filter-grid input { width: 100% !important; min-width: 0 !important; height: 44px !important; border-radius: 14px !important; }
-              .payments-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-              .payments-filter-actions button { min-height: 44px !important; width: 100%; }
+              .payments-filters { display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:16px; padding:12px; border-radius:18px; }
+              .payments-filters > input, .payments-filters > select, .payments-filters > .payments-search { width:100% !important; min-width:0; min-height:44px; }
+              .payments-filters > button { width:100%; min-height:44px; }
+              .payments-desktop-table, .payments-desktop-table-inner { display: none !important; }
               .payments-mobile-list { display: flex; flex-direction: column; gap: 10px; }
               .payments-dir-card { background: ${theme.card}; border: 1px solid ${theme.border}; border-radius: 18px; overflow: hidden; box-shadow: 0 8px 22px rgba(168,177,206,.11); }
               .payments-dir-toggle { padding: 12px 13px !important; min-height: 44px; }
@@ -3019,52 +2996,18 @@ export default function App() {
 
           <ManualFinancialOperations
             operations={manualFinancialOperations}
+            theme={theme}
+            inputStyle={inputSt}
+            primaryButtonStyle={btnP}
+            secondaryButtonStyle={btnS}
             onCreate={async (payload) => {
               const operation = await db.createManualFinancialOperation(payload);
               setManualFinancialOperations((current) => [operation, ...current]);
             }}
           />
 
-          <div className="payments-mobile-header">
-            <div className="payments-mobile-title"><h2>Оплати</h2><div>{paymentsSummary.count} записів · {paymentsSummary.paidTotal.toLocaleString()} ₴ оплачено</div></div>
-            <button type="button" className="payments-add-btn" style={btnP} onClick={()=>setModal("addSub")}>+ Оплата</button>
-          </div>
-
-          <div className="payments-summary-grid">
-            <div className="payments-summary-card"><div className="payments-summary-label">Оплачено</div><div className="payments-summary-value" style={{color: theme.success}}>{paymentsSummary.paidTotal.toLocaleString()} ₴</div></div>
-            <div className="payments-summary-card"><div className="payments-summary-label">Борги</div><div className="payments-summary-value" style={{color: theme.danger}}>{paymentsSummary.unpaidTotal.toLocaleString()} ₴</div></div>
-            <div className="payments-summary-card"><div className="payments-summary-label">Записів</div><div className="payments-summary-value">{paymentsSummary.count}</div></div>
-            <div className="payments-summary-card"><div className="payments-summary-label">Активні</div><div className="payments-summary-value">{paymentsSummary.activeCount}</div></div>
-          </div>
-
-          <div className="payments-mobile-toolbar">
-            <input className="payments-mobile-search" style={inputSt} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
-            <button type="button" className="payments-clear-button" style={btnS} onClick={()=>setSearchQ("")} disabled={!searchQ}>Очистити</button>
-            <button type="button" className="payments-filter-button" style={btnS} onClick={()=>setPaymentsFiltersOpen(true)}>Фільтри{activePaymentsFilterCount > 0 && <span className="payments-filter-badge">{activePaymentsFilterCount}</span>}</button>
-          </div>
-
-          <div className="payments-filter-shell" onClick={()=>setPaymentsFiltersOpen(false)}>
-            <div className="payments-filter-panel" onClick={(e)=>e.stopPropagation()}>
-              <div className="payments-filter-panel-head"><strong>Фільтри оплат</strong><button type="button" style={{...btnS, minHeight: 38}} onClick={()=>setPaymentsFiltersOpen(false)}>✕</button></div>
-              <div className="payments-filter-grid">
-                <select style={inputSt} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
-                <select style={inputSt} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
-                <select style={inputSt} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
-                <GroupSelect groups={paymentGroups.current} historicalGroups={paymentGroups.historical} value={filterGroup} onChange={setFilterGroup} filterDir={filterDir} allowAll={true} />
-                <select style={inputSt} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
-                <select style={inputSt} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
-                <select style={inputSt} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
-                <select style={inputSt} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}><option value="custom">Власний діапазон</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option></select>
-                <input type="date" style={inputSt} value={filterFromDate} onChange={e=>{setFilterDatePreset("custom");setFilterFromDate(e.target.value)}} />
-                <input type="date" style={inputSt} value={filterToDate} onChange={e=>{setFilterDatePreset("custom");setFilterToDate(e.target.value)}} />
-                <select style={inputSt} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}><option value="all">Усі записи</option><option value="only_issues">Проблемні записи</option></select>
-              </div>
-              <div className="payments-filter-actions"><button type="button" style={btnS} onClick={resetPaymentsFilters}>Скинути</button><button type="button" style={btnP} onClick={()=>setPaymentsFiltersOpen(false)}>Показати</button></div>
-            </div>
-          </div>
-
-          <div className="payments-desktop-filters" style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap", background: theme.card, padding: 16, borderRadius: 24, boxShadow: "0 10px 30px rgba(168, 177, 206, 0.15)"}}>
-            <input style={{...inputSt,width:"auto",minWidth:250, flexGrow: 1}} placeholder="Пошук учениці..." value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
+          <div className="payments-filters" data-payments-filters>
+            <input className="payments-search" style={inputSt} aria-label="Пошук учениці" placeholder="Знайти ученицю" value={searchQ} onChange={e=>setSearchQ(e.target.value)}/>
             <select style={{...inputSt,width:"auto"}} value={filterPlanType} onChange={e=>setFilterPlanType(e.target.value)}><option value="all">Усі типи оплат</option><option value="4pack">4 абонемент</option><option value="8pack">8 абонемент</option><option value="12pack">12 абонемент</option><option value="single">Разове</option><option value="trial">Пробне</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterPaid} onChange={e=>setFilterPaid(e.target.value)}><option value="all">Оплата: усі</option><option value="paid">Оплачені</option><option value="unpaid">Неоплачені</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterDir} onChange={e=>{setFilterDir(e.target.value);setFilterGroup("all")}}><option value="all">Усі напрямки</option>{directionsList.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>
@@ -3072,10 +3015,11 @@ export default function App() {
             <select style={{...inputSt,width:"auto"}} value={filterTrainer} onChange={e=>setFilterTrainer(e.target.value)}><option value="all">Усі тренери</option>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name || [t.firstName,t.lastName].filter(Boolean).join(" ") || "Без імені"}</option>)}</select>
             <select style={{...inputSt,width:"auto"}} value={filterPayMethod} onChange={e=>setFilterPayMethod(e.target.value)}><option value="all">Усі методи оплати</option><option value="card">Картка</option><option value="cash">Готівка</option><option value="transfer">Переказ</option></select>
             <select style={{...inputSt,width:"auto"}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Усі статуси</option><option value="active">Активні</option><option value="warning">Закінчуються</option><option value="expired">Протерміновані</option><option value="completed">Завершені</option></select>
-            <select style={{...inputSt,width:"auto"}} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}><option value="custom">Власний діапазон</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option></select>
-            <input type="date" style={{...inputSt,width:"auto"}} value={filterFromDate} onChange={e=>{setFilterDatePreset("custom");setFilterFromDate(e.target.value)}} />
-            <input type="date" style={{...inputSt,width:"auto"}} value={filterToDate} onChange={e=>{setFilterDatePreset("custom");setFilterToDate(e.target.value)}} />
+            <select aria-label="Період оплати" style={{...inputSt,width:"auto"}} value={filterDatePreset} onChange={e=>setFilterDatePreset(e.target.value)}><option value="all">Усі дати</option><option value="today">Сьогодні</option><option value="this_week">Цей тиждень</option><option value="last_week">Минулий тиждень</option><option value="this_month">Цей місяць</option><option value="last_month">Минулий місяць</option><option value="custom">Власний діапазон</option></select>
+            {filterDatePreset === "custom" && <input aria-label="Дата від" type="date" style={inputSt} value={filterFromDate} onChange={e=>setFilterFromDate(e.target.value)} />}
+            {filterDatePreset === "custom" && <input aria-label="Дата до" type="date" style={inputSt} value={filterToDate} onChange={e=>setFilterToDate(e.target.value)} />}
             <select style={{...inputSt,width:"auto"}} value={filterAudit} onChange={e=>setFilterAudit(e.target.value)}><option value="all">Усі записи</option><option value="only_issues">Проблемні записи</option></select>
+            <button type="button" style={btnS} onClick={resetPaymentsFilters}>Скинути</button>
           </div>
           {filterAudit==="only_issues" && (
             <div className="payments-issues" style={{background: theme.card, borderRadius: 20, padding: 16, marginBottom: 20, border: `1px solid ${theme.border}`}}>
