@@ -67,4 +67,48 @@ end $$;
 revoke all on function public.crm_admin_fetch_manual_financial_operations() from public, anon;
 grant execute on function public.crm_admin_fetch_manual_financial_operations() to authenticated;
 
+create or replace function public.crm_admin_confirm_manual_financial_operation(
+  p_operation_id uuid,
+  p_amount_uah numeric,
+  p_payment_method_code text,
+  p_operation_date date
+)
+returns public.financial_operations
+language plpgsql security definer set search_path = public as $$
+declare v_row public.financial_operations;
+begin
+  if not public.crm_is_admin_session() then
+    raise exception 'Only an administrator may confirm manual financial operations' using errcode = '42501';
+  end if;
+  if p_amount_uah is null or p_amount_uah <= 0 then
+    raise exception 'Amount must be greater than zero' using errcode = '23514';
+  end if;
+  if p_operation_date is null then
+    raise exception 'Operation date is required' using errcode = '23502';
+  end if;
+  if p_payment_method_code not in ('cash', 'card') then
+    raise exception 'Unsupported payment method' using errcode = '23514';
+  end if;
+
+  update public.financial_operations operation
+  set amount_uah = p_amount_uah,
+      payment_method_code = p_payment_method_code,
+      operation_date = p_operation_date,
+      status = 'posted'
+  where operation.id = p_operation_id
+    and operation.status = 'pending'
+    and operation.attendance_id is null
+    and operation.room_booking_id is null
+    and operation.room_booking_series_id is null
+    and operation.category_code in ('room_rental', 'manual_income', 'manual_expense')
+  returning operation.* into v_row;
+
+  if not found then
+    raise exception 'Pending manual financial operation not found' using errcode = 'P0002';
+  end if;
+  return v_row;
+end $$;
+revoke all on function public.crm_admin_confirm_manual_financial_operation(uuid,numeric,text,date) from public, anon;
+grant execute on function public.crm_admin_confirm_manual_financial_operation(uuid,numeric,text,date) to authenticated;
+
 commit;

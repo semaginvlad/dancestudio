@@ -1043,6 +1043,20 @@ export async function createManualFinancialOperation(payload = {}) {
   return mapPostedIncome(Array.isArray(data) ? data[0] : data);
 }
 
+export async function confirmManualFinancialOperation(id, { amountUah, paymentMethod, operationDate }) {
+  const amount = Number(amountUah);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Сума має бути більшою за нуль');
+  if (!['cash', 'card'].includes(paymentMethod)) throw new Error('Оберіть готівку або картку');
+  const { data, error } = await supabase.rpc('crm_admin_confirm_manual_financial_operation', {
+    p_operation_id: id,
+    p_amount_uah: amount,
+    p_payment_method_code: paymentMethod,
+    p_operation_date: operationDate,
+  });
+  if (error) throw error;
+  return mapPostedIncome(Array.isArray(data) ? data[0] : data);
+}
+
 // ─── SUBSCRIPTIONS ───
 const SAFE_SUBS_COLUMNS = [
   'id',

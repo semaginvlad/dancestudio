@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { buildCanonicalRevenueEntries } from '../src/revenue.js';
-import { manualExpenseTotalForRange, withoutManualDuplicates } from '../src/manualFinancialOperations.js';
+import { buildCanonicalRevenueEntries, upsertPostedFinancialTransaction } from '../src/revenue.js';
+import { manualExpenseTotalForRange, toPendingManualOperation, withoutManualDuplicates } from '../src/manualFinancialOperations.js';
 
 const coreSql = await readFile(new URL('../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql', import.meta.url), 'utf8');
 const migrationSql = await readFile(new URL('../supabase/migrations/20261110120000_admin_manual_financial_operations.sql', import.meta.url), 'utf8');
@@ -35,7 +35,7 @@ async function database() {
 }
 
 const createManual = (db, direction, category, amount, status = 'posted') => db.query(
-  `select (crm_admin_create_manual_financial_operation($1,$2,$3,'2026-11-10','cash',$4,'test')).*`,
+  `select result.* from crm_admin_create_manual_financial_operation($1,$2,$3,'2026-11-10','cash',$4,'test') result`,
   [direction, category, amount, status],
 );
 
@@ -83,4 +83,48 @@ test('automatic PR 457 rental is not duplicated by manual journal aggregation', 
   const entries = buildCanonicalRevenueEntries([], [...withoutManualDuplicates(staleAutomaticFeed, manual), ...manual]);
   assert.equal(entries.length, 2);
   assert.equal(entries.reduce((sum, row) => sum + row.amount, 0), 1000);
+});
+
+test('admin confirms every pending manual category with corrected amount, method and date', async () => {
+  const db = await database();
+  try {
+    const pendingRows = [];
+    pendingRows.push((await createManual(db, 'income', 'room_rental', 600, 'pending')).rows[0]);
+    pendingRows.push((await createManual(db, 'income', 'manual_income', 200, 'pending')).rows[0]);
+    pendingRows.push((await createManual(db, 'expense', 'manual_expense', 100, 'pending')).rows[0]);
+    for (const [index, row] of pendingRows.entries()) {
+      const confirmed = (await db.query(
+        `select result.* from crm_admin_confirm_manual_financial_operation($1,$2,'card','2026-11-11') result`,
+        [row.id, 700 + index],
+      )).rows[0];
+      assert.equal(confirmed.status, 'posted');
+      assert.equal(confirmed.payment_method_code, 'card');
+      assert.equal(Number(confirmed.amount_uah), 700 + index);
+      assert.equal(confirmed.operation_date.toISOString?.().slice(0, 10) || String(confirmed.operation_date), '2026-11-11');
+    }
+  } finally { await db.close(); }
+});
+
+test('trainer cannot call manual confirmation RPC', async () => {
+  const db = await database();
+  try {
+    const pending = (await createManual(db, 'income', 'room_rental', 600, 'pending')).rows[0];
+    await db.exec("set app.test_admin='off'; set role authenticated");
+    await assert.rejects(
+      db.query(`select result.* from crm_admin_confirm_manual_financial_operation($1,600,'cash','2026-11-11') result`, [pending.id]),
+      /Only an administrator/,
+    );
+  } finally { await db.close(); }
+});
+
+test('confirmed manual rental replaces stale pending state and updates dashboard without reload', () => {
+  const pending = { id: 'manual-room', categoryCode: 'room_rental', direction: 'income', status: 'pending', amountUah: 500, operationDate: '2026-11-10', paymentMethod: 'cash' };
+  const posted = { ...pending, status: 'posted', amountUah: 650, operationDate: '2026-11-11', paymentMethod: 'card' };
+  const nextManualState = upsertPostedFinancialTransaction([pending], posted);
+  assert.deepEqual(nextManualState, [posted]);
+  assert.equal(toPendingManualOperation(pending).pendingType, 'manual');
+  const revenue = buildCanonicalRevenueEntries([], [...withoutManualDuplicates([posted], nextManualState), ...nextManualState]);
+  assert.equal(revenue.length, 1);
+  assert.equal(revenue[0].amount, 650);
+  assert.equal(revenue[0].categoryCode, 'room_rental');
 });

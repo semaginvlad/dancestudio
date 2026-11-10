@@ -37,7 +37,7 @@ import {
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
 import { buildCanonicalRevenueEntries, buildPaymentRows, findUnpaidOneOffAttendance, getRevenueDate, upsertPostedFinancialTransaction } from "./revenue";
-import { withoutManualDuplicates } from "./manualFinancialOperations";
+import { toPendingManualOperation, withoutManualDuplicates } from "./manualFinancialOperations";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -3177,19 +3177,28 @@ export default function App() {
           return (
             <div style={{ minWidth: 0 }}>
               <PendingIndividualIncome
-                rows={pendingIndividualIncome}
+                rows={[...pendingIndividualIncome, ...manualFinancialOperations.filter((operation) => operation.status === "pending").map(toPendingManualOperation)]}
                 loading={pendingIndividualIncomeLoading}
                 error={pendingIndividualIncomeError}
                 onRefresh={async () => {
                   setPendingIndividualIncomeLoading(true); setPendingIndividualIncomeError("");
-                  try { setPendingIndividualIncome(await db.fetchPendingIndividualIncome()); }
+                  try {
+                    const [pendingIncome, manualOperations] = await Promise.all([db.fetchPendingIndividualIncome(), db.fetchManualFinancialOperations()]);
+                    setPendingIndividualIncome(pendingIncome);
+                    setManualFinancialOperations(manualOperations);
+                  }
                   catch (error) { setPendingIndividualIncomeError(error?.message || "Не вдалося завантажити pending-оплати"); }
                   finally { setPendingIndividualIncomeLoading(false); }
                 }}
-                onConfirm={async (id, payload) => {
-                  const postedOperation = await db.confirmIndividualIncome(id, payload);
+                onConfirm={async (row, payload) => {
+                  if (row.pendingType === "manual") {
+                    const postedOperation = await db.confirmManualFinancialOperation(row.id, payload);
+                    setManualFinancialOperations((current) => upsertPostedFinancialTransaction(current, postedOperation));
+                    return;
+                  }
+                  const postedOperation = await db.confirmIndividualIncome(row.id, payload);
                   setPostedOneOffIncome((current) => upsertPostedFinancialTransaction(current, postedOperation));
-                  setPendingIndividualIncome((current) => current.filter((row) => row.id !== id));
+                  setPendingIndividualIncome((current) => current.filter((operation) => operation.id !== row.id));
                 }}
               />
               <div className="admin-mobile-header"><div><h2>Фінанси</h2><p>Доходи, борги та деталізація по групах</p></div><button type="button" className="admin-mobile-filter-toggle" onClick={() => setAdminFinanceFiltersOpen(true)}>Фільтри{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length ? <span className="admin-mobile-badge">{[finFilterDir !== "all", finFilterGroup !== "all", finSortBy !== "total"].filter(Boolean).length}</span> : null}</button></div>
