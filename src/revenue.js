@@ -98,13 +98,13 @@ export const buildPaymentRows = (subscriptions = [], financialTransactions = [])
 /**
  * Canonical studio income rows. Paid subscriptions remain the legacy source;
  * posted trial/single journal rows replace only an auto-one-off linked to the
- * same attendance. Room-rental and other journal categories are out of scope.
+ * same attendance. Posted room rentals are independent studio income rows.
  */
 export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransactions = []) => {
   const journalRows = (financialTransactions || []).filter((row) => (
     row?.status === "posted"
     && row?.direction === "income"
-    && ["trial", "single"].includes(String(row.categoryCode || row.category_code || "").toLowerCase())
+    && ["trial", "single", "room_rental"].includes(String(row.categoryCode || row.category_code || "").toLowerCase())
   ));
   const journalAttendanceIds = new Set(journalRows
     .map((row) => String(row.attendanceSourceId || row.attendance_source_id || row.attendanceId || row.attendance_id || "").toLowerCase())
@@ -123,6 +123,7 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
     financialTransactionId: row.id,
     attendanceSourceId: row.attendanceSourceId || row.attendance_source_id || row.attendanceId || row.attendance_id || null,
     source: "financial_journal",
+    categoryCode: row.categoryCode || row.category_code,
     planType: row.categoryCode || row.category_code,
     studentId: row.studentId || row.student_id || null,
     groupId: row.groupId || row.group_id || null,
@@ -134,4 +135,11 @@ export const buildCanonicalRevenueEntries = (subscriptions = [], financialTransa
   }));
 
   return [...legacyRows, ...postedRows];
+};
+
+export const upsertPostedFinancialTransaction = (transactions = [], transaction) => {
+  if (!transaction?.id) return transactions;
+  const index = transactions.findIndex((row) => String(row.id) === String(transaction.id));
+  if (index < 0) return [...transactions, transaction];
+  return transactions.map((row, rowIndex) => rowIndex === index ? transaction : row);
 };

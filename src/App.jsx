@@ -36,7 +36,7 @@ import {
   useStickyState,
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
-import { buildCanonicalRevenueEntries, buildPaymentRows, findUnpaidOneOffAttendance, getRevenueDate } from "./revenue";
+import { buildCanonicalRevenueEntries, buildPaymentRows, findUnpaidOneOffAttendance, getRevenueDate, upsertPostedFinancialTransaction } from "./revenue";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -3173,7 +3173,8 @@ export default function App() {
                   finally { setPendingIndividualIncomeLoading(false); }
                 }}
                 onConfirm={async (id, payload) => {
-                  await db.confirmIndividualIncome(id, payload);
+                  const postedOperation = await db.confirmIndividualIncome(id, payload);
+                  setPostedOneOffIncome((current) => upsertPostedFinancialTransaction(current, postedOperation));
                   setPendingIndividualIncome((current) => current.filter((row) => row.id !== id));
                 }}
               />
