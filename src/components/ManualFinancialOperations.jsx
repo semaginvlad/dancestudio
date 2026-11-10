@@ -57,7 +57,7 @@ export default function ManualFinancialOperations({ operations = [], onCreate, t
       }
     `}</style>
     <div className="manual-operation-header">
-      <h2>Оплати</h2>
+      <h2>Ручний журнал</h2>
       <button type="button" data-open-manual-operation style={primaryButtonStyle} onClick={() => setOpen(true)}>+ Додати операцію</button>
     </div>
 
