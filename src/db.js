@@ -1012,12 +1012,35 @@ const mapPostedIncome = (row = {}) => ({
   studentId: row.student_id || null,
   groupId: row.group_id || null,
   guestName: row.guest_name || null,
+  note: row.note || null,
 });
 
 export async function fetchPostedOneOffIncome() {
   const { data, error } = await supabase.rpc('crm_admin_fetch_posted_one_off_income');
   if (error) throw error;
   return (data || []).map(mapPostedIncome);
+}
+
+export async function fetchManualFinancialOperations() {
+  const { data, error } = await supabase.rpc('crm_admin_fetch_manual_financial_operations');
+  if (error) throw error;
+  return (data || []).map(mapPostedIncome);
+}
+
+export async function createManualFinancialOperation(payload = {}) {
+  const amount = Number(payload.amountUah);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Сума має бути більшою за нуль');
+  const { data, error } = await supabase.rpc('crm_admin_create_manual_financial_operation', {
+    p_direction: payload.direction,
+    p_category_code: payload.categoryCode,
+    p_amount_uah: amount,
+    p_operation_date: payload.operationDate,
+    p_payment_method_code: payload.paymentMethod,
+    p_status: payload.status,
+    p_note: payload.note || null,
+  });
+  if (error) throw error;
+  return mapPostedIncome(Array.isArray(data) ? data[0] : data);
 }
 
 // ─── SUBSCRIPTIONS ───

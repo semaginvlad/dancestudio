@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { manualExpenseTotalForRange } from "../manualFinancialOperations";
 import { cardSt, theme } from "../shared/constants";
 import { useStickyState } from "../shared/utils";
 import AIInsightsPanel from "./AIInsightsPanel";
@@ -70,7 +71,7 @@ const MobileAccordionCard = ({ title, summary, children, open, onToggle }) => (
   </div>
 );
 
-export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], revenueEntries = null, attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
+export default function DashboardTab({ students = [], studentGrps = [], groups = [], directionsList = [], subs = [], revenueEntries = null, financialOperations = [], attn = [], waitlist = [], trialBookings = [], trainers = [], trainerGroups = [], cancelled = [], roomBookings = [], groupLessonOverrides = [], isAdmin = false, aiInsightsContext = {} }) {
   const now = new Date();
   const [mode, setMode] = useState("this_month");
   const [from, setFrom] = useState(toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1)));
@@ -126,7 +127,8 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
     .filter((row) => inRange(getRevenueDate(row), period.start, period.end))
     .reduce((sum, row) => sum + Number(row.amount || 0), 0), [revenueRows, period.start, period.end]);
   const grossRevenue = curr.revenue;
-  const netProfit = grossRevenue - trainerSalaryTotal - money(financeOverrides.operationalExpenses) - money(financeOverrides.ownerSalaryVlad) - money(financeOverrides.ownerSalaryKostia) - money(financeOverrides.otherExpenses);
+  const manualExpenses = manualExpenseTotalForRange(financialOperations, period.start, period.end);
+  const netProfit = grossRevenue - trainerSalaryTotal - manualExpenses - money(financeOverrides.operationalExpenses) - money(financeOverrides.ownerSalaryVlad) - money(financeOverrides.ownerSalaryKostia) - money(financeOverrides.otherExpenses);
 
   const cmpLabel = (currValue, prevValue) => {
     const delta = pctDelta(currValue, prevValue);
@@ -282,6 +284,7 @@ export default function DashboardTab({ students = [], studentGrps = [], groups =
       <div className="dashboard-finance-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginTop: 8 }}>
         <div><div style={{fontSize:12,color:theme.textMuted}}>Брутто дохід</div><div style={{fontWeight:800}}>{grossRevenue.toLocaleString()} ₴</div></div>
         <div data-dashboard-room-rental><div style={{fontSize:12,color:theme.textMuted}}>Оренда залів</div><div style={{fontWeight:800}}>{roomRentalRevenue.toLocaleString()} ₴</div></div>
+        <div data-dashboard-manual-expenses><div style={{fontSize:12,color:theme.textMuted}}>Ручні витрати</div><div style={{fontWeight:800,color:theme.danger}}>{manualExpenses.toLocaleString()} ₴</div></div>
         <div><div style={{fontSize:12,color:theme.textMuted}}>ЗП тренерів</div><div style={{fontWeight:800}}>{trainerSalaryTotal.toLocaleString()} ₴</div></div>
         <div><div style={{fontSize:12,color:theme.textMuted}}>Операційні витрати</div><input type="number" value={financeOverrides.operationalExpenses} onChange={(e)=>setFinanceOverrides((p)=>({...p,operationalExpenses:Number(e.target.value||0)}))} /></div>
         <div><div style={{fontSize:12,color:theme.textMuted}}>ЗП Влад</div><input type="number" value={financeOverrides.ownerSalaryVlad} onChange={(e)=>setFinanceOverrides((p)=>({...p,ownerSalaryVlad:Number(e.target.value||0)}))} /></div>

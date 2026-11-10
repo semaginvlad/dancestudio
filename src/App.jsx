@@ -37,6 +37,7 @@ import {
 } from "./shared/utils";
 import { buildAnalyticsFoundation } from "./shared/analytics";
 import { buildCanonicalRevenueEntries, buildPaymentRows, findUnpaidOneOffAttendance, getRevenueDate, upsertPostedFinancialTransaction } from "./revenue";
+import { withoutManualDuplicates } from "./manualFinancialOperations";
 import { resolveGroupTrainer } from "./shared/groupTrainer";
 import { ADMIN_EMAILS, isAdminEmail } from "./shared/adminAccess";
 import { Badge, Field, GroupSelect, Modal, Pill, StudentSelectWithSearch } from "./components/UI";
@@ -54,6 +55,7 @@ import SiteTab from "./components/SiteTab";
 import SiteInquiriesTab from "./components/SiteInquiriesTab";
 import PricingTab from "./components/PricingTab";
 import PendingIndividualIncome from "./components/PendingIndividualIncome";
+import ManualFinancialOperations from "./components/ManualFinancialOperations";
 import {
   extractPushSubscriptionPayload,
   getPushStatus,
@@ -141,6 +143,7 @@ export default function App() {
   const [pendingIndividualIncomeLoading, setPendingIndividualIncomeLoading] = useState(false);
   const [pendingIndividualIncomeError, setPendingIndividualIncomeError] = useState("");
   const [postedOneOffIncome, setPostedOneOffIncome] = useState([]);
+  const [manualFinancialOperations, setManualFinancialOperations] = useState([]);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -623,7 +626,7 @@ export default function App() {
       const todayKey = toLocalISO(new Date());
       const overrideStartDate = addDaysForScheduleRange(todayKey, -90);
       const overrideEndDate = addDaysForScheduleRange(todayKey, 180);
-      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome, oneOffIncome] = await Promise.all([
+      const [st, gr, scheduleGr, attendanceGr, attendanceRoster, su, at, ca, scheduleCa, sg, wl, tb, ord, warned, tr, trg, dirs, rb, glo, tlp, tlr, gmo, bookingBlocks, prices, bookingTariffs, individualRates, trainerFinance, pendingIncome, oneOffIncome, manualOperations] = await Promise.all([
         safeFetch(db.fetchStudents, "fetchStudents"), safeFetch(db.fetchGroups, "fetchGroups"), safeFetch(fetchScheduleGroupRows, "fetchScheduleGroupRows"), safeFetch(fetchAttendanceGroupRows, "fetchAttendanceGroupRows"), safeFetch(fetchAttendanceRosterRows, "fetchAttendanceRosterRows"), safeFetch(fetchAttendanceSubscriptions, "fetchAttendanceSubscriptions"),
         safeFetch(() => db.fetchAttendance({ includeFinancial: isCurrentAdmin }), "fetchAttendance"), safeFetch(db.fetchCancelled, "fetchCancelled"), safeFetch(fetchScheduleCancelled, "fetchScheduleCancelled"), safeFetch(db.fetchStudentGroups, "fetchStudentGroups"),
         safeFetch(isCurrentAdmin ? db.fetchWaitlist : async () => [], "fetchWaitlist"), safeFetch(db.fetchTrialBookings, "fetchTrialBookings"),
@@ -643,7 +646,8 @@ export default function App() {
         safeFetch(isCurrentAdmin ? db.fetchIndividualTrainingRateMatrix : async () => [], "fetchIndividualTrainingRateMatrix"),
         safeFetch(isCurrentAdmin ? db.fetchTrainerFinancialSettings : async () => [], "fetchTrainerFinancialSettings"),
         safeFetch(isCurrentAdmin ? db.fetchPendingIndividualIncome : async () => [], "fetchPendingIndividualIncome"),
-        safeFetch(isCurrentAdmin ? db.fetchPostedOneOffIncome : async () => [], "fetchPostedOneOffIncome")
+        safeFetch(isCurrentAdmin ? db.fetchPostedOneOffIncome : async () => [], "fetchPostedOneOffIncome"),
+        safeFetch(isCurrentAdmin ? db.fetchManualFinancialOperations : async () => [], "fetchManualFinancialOperations")
       ]);
 
       const baseGroups = gr?.length ? gr : DEFAULT_GROUPS;
@@ -735,6 +739,7 @@ export default function App() {
       setTrainerFinancialSettings(isCurrentAdmin ? (trainerFinance || []) : []);
       setPendingIndividualIncome(isCurrentAdmin ? (pendingIncome || []) : []);
       setPostedOneOffIncome(isCurrentAdmin ? (oneOffIncome || []) : []);
+      setManualFinancialOperations(isCurrentAdmin ? (manualOperations || []) : []);
       setDirections(dirs || []);
       if (rb?.ok) {
         setRoomBookings(rb.data);
@@ -1581,8 +1586,8 @@ export default function App() {
   }, [notifications]);
 
   const revenueEntries = useMemo(
-    () => buildCanonicalRevenueEntries(subs, postedOneOffIncome),
-    [subs, postedOneOffIncome]
+    () => buildCanonicalRevenueEntries(subs, [...withoutManualDuplicates(postedOneOffIncome, manualFinancialOperations), ...manualFinancialOperations]),
+    [subs, postedOneOffIncome, manualFinancialOperations]
   );
 
   const analytics = useMemo(()=>{
@@ -2619,6 +2624,7 @@ export default function App() {
           <DashboardTab
             subs={subs}
             revenueEntries={revenueEntries}
+            financialOperations={manualFinancialOperations}
             students={students}
             studentGrps={studentGrps}
             groups={activeGroups}
@@ -3010,6 +3016,14 @@ export default function App() {
               .payments-issues { padding: 12px !important; border-radius: 18px !important; margin-bottom: 10px !important; }
             }
           `}</style>
+
+          <ManualFinancialOperations
+            operations={manualFinancialOperations}
+            onCreate={async (payload) => {
+              const operation = await db.createManualFinancialOperation(payload);
+              setManualFinancialOperations((current) => [operation, ...current]);
+            }}
+          />
 
           <div className="payments-mobile-header">
             <div className="payments-mobile-title"><h2>Оплати</h2><div>{paymentsSummary.count} записів · {paymentsSummary.paidTotal.toLocaleString()} ₴ оплачено</div></div>
