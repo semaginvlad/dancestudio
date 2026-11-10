@@ -968,6 +968,7 @@ export async function upsertTrainerFinancialSetting(trainerId, patch = {}) {
 
 const mapPendingIndividualIncome = (row = {}) => ({
   id: row.id,
+  categoryCode: row.category_code,
   title: row.title || 'Індивідуальне тренування',
   trainerName: row.trainer_name || '—',
   occurrenceDate: row.occurrence_date || null,
@@ -2416,4 +2417,16 @@ export async function deleteTrialBooking(id) {
   const { error } = await supabase.from('trial_bookings').delete().eq('id', id);
   if (error) throw error;
   return true;
+}
+
+export async function changeFinancialOperationStatus(id, action) {
+  const { data, error } = await supabase.rpc('crm_admin_change_financial_operation_status', { p_operation_id: id, p_action: action });
+  if (error) throw error;
+  return mapPostedIncome(Array.isArray(data) ? data[0] : data);
+}
+
+export async function fetchPostedRoomRentals() {
+  const { data, error } = await supabase.rpc('crm_admin_fetch_posted_room_rentals');
+  if (error) throw error;
+  return (data || []).map((row) => ({ ...mapPostedIncome(row), title: row.event_title_snapshot, occurrenceDate: row.occurrence_date }));
 }
