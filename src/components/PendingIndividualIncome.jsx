@@ -1,8 +1,10 @@
+import FinancialOperationDetails from './FinancialOperationDetails';
 import React, { useEffect, useState } from 'react';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation } from '../individualIncome';
 
-export default function PendingIndividualIncome({ rows = [], loading = false, error = '', onRefresh, onConfirm, onVoid }) {
+export default function PendingIndividualIncome({ rows = [], loading = false, error = '', onRefresh, onConfirm, onVoid, onVoidManual, confirmationRequest, onConfirmationRequestHandled }) {
+  const [details, setDetails] = useState(null);
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -20,6 +22,13 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
     setDraft(buildIndividualIncomeConfirmation(row));
     setSubmitError('');
   };
+
+  useEffect(() => {
+    if (confirmationRequest) {
+      openConfirmation(confirmationRequest);
+      onConfirmationRequestHandled();
+    }
+  }, [confirmationRequest]);
 
   const isDraftValid = isValidIndividualIncomeConfirmation(draft)
     && (selected?.pendingType !== 'manual' || Number(draft?.amountUah) > 0);
@@ -57,10 +66,15 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
           <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 5 }}>{row.details || `${row.trainerName} · ${row.occurrenceDate} · ${row.startTime}–${row.endTime}`}</div>
           <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 3 }}>{row.secondaryDetails || `${row.roomName} · ${row.peopleCount} ос. · початкова сума ${row.amountUah.toLocaleString('uk-UA')} ₴`}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" style={btnS} onClick={() => setDetails(row)}>Деталі</button><button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>
         {row.pendingType !== 'manual' && row.categoryCode === 'room_rental' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(row); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}</div>
       </article>)}
     </div>
+    {details && <FinancialOperationDetails row={details} manual={details.pendingType === 'manual'} onClose={() => setDetails(null)}>
+      <button type="button" style={btnP} onClick={() => { setDetails(null); openConfirmation(details); }}>Підтвердити</button>
+      {details.pendingType === 'manual' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати операцію? Вона залишиться в журналі та не враховуватиметься у підсумках.')) return; try { await onVoidManual(details); setDetails(null); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати операцію'); } }}>Скасувати операцію</button>}
+      {details.pendingType !== 'manual' && details.categoryCode === 'room_rental' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(details); setDetails(null); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}
+    </FinancialOperationDetails>}
     {selected && draft && <div role="dialog" aria-modal="true" aria-label="Підтвердження оплати" style={{ position: 'fixed', inset: 0, zIndex: 1300, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 16 }}>
       <div style={{ ...cardSt, width: 'min(460px,100%)', background: theme.card, display: 'grid', gap: 14 }}>
         <div><h3 style={{ margin: 0, color: theme.textMain }}>Підтвердити оплату</h3><div style={{ color: theme.textMuted, marginTop: 5 }}>{selected.title} · {selected.occurrenceDate}</div></div>

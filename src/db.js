@@ -2416,5 +2416,5 @@ export async function changeFinancialOperationStatus(id, action) {
 export async function fetchPostedRoomRentals() {
   const { data, error } = await supabase.rpc('crm_admin_fetch_posted_room_rentals');
   if (error) throw error;
-  return (data || []).map((row) => ({ ...mapPostedIncome(row), title: row.event_title_snapshot, occurrenceDate: row.occurrence_date }));
+  return (data || []).map((row) => ({ ...mapPostedIncome(row), title: row.event_title_snapshot, occurrenceDate: row.occurrence_date, roomName: row.room_name_snapshot, trainerName: row.trainer_name_snapshot, startTime: row.event_start_time_snapshot, endTime: row.event_end_time_snapshot, peopleCount: row.people_count_snapshot }));
 }
