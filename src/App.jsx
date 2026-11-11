@@ -55,6 +55,7 @@ import SiteTab from "./components/SiteTab";
 import SiteInquiriesTab from "./components/SiteInquiriesTab";
 import PricingTab from "./components/PricingTab";
 import PendingIndividualIncome from "./components/PendingIndividualIncome";
+import PostedRoomRentals from "./components/PostedRoomRentals";
 import ManualFinancialOperations from "./components/ManualFinancialOperations";
 import {
   extractPushSubscriptionPayload,
@@ -2994,7 +2995,16 @@ export default function App() {
             }
           `}</style>
 
+          <PostedRoomRentals onUnconfirm={async (row) => {
+            await db.changeFinancialOperationStatus(row.id, "unconfirm");
+            setPostedOneOffIncome((current) => current.filter((operation) => operation.id !== row.id));
+            setPendingIndividualIncome(await db.fetchPendingIndividualIncome());
+          }} refreshKey={postedOneOffIncome} />
           <PendingIndividualIncome
+            onVoid={async (row) => {
+              await db.changeFinancialOperationStatus(row.id, "void");
+              setPendingIndividualIncome((current) => current.filter((operation) => operation.id !== row.id));
+            }}
             rows={[...pendingIndividualIncome, ...manualFinancialOperations.filter((operation) => operation.status === "pending").map(toPendingManualOperation)]}
             loading={pendingIndividualIncomeLoading}
             error={pendingIndividualIncomeError}
@@ -3021,6 +3031,11 @@ export default function App() {
           />
 
           <ManualFinancialOperations
+            onVoid={async (row) => {
+              const operation = await db.changeFinancialOperationStatus(row.id, "void");
+              setManualFinancialOperations((current) => current.map((item) => item.id === row.id ? operation : item));
+              setPostedOneOffIncome((current) => current.filter((item) => item.id !== row.id));
+            }}
             operations={manualFinancialOperations}
             theme={theme}
             inputStyle={inputSt}
