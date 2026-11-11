@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation } from '../src/individualIncome.js';
+import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation, mapPendingIndividualIncome } from '../src/individualIncome.js';
 import { buildCanonicalRevenueEntries, upsertPostedFinancialTransaction } from '../src/revenue.js';
 
 const coreSql = await readFile(new URL('../supabase/migrations/20261104090000_financial_core_and_booking_tariffs.sql', import.meta.url), 'utf8');
@@ -363,6 +363,17 @@ test('admin reversals preserve rental history and bookings, exclude voids from t
     assert.equal((await db.query('select count(*)::int n from room_bookings where id in ($1,$2)', [a.id,b.id])).rows[0].n, 2);
     assert.equal((await db.query("select count(*)::int n from financial_operations where status='posted' and id in ($1,$2)", [pending.id,posted.id])).rows[0].n, 0);
     assert.deepEqual((await db.query('select id from crm_fetch_pending_individual_income() where id in ($1,$2)', [pending.id,posted.id])).rows.map(row => row.id), [posted.id]);
+    const pendingRow = (await db.query('select * from crm_fetch_pending_individual_income() where id=$1', [posted.id])).rows[0];
+    const localPending = mapPendingIndividualIncome({ ...pendingRow, operation_date: new Date(pendingRow.operation_date).toISOString().slice(0, 10) });
+    const draft = buildIndividualIncomeConfirmation(localPending, '2026-11-20');
+    assert.deepEqual(draft, { amountUah: '345', paymentMethod: 'card', operationDate: '2026-11-09' });
+    const reconfirmed = (await db.query('select * from crm_admin_confirm_individual_income($1,$2,$3,$4)',
+      [posted.id, Number(draft.amountUah), draft.paymentMethod, draft.operationDate])).rows[0];
+    assert.equal(reconfirmed.status, 'posted');
+    assert.equal(reconfirmed.payment_method_code, 'card');
+    assert.equal(new Date(reconfirmed.operation_date).toISOString().slice(0, 10), '2026-11-09');
+    assert.deepEqual(buildIndividualIncomeConfirmation(mapPendingIndividualIncome({ amount_uah: 250, operation_date: '2026-11-01' }), '2026-11-20'),
+      { amountUah: '250', paymentMethod: 'cash', operationDate: '2026-11-20' });
     const manual = [];
     for (const [direction, category] of [['income','manual_income'], ['expense','manual_expense'], ['income','room_rental']]) {
       const row = (await db.query("select * from crm_admin_create_manual_financial_operation($1,$2,200,current_date,'cash','posted',null)", [direction,category])).rows[0];

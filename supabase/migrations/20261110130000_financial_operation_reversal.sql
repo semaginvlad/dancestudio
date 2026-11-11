@@ -95,7 +95,7 @@ create or replace function public.crm_fetch_pending_individual_income()
 returns table(
   id uuid, title text, trainer_name text, occurrence_date date,
   start_time text, end_time text, room_name text, people_count integer,
-  amount_uah numeric, category_code text
+  amount_uah numeric, category_code text, payment_method_code text, operation_date date
 )
 language plpgsql volatile security definer set search_path = public as $$
 declare v_booking_id uuid;
@@ -127,7 +127,8 @@ begin
   select operation.id, operation.event_title_snapshot, operation.trainer_name_snapshot,
     operation.occurrence_date, operation.event_start_time_snapshot,
     operation.event_end_time_snapshot, operation.room_name_snapshot,
-    operation.people_count_snapshot, operation.amount_uah, operation.category_code
+    operation.people_count_snapshot, operation.amount_uah, operation.category_code,
+    operation.payment_method_code, operation.operation_date
   from public.financial_operations operation
   where operation.category_code in ('room_rental', 'individual_training') and operation.status = 'pending'
     and operation.room_booking_series_id is not null
