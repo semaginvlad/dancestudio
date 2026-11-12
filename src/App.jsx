@@ -145,6 +145,7 @@ export default function App() {
   const [pendingIndividualIncomeError, setPendingIndividualIncomeError] = useState("");
   const [postedOneOffIncome, setPostedOneOffIncome] = useState([]);
   const [manualFinancialOperations, setManualFinancialOperations] = useState([]);
+  const [manualConfirmationRequest, setManualConfirmationRequest] = useState(null);
   const [roomBookings, setRoomBookings] = useState([]);
   const [roomBookingsLoadStatus, setRoomBookingsLoadStatus] = useState("loading");
   const [roomBookingsLoadNotice, setRoomBookingsLoadNotice] = useState("");
@@ -3001,6 +3002,13 @@ export default function App() {
             setPendingIndividualIncome(await db.fetchPendingIndividualIncome());
           }} refreshKey={postedOneOffIncome} />
           <PendingIndividualIncome
+            onVoidManual={async (row) => {
+              const operation = await db.changeFinancialOperationStatus(row.id, "void");
+              setManualFinancialOperations((current) => current.map((item) => item.id === row.id ? operation : item));
+              setPostedOneOffIncome((current) => current.filter((item) => item.id !== row.id));
+            }}
+            confirmationRequest={manualConfirmationRequest}
+            onConfirmationRequestHandled={() => setManualConfirmationRequest(null)}
             onVoid={async (row) => {
               await db.changeFinancialOperationStatus(row.id, "void");
               setPendingIndividualIncome((current) => current.filter((operation) => operation.id !== row.id));
@@ -3031,6 +3039,7 @@ export default function App() {
           />
 
           <ManualFinancialOperations
+            onConfirmRequest={(row) => setManualConfirmationRequest(toPendingManualOperation(row))}
             onVoid={async (row) => {
               const operation = await db.changeFinancialOperationStatus(row.id, "void");
               setManualFinancialOperations((current) => current.map((item) => item.id === row.id ? operation : item));

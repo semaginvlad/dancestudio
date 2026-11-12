@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import FinancialOperationDetails from "./FinancialOperationDetails";
 import { MANUAL_OPERATION_CATEGORIES } from "../manualFinancialOperations";
 
 const today = () => {
@@ -6,13 +7,18 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
-export default function ManualFinancialOperations({ operations = [], onCreate, onVoid, theme, inputStyle, primaryButtonStyle, secondaryButtonStyle }) {
+export default function ManualFinancialOperations({ operations = [], onCreate, onVoid, onConfirmRequest, theme, inputStyle, primaryButtonStyle, secondaryButtonStyle }) {
   const [open, setOpen] = useState(false);
+  const [showVoided, setShowVoided] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ direction: "income", categoryCode: "room_rental", amountUah: "", operationDate: today(), paymentMethod: "cash", status: "posted", note: "" });
   const categories = MANUAL_OPERATION_CATEGORIES[form.direction];
   const rows = useMemo(() => [...operations].sort((a, b) => String(b.operationDate).localeCompare(String(a.operationDate))), [operations]);
+  const selected = operations.find((row) => row.id === selectedId);
+  const visibleRows = rows.filter((row) => showVoided || row.status !== "voided");
+  const voidOperation = async (row) => { if (!window.confirm("Скасувати операцію? Вона залишиться в журналі та не враховуватиметься у підсумках.")) return; try { await onVoid(row); setSelectedId(null); } catch (cause) { window.alert(cause?.message || "Не вдалося скасувати операцію"); } };
   const update = (patch) => setForm((current) => ({ ...current, ...patch }));
   const close = () => { if (!saving) { setOpen(false); setError(""); } };
   const submit = async (event) => {
@@ -78,6 +84,11 @@ export default function ManualFinancialOperations({ operations = [], onCreate, o
       </div>
     </div>}
 
-    {rows.length > 0 && <div className="manual-operation-table"><table><thead><tr><th>Дата</th><th>Тип</th><th>Категорія</th><th>Спосіб</th><th>Статус</th><th style={{ textAlign: "right" }}>Сума</th><th>Дія</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.operationDate}</td><td>{row.direction === "income" ? "Дохід" : "Витрата"}</td><td>{MANUAL_OPERATION_CATEGORIES[row.direction]?.find((item) => item.value === row.categoryCode)?.label || row.categoryCode}</td><td>{row.paymentMethod === "cash" ? "Готівка" : "Карта"}</td><td>{row.status === "voided" ? "Скасовано" : row.status === "posted" ? "Оплачено" : "Очікує оплату"}</td><td style={{ textAlign: "right", color: row.direction === "expense" ? theme.danger : theme.success, fontWeight: 700 }}>{Number(row.amountUah).toLocaleString()} ₴</td><td>{row.status !== "voided" && <button type="button" style={secondaryButtonStyle} onClick={async () => { if (!window.confirm("Скасувати операцію? Вона залишиться в журналі та не враховуватиметься у підсумках.")) return; try { await onVoid(row); } catch (cause) { window.alert(cause?.message || "Не вдалося скасувати операцію"); } }}>Скасувати операцію</button>}</td></tr>)}</tbody></table></div>}
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 12 }}><input type="checkbox" checked={showVoided} onChange={(event) => setShowVoided(event.target.checked)} />Показати скасовані</label>
+    {visibleRows.length > 0 && <div className="manual-operation-table"><table><thead><tr><th>Дата</th><th>Тип</th><th>Категорія</th><th>Опис</th><th>Спосіб</th><th>Статус</th><th style={{ textAlign: "right" }}>Сума</th><th>Дія</th></tr></thead><tbody>{visibleRows.map((row) => <tr key={row.id}><td>{row.operationDate}</td><td>{row.direction === "income" ? "Дохід" : "Витрата"}</td><td>{MANUAL_OPERATION_CATEGORIES[row.direction]?.find((item) => item.value === row.categoryCode)?.label || row.categoryCode}</td><td style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{row.note || "—"}</td><td>{row.paymentMethod === "cash" ? "Готівка" : "Карта"}</td><td>{row.status === "voided" ? "Скасовано" : row.status === "posted" ? "Оплачено" : "Очікує оплату"}</td><td style={{ textAlign: "right", color: row.direction === "expense" ? theme.danger : theme.success, fontWeight: 700 }}>{Number(row.amountUah).toLocaleString()} ₴</td><td><button type="button" style={secondaryButtonStyle} onClick={() => setSelectedId(row.id)}>Деталі</button>{row.status !== "voided" && <button type="button" style={secondaryButtonStyle} onClick={() => voidOperation(row)}>Скасувати операцію</button>}</td></tr>)}</tbody></table></div>}
+    {selected && <FinancialOperationDetails row={selected} manual onClose={() => setSelectedId(null)}>
+      {selected.status === "pending" && <button type="button" style={primaryButtonStyle} onClick={() => { setSelectedId(null); onConfirmRequest(selected); }}>Підтвердити</button>}
+      {selected.status !== "voided" && <button type="button" style={secondaryButtonStyle} onClick={() => voidOperation(selected)}>Скасувати операцію</button>}
+    </FinancialOperationDetails>}
   </section>;
 }
