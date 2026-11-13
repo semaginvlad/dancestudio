@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { nextAutoQuantity, setAutoAttendance } from '../src/autoAttendance.js';
+import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity, setAutoAttendance } from '../src/autoAttendance.js';
 
 const student = '10000000-0000-0000-0000-000000000001';
 const old = '20000000-0000-0000-0000-000000000001';
@@ -157,4 +157,18 @@ test('client Auto submits only cell identity and count, and propagates errors', 
   assert.match(ui,/all\.every\(\(row\) => row\.queueAuto\)/);
   assert.match(ui,/existing\.some\(\(row\) => row\.queueAuto\)/);
   assert.match(ui,/db\.createPaidOneOffAttendance\(payload, payment\)/); assert.match(ui,/const handleToggleGuestCell/);
+});
+
+test('queue Auto combines subscription and debt into a counted debt cell regardless of row order', () => {
+  const subscription = { queueAuto: true, entryType: 'subscription', quantity: 1 };
+  const debt = { queueAuto: true, entryType: 'debt', quantity: 1 };
+  for (const rows of [[subscription, debt], [debt, subscription]]) {
+    const combined = aggregateQueueAutoAttendance(rows);
+    assert.equal(combined.entryType, 'debt');
+    assert.equal(combined.quantity, 2);
+    assert.deepEqual(debtAttendanceCellView(combined, false), { bg: '#dc2626', mark: '2' });
+    assert.deepEqual(debtAttendanceCellView(combined, true), { bg: '#7f1d1d', mark: '2' });
+  }
+  assert.equal(aggregateQueueAutoAttendance([subscription, subscription]).entryType, 'subscription');
+  assert.deepEqual(debtAttendanceCellView({ entryType: 'debt', quantity: 2 }, false), { bg: '#dc2626', mark: '!' });
 });

@@ -1,4 +1,4 @@
-import { nextAutoQuantity } from '../autoAttendance';
+import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity } from '../autoAttendance';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
@@ -2506,7 +2506,7 @@ export default function AttendanceTab({
     const all = getRecordsForCell(student, dateStr);
     if (!all.length) return null;
     return all.every((row) => row.queueAuto)
-      ? { ...all[0], quantity: all.reduce((sum, row) => sum + (row.quantity || 1), 0) }
+      ? aggregateQueueAutoAttendance(all)
       : all[0];
   };
 
@@ -2993,7 +2993,7 @@ export default function AttendanceTab({
 
     const type = String(rec.entryType || rec.guestType || "subscription").trim().toLowerCase();
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
-    if (type === "debt") return { bg: isDark ? "#7f1d1d" : "#dc2626", mark: "!" };
+    if (type === "debt") return debtAttendanceCellView(rec, isDark);
     if (type === "single") return { bg: isDark ? "#7a4313" : "#f59e0b", mark };
     if (type === "trial") return { bg: isDark ? "#0f5a43" : "#10b981", mark };
     return { bg: isDark ? "#1f3e79" : "#2563eb", mark };
