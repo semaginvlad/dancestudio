@@ -51,8 +51,11 @@ test('deadline, debt, duplicates, permissions and protected attendance', async t
   assert.equal(results.find(x => x.status === 'fulfilled').value.rows[0].sub_id, next);
   assert.equal((await db.query('select activation_date::text,used_trainings from subscriptions where id=$1',[next])).rows[0].activation_date,'2026-11-15');
   assert.equal((await db.query('select used_trainings from subscriptions where id=$1',[next])).rows[0].used_trainings,1);
+  assert.equal((await create(db,'2026-11-16')).rows[0].sub_id, next);
+  assert.equal((await db.query('select used_trainings from subscriptions where id=$1',[old])).rows[0].used_trainings,0);
   await assert.rejects(create(db,'2026-11-16','other'), /доступу/);
   await assert.rejects(db.query('select crm_create_auto_attendance($1,$2,$3,$4)',[student,'a','2026-11-16',old]), /does not exist/);
+  await assert.rejects(db.query('select crm_create_auto_attendance($1,$2,$3,$4)',[student,'a','2026-11-16','single']), /does not exist/);
   await db.exec('delete from subscriptions');
   assert.equal((await create(db,'2026-11-17')).rows[0].entry_type,'debt');
   for (const [type, guest] of [['trial',null],['single',null],['subscription','Guest']]) {
