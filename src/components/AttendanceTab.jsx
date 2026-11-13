@@ -1,3 +1,4 @@
+import { nextAutoQuantity } from '../autoAttendance';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
@@ -2503,7 +2504,10 @@ export default function AttendanceTab({
 
   const getRecordForCell = (student, dateStr) => {
     const all = getRecordsForCell(student, dateStr);
-    return all[0] || null;
+    if (!all.length) return null;
+    return all.every((row) => row.queueAuto)
+      ? { ...all[0], quantity: all.reduce((sum, row) => sum + (row.quantity || 1), 0) }
+      : all[0];
   };
 
   const isCancelledDate = (dateStr) => cancelledDatesForCurrentGroup.has(toDateKey(dateStr));
@@ -2729,8 +2733,21 @@ export default function AttendanceTab({
     try {
       const existing = getRecordsForCell(student, dateStr);
 
+      if (!isAdmin && entryMode !== "auto") {
+        alert("Для відміток використовуйте режим «Авто».");
+        return;
+      }
+
       if (!isAdmin && existing.some(isFinancialAttendance)) {
         alert(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+        return;
+      }
+
+      if (existing.some((row) => row.queueAuto) || (entryMode === "auto" && !existing.some(isFinancialAttendance))) {
+        const quantity = nextAutoQuantity(existing);
+        backendMutationStarted = true;
+        await db.setAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr, quantity });
+        await reloadFromDb();
         return;
       }
 
@@ -2756,23 +2773,17 @@ export default function AttendanceTab({
         backendMutationStarted = true;
         for (const rec of existing) {
           if (rec.id) {
-            if (entryMode === "auto" && !isFinancialAttendance(rec) && ["subscription", "debt"].includes(rec.entryType)) {
-              await db.deleteAutoAttendance(rec.id);
-            } else {
-              await db.deleteAttendance(rec.id);
-            }
+            await db.deleteAttendance(rec.id);
             if (isFinancialAttendance(rec)) refreshFinancialJournal();
           }
         }
-        if (entryMode !== "auto") {
-          for (const subId of subIdsToSync) await db.syncSubUsedTrainings(subId);
-        }
+        for (const subId of subIdsToSync) await db.syncSubUsedTrainings(subId);
         rollbackOptimisticChange = null;
         await refreshSubscriptionsAfterAttendanceChange();
         return;
       }
 
-      const nextEntry = entryMode === "auto" ? { entryType: "debt", subId: null } : resolveNewEntry(student, dateStr);
+      const nextEntry = resolveNewEntry(student, dateStr);
 
       const payload = {
         id: `tmp_${uid()}`,
@@ -2805,8 +2816,6 @@ export default function AttendanceTab({
         }
         savedRecord = await db.createPaidOneOffAttendance(payload, payment);
         refreshFinancialJournal();
-      } else if (entryMode === "auto") {
-        savedRecord = await db.createAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr });
       } else {
         savedRecord = await db.insertAttendance(payload);
       }
