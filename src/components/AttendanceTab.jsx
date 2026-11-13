@@ -2756,19 +2756,23 @@ export default function AttendanceTab({
         backendMutationStarted = true;
         for (const rec of existing) {
           if (rec.id) {
-            await db.deleteAttendance(rec.id);
+            if (entryMode === "auto" && !isFinancialAttendance(rec) && ["subscription", "debt"].includes(rec.entryType)) {
+              await db.deleteAutoAttendance(rec.id);
+            } else {
+              await db.deleteAttendance(rec.id);
+            }
             if (isFinancialAttendance(rec)) refreshFinancialJournal();
           }
         }
-        for (const subId of subIdsToSync) {
-          await db.syncSubUsedTrainings(subId);
+        if (entryMode !== "auto") {
+          for (const subId of subIdsToSync) await db.syncSubUsedTrainings(subId);
         }
         rollbackOptimisticChange = null;
         await refreshSubscriptionsAfterAttendanceChange();
         return;
       }
 
-      const nextEntry = resolveNewEntry(student, dateStr);
+      const nextEntry = entryMode === "auto" ? { entryType: "debt", subId: null } : resolveNewEntry(student, dateStr);
 
       const payload = {
         id: `tmp_${uid()}`,
@@ -2801,6 +2805,8 @@ export default function AttendanceTab({
         }
         savedRecord = await db.createPaidOneOffAttendance(payload, payment);
         refreshFinancialJournal();
+      } else if (entryMode === "auto") {
+        savedRecord = await db.createAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr });
       } else {
         savedRecord = await db.insertAttendance(payload);
       }

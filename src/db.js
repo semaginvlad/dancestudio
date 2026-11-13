@@ -1381,6 +1381,23 @@ export async function fetchSubscriptionChangeLog({ groupId, studentId, dateFrom,
   return (data || []).map(mapSubscriptionChangeLog);
 }
 
+export async function createAutoAttendance({ studentId, groupId, date }) {
+  const { data, error } = await supabase.rpc('crm_create_auto_attendance', {
+    p_student_id: studentId, p_group_id: groupId, p_date: date,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('Не вдалося створити відмітку');
+  return { id: row.id, subId: row.sub_id, studentId: row.student_id, groupId: row.group_id,
+    date: row.date, guestName: row.guest_name, guestType: row.guest_type,
+    quantity: row.quantity || 1, entryType: row.entry_type };
+}
+
+export async function deleteAutoAttendance(id) {
+  const { error } = await supabase.rpc('crm_delete_auto_attendance', { p_attendance_id: id });
+  if (error) throw error;
+}
+
 export async function insertAttendance(a) {
   const entryType = String(a.entryType || 'subscription').trim().toLowerCase();
   let guestType = a.guestType ? String(a.guestType).trim().toLowerCase() : null;
