@@ -85,7 +85,7 @@ begin
           effective_activation := least(coalesce(next_sub.activation_date, next_sub.paid_at + 14), next_sub.paid_at + 14);
           candidate_id := null;
           candidate_activation := null;
-        elsif candidate_id is null and effective_activation <> 'infinity'::date
+        elsif candidate_id is null and effective_activation is distinct from 'infinity'::date
           and (coalesce(current_sub.used_trainings, 0) >= coalesce(current_sub.total_trainings, 0)
             or (current_sub.end_date is not null and current_sub.end_date < p_attendance_date)) then
           effective_activation := p_attendance_date;

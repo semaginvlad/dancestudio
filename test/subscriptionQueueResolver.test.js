@@ -74,3 +74,22 @@ test('explicit activation records only the selected queued subscription', async 
   assert.equal(date(later.activation_date), '2026-11-05');
   assert.deepEqual((await db.query('select * from subscriptions where id = $1', [old])).rows[0], original);
 });
+
+
+test('unactivated legacy predecessor permits early successor activation after expiry or exhaustion', async t => {
+  const db = await setup(); t.after(() => db.close());
+  for (const [group, options] of [
+    ['expired', { end: '2026-11-04' }],
+    ['exhausted', { used: 8 }],
+  ]) {
+    const predecessor = group === 'expired' ? old : other;
+    const successor = group === 'expired' ? next : '20000000-0000-0000-0000-000000000004';
+    await insert(db, predecessor, group, options);
+    await insert(db, successor, group, { previous: predecessor, paid: '2026-11-01' });
+    const decision = await resolve(db, group, '2026-11-05');
+    assert.equal(decision.result, 'subscription');
+    assert.equal(decision.subscription_id, successor);
+    assert.equal(date(decision.activation_date), '2026-11-05');
+    assert.equal((await db.query('select activation_date from subscriptions where id = $1', [predecessor])).rows[0].activation_date, null);
+  }
+});
