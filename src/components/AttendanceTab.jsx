@@ -1,3 +1,4 @@
+import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity } from '../autoAttendance';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
@@ -2503,7 +2504,10 @@ export default function AttendanceTab({
 
   const getRecordForCell = (student, dateStr) => {
     const all = getRecordsForCell(student, dateStr);
-    return all[0] || null;
+    if (!all.length) return null;
+    return all.every((row) => row.queueAuto)
+      ? aggregateQueueAutoAttendance(all)
+      : all[0];
   };
 
   const isCancelledDate = (dateStr) => cancelledDatesForCurrentGroup.has(toDateKey(dateStr));
@@ -2729,8 +2733,21 @@ export default function AttendanceTab({
     try {
       const existing = getRecordsForCell(student, dateStr);
 
+      if (!isAdmin && entryMode !== "auto") {
+        alert("Для відміток використовуйте режим «Авто».");
+        return;
+      }
+
       if (!isAdmin && existing.some(isFinancialAttendance)) {
         alert(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+        return;
+      }
+
+      if (existing.some((row) => row.queueAuto) || (entryMode === "auto" && !existing.some(isFinancialAttendance))) {
+        const quantity = nextAutoQuantity(existing);
+        backendMutationStarted = true;
+        await db.setAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr, quantity });
+        await reloadFromDb();
         return;
       }
 
@@ -2760,9 +2777,7 @@ export default function AttendanceTab({
             if (isFinancialAttendance(rec)) refreshFinancialJournal();
           }
         }
-        for (const subId of subIdsToSync) {
-          await db.syncSubUsedTrainings(subId);
-        }
+        for (const subId of subIdsToSync) await db.syncSubUsedTrainings(subId);
         rollbackOptimisticChange = null;
         await refreshSubscriptionsAfterAttendanceChange();
         return;
@@ -2978,7 +2993,7 @@ export default function AttendanceTab({
 
     const type = String(rec.entryType || rec.guestType || "subscription").trim().toLowerCase();
     const mark = (rec.quantity || 1) >= 2 ? "2" : "✓";
-    if (type === "debt") return { bg: isDark ? "#7f1d1d" : "#dc2626", mark: "!" };
+    if (type === "debt") return debtAttendanceCellView(rec, isDark);
     if (type === "single") return { bg: isDark ? "#7a4313" : "#f59e0b", mark };
     if (type === "trial") return { bg: isDark ? "#0f5a43" : "#10b981", mark };
     return { bg: isDark ? "#1f3e79" : "#2563eb", mark };

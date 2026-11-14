@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { setAutoAttendance as setAutoAttendanceRpc } from './autoAttendance'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 import { resolveStudioRoomsResponse } from './studioRooms'
@@ -1213,6 +1214,7 @@ export async function fetchAttendance({ includeFinancial = false } = {}) {
       groupId: a.group_id,
       quantity: a.quantity || 1,
       entryType: a.entry_type || 'subscription',
+      queueAuto: a.queue_auto ?? (a.queue_auto_order != null),
     };
     if (includeFinancial) attendance.priceSnapshotUah = a.price_snapshot_uah ?? null;
     return attendance;
@@ -1379,6 +1381,10 @@ export async function fetchSubscriptionChangeLog({ groupId, studentId, dateFrom,
   const { data, error } = await query;
   if (error) throw error;
   return (data || []).map(mapSubscriptionChangeLog);
+}
+
+export async function setAutoAttendance(request) {
+  return setAutoAttendanceRpc(supabase, request);
 }
 
 export async function insertAttendance(a) {

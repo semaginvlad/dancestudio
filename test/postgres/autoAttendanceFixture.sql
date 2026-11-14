@@ -1,0 +1,13 @@
+create role anon; create role authenticated; create role service_role;
+create schema auth;
+create function auth.uid() returns uuid language sql as $$ select '30000000-0000-0000-0000-000000000001'::uuid $$;
+create table trainers(id uuid, auth_user_id uuid, is_active boolean, archived_at timestamptz, access_disabled_at timestamptz);
+create table trainer_groups(trainer_id uuid, group_id text); create table student_groups(student_id uuid, group_id text);
+create function crm_is_admin_session() returns boolean language sql as $$ select false $$;
+create table subscriptions(id uuid primary key, student_id uuid, group_id text, paid_at date, previous_subscription_id uuid, activation_date date, start_date date, end_date date, total_trainings integer, used_trainings integer);
+create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, guest_name text, guest_type text, price_snapshot_uah numeric);
+create table financial_operations(attendance_id uuid);
+insert into trainers values ('30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',true,null,null);
+insert into trainer_groups values ('30000000-0000-0000-0000-000000000001','a');
+insert into student_groups values ('10000000-0000-0000-0000-000000000001','a');
+insert into subscriptions values ('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','a',null,null,'2026-10-01','2026-10-01','2026-12-31',8,0);
