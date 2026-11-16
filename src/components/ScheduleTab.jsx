@@ -8,7 +8,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, isRepeatingBookingBlock, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
 import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
@@ -2672,8 +2672,8 @@ export default function ScheduleTab({
       {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>Закриті години</b><button style={btnP} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>+ Закрити години</button><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
         {reconciledBookingBlocks.filter((block) => block.endsOn >= toLocalDateKey(new Date())).sort((a,b) => a.startsOn.localeCompare(b.startsOn)).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
-          <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span><span>{block.startsOn === block.endsOn || block.weekdays.length === 7 ? "Без повторення" : `Повторення: ${block.weekdays.join(", ")}`}</span><span>{block.isActive ? "Активне" : "Вимкнене"}</span>
-          <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => setBlockDraft({...block, repeats: block.startsOn !== block.endsOn && block.weekdays.length !== 7})}>Редагувати</button>
+          <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span><span>{!isRepeatingBookingBlock(block) ? "Без повторення" : `Повторення: ${block.weekdays.join(", ")}`}</span><span>{block.isActive ? "Активне" : "Вимкнене"}</span>
+          <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => setBlockDraft({...block, repeats: isRepeatingBookingBlock(block)})}>Редагувати</button>
           <button style={btnS} disabled={!bookingBlocksReady || (!block.isActive && !roomBookingsReady)} onClick={() => toggleBlock(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
           <button style={{...btnS,color:theme.danger}} disabled={!bookingBlocksReady} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
         </div>)}

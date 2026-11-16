@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, intervalsOverlap, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
+import { blockMatchesRoom, bookingRecurrenceCandidates, buildBookingBlockDisplayRooms, expandBookingBlocks, findBookingBlockConflict, getBookingBlockSaveGuard, getFreshBookingBlockSaveGuard, intervalsOverlap, isRepeatingBookingBlock, isoWeekday, parseDateOnly, reconcileBookingBlockRooms, resolveBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../src/scheduleBookingBlocks.js";
 
 const rooms = [{ id: "one", name: "Перша", isActive: true }, { id: "two", name: "Друга", isActive: true }];
 const base = { id: "b", title: "Закрито", startsOn: "2026-10-01", endsOn: "2026-10-07", startTime: "10:00", endTime: "11:00", weekdays: [1,2,3,4,5,6,7], allRooms: false, roomIds: ["one"], roomNames: ["Стара назва"], isActive: true };
@@ -253,4 +253,19 @@ test("single-date closures ignore legacy weekdays; recurring rules and disabled 
   assert.equal(blockMatchesDate(recurring, "2026-11-17"), true);
   assert.equal(blockMatchesDate({ ...recurring, isActive: false }, "2026-11-17"), false);
   assert.equal(blockMatchesDate(recurring, "2026-11-23"), false);
+});
+
+
+test("legacy continuous closure ignores stored weekdays when displayed and edited", async () => {
+  const existing = { ...base, startsOn: "2026-10-02", endsOn: "2026-10-04", startTime: "16:00", endTime: "12:30", weekdays: [5] };
+  const draft = { ...existing, repeats: isRepeatingBookingBlock(existing) };
+  assert.equal(draft.repeats, false);
+  assert.equal(validateBookingBlock(draft).valid, true);
+  const saved = { ...draft, title: "Змінена назва", weekdays: draft.repeats ? draft.weekdays : [1,2,3,4,5,6,7] };
+  assert.deepEqual(expandBookingBlocks([saved], existing.startsOn, existing.endsOn, rooms).map(({ date, startTime, endTime }) => ({ date, startTime, endTime })),
+    expandBookingBlocks([existing], existing.startsOn, existing.endsOn, rooms).map(({ date, startTime, endTime }) => ({ date, startTime, endTime })));
+  assert.equal(isRepeatingBookingBlock({ ...base, weekdays: [1,3] }), true);
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
+  assert.match(source, /!isRepeatingBookingBlock\(block\) \? "Без повторення"/);
+  assert.match(source, /repeats: isRepeatingBookingBlock\(block\)/);
 });

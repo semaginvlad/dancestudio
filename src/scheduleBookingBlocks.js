@@ -92,6 +92,8 @@ export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames =
   return result;
 }
 export const isContinuousBookingBlock = (block) => Boolean(block?.startsOn < block?.endsOn && timeMinutes(block?.endTime) <= timeMinutes(block?.startTime));
+// Legacy continuous periods ignore weekdays on both client and server.
+export const isRepeatingBookingBlock = (block) => Boolean(block?.startsOn !== block?.endsOn && !isContinuousBookingBlock(block) && (block?.weekdays || []).length !== 7);
 export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.startsOn === block.endsOn || isContinuousBookingBlock(block) || (block.weekdays || []).map(Number).includes(isoWeekday(date)));
 export const bookingBlockIntervalForDate = (block, date) => {
   if (!blockMatchesDate(block, date)) return null;
