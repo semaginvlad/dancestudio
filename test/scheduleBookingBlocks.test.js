@@ -84,7 +84,7 @@ test("booking-block loading fails closed without erasing the last successful lis
 test("room mutations reload canonical rows without losing trainer exceptions", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
   assert.match(source,/const loadStudioRooms = \(\) => loadStudioRoomsState\([\s\S]*fetchStudioRooms\(\{ includeInactive: isAdmin, strict: true \}\)/);
-  assert.match(source,/await updateStudioRoom\(room\.id, \{ bookingOpen:[^}]+\}\);\s*await loadStudioRooms\(\)/);
+  assert.match(source,/await updateStudioRoom\(room\.id, \{ isActive: true, bookingOpen: opening \}\);\s*await loadStudioRooms\(\)/);
   assert.match(source,/await setStudioRoomBookingTrainerExceptions\(room\.id, next\);\s*await loadStudioRooms\(\)/);
   assert.match(source,/await renameStudioRoom\(room\.id, room\.name, nextName\);[\s\S]*await loadStudioRooms\(\)/);
   assert.doesNotMatch(source,/\{ \.\.\.item, \.\.\.updatedRoom \}/);
@@ -242,4 +242,15 @@ test("selected-room UI exposes controlled scope, loading/error states and multi-
   assert.match(source,/onClick=\{loadStudioRooms\}>Повторити<\/button>/);
   assert.match(source,/selectableBlockRooms\.map/);
   assert.match(source,/!blockDraft\.allRooms && \(!\(blockDraft\.roomIds \|\| \[\]\)\.length/);
+});
+
+test("single-date closures ignore legacy weekdays; recurring rules and disabled rules respect their state", async () => {
+  const { blockMatchesDate } = await import("../src/scheduleBookingBlocks.js");
+  const single = { startsOn: "2026-11-16", endsOn: "2026-11-16", startTime: "10:00", endTime: "11:00", weekdays: [2], isActive: true };
+  assert.equal(blockMatchesDate(single, "2026-11-16"), true);
+  const recurring = { ...single, endsOn: "2026-11-22", weekdays: [2, 4] };
+  assert.equal(blockMatchesDate(recurring, "2026-11-16"), false);
+  assert.equal(blockMatchesDate(recurring, "2026-11-17"), true);
+  assert.equal(blockMatchesDate({ ...recurring, isActive: false }, "2026-11-17"), false);
+  assert.equal(blockMatchesDate(recurring, "2026-11-23"), false);
 });

@@ -42,6 +42,7 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(await readFile(adminClosedRoomOverrideMigrationUrl, "utf8"));
     await db.exec(await readFile(trainerExceptionsMigrationUrl, "utf8"));
     await db.exec(await readFile(checksUrl, "utf8"));
+    await db.exec(await readFile(new URL("../supabase/migrations/20261116090000_single_date_booking_blocks.sql", import.meta.url), "utf8"));
     const roomId = "10000000-0000-0000-0000-000000000001";
     const blockId = "20000000-0000-0000-0000-000000000001";
 
@@ -84,7 +85,7 @@ test("booking-block trigger and explicit override RPC are transactionally author
             ('2026-10-01','10:20','10:40',null,'Admin removal','Зал 1','daily','2026-10-05'),
             ('2026-10-01','10:20','10:40',null,'Whole series delete','Зал 1','daily','2026-10-05');
       insert into schedule_booking_blocks(id,title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
-      values('${blockId}','Закрито','2026-10-02','2026-10-02','10:00','11:00',false,array[5]::smallint[],'00000000-0000-0000-0000-000000000001');
+      values('${blockId}','Закрито','2026-10-02','2026-10-02','10:00','11:00',false,array[1]::smallint[],'00000000-0000-0000-0000-000000000001');
       insert into schedule_booking_block_rooms values('${blockId}','${roomId}');
     `);
     const args = `'2026-10-02','10:15','10:45',null,null,'Резерв','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','  зал   1  '`;
@@ -210,6 +211,12 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.exec(`select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false)`);
     const closedRename = await db.query(`select (public.rename_studio_room('${roomId}','Закрита перейменована зала')).name as name`);
     assert.equal(closedRename.rows[0]?.name, "Закрита перейменована зала");
+    await db.exec(`update studio_rooms set booking_open=true where id='${roomId}'; select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    await db.exec("insert into room_bookings(date,start_time,end_time,trainer_id,title,room_name) values('2026-11-16','10:00','11:00','other-trainer','Reopened booking','Закрита перейменована зала')");
+    await db.exec(`select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); insert into schedule_booking_blocks(title,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by) values('Toggle rule','2026-11-17','2026-11-17','10:00','11:00',true,array[1]::smallint[],'00000000-0000-0000-0000-000000000001')`);
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Blocked by rule','Закрита перейменована зала')"), /Toggle rule/);
+    await db.exec("update schedule_booking_blocks set is_active=false where title='Toggle rule'; insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Disabled rule','Закрита перейменована зала'); update schedule_booking_blocks set is_active=true where title='Toggle rule'; delete from schedule_booking_blocks where title='Toggle rule'; insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Deleted rule','Закрита перейменована зала')");
+    assert.equal((await db.query("select count(*)::int as n from room_bookings where title in ('Reopened booking','Disabled rule','Deleted rule','Cancel closed single','Cancel closed series')")).rows[0].n, 5);
   } finally {
     await db.close();
   }

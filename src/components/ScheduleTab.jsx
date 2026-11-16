@@ -1093,7 +1093,7 @@ export default function ScheduleTab({
     if (!bookingBlockMutationsReady) { setBlockError("Спочатку завантажте правила недоступності та поточні бронювання."); return; }
     const today = toLocalDateKey(new Date());
     setBlockError("");
-    setBlockDraft({ title: "Недоступно для бронювання", note: "", startsOn: today, endsOn: today, startTime: "10:00", endTime: "11:00", allRooms: true, roomIds: [], weekdays: [1,2,3,4,5,6,7], isActive: true });
+    setBlockDraft({ title: "Недоступно для бронювання", note: "", startsOn: today, endsOn: today, startTime: "10:00", endTime: "11:00", allRooms: true, roomIds: [], weekdays: [1,2,3,4,5,6,7], repeats: false, isActive: true });
     setShowBlocksManager(true);
   };
   const saveBlock = async () => {
@@ -1102,7 +1102,7 @@ export default function ScheduleTab({
     const validation = validateBookingBlock(blockDraft);
     if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
     const presentationDraft = reconcileBookingBlockRooms(
-      blockDraft,
+      { ...blockDraft, weekdays: blockDraft.repeats && blockDraft.startsOn !== blockDraft.endsOn ? blockDraft.weekdays : [1,2,3,4,5,6,7] },
       studioRooms,
     );
     try {
@@ -2405,6 +2405,7 @@ export default function ScheduleTab({
     await loadStudioRooms();
   };
   const removeCustomRoom = async (room) => {
+    if (!window.confirm("Видалити зал зі списку активних? Наявні події залишаться. Зал можна відновити в налаштуваннях.")) return;
     try {
       await updateStudioRoom(room.id, { isActive: false });
     } catch (error) {
@@ -2414,9 +2415,11 @@ export default function ScheduleTab({
     await loadStudioRooms();
   };
   const toggleRoomBookingAvailability = async (room) => {
-    if (!isAdmin || room?.isActive === false) return;
+    if (!isAdmin) return;
+    const opening = room.isActive === false || room.bookingOpen === false;
+    if (!opening && !window.confirm("Нові бронювання тренерів будуть недоступні. Наявні події не видаляються. Закрити бронювання?")) return;
     try {
-      await updateStudioRoom(room.id, { bookingOpen: room.bookingOpen === false });
+      await updateStudioRoom(room.id, { isActive: true, bookingOpen: opening });
       await loadStudioRooms();
       window.dispatchEvent(new CustomEvent("studio-rooms-changed"));
     } catch (error) {
@@ -2604,7 +2607,7 @@ export default function ScheduleTab({
                 ) : null}
               </div>
             ) : null}
-            {isAdmin ? <button style={{ ...mobileToolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>🔒 Закрити години</button> : null}
+            {isAdmin ? <button style={{ ...mobileToolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => setShowBlocksManager(v => !v)}>🔒 Закриті години</button> : null}
             <div style={{ fontSize: 10.5, color: theme.textLight, textAlign: "center", lineHeight: 1.2 }}>
               {periodLabel}
             </div>
@@ -2633,7 +2636,7 @@ export default function ScheduleTab({
                 {allKnownRooms.map((room) => <option key={room} value={room}>{room}{isRoomBookingClosed(room) ? " — Тимчасово недоступний" : ""}</option>)}
               </select></label>
               {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
-              {isAdmin ? <button style={{ ...toolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>🔒 Закрити години</button> : null}
+              {isAdmin ? <button style={{ ...toolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => setShowBlocksManager(v => !v)}>🔒 Закриті години</button> : null}
               {canOpenBulkPlanner ? <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
               <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>{periodLabel}</div>
               {canManageBookings && (
@@ -2667,10 +2670,10 @@ export default function ScheduleTab({
       </div> : null}
 
       {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>🔒 Закриті години</b><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
-        {reconciledBookingBlocks.map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
-          <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span>
-          <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => setBlockDraft({...block})}>Редагувати</button>
+        <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>Закриті години</b><button style={btnP} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>+ Закрити години</button><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
+        {reconciledBookingBlocks.filter((block) => block.endsOn >= toLocalDateKey(new Date())).sort((a,b) => a.startsOn.localeCompare(b.startsOn)).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
+          <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span><span>{block.startsOn === block.endsOn || block.weekdays.length === 7 ? "Без повторення" : `Повторення: ${block.weekdays.join(", ")}`}</span><span>{block.isActive ? "Активне" : "Вимкнене"}</span>
+          <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => setBlockDraft({...block, repeats: block.startsOn !== block.endsOn && block.weekdays.length !== 7})}>Редагувати</button>
           <button style={btnS} disabled={!bookingBlocksReady || (!block.isActive && !roomBookingsReady)} onClick={() => toggleBlock(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
           <button style={{...btnS,color:theme.danger}} disabled={!bookingBlocksReady} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
         </div>)}
@@ -2686,12 +2689,13 @@ export default function ScheduleTab({
             {studioRoomsLoadStatus === "ready" && !selectableBlockRooms.length ? <span>Немає доступних залів.</span> : null}
             {studioRoomsLoadStatus === "ready" ? selectableBlockRooms.map(room=><label key={room.id}><input type="checkbox" checked={(blockDraft.roomIds || []).map(String).includes(String(room.id))} onChange={()=>setBlockDraft(p=>({...p,roomIds:(p.roomIds || []).map(String).includes(String(room.id))?p.roomIds.filter(id=>String(id)!==String(room.id)):[...p.roomIds,room.id]}))}/>{room.name}{room.isActive === false ? " (архівна)" : ""}</label>) : null}
           </div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:5,flexWrap:"wrap"}}>{[{v:1,l:"ПН"},{v:2,l:"ВТ"},{v:3,l:"СР"},{v:4,l:"ЧТ"},{v:5,l:"ПТ"},{v:6,l:"СБ"},{v:7,l:"НД"}].map(day=><button type="button" key={day.v} style={blockDraft.weekdays.includes(day.v)?btnP:btnS} onClick={()=>setBlockDraft(p=>({...p,weekdays:p.weekdays.includes(day.v)?p.weekdays.filter(v=>v!==day.v):[...p.weekdays,day.v].sort()}))}>{day.l}</button>)}</div>
+          <label><input type="checkbox" checked={!!blockDraft.repeats} onChange={e=>setBlockDraft(p=>({...p,repeats:e.target.checked,weekdays:e.target.checked ? [1] : [1,2,3,4,5,6,7]}))}/> Повторювати за днями тижня</label>
+          {blockDraft.repeats ? <div style={{gridColumn:"1/-1",display:"flex",gap:5,flexWrap:"wrap"}}>{[{v:1,l:"ПН"},{v:2,l:"ВТ"},{v:3,l:"СР"},{v:4,l:"ЧТ"},{v:5,l:"ПТ"},{v:6,l:"СБ"},{v:7,l:"НД"}].map(day=><button type="button" key={day.v} style={blockDraft.weekdays.includes(day.v)?btnP:btnS} onClick={()=>setBlockDraft(p=>({...p,weekdays:p.weekdays.includes(day.v)?p.weekdays.filter(v=>v!==day.v):[...p.weekdays,day.v].sort()}))}>{day.l}</button>)}</div> : null}
           <label><input type="checkbox" checked={blockDraft.isActive} onChange={e=>setBlockDraft(p=>({...p,isActive:e.target.checked}))}/> Активне</label>
           <div><b>{blockDraft.title}</b> · {blockDraft.startsOn}—{blockDraft.endsOn} · {blockDraft.startTime}–{blockDraft.endTime}</div>
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
           <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady || (!blockDraft.allRooms && (!(blockDraft.roomIds || []).length || studioRoomsLoadStatus !== "ready"))}>{blockSaving ? "Збереження…" : "Зберегти"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
-        </div> : <button style={btnP} disabled={!bookingBlockMutationsReady} onClick={openNewBlock}>+ Нове правило</button>}
+        </div> : null}
       </div> : null}
 
       {canManageBookings && showForm && (
@@ -3311,29 +3315,23 @@ export default function ScheduleTab({
             <input style={{ ...inputSt, minHeight: 44 }} placeholder="Нова назва залу" value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} />
             <button type="submit" style={btnP}>Додати залу</button>
           </form>
-          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {studioRooms.map((room) => {
-              const isRenaming = renamingRoomId === room.id;
-              return (
-                <span key={room.id} style={{ padding: "6px 10px", border: `1px solid ${theme.border}`, borderRadius: 999, display: "inline-flex", gap: 8, alignItems: "center" }}>
-                  {isRenaming ? (
-                    <>
-                      <input style={{ ...inputSt, minHeight: 24, padding: "0 6px", width: 140 }} value={renamingRoomName} onChange={(e) => setRenamingRoomName(e.target.value)} />
-                      <button type="button" style={{ ...btnP, padding: "0 6px", lineHeight: "20px" }} onClick={() => saveRenameRoom(room)}>✓</button>
-                      <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "20px" }} onClick={cancelRenameRoom}>✕</button>
-                    </>
-                  ) : (
-                    <>
-                      {room.name}
-                      {room.isActive !== false ? <button type="button" role="switch" aria-checked={room.bookingOpen !== false} style={{ ...btnS, padding: "0 8px", lineHeight: "20px", color: room.bookingOpen === false ? theme.danger : theme.text }} onClick={() => toggleRoomBookingAvailability(room)}>{room.bookingOpen === false ? "Бронювання закриті" : "Бронювання відкриті"}</button> : null}
-                      <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => startRenameRoom(room)}>✎</button>
-                      {normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={{ ...btnS, padding: "0 6px", lineHeight: "16px" }} onClick={() => removeCustomRoom(room)}>×</button> : null}
-                    </>
-                  )}
-                  {room.isActive !== false && room.bookingOpen === false ? <span style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%", fontSize: 11 }}><b>Винятки:</b>{getOperationalTrainers(safeTrainers, room.allowedTrainerIds || []).map((trainer) => <label key={trainer.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} disabled={roomTrainerExceptionsSavingIds.has(String(room.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</span> : null}
-                </span>
-              );
-            })}
+          <div style={{ marginTop: 16 }}><b>Доступність бронювання залів</b>
+            {studioRoomsLoadStatus !== "ready" ? <div role="alert">Стан залів не завантажено. <button type="button" style={btnS} onClick={loadStudioRooms}>Повторити</button></div> : null}
+            {blockError ? <div role="alert" style={{color:theme.danger}}>{blockError}</div> : null}
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+              {(studioRoomsLoadStatus === "ready" ? studioRooms : []).filter((room) => room.isActive !== false).map((room) => {
+                const closed = room.bookingOpen === false;
+                const isRenaming = renamingRoomId === room.id;
+                return <div key={room.id} style={{ padding: 12, border: `1px solid ${theme.border}`, borderRadius: 10, display: "grid", gap: 8 }}>
+                  <b>{room.name}{room.isActive === false ? " (архівна)" : ""}</b>
+                  <strong style={{ fontSize: 18, color: closed ? theme.danger : theme.text }}>{closed ? "Бронювання закриті" : "Бронювання відкриті"}</strong>
+                  <div><button type="button" style={btnS} onClick={() => toggleRoomBookingAvailability(room)}>{closed ? "Відкрити бронювання" : "Закрити бронювання"}</button></div>
+                  {closed && room.isActive !== false ? <details><summary>Дозволені тренери: {(room.allowedTrainerIds || []).length}</summary><div>Виняток дозволяє лише бронювання цього залу.</div>{getOperationalTrainers(safeTrainers, room.allowedTrainerIds || []).map((trainer) => <label key={trainer.id} style={{ display: "block" }}><input type="checkbox" checked={(room.allowedTrainerIds || []).map(String).includes(String(trainer.id))} disabled={roomTrainerExceptionsSavingIds.has(String(room.id))} onChange={() => toggleRoomTrainerException(room, trainer.id)} />{getTrainerDisplayName(trainer) || trainer.email || trainer.id}</label>)}</details> : null}
+                  {isRenaming ? <div><input style={inputSt} value={renamingRoomName} onChange={(e) => setRenamingRoomName(e.target.value)} /><button type="button" style={btnS} onClick={() => saveRenameRoom(room)}>Зберегти назву</button><button type="button" style={btnS} onClick={cancelRenameRoom}>Скасувати</button></div> : <div><button type="button" style={btnS} onClick={() => startRenameRoom(room)}>Перейменувати</button>{room.isActive !== false && normalizeRoomName(room.name) !== normalizeRoomName(primaryRoomName) ? <button type="button" style={btnS} onClick={() => removeCustomRoom(room)}>Видалити зал</button> : null}</div>}
+                </div>;
+              })}
+            </div>
+            {studioRooms.some((room) => room.isActive === false) ? <details><summary>Архівні зали</summary>{studioRooms.filter((room) => room.isActive === false).map((room) => <div key={room.id}>{room.name} <button type="button" style={btnS} onClick={() => toggleRoomBookingAvailability(room)}>Відновити зал і відкрити бронювання</button></div>)}</details> : null}
           </div>
         </div>
       ) : null}

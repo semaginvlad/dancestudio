@@ -92,7 +92,7 @@ export function buildBookingBlockDisplayRooms(activeRooms = [], eventRoomNames =
   return result;
 }
 export const isContinuousBookingBlock = (block) => Boolean(block?.startsOn < block?.endsOn && timeMinutes(block?.endTime) <= timeMinutes(block?.startTime));
-export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (isContinuousBookingBlock(block) || (block.weekdays || []).map(Number).includes(isoWeekday(date)));
+export const blockMatchesDate = (block, date) => block?.isActive !== false && date >= block.startsOn && date <= block.endsOn && (block.startsOn === block.endsOn || isContinuousBookingBlock(block) || (block.weekdays || []).map(Number).includes(isoWeekday(date)));
 export const bookingBlockIntervalForDate = (block, date) => {
   if (!blockMatchesDate(block, date)) return null;
   if (!isContinuousBookingBlock(block)) return { startTime: block.startTime, endTime: block.endTime };
@@ -231,7 +231,7 @@ export function validateBookingBlock(input) {
   if (!weekdays.length || weekdays.some((day) => day < 1 || day > 7)) errors.weekdays = "Оберіть дні тижня";
   const startMinutes = timeMinutes(input?.startTime);
   const endMinutes = timeMinutes(input?.endTime);
-  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || (input?.startsOn === input?.endsOn && startMinutes >= endMinutes)) errors.time = "Для однієї дати час завершення має бути пізніше";
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || ((input?.startsOn === input?.endsOn || input?.repeats) && startMinutes >= endMinutes)) errors.time = "Час завершення має бути пізніше для однієї дати або повторення";
   if (!input?.allRooms && !(input?.roomIds || []).length) errors.rooms = "Оберіть хоча б одну залу";
   return { valid: !Object.keys(errors).length, errors };
 }
