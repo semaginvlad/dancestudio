@@ -6,7 +6,8 @@ create table trainer_groups(trainer_id uuid, group_id text); create table studen
 create function crm_is_admin_session() returns boolean language sql as $$ select false $$;
 create table subscriptions(id uuid primary key, student_id uuid, group_id text, paid_at date, previous_subscription_id uuid, activation_date date, start_date date, end_date date, total_trainings integer, used_trainings integer);
 create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, guest_name text, guest_type text, price_snapshot_uah numeric);
-create table financial_operations(attendance_id uuid);
+create unique index attendance_unique_subscription on attendance(student_id, group_id, date, sub_id) where sub_id is not null;
+create table financial_operations(attendance_id uuid, attendance_source_id uuid);
 insert into trainers values ('30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',true,null,null);
 insert into trainer_groups values ('30000000-0000-0000-0000-000000000001','a');
 insert into student_groups values ('10000000-0000-0000-0000-000000000001','a');
