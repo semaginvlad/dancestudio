@@ -21,3 +21,19 @@ export function aggregateQueueAutoAttendance(rows) {
 export function debtAttendanceCellView(record, isDark) {
   return { bg: isDark ? '#7f1d1d' : '#dc2626', mark: record.queueAuto && record.quantity >= 2 ? '2' : '!' };
 }
+
+export const HISTORICAL_AUTO_MESSAGE = "Це старий запис, який поки не підтримує редагування в режимі «Авто».";
+export const TRAINER_ONE_OFF_MESSAGE = "Пробне або разове заняття може скасувати адміністратор";
+
+export function autoCellAction(rows, isAdmin) {
+  if (!isAdmin && rows.some(row => ['trial', 'single'].includes(String(row.entryType || row.guestType || '').toLowerCase()))) return 'one-off';
+  if (rows.some(row => !row.queueAuto)) return 'historical';
+  return !isAdmin && rows.length ? 'remove' : 'set';
+}
+
+export async function removeMyAutoAttendance(client, { studentId, groupId, date }) {
+  const { error } = await client.rpc('crm_remove_my_auto_attendance', {
+    p_student_id: studentId, p_group_id: groupId, p_date: date,
+  });
+  if (error) throw error;
+}
