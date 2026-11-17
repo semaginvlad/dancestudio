@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { setAutoAttendance as setAutoAttendanceRpc } from './autoAttendance'
+import { setAutoAttendance as setAutoAttendanceRpc, removeMyAutoAttendance as removeMyAutoAttendanceRpc } from './autoAttendance'
 import { mapSiteInquiry, SITE_INQUIRY_EDITABLE_STATUSES } from './shared/siteInquiries'
 import { normalizeHomeSection, normalizeSiteDirectionContent, normalizeSitePageContent } from './shared/sitePageContent'
 import { resolveStudioRoomsResponse } from './studioRooms'
@@ -1381,6 +1381,10 @@ export async function fetchSubscriptionChangeLog({ groupId, studentId, dateFrom,
   const { data, error } = await query;
   if (error) throw error;
   return (data || []).map(mapSubscriptionChangeLog);
+}
+
+export async function removeMyAutoAttendance(request) {
+  return removeMyAutoAttendanceRpc(supabase, request);
 }
 
 export async function setAutoAttendance(request) {

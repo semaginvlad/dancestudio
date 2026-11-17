@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity, setAutoAttendance } from '../src/autoAttendance.js';
+import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity, setAutoAttendance, autoCellAction, HISTORICAL_AUTO_MESSAGE, TRAINER_ONE_OFF_MESSAGE, removeMyAutoAttendance } from '../src/autoAttendance.js';
 
 const student = '10000000-0000-0000-0000-000000000001';
 const old = '20000000-0000-0000-0000-000000000001';
@@ -17,7 +17,7 @@ async function setup({ historical = false } = {}) {
     create function crm_is_admin_session() returns boolean language sql as $$ select coalesce(current_setting('test.is_admin',true) = 'on',false) $$;
     create table subscriptions(id uuid primary key, student_id uuid, group_id text, paid_at date, previous_subscription_id uuid, activation_date date, start_date date, end_date date, total_trainings integer, used_trainings integer);
     create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, guest_name text, guest_type text, price_snapshot_uah numeric);
-    create table financial_operations(attendance_id uuid);
+    create table financial_operations(attendance_id uuid, attendance_source_id uuid);
     alter table attendance enable row level security;
     grant usage on schema public, auth to authenticated;
     grant select,insert,update,delete on attendance to authenticated;
@@ -34,6 +34,7 @@ async function setup({ historical = false } = {}) {
   await db.exec(rls.slice(rls.indexOf('create or replace function public.rls_owns_group'), rls.indexOf('revoke execute')));
   await db.exec(await readFile(new URL('../supabase/migrations/20261113090000_subscription_queue_resolver.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261113100000_auto_attendance_queue.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261117120000_safe_auto_attendance_removal.sql', import.meta.url), 'utf8'));
   return db;
 }
 const set = (db, quantity, date = '2026-11-02', group = 'a') => db.query('select crm_set_auto_attendance($1,$2,$3,$4)', [student, group, date, quantity]);
@@ -171,4 +172,45 @@ test('queue Auto combines subscription and debt into a counted debt cell regardl
   }
   assert.equal(aggregateQueueAutoAttendance([subscription, subscription]).entryType, 'subscription');
   assert.deepEqual(debtAttendanceCellView({ entryType: 'debt', quantity: 2 }, false), { bg: '#dc2626', mark: '!' });
+});
+
+
+test('Auto cell routes historical and one-off marks safely and submits removal without finance fields', async () => {
+  assert.equal(autoCellAction([{queueAuto:false, entryType:'subscription'}], true), 'historical');
+  assert.match(HISTORICAL_AUTO_MESSAGE, /старий запис/);
+  assert.equal(autoCellAction([{queueAuto:false, entryType:'trial'}], false), 'one-off');
+  assert.equal(TRAINER_ONE_OFF_MESSAGE, 'Пробне або разове заняття може скасувати адміністратор');
+  assert.equal(autoCellAction([{queueAuto:true}], true), 'set');
+  assert.equal(autoCellAction([{queueAuto:true}], false), 'remove');
+  assert.equal(autoCellAction([{queueAuto:true},{queueAuto:false}], true), 'historical');
+  const calls=[];
+  await removeMyAutoAttendance({rpc:async (...args)=>{calls.push(args);return {error:null}}}, {studentId:student,groupId:'a',date:'2026-11-02',subId:old});
+  assert.deepEqual(calls, [['crm_remove_my_auto_attendance',{p_student_id:student,p_group_id:'a',p_date:'2026-11-02'}]]);
+});
+
+test('admin updates Queue-Auto; trainer removes only own ordinary Auto marks and usage is canonical', async t => {
+  const db=await setup(); t.after(()=>db.close()); await seed(db);
+  await db.exec("select set_config('test.is_admin','on',false); set role authenticated");
+  await set(db,2);
+  await db.exec("reset role; select set_config('test.is_admin','off',false); set role authenticated");
+  await db.query('select crm_remove_my_auto_attendance($1,$2,$3)',[student,'a','2026-11-02']);
+  await db.exec('reset role');
+  assert.equal((await rows(db)).rows.length,0);
+  assert.equal((await usage(db)).rows[0].used_trainings,0);
+  await db.exec('delete from subscriptions');
+  await db.exec('set role authenticated');
+  await set(db,1);
+  await db.query('select crm_remove_my_auto_attendance($1,$2,$3)',[student,'a','2026-11-02']);
+  await db.exec('reset role'); assert.equal((await rows(db)).rows.length,0);
+});
+
+test('trainer removal rejects foreign groups and trial/single including linked journal without changes', async t => {
+  const db=await setup(); t.after(()=>db.close());
+  await db.query(`insert into attendance(student_id,group_id,date,entry_type,quantity,queue_auto_order) values ($1,'a','2026-10-01','trial',1,1),($1,'a','2026-10-02','single',1,2),($1,'b','2026-10-03','debt',1,3),($1,'a','2026-10-04','debt',1,4)`,[student]);
+  await db.exec("insert into financial_operations(attendance_source_id) select id from attendance where date='2026-10-04'");
+  const before=(await rows(db)).rows; await db.exec('set role authenticated');
+  for (const [group,date] of [['a','2026-10-01'],['a','2026-10-02'],['b','2026-10-03'],['a','2026-10-04']])
+    await assert.rejects(db.query('select crm_remove_my_auto_attendance($1,$2,$3)',[student,group,date]));
+  await db.exec('reset role'); assert.deepEqual((await rows(db)).rows,before);
+  assert.equal((await db.query('select * from financial_operations')).rows.length,1);
 });

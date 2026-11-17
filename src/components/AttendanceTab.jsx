@@ -1,4 +1,4 @@
-import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity } from '../autoAttendance';
+import { aggregateQueueAutoAttendance, debtAttendanceCellView, nextAutoQuantity, autoCellAction, HISTORICAL_AUTO_MESSAGE, TRAINER_ONE_OFF_MESSAGE } from '../autoAttendance';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getScheduleSlotStartTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
@@ -2738,16 +2738,23 @@ export default function AttendanceTab({
         return;
       }
 
-      if (!isAdmin && existing.some(isFinancialAttendance)) {
-        alert(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
+      if (entryMode === "auto" || existing.some((row) => row.queueAuto)) {
+        const action = autoCellAction(existing, isAdmin);
+        if (action === "one-off") { alert(TRAINER_ONE_OFF_MESSAGE); return; }
+        if (action === "historical") { alert(HISTORICAL_AUTO_MESSAGE); return; }
+        backendMutationStarted = true;
+        if (action === "remove") {
+          await db.removeMyAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr });
+        } else {
+          const quantity = nextAutoQuantity(existing);
+          await db.setAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr, quantity });
+        }
+        await reloadFromDb();
         return;
       }
 
-      if (existing.some((row) => row.queueAuto) || (entryMode === "auto" && !existing.some(isFinancialAttendance))) {
-        const quantity = nextAutoQuantity(existing);
-        backendMutationStarted = true;
-        await db.setAutoAttendance({ studentId: student.id, groupId: gid, date: dateStr, quantity });
-        await reloadFromDb();
+      if (!isAdmin && existing.some(isFinancialAttendance)) {
+        alert(FINANCIAL_ATTENDANCE_ADMIN_MESSAGE);
         return;
       }
 
@@ -2928,6 +2935,8 @@ export default function AttendanceTab({
         toDateKey(a.date) === toDateKey(dateStr)
       );
       const existing = existingById || existingByName || null;
+
+      if (existing?.id && !isAdmin) { alert(TRAINER_ONE_OFF_MESSAGE); return; }
 
       if (existing?.id) {
         applyAttendanceStateChange({ removeIds: [existing.id] });
