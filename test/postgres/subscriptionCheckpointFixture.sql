@@ -1,0 +1,13 @@
+create role anon; create role authenticated;
+create schema auth;
+create function auth.uid() returns uuid language sql as $$ select '30000000-0000-0000-0000-000000000001'::uuid $$;
+create function auth.jwt() returns jsonb language sql as $$ select '{"email":"semagin.vlad@gmail.com"}'::jsonb $$;
+create function crm_is_admin_session() returns boolean language sql as $$ select true $$;
+create function rls_can_record_attendance(uuid,text) returns boolean language sql as $$ select true $$;
+create function rls_owns_group(text) returns boolean language sql as $$ select true $$;
+create table groups(id text primary key, trainer_id uuid, schedule jsonb);
+create table subscriptions(id uuid primary key, student_id uuid, group_id text, plan_type text, start_date date, end_date date, original_end_date date, total_trainings integer, used_trainings integer, notification_sent boolean, created_at timestamptz default now(), activation_date date);
+create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, queue_auto_order bigint, guest_name text, guest_type text, price_snapshot_uah numeric);
+create table financial_operations(attendance_id uuid, attendance_source_id uuid);
+create table cancelled_trainings(id uuid primary key default gen_random_uuid(), group_id text, date date, reason text, created_at timestamptz default now());
+create sequence crm_auto_attendance_order_seq;
