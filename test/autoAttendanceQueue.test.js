@@ -17,6 +17,7 @@ async function setup({ historical = false } = {}) {
     create function crm_is_admin_session() returns boolean language sql as $$ select coalesce(current_setting('test.is_admin',true) = 'on',false) $$;
     create table subscriptions(id uuid primary key, student_id uuid, group_id text, paid_at date, previous_subscription_id uuid, activation_date date, start_date date, end_date date, total_trainings integer, used_trainings integer);
     create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, guest_name text, guest_type text, price_snapshot_uah numeric);
+    create unique index attendance_unique_subscription on attendance(student_id, group_id, date, sub_id) where sub_id is not null;
     create table financial_operations(attendance_id uuid, attendance_source_id uuid);
     alter table attendance enable row level security;
     grant usage on schema public, auth to authenticated;
@@ -35,6 +36,7 @@ async function setup({ historical = false } = {}) {
   await db.exec(await readFile(new URL('../supabase/migrations/20261113090000_subscription_queue_resolver.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261113100000_auto_attendance_queue.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../supabase/migrations/20261117120000_safe_auto_attendance_removal.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/20261117130000_queue_auto_quantity.sql', import.meta.url), 'utf8'));
   return db;
 }
 const set = (db, quantity, date = '2026-11-02', group = 'a') => db.query('select crm_set_auto_attendance($1,$2,$3,$4)', [student, group, date, quantity]);
@@ -101,7 +103,7 @@ test('migration leaves a pre-existing historical attendance unchanged and Auto r
 });
 
 test('errors during activation, insertion, usage update and deletion roll back all changes', async t => {
-  const db=await setup(); t.after(()=>db.close()); await seed(db,8);
+  const db=await setup(); t.after(()=>db.close()); await seed(db,0,1);
   await db.exec(`create function test_fail() returns trigger language plpgsql as $$ begin
     if current_setting('test.fail_step',true) = TG_ARGV[0]
       or (current_setting('test.fail_step',true) = 'usage_after_insert' and TG_TABLE_NAME = 'subscriptions' and exists(select 1 from attendance))
@@ -181,7 +183,8 @@ test('Auto cell routes historical and one-off marks safely and submits removal w
   assert.equal(autoCellAction([{queueAuto:false, entryType:'trial'}], false), 'one-off');
   assert.equal(TRAINER_ONE_OFF_MESSAGE, 'Пробне або разове заняття може скасувати адміністратор');
   assert.equal(autoCellAction([{queueAuto:true}], true), 'set');
-  assert.equal(autoCellAction([{queueAuto:true}], false), 'remove');
+  assert.equal(autoCellAction([{queueAuto:true, quantity:1}], false), 'set');
+  assert.equal(autoCellAction([{queueAuto:true, quantity:2}], false), 'remove');
   assert.equal(autoCellAction([{queueAuto:true},{queueAuto:false}], true), 'historical');
   const calls=[];
   await removeMyAutoAttendance({rpc:async (...args)=>{calls.push(args);return {error:null}}}, {studentId:student,groupId:'a',date:'2026-11-02',subId:old});
@@ -213,4 +216,51 @@ test('trainer removal rejects foreign groups and trial/single including linked j
     await assert.rejects(db.query('select crm_remove_my_auto_attendance($1,$2,$3)',[student,group,date]));
   await db.exec('reset role'); assert.deepEqual((await rows(db)).rows,before);
   assert.equal((await db.query('select * from financial_operations')).rows.length,1);
+});
+
+
+test('trainer cycles 0 → 1 → 2 → 0 with one subscription row and canonical usage', async t => {
+  const db=await setup(); t.after(()=>db.close()); await seed(db);
+  await db.exec('set role authenticated');
+  await set(db,1); await db.exec('reset role');
+  let a=(await rows(db)).rows; assert.equal(a.length,1); assert.equal(a[0].quantity,1); assert.equal((await usage(db)).rows[0].used_trainings,1);
+  await db.exec('set role authenticated'); await set(db,2); await db.exec('reset role');
+  a=(await rows(db)).rows; assert.equal(a.length,1); assert.equal(a[0].sub_id,old); assert.equal(a[0].quantity,2); assert.equal((await usage(db)).rows[0].used_trainings,2);
+  await db.exec('set role authenticated'); await assert.rejects(set(db,2,'2026-11-02','b'),/доступу/);
+  await db.query('select crm_remove_my_auto_attendance($1,$2,$3)',[student,'a','2026-11-02']); await db.exec('reset role');
+  assert.equal((await rows(db)).rows.length,0); assert.equal((await usage(db)).rows[0].used_trainings,0);
+});
+
+test('last available unit creates subscription plus debt and both are removed atomically', async t => {
+  const db=await setup(); t.after(()=>db.close()); await seed(db,0,1);
+  await db.query('delete from subscriptions where id=$1',[next]);
+  await set(db,1); assert.equal((await usage(db)).rows[0].used_trainings,1);
+  await set(db,2); const a=(await rows(db)).rows;
+  assert.deepEqual(a.map(x=>[x.entry_type,x.quantity,x.sub_id]), [['subscription',1,old],['debt',1,null]]);
+  assert.equal((await usage(db)).rows[0].used_trainings,1);
+  await set(db,0); assert.equal((await rows(db)).rows.length,0); assert.equal((await usage(db)).rows[0].used_trainings,0);
+});
+
+test('duplicate-key failure in prior RPC rolls back the entire second request', async t => {
+  const db=await setup(); t.after(()=>db.close()); await seed(db);
+  const oldMigration=await readFile(new URL('../supabase/migrations/20261113100000_auto_attendance_queue.sql',import.meta.url),'utf8');
+  await db.exec(oldMigration.slice(oldMigration.indexOf('create or replace function public.crm_set_auto_attendance(')));
+  await set(db,1); const before=(await rows(db)).rows, beforeUsage=(await usage(db)).rows;
+  const sequenceBefore=(await db.query('select last_value from crm_auto_attendance_order_seq')).rows[0].last_value;
+  await assert.rejects(set(db,2),/attendance_unique_subscription/);
+  assert.deepEqual((await rows(db)).rows,before); assert.deepEqual((await usage(db)).rows,beforeUsage);
+  const sequenceAfter=(await db.query('select last_value from crm_auto_attendance_order_seq')).rows[0].last_value;
+  assert.equal(Number(sequenceAfter), Number(sequenceBefore)+1); // PostgreSQL sequences are not transactional.
+
+});
+
+test('failure after increasing an existing row rolls the entire second click back', async t => {
+  const db=await setup(); t.after(()=>db.close()); await seed(db);
+  await set(db,1);
+  const before=(await rows(db)).rows, beforeUsage=(await usage(db)).rows;
+  await db.exec(`create function reject_usage() returns trigger language plpgsql as $$ begin raise exception 'usage failed'; end $$;
+    create trigger reject_usage before update of used_trainings on subscriptions for each row execute function reject_usage();`);
+  await assert.rejects(set(db,2),/usage failed/);
+  assert.deepEqual((await rows(db)).rows,before);
+  assert.deepEqual((await usage(db)).rows,beforeUsage);
 });

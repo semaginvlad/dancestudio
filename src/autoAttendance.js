@@ -28,7 +28,7 @@ export const TRAINER_ONE_OFF_MESSAGE = "Пробне або разове зан�
 export function autoCellAction(rows, isAdmin) {
   if (!isAdmin && rows.some(row => ['trial', 'single'].includes(String(row.entryType || row.guestType || '').toLowerCase()))) return 'one-off';
   if (rows.some(row => !row.queueAuto)) return 'historical';
-  return !isAdmin && rows.length ? 'remove' : 'set';
+  return !isAdmin && nextAutoQuantity(rows) === 0 ? 'remove' : 'set';
 }
 
 export async function removeMyAutoAttendance(client, { studentId, groupId, date }) {
