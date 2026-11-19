@@ -18,7 +18,7 @@ async function setup() {
     create table groups(id text primary key, trainer_id uuid, schedule jsonb);
     insert into groups values('g','${user}','[]');
     create table subscriptions(id uuid primary key, student_id uuid, group_id text, plan_type text, start_date date, end_date date, original_end_date date, total_trainings integer, used_trainings integer, notification_sent boolean, created_at timestamptz default now(), activation_date date);
-    create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid, entry_type text, quantity integer, queue_auto_order bigint, guest_name text, guest_type text, price_snapshot_uah numeric);
+    create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid references subscriptions(id) on delete cascade, entry_type text, quantity integer, queue_auto_order bigint, guest_name text, guest_type text, price_snapshot_uah numeric);
     create table financial_operations(attendance_id uuid, attendance_source_id uuid);
     create table cancelled_trainings(id uuid primary key default gen_random_uuid(), group_id text, date date, reason text, created_at timestamptz default now());
     create sequence crm_auto_attendance_order_seq;
@@ -143,4 +143,17 @@ test('unchanged admin date and internal expiry updates retain captured checkpoin
   assert.equal((await state(db)).end_date,'2026-01-12');
   assert.equal((await state(db)).usage_expiry_checkpoint,'2026-02-01');
   assert.equal((await state(db)).usage_expiry_state,'captured');
+});
+
+
+test('deleting a subscription cascades attendance while an individual deletion reconciles expiry', async t => {
+  const db=await setup(); t.after(()=>db.close());
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2)`,[user,sub]);
+  assert.equal((await state(db)).usage_expiry_state,'captured');
+  await db.query('delete from attendance where sub_id=$1',[sub]);
+  assert.deepEqual(await state(db),{used_trainings:0,end_date:'2026-02-01',original_end_date:'2026-02-01',usage_expiry_checkpoint:null,usage_expiry_state:'ready'});
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2)`,[user,sub]);
+  await db.query('delete from subscriptions where id=$1',[sub]);
+  assert.equal((await db.query('select count(*)::int as count from subscriptions where id=$1',[sub])).rows[0].count,0);
+  assert.equal((await db.query('select count(*)::int as count from attendance where sub_id=$1',[sub])).rows[0].count,0);
 });

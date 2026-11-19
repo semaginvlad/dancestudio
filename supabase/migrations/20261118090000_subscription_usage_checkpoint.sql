@@ -109,7 +109,13 @@ begin
       case when tg_op <> 'DELETE' then new.sub_id end
     ]) id where id is not null order by id
   loop
-    perform public.crm_reconcile_subscription_usage(v_id);
+    -- ON DELETE CASCADE fires this trigger after the parent has disappeared.
+    -- Lock existing parents before reconciliation, including against a
+    -- concurrent subscription deletion.
+    perform 1 from public.subscriptions s where s.id = v_id for update;
+    if found then
+      perform public.crm_reconcile_subscription_usage(v_id);
+    end if;
   end loop;
   return null;
 end $$;
