@@ -4,7 +4,7 @@ alter table public.subscriptions
   add column usage_expiry_state text not null default 'legacy_unknown';
 alter table public.subscriptions alter column usage_expiry_state set default 'ready';
 alter table public.subscriptions add constraint subscriptions_usage_expiry_checkpoint_check
-  check ((usage_expiry_state in ('legacy_unknown', 'ready') and usage_expiry_checkpoint is null)
+  check ((usage_expiry_state in ('legacy_unknown', 'ready', 'manual_override') and usage_expiry_checkpoint is null)
       or (usage_expiry_state = 'captured' and usage_expiry_checkpoint is not null));
 
 -- Caller must be authorized before invoking this private helper. The row lock
@@ -26,7 +26,13 @@ begin
   v_end := v_sub.end_date;
   v_checkpoint := v_sub.usage_expiry_checkpoint;
   v_state := v_sub.usage_expiry_state;
-  if v_state = 'captured' then
+  if v_state = 'manual_override' then
+    -- Respect the admin's explicit date for this exhaustion cycle. Once the
+    -- pack is no longer exhausted, later exhaustion can capture it anew.
+    if coalesce(v_sub.total_trainings, 0) <= 0 or v_used < v_sub.total_trainings then
+      v_state := 'ready';
+    end if;
+  elsif v_state = 'captured' then
     if coalesce(v_sub.total_trainings, 0) <= 0 or v_used < v_sub.total_trainings or v_last is null then
       v_end := v_checkpoint;
       v_checkpoint := null;
@@ -46,6 +52,26 @@ begin
     where id = p_sub_id;
 end $$;
 revoke all on function public.crm_reconcile_subscription_usage(uuid) from public, anon, authenticated;
+
+-- The subscription form writes as authenticated; internal reconciliation and
+-- cancellation RPCs write as their SECURITY DEFINER owner. Preserve the admin's
+-- chosen date for the current exhaustion cycle without mistaking server expiry
+-- updates for a manual edit.
+create or replace function public.crm_preserve_manual_subscription_expiry()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if current_user = 'authenticated' and public.crm_is_admin_session()
+      and old.usage_expiry_state = 'captured'
+      and new.end_date is distinct from old.end_date then
+    new.usage_expiry_checkpoint := null;
+    new.usage_expiry_state := 'manual_override';
+  end if;
+  return new;
+end $$;
+revoke all on function public.crm_preserve_manual_subscription_expiry() from public, anon, authenticated;
+create trigger subscription_preserve_manual_expiry
+  before update of end_date on public.subscriptions
+  for each row execute function public.crm_preserve_manual_subscription_expiry();
 
 -- Direct authorized attendance mutations and legacy clients must reconcile in
 -- the same transaction. Lock subscriptions in a deterministic order on relink.

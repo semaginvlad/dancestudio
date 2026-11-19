@@ -111,3 +111,36 @@ test('ambiguous legacy removal is rolled back with an admin reconciliation messa
   assert.equal((await db.query('select count(*)::int as count from attendance where sub_id=$1',[legacy])).rows[0].count,1);
   assert.equal((await state(db,legacy)).end_date,'2026-01-15');
 });
+
+test('admin manual expiry survives sync and attendance changes after capture', async t => {
+  const db=await setup(); t.after(()=>db.close());
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2)`,[user,sub]);
+  assert.equal((await state(db)).usage_expiry_state,'captured');
+  await db.exec('grant usage on schema public to authenticated; grant select, update on subscriptions to authenticated; set role authenticated');
+  await db.query("update subscriptions set end_date = '2026-03-01' where id = $1",[sub]);
+  await db.exec('reset role');
+  assert.deepEqual(await state(db),{used_trainings:2,end_date:'2026-03-01',original_end_date:'2026-02-01',usage_expiry_checkpoint:null,usage_expiry_state:'manual_override'});
+  await sync(db);
+  assert.equal((await state(db)).end_date,'2026-03-01');
+  await db.exec('update attendance set quantity=1');
+  await sync(db);
+  assert.deepEqual(await state(db),{used_trainings:1,end_date:'2026-03-01',original_end_date:'2026-02-01',usage_expiry_checkpoint:null,usage_expiry_state:'ready'});
+  await db.exec('update attendance set quantity=2');
+  assert.equal((await state(db)).usage_expiry_checkpoint,'2026-03-01');
+  await db.exec('delete from attendance');
+  assert.equal((await state(db)).end_date,'2026-03-01');
+});
+
+test('unchanged admin date and internal expiry updates retain captured checkpoint', async t => {
+  const db=await setup(); t.after(()=>db.close());
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2)`,[user,sub]);
+  await db.exec('grant usage on schema public to authenticated; grant select, update on subscriptions to authenticated; set role authenticated');
+  await db.query("update subscriptions set end_date='2026-01-10' where id=$1",[sub]);
+  await db.exec('reset role');
+  assert.equal((await state(db)).usage_expiry_state,'captured');
+  await db.exec("update attendance set date='2026-01-12'");
+  await sync(db);
+  assert.equal((await state(db)).end_date,'2026-01-12');
+  assert.equal((await state(db)).usage_expiry_checkpoint,'2026-02-01');
+  assert.equal((await state(db)).usage_expiry_state,'captured');
+});
