@@ -17,9 +17,9 @@ async function setup() {
     create function rls_owns_group(text) returns boolean language sql as $$ select true $$;
     create table groups(id text primary key, trainer_id uuid, schedule jsonb);
     insert into groups values('g','${user}','[]');
-    create table subscriptions(id uuid primary key, student_id uuid, group_id text, plan_type text, start_date date, end_date date, original_end_date date, total_trainings integer, used_trainings integer, notification_sent boolean, created_at timestamptz default now(), activation_date date);
+    create table subscriptions(id uuid primary key, student_id uuid, group_id text, plan_type text, start_date date, end_date date, original_end_date date, total_trainings integer, used_trainings integer, notification_sent boolean, created_at timestamptz default now(), activation_date date, notes text, paid boolean);
     create table attendance(id uuid primary key default gen_random_uuid(), student_id uuid, group_id text, date date, sub_id uuid references subscriptions(id) on delete cascade, entry_type text, quantity integer, queue_auto_order bigint, guest_name text, guest_type text, price_snapshot_uah numeric);
-    create table financial_operations(attendance_id uuid, attendance_source_id uuid);
+    create table financial_operations(attendance_id uuid, attendance_source_id uuid, status text, amount_uah numeric);
     create table cancelled_trainings(id uuid primary key default gen_random_uuid(), group_id text, date date, reason text, created_at timestamptz default now());
     create sequence crm_auto_attendance_order_seq;
     create function crm_record_subscription_queue_activation(uuid,text,date)
@@ -156,4 +156,64 @@ test('deleting a subscription cascades attendance while an individual deletion r
   await db.query('delete from subscriptions where id=$1',[sub]);
   assert.equal((await db.query('select count(*)::int as count from subscriptions where id=$1',[sub])).rows[0].count,0);
   assert.equal((await db.query('select count(*)::int as count from attendance where sub_id=$1',[sub])).rows[0].count,0);
+});
+
+
+async function correctionDb() {
+  const db = await setup();
+  await db.exec(await readFile(new URL('../supabase/migrations/20261119090000_admin_historical_attendance_correction.sql', import.meta.url), 'utf8'));
+  await db.exec(`create or replace function crm_is_admin_session() returns boolean language sql as $$ select coalesce(current_setting('test.admin',true) = 'yes', false) $$; select set_config('test.admin','yes',false);`);
+  return db;
+}
+const correct = (db,id,quantity) => db.query('select crm_admin_correct_historical_attendance($1,$2)',[id,quantity]);
+test('admin corrects historical subscription quantities atomically and reconciles expiry', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',1) returning id`,[user,sub])).rows[0];
+  await correct(db,row.id,2);
+  assert.equal((await state(db)).used_trainings,2); assert.equal((await state(db)).end_date,'2026-01-10');
+  await correct(db,row.id,1); await correct(db,row.id,1);
+  assert.equal((await state(db)).used_trainings,1); assert.equal((await state(db)).end_date,'2026-02-01');
+  assert.equal((await state(db)).original_end_date,'2026-02-01');
+  await correct(db,row.id,0);
+  assert.equal((await state(db)).used_trainings,0);
+  assert.equal((await db.query('select count(*)::int as n from attendance')).rows[0].n,0);
+});
+test('legacy ambiguity, trainer access, financial journal and injected errors leave rows intact', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const old=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-15',$2,'subscription',2) returning id`,[user,legacy])).rows[0];
+  await assert.rejects(correct(db,old.id,1),/вручну перевірити/);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[old.id])).rows[0].quantity,2);
+  assert.equal((await state(db,legacy)).end_date,'2026-01-15');
+  await db.exec("select set_config('test.admin','no',false); set role authenticated");
+  await assert.rejects(correct(db,old.id,1),/Доступ лише/);
+  await db.exec("reset role; select set_config('test.admin','yes',false)");
+  const paid=(await db.query(`insert into attendance(student_id,group_id,date,entry_type,quantity,price_snapshot_uah) values ($1,'g','2026-01-12','single',1,250) returning id`,[user])).rows[0];
+  await db.query("insert into financial_operations(attendance_id,attendance_source_id,status,amount_uah) values ($1,$1,'posted',250)",[paid.id]);
+  await assert.rejects(correct(db,paid.id,0),/Ця відмітка має підтверджену оплату/);
+  assert.deepEqual((await db.query('select status,amount_uah::text from financial_operations')).rows,[{status:'posted',amount_uah:'250'}]);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[paid.id])).rows[0].quantity,1);
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-11',$2,'subscription',1) returning id`,[user,sub])).rows[0];
+  await db.exec(`create function reject_reconcile() returns trigger language plpgsql as $$ begin raise exception 'injected failure'; end $$; create trigger reject_reconcile before update of used_trainings on subscriptions for each row execute function reject_reconcile();`);
+  await assert.rejects(correct(db,row.id,2),/injected failure/);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,1);
+  assert.equal((await state(db)).used_trainings,1);
+});
+
+test('legacy restoration ambiguity is caught even when the corrected row is not the last date', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const first=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',1) returning id`,[user,legacy])).rows[0];
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-15',$2,'subscription',1)`,[user,legacy]);
+  await assert.rejects(correct(db,first.id,0),/вручну перевірити/);
+  assert.equal((await state(db,legacy)).used_trainings,2);
+  assert.equal((await state(db,legacy)).end_date,'2026-01-15');
+  assert.equal((await db.query('select count(*)::int as n from attendance where sub_id=$1',[legacy])).rows[0].n,2);
+});
+
+test('posted trial payment remains unchanged when its historical attendance is corrected', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,entry_type,quantity,price_snapshot_uah) values ($1,'g','2026-01-12','trial',1,250) returning id`,[user])).rows[0];
+  await db.query("insert into financial_operations(attendance_id,attendance_source_id,status,amount_uah) values ($1,$1,'posted',250)",[row.id]);
+  await assert.rejects(correct(db,row.id,2),/Ця відмітка має підтверджену оплату/);
+  assert.deepEqual((await db.query('select status,amount_uah::text from financial_operations')).rows,[{status:'posted',amount_uah:'250'}]);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,1);
 });
