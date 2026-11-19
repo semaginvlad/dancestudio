@@ -217,3 +217,20 @@ test('posted trial payment remains unchanged when its historical attendance is c
   assert.deepEqual((await db.query('select status,amount_uah::text from financial_operations')).rows,[{status:'posted',amount_uah:'250'}]);
   assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,1);
 });
+
+test('admin can correct and cancel historical debt without creating a subscription', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,entry_type,quantity) values ($1,'g','2026-01-12','debt',1) returning id`,[user])).rows[0];
+  await correct(db,row.id,2);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,2);
+  await correct(db,row.id,0);
+  assert.equal((await db.query('select count(*)::int as n from attendance where id=$1',[row.id])).rows[0].n,0);
+});
+
+test('separate legacy paid one-off on the same student, group and date blocks correction', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,entry_type,quantity) values ($1,'g','2026-01-12','debt',1) returning id`,[user])).rows[0];
+  await db.query(`insert into subscriptions(id,student_id,group_id,plan_type,activation_date,paid) values (gen_random_uuid(),$1,'g','single','2026-01-12',true)`,[user]);
+  await assert.rejects(correct(db,row.id,2),/Ця відмітка має підтверджену оплату/);
+  assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,1);
+});
