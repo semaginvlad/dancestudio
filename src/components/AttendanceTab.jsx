@@ -1286,6 +1286,9 @@ export default function AttendanceTab({
   const [oneOffPayment, setOneOffPayment] = useState(null);
   const [showCancellationControls, setShowCancellationControls] = useState(false);
   const [busyCell, setBusyCell] = useState("");
+  const [historicalCorrection, setHistoricalCorrection] = useState(null);
+  const [correctionSaving, setCorrectionSaving] = useState(false);
+  const [correctionError, setCorrectionError] = useState("");
   const [busyCancelDate, setBusyCancelDate] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
   const [addMode, setAddMode] = useState("student");
@@ -2712,6 +2715,29 @@ export default function AttendanceTab({
     });
   };
 
+  const openHistoricalCorrectionRows = (rows) => {
+    if (!isAdmin) return;
+    const records = rows.filter((row) => !row.queueAuto && row.id);
+    if (!records.length) return;
+    setCorrectionError("");
+    setHistoricalCorrection({ records, id: records[0].id, quantity: String(records[0].quantity || 1) });
+  };
+  const openHistoricalCorrection = (student, dateStr) => openHistoricalCorrectionRows(getRecordsForCell(student, dateStr));
+
+  const saveHistoricalCorrection = async () => {
+    if (!isAdmin || !historicalCorrection || correctionSaving) return;
+    setCorrectionSaving(true);
+    setCorrectionError("");
+    try {
+      await db.correctHistoricalAttendance(historicalCorrection.id, Number(historicalCorrection.quantity));
+      setHistoricalCorrection(null);
+      try { await reloadFromDb(); }
+      catch (error) { alert("Зміни збережено, але не вдалося оновити журнал. Оновіть сторінку."); }
+    } catch (error) {
+      setCorrectionError(error?.message || "Не вдалося виправити відмітку.");
+    } finally { setCorrectionSaving(false); }
+  };
+
   const handleToggleCell = async (student, dateStr) => {
     if (!gid) return;
     if (isCancelledDate(dateStr)) {
@@ -2733,6 +2759,10 @@ export default function AttendanceTab({
     try {
       const existing = getRecordsForCell(student, dateStr);
 
+      if (isAdmin && existing.some((row) => !row.queueAuto)) {
+        openHistoricalCorrection(student, dateStr);
+        return;
+      }
       if (!isAdmin && entryMode !== "auto") {
         alert("Для відміток використовуйте режим «Авто».");
         return;
@@ -2937,6 +2967,10 @@ export default function AttendanceTab({
       const existing = existingById || existingByName || null;
 
       if (existing?.id && !isAdmin) { alert(TRAINER_ONE_OFF_MESSAGE); return; }
+      if (existing?.id && isAdmin && !existing.queueAuto) {
+        openHistoricalCorrectionRows([existing]);
+        return;
+      }
 
       if (existing?.id) {
         applyAttendanceStateChange({ removeIds: [existing.id] });
@@ -3678,6 +3712,27 @@ export default function AttendanceTab({
           <div style={styles.hint}>✓ = 1 заняття, 2 = 2 заняття за день</div>
         </div>
       </div>
+      {isAdmin && historicalCorrection && createPortal(
+        <div style={styles.historyOverlay} onClick={() => !correctionSaving && setHistoricalCorrection(null)}>
+          <div role="dialog" aria-modal="true" aria-label="Виправити кількість" style={styles.historyPanel} onClick={(event) => event.stopPropagation()}>
+            <div style={styles.historyHeader}><h3 style={styles.historyTitle}>Виправити кількість</h3></div>
+            <div style={styles.historyBody}>
+              {historicalCorrection.records.length > 1 && <label>Відмітка <select value={historicalCorrection.id} onChange={(event) => {
+                const record = historicalCorrection.records.find((row) => String(row.id) === event.target.value);
+                setHistoricalCorrection((prev) => ({ ...prev, id: event.target.value, quantity: String(record?.quantity || 1) }));
+              }}>{historicalCorrection.records.map((row) => <option key={row.id} value={row.id}>{row.entryType || "subscription"} · {row.quantity || 1} · {String(row.id).slice(0, 8)}</option>)}</select></label>}
+              <label>Правильна кількість <select value={historicalCorrection.quantity} onChange={(event) => setHistoricalCorrection((prev) => ({ ...prev, quantity: event.target.value }))}>
+                <option value="0">0 — скасувати відмітку</option><option value="1">1</option><option value="2">2</option>
+              </select></label>
+              <p>Зміна може вплинути на використання та строк абонемента. Відмітки з підтвердженою оплатою потребують окремої фінансової корекції.</p>
+              {correctionError && <p role="alert">{correctionError}</p>}
+              <button type="button" style={styles.control} onClick={() => setHistoricalCorrection(null)} disabled={correctionSaving}>Скасувати</button>{" "}
+              <button type="button" style={styles.control} onClick={saveHistoricalCorrection} disabled={correctionSaving}>Зберегти</button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
+
       {isAdmin && oneOffPayment && createPortal(
         <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(15,23,42,.62)", display: "grid", placeItems: "center", padding: 16 }}>
           <form
@@ -4085,7 +4140,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button></div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button>{isAdmin && rec && !rec.queueAuto && <button type="button" title="Виправити кількість" aria-label="Виправити кількість" onClick={() => openHistoricalCorrectionRows([rec])} style={{ border: 0, background: "transparent", cursor: "pointer", fontSize: 12 }}>✎</button>}</div>
                         </td>
                       );
                     })}
@@ -4233,6 +4288,11 @@ export default function AttendanceTab({
                       >
                         {cellView.mark}
                       </button>
+                      {isAdmin && getRecordsForCell(student, dateStr).some((row) => !row.queueAuto) && (
+                        <button type="button" title="Виправити кількість" aria-label="Виправити кількість" disabled={saving}
+                          onClick={() => openHistoricalCorrection(student, dateStr)}
+                          style={{ border: 0, background: "transparent", cursor: "pointer", fontSize: 12 }}>✎</button>
+                      )}
                       </div>
                     </td>
                   );

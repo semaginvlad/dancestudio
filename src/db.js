@@ -1383,6 +1383,13 @@ export async function fetchSubscriptionChangeLog({ groupId, studentId, dateFrom,
   return (data || []).map(mapSubscriptionChangeLog);
 }
 
+export async function correctHistoricalAttendance(id, quantity) {
+  const { error } = await supabase.rpc('crm_admin_correct_historical_attendance', {
+    p_attendance_id: id, p_quantity: quantity,
+  });
+  if (error) throw error;
+}
+
 export async function removeMyAutoAttendance(request) {
   return removeMyAutoAttendanceRpc(supabase, request);
 }
