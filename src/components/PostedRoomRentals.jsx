@@ -20,7 +20,7 @@ export default function PostedRoomRentals({ onUnconfirm, refreshKey }) {
   };
   if (!rows.length && !error) return null;
   return <section style={{ ...cardSt, marginBottom: 24 }}>
-    <h3>Підтверджені оплати оренди</h3>
+    <h3>Підтверджені оплати подій</h3>
     {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
     {rows.map((row) => <div key={row.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', margin: '10px 0' }}>
       <span>{row.title || 'Оренда залу'} · {row.occurrenceDate} · {row.amountUah.toLocaleString('uk-UA')} ₴</span>

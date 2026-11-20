@@ -2671,6 +2671,12 @@ export default function App() {
             onUpsertTrainingLessonPlan={upsertTrainingLessonPlanAction}
             scheduleScale={safeScheduleScale}
             bookingTariffs={roomBookingTariffs}
+            {...(isAdmin ? { onSchedulePendingRefresh: setPendingIndividualIncome, onConfirmSchedulePayment: async (row, payload) => {
+              const posted = await db.confirmIndividualIncome(row.id, payload);
+              setPendingIndividualIncome(current => current.filter(item => item.id !== row.id));
+              setPostedOneOffIncome(current => upsertPostedFinancialTransaction(current, posted));
+              return posted;
+            } } : {})}
           />
         )}
         {tab === "attendance" && <AttendanceTab groups={visibleGroups} transferGroups={isAdmin ? groups : visibleGroups} trainerGroups={trainerGroups} trainers={trainers} currentUser={user} trainingLessonPlans={trainingLessonPlans} trainingLessonReports={trainingLessonReports} onUpsertTrainingLessonReport={upsertTrainingLessonReportAction} rawSubs={subs} subs={subsExt} setSubs={setSubs} isAdmin={isAdmin} fetchSubscriptions={isAdmin ? () => db.fetchSubs({ includeFinancial: true }) : db.fetchMyAttendanceSubscriptions} onFinancialJournalChange={isAdmin ? async () => setPostedOneOffIncome(await db.fetchPostedOneOffIncome()) : undefined} attn={attn} setAttn={setAttn} studentMap={studentMap} students={students} setStudents={setStudents} studentGrps={studentGrps} setStudentGrps={setStudentGrps} cancelled={cancelled} scheduleCancelled={scheduleCancelled} setCancelled={setCancelled} customOrders={customOrders} setCustomOrders={setCustomOrders} warnedStudents={warnedStudents} setWarnedStudents={setWarnedStudents} {...(isAdmin ? { onActionAddSub: (stId, gId) => { setPrefillSub({studentId: stId, groupId: gId}); setModal("addSub"); }, onActionEditSub: openSubscriptionEdit } : {})} onActionEditStudent={(student) => { setEditItem(student); setModal("editStudent"); }} onActionMessageStudent={(student) => { if (!isAdmin) { alert("Доступ до повідомлень лише для адміністратора"); return; } setSelectedMessageStudentId(student.id); setTab("messages"); }} trialBookings={trialBookings} setTrialBookings={setTrialBookings} attendanceScale={safeAttendanceScale} />}

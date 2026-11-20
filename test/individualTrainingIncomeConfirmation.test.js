@@ -390,3 +390,48 @@ test('admin reversals preserve rental history and bookings, exclude voids from t
     await assert.rejects(db.query('select * from crm_admin_fetch_posted_room_rentals()'), /Only an administrator/);
   } finally { await db.close(); }
 });
+
+
+test('schedule confirmation uses one operation per occurrence, supports category and reversals, and rejects trainers', async () => {
+  const db = await database();
+  try {
+    await db.exec(await readFile(new URL('../supabase/migrations/20261110120000_admin_manual_financial_operations.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261110130000_financial_operation_reversal.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261120120000_schedule_financial_confirmation.sql', import.meta.url), 'utf8'));
+    const single = (await insertIndividual(db)).rows[0];
+    const recurring = (await insertIndividual(db, ", 'weekly', '2026-11-24'")).rows[0];
+    const cancelled = (await insertIndividual(db)).rows[0];
+    await db.exec("alter table financial_operations add column attendance_source_id uuid; alter table attendance add column student_id uuid, add column group_id text, add column guest_name text; set app.test_admin='on'");
+    await db.query("select crm_reconcile_individual_training_income($1,'2026-11-24')", [recurring.id]);
+    const schedule = (await db.query('select * from crm_admin_fetch_schedule_financial_operations()')).rows;
+    const one = schedule.find(row => row.booking_id === single.id);
+    const second = schedule.find(row => row.booking_id === recurring.id && new Date(row.occurrence_date).toISOString().startsWith('2026-11-17'));
+    assert.ok(one && second);
+    assert.equal(second.status, 'pending');
+    const cancelledOp = schedule.find(row => row.booking_id === cancelled.id);
+    await assert.rejects(db.query("select crm_admin_confirm_individual_income($1,400,'card','2026-11-19','manual_income')", [one.id]), /Invalid category/);
+    await db.query("select crm_admin_confirm_individual_income($1,275,'cash','2026-11-18','room_rental')", [one.id]);
+    assert.equal((await db.query('select status from crm_admin_fetch_schedule_financial_operations() where id=$1', [one.id])).rows[0].status, 'posted');
+    const posted = (await db.query("select * from crm_admin_confirm_individual_income($1,400,'card','2026-11-19','individual_training')", [second.id])).rows[0];
+    assert.equal(posted.status, 'posted'); assert.equal(posted.category_code, 'individual_training');
+    assert.equal(Number(posted.amount_uah), 400); assert.equal(posted.payment_method_code, 'card');
+    assert.equal(new Date(posted.operation_date).toISOString().slice(0,10), '2026-11-19');
+    await assert.rejects(db.query("select crm_admin_confirm_individual_income($1,400,'card','2026-11-19','room_rental')", [second.id]), /Pending active/);
+    await db.query("select crm_reconcile_individual_training_income($1,'2026-11-24')", [recurring.id]);
+    assert.equal((await db.query('select count(*)::int n from financial_operations where room_booking_series_id=$1 and occurrence_date=$2 and status=$3', [second.series_id, '2026-11-17', 'posted'])).rows[0].n, 1);
+    assert.equal((await db.query('select count(*)::int n from crm_admin_fetch_posted_room_rentals() where id=$1', [second.id])).rows[0].n, 1);
+    const journal = (await db.query('select * from crm_admin_fetch_posted_one_off_income() where id=$1', [second.id])).rows;
+    assert.equal(journal.length, 1); assert.equal(Number(journal[0].amount_uah), 400); assert.equal(journal[0].payment_method_code, 'card');
+    assert.equal(new Date(journal[0].operation_date).toISOString().slice(0, 10), '2026-11-19');
+    await db.query("select crm_admin_change_financial_operation_status($1,'unconfirm')", [second.id]);
+    assert.equal((await db.query('select status from financial_operations where id=$1', [second.id])).rows[0].status, 'pending');
+    await db.query("select crm_admin_change_financial_operation_status($1,'void')", [second.id]);
+    await db.query("select crm_reconcile_individual_training_income($1,'2026-11-24')", [recurring.id]);
+    assert.equal((await db.query("select count(*)::int n from financial_operations where room_booking_series_id=$1 and occurrence_date='2026-11-17'", [second.series_id])).rows[0].n, 1);
+    await db.query("update room_bookings set status='cancelled' where id=$1", [cancelled.id]);
+    await assert.rejects(db.query("select crm_admin_confirm_individual_income($1,400,'card','2026-11-19','room_rental')", [cancelledOp.id]), /Pending active/);
+    await db.exec("set app.test_admin='off'; set role authenticated");
+    await assert.rejects(db.query('select * from crm_admin_fetch_schedule_financial_operations()'), /Only an administrator/);
+    await assert.rejects(db.query("select crm_admin_confirm_individual_income($1,400,'card','2026-11-19','room_rental')", [one.id]), /Only an administrator/);
+  } finally { await db.close(); }
+});

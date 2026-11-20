@@ -974,7 +974,7 @@ export async function fetchPendingIndividualIncome() {
   return (data || []).map(mapPendingIndividualIncome);
 }
 
-export async function confirmIndividualIncome(id, { amountUah, paymentMethod, operationDate }) {
+export async function confirmIndividualIncome(id, { amountUah, paymentMethod, operationDate, categoryCode }) {
   const amount = Number(amountUah);
   if (!Number.isFinite(amount) || amount < 0) throw new Error('Сума має бути невід’ємною');
   if (!['cash', 'card'].includes(paymentMethod)) throw new Error('Оберіть готівку або картку');
@@ -983,6 +983,7 @@ export async function confirmIndividualIncome(id, { amountUah, paymentMethod, op
     p_amount_uah: amount,
     p_payment_method_code: paymentMethod,
     p_operation_date: operationDate,
+    ...(categoryCode ? { p_category_code: categoryCode } : {}),
   });
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
@@ -2434,4 +2435,10 @@ export async function fetchPostedRoomRentals() {
   const { data, error } = await supabase.rpc('crm_admin_fetch_posted_room_rentals');
   if (error) throw error;
   return (data || []).map((row) => ({ ...mapPostedIncome(row), title: row.event_title_snapshot, occurrenceDate: row.occurrence_date, roomName: row.room_name_snapshot, trainerName: row.trainer_name_snapshot, startTime: row.event_start_time_snapshot, endTime: row.event_end_time_snapshot, peopleCount: row.people_count_snapshot }));
+}
+
+export async function fetchScheduleFinancialOperations() {
+  const { data, error } = await supabase.rpc('crm_admin_fetch_schedule_financial_operations');
+  if (error) throw error;
+  return (data || []).map(row => ({ ...mapPostedIncome(row), bookingId: row.booking_id, seriesId: row.series_id, occurrenceDate: row.occurrence_date }));
 }
