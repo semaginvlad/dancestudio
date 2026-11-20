@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import FinancialOperationDetails from "./FinancialOperationDetails";
+import FinanceSectionHeader from "./FinanceSectionHeader";
 import { MANUAL_OPERATION_CATEGORIES } from "../manualFinancialOperations";
 
 const today = () => {
@@ -9,6 +10,7 @@ const today = () => {
 
 export default function ManualFinancialOperations({ operations = [], onCreate, onVoid, onConfirmRequest, theme, inputStyle, primaryButtonStyle, secondaryButtonStyle }) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [showVoided, setShowVoided] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -63,7 +65,7 @@ export default function ManualFinancialOperations({ operations = [], onCreate, o
       }
     `}</style>
     <div className="manual-operation-header">
-      <h2>Ручний журнал</h2>
+      <FinanceSectionHeader title="Ручний журнал" count={operations.length} expanded={expanded} onToggle={() => setExpanded(value => !value)} controlsId="manual-finance-content" theme={theme} />
       <button type="button" data-open-manual-operation style={primaryButtonStyle} onClick={() => setOpen(true)}>+ Додати операцію</button>
     </div>
 
@@ -84,8 +86,10 @@ export default function ManualFinancialOperations({ operations = [], onCreate, o
       </div>
     </div>}
 
+    <div id="manual-finance-content" hidden={!expanded}>
     <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 12 }}><input type="checkbox" checked={showVoided} onChange={(event) => setShowVoided(event.target.checked)} />Показати скасовані</label>
     {visibleRows.length > 0 && <div className="manual-operation-table"><table><thead><tr><th>Дата</th><th>Тип</th><th>Категорія</th><th>Опис</th><th>Спосіб</th><th>Статус</th><th style={{ textAlign: "right" }}>Сума</th><th>Дія</th></tr></thead><tbody>{visibleRows.map((row) => <tr key={row.id}><td>{row.operationDate}</td><td>{row.direction === "income" ? "Дохід" : "Витрата"}</td><td>{MANUAL_OPERATION_CATEGORIES[row.direction]?.find((item) => item.value === row.categoryCode)?.label || row.categoryCode}</td><td style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{row.note || "—"}</td><td>{row.paymentMethod === "cash" ? "Готівка" : "Карта"}</td><td>{row.status === "voided" ? "Скасовано" : row.status === "posted" ? "Оплачено" : "Очікує оплату"}</td><td style={{ textAlign: "right", color: row.direction === "expense" ? theme.danger : theme.success, fontWeight: 700 }}>{Number(row.amountUah).toLocaleString()} ₴</td><td><button type="button" style={secondaryButtonStyle} onClick={() => setSelectedId(row.id)}>Деталі</button>{row.status !== "voided" && <button type="button" style={secondaryButtonStyle} onClick={() => voidOperation(row)}>Скасувати операцію</button>}</td></tr>)}</tbody></table></div>}
+    </div>
     {selected && <FinancialOperationDetails row={selected} manual onClose={() => setSelectedId(null)}>
       {selected.status === "pending" && <button type="button" style={primaryButtonStyle} onClick={() => { setSelectedId(null); onConfirmRequest(selected); }}>Підтвердити</button>}
       {selected.status !== "voided" && <button type="button" style={secondaryButtonStyle} onClick={() => voidOperation(selected)}>Скасувати операцію</button>}

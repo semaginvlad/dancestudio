@@ -1,9 +1,11 @@
 import FinancialOperationDetails from './FinancialOperationDetails';
+import FinanceSectionHeader from './FinanceSectionHeader';
 import React, { useEffect, useState } from 'react';
 import { btnP, btnS, cardSt, inputSt, theme } from '../shared/constants';
 import { buildIndividualIncomeConfirmation, isValidIndividualIncomeConfirmation } from '../individualIncome';
 
 export default function PendingIndividualIncome({ rows = [], loading = false, error = '', onRefresh, onConfirm, onVoid, onVoidManual, confirmationRequest, onConfirmationRequestHandled }) {
+  const [expanded, setExpanded] = useState(true);
   const [details, setDetails] = useState(null);
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -54,10 +56,11 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
 
   return <section style={{ ...cardSt, background: theme.card, marginBottom: 24, display: 'grid', gap: 14 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оплати подій і ручні операції · {rows.length}</div></div>
+      <FinanceSectionHeader title="Очікують підтвердження" count={rows.length} expanded={expanded} onToggle={() => setExpanded(value => !value)} controlsId="pending-finance-content" theme={theme} />
       <button type="button" style={btnS} onClick={onRefresh} disabled={loading}>{loading ? 'Оновлення…' : 'Оновити'}</button>
     </div>
     {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
+    <div id="pending-finance-content" hidden={!expanded}>
     {!loading && !rows.length && !error && <div style={{ color: theme.textMuted }}>Немає оплат, що очікують підтвердження.</div>}
     <div style={{ display: 'grid', gap: 10 }}>
       {rows.map((row) => <article key={row.id} style={{ border: `1px solid ${theme.border}`, borderRadius: 16, padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, alignItems: 'center' }}>
@@ -69,6 +72,7 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" style={btnS} onClick={() => setDetails(row)}>Деталі</button>{row.pendingType === 'manual' && <button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>}
         {row.pendingType !== 'manual' && ['room_rental', 'individual_training'].includes(row.categoryCode) && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(row); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}</div>
       </article>)}
+    </div>
     </div>
     {details && <FinancialOperationDetails row={details} manual={details.pendingType === 'manual'} onClose={() => setDetails(null)}>
       {details.pendingType === 'manual' ? <button type="button" style={btnP} onClick={() => { setDetails(null); openConfirmation(details); }}>Підтвердити</button> : <span>Підтвердження оплати доступне у вкладці «Графік».</span>}
