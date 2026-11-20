@@ -15,7 +15,13 @@ export default function SchedulePayment({ row, event, onConfirm }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!row) return null;
-  const open = () => { setDraft({ ...buildIndividualIncomeConfirmation(row), categoryCode: row.categoryCode }); setError(''); };
+  const open = () => {
+    // A fresh pending row has no payment method: its operation date is the
+    // occurrence date, not a payment date. Reversal retains the paid method.
+    const paymentDate = row.paymentMethod ? row.operationDate : null;
+    setDraft({ ...buildIndividualIncomeConfirmation({ ...row, operationDate: paymentDate }), categoryCode: row.categoryCode });
+    setError('');
+  };
   const submit = async () => {
     if (!isValidIndividualIncomeConfirmation(draft) || !['room_rental', 'individual_training'].includes(draft.categoryCode) || busy) return;
     setBusy(true); setError('');

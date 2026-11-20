@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { create, act } from 'react-test-renderer';
 import { createServer } from 'vite';
+import { toLocalISO } from '../src/shared/utils.js';
 
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
 after(() => server.close());
@@ -38,4 +39,40 @@ test('trainer gets no payment and cancelled event cannot be confirmed', async ()
   assert.equal(renderer.toJSON(), null);
   await act(() => renderer.update(React.createElement(Payment, { row, event: { ...event, status: 'cancelled' }, onConfirm: () => {} })));
   assert.equal(button(renderer.root, 'Підтвердити оплату'), undefined);
+});
+
+
+test('an old unpaid occurrence defaults to today when confirmed', async () => {
+  const oldPending = { ...row, occurrenceDate: '2020-02-01', operationDate: '2020-02-01', paymentMethod: null };
+  const oldEvent = { ...event, date: oldPending.occurrenceDate };
+  let renderer, payload;
+  await act(() => { renderer = create(React.createElement(Payment, { row: oldPending, event: oldEvent, onConfirm: async (_, value) => { payload = value; } })); });
+  await act(() => button(renderer.root, 'Підтвердити оплату').props.onClick());
+  const dialog = renderer.root.findByProps({ 'aria-label': 'Підтвердження оплати' });
+  const today = toLocalISO(new Date());
+  assert.equal(dialog.findByProps({ 'aria-label': 'Дата оплати' }).props.value, today);
+  await act(async () => button(dialog, 'Підтвердити оплату').props.onClick());
+  assert.equal(payload.operationDate, today);
+});
+
+test('a posted payment displays its actual historical payment date', async () => {
+  const posted = { ...row, status: 'posted', occurrenceDate: '2020-02-01', operationDate: '2020-02-03', paymentMethod: 'card' };
+  let renderer;
+  await act(() => { renderer = create(React.createElement(Payment, { row: posted, event, onConfirm: async () => {} })); });
+  const content = JSON.stringify(renderer.toJSON());
+  assert.match(content, /2020-02-03/);
+  assert.doesNotMatch(content, /2020-02-01/);
+  assert.equal(button(renderer.root, 'Підтвердити оплату'), undefined);
+});
+
+test('reversed payment keeps its actual payment date on reconfirmation', async () => {
+  const reversed = { ...row, status: 'pending', occurrenceDate: '2020-02-01', operationDate: '2020-02-03', paymentMethod: 'card' };
+  let renderer, payload;
+  await act(() => { renderer = create(React.createElement(Payment, { row: reversed, event, onConfirm: async (_, value) => { payload = value; } })); });
+  await act(() => button(renderer.root, 'Підтвердити оплату').props.onClick());
+  const dialog = renderer.root.findByProps({ 'aria-label': 'Підтвердження оплати' });
+  assert.equal(dialog.findByProps({ 'aria-label': 'Дата оплати' }).props.value, '2020-02-03');
+  await act(async () => button(dialog, 'Підтвердити оплату').props.onClick());
+  assert.equal(payload.operationDate, '2020-02-03');
+  assert.equal(payload.paymentMethod, 'card');
 });
