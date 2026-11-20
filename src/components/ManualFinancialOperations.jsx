@@ -39,7 +39,7 @@ export default function ManualFinancialOperations({ operations = [], onCreate, o
 
   return <section data-manual-financial-journal>
     <style>{`
-      .manual-operation-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+      .manual-operation-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
       .manual-operation-header h2 { margin:0; color:${theme.secondary}; font-size:24px; line-height:1.2; }
       .manual-operation-dialog { position:fixed; inset:0; z-index:1100; display:grid; place-items:center; padding:18px; background:rgba(15,18,28,.58); }
       .manual-operation-panel { width:min(720px,100%); max-height:calc(100dvh - 36px); overflow:auto; padding:22px; border:1px solid ${theme.border}; border-radius:22px; background:${theme.card}; box-shadow:0 28px 70px rgba(0,0,0,.28); }
