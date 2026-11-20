@@ -12,3 +12,14 @@ test('historical correction is admin-only, offers 0–2 and uses the transaction
   assert.match(ui,/await reloadFromDb\(\)/);
   assert.match(db,/rpc\('crm_admin_correct_historical_attendance'/);
 });
+
+
+test('attendance cells keep their click handlers without visible edit indicators', async () => {
+  const ui=await readFile(new URL('../src/components/AttendanceTab.jsx', import.meta.url),'utf8');
+  assert.doesNotMatch(ui,/[✎✏]/u);
+  assert.match(ui,/onClick=\{\(\) => handleToggleCell\(student, dateStr\)\}/);
+  assert.match(ui,/onClick=\{\(\) => handleToggleGuestCell\(student, dateStr\)\}/);
+  assert.match(ui,/onClick=\{\(\) => openHistoricalCorrection\(student, dateStr\)\}\s+style=\{hiddenCorrectionActionStyle\}/);
+  assert.match(ui,/onClick=\{\(\) => openHistoricalCorrectionRows\(\[rec\]\)\} style=\{hiddenCorrectionActionStyle\}/);
+  assert.match(ui,/color: "transparent"/);
+});

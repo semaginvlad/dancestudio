@@ -21,6 +21,15 @@ import { commitServerMutationThenRefresh, projectMovedMemberships, projectMovedS
 import { FINANCIAL_ATTENDANCE_ADMIN_MESSAGE, isFinancialAttendance } from "../attendanceFinancialGuard";
 import { buildOneOffAttendancePayment, isValidOneOffAttendancePayment } from "../oneOffAttendancePayment";
 
+// Preserve the separate correction action for cancelled dates without a visible indicator.
+const hiddenCorrectionActionStyle = {
+  border: 0,
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: 12,
+  color: "transparent",
+};
+
 const MONTH_NAMES = [
   "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
   "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"
@@ -4140,7 +4149,7 @@ export default function AttendanceTab({
                               : { bg: theme.bg === "#0F131A" ? "#1f3e79" : "#2563eb", mark };
                       return (
                         <td key={dateStr} className="attendance-day-cell" style={{ ...styles.cell(isCancelledDate(dateStr), dateStr.slice(0, 7) !== centerMonth, dateStr.slice(0, 7) === centerMonth), ...(isMonthBoundary ? styles.monthDivider : {}), ...(isLastDay ? { borderTopRightRadius: 15, borderBottomRightRadius: 15 } : {}) }}>
-                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button>{isAdmin && rec && !rec.queueAuto && <button type="button" title="Виправити кількість" aria-label="Виправити кількість" onClick={() => openHistoricalCorrectionRows([rec])} style={{ border: 0, background: "transparent", cursor: "pointer", fontSize: 12 }}>✎</button>}</div>
+                          <div className="attendance-cell-shell" style={styles.cellShell}><button type="button" className="attendance-cell-button" disabled={isCancelledDate(dateStr) || saving} onClick={() => handleToggleGuestCell(student, dateStr)} style={styles.cellBtn(cellView.bg, isCancelledDate(dateStr) || futureDay, saving)} title={isCancelledDate(dateStr) ? CANCELLED_ATTENDANCE_MESSAGE : (futureDay ? FUTURE_ATTENDANCE_MESSAGE : dateStr)}>{cellView.mark}</button>{isAdmin && rec && !rec.queueAuto && <button type="button" title="Виправити кількість" aria-label="Виправити кількість" onClick={() => openHistoricalCorrectionRows([rec])} style={hiddenCorrectionActionStyle}>{"\u00a0"}</button>}</div>
                         </td>
                       );
                     })}
@@ -4291,7 +4300,7 @@ export default function AttendanceTab({
                       {isAdmin && getRecordsForCell(student, dateStr).some((row) => !row.queueAuto) && (
                         <button type="button" title="Виправити кількість" aria-label="Виправити кількість" disabled={saving}
                           onClick={() => openHistoricalCorrection(student, dateStr)}
-                          style={{ border: 0, background: "transparent", cursor: "pointer", fontSize: 12 }}>✎</button>
+                          style={hiddenCorrectionActionStyle}>{"\u00a0"}</button>
                       )}
                       </div>
                     </td>
