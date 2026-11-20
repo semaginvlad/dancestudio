@@ -5,6 +5,8 @@ import { create, act } from 'react-test-renderer';
 import { createServer } from 'vite';
 import { manualExpenseTotalForRange } from '../src/manualFinancialOperations.js';
 
+process.env.VITE_SUPABASE_URL ||= 'https://example.supabase.co';
+process.env.VITE_SUPABASE_ANON_KEY ||= 'test-anon-key';
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
 after(() => server.close());
 const { default: Manual } = await server.ssrLoadModule('/src/components/ManualFinancialOperations.jsx');
@@ -54,4 +56,51 @@ test('pending manual details use the existing confirmation flow', async () => {
   const dialog = renderer.root.findByProps({ 'aria-label': 'Деталі операції' });
   await act(() => byText(dialog, 'button', 'Підтвердити').props.onClick());
   assert.equal(requested.id, row.id);
+});
+
+test('finance sections start with pending open and paid and manual lists collapsed, then toggle accessibly', async () => {
+  const { default: Posted } = await server.ssrLoadModule('/src/components/PostedRoomRentals.jsx');
+  const pendingRow = { id: 'p', pendingType: 'manual', title: 'Очікувана операція', amountUah: 125, details: 'Очікування', secondaryDetails: '125 ₴' };
+  const paidRows = [
+    { id: 'r1', title: 'Перша подія', occurrenceDate: '2026-11-10', amountUah: 200, categoryCode: 'room_rental', status: 'posted' },
+    { id: 'r2', title: 'Друга подія', occurrenceDate: '2026-11-11', amountUah: 350, categoryCode: 'room_rental', status: 'posted' },
+  ];
+  const fetchOperations = async () => paidRows;
+  let pending, posted, journal, unconfirmed;
+  globalThis.window = { confirm: () => true, alert: () => {} };
+  await act(async () => {
+    pending = create(React.createElement(Pending, { rows: [pendingRow], onRefresh: () => {}, onConfirm: async () => {}, onVoid: async () => {} }));
+    posted = create(React.createElement(Posted, { fetchOperations, onUnconfirm: async value => { unconfirmed = value; } }));
+    journal = create(React.createElement(Manual, { operations: [manual, voided], theme, inputStyle: {}, primaryButtonStyle: {}, secondaryButtonStyle: {}, onVoid: async () => {}, onConfirmRequest: () => {}, onCreate: async () => {} }));
+  });
+  const toggle = (renderer, id) => renderer.root.findByProps({ 'aria-controls': id });
+  const content = (renderer, id) => renderer.root.findByProps({ id });
+  const labelText = node => typeof node === 'string' ? node : node.children.map(labelText).join('');
+  assert.equal(toggle(pending, 'pending-finance-content').props['aria-expanded'], true);
+  assert.equal(content(pending, 'pending-finance-content').props.hidden, false);
+  assert.match(labelText(toggle(pending, 'pending-finance-content')), /Записів: 1/);
+  assert.equal(toggle(posted, 'posted-finance-content').props['aria-expanded'], false);
+  assert.equal(content(posted, 'posted-finance-content').props.hidden, true);
+  const postedHeader = labelText(toggle(posted, 'posted-finance-content'));
+  assert.match(postedHeader, /Записів: 2/); assert.match(postedHeader, /550/);
+  assert.equal(toggle(journal, 'manual-finance-content').props['aria-expanded'], false);
+  assert.equal(content(journal, 'manual-finance-content').props.hidden, true);
+  assert.match(labelText(toggle(journal, 'manual-finance-content')), /Записів: 2/);
+  assert.ok(journal.root.findByProps({ 'data-open-manual-operation': true }), 'manual creation remains available while collapsed');
+  await act(() => toggle(pending, 'pending-finance-content').props.onClick());
+  assert.equal(content(pending, 'pending-finance-content').props.hidden, true);
+  await act(() => toggle(pending, 'pending-finance-content').props.onClick());
+  assert.equal(content(pending, 'pending-finance-content').props.hidden, false);
+  await act(() => toggle(posted, 'posted-finance-content').props.onClick());
+  assert.equal(content(posted, 'posted-finance-content').props.hidden, false);
+  await act(() => byText(content(posted, 'posted-finance-content'), 'button', 'Деталі').props.onClick());
+  const paidDialog = posted.root.findByProps({ 'aria-label': 'Деталі операції' });
+  await act(async () => byText(paidDialog, 'button', 'Скасувати підтвердження').props.onClick());
+  assert.equal(unconfirmed.id, 'r1');
+  assert.match(labelText(toggle(posted, 'posted-finance-content')), /Записів: 1/);
+  await act(() => toggle(journal, 'manual-finance-content').props.onClick());
+  assert.equal(content(journal, 'manual-finance-content').props.hidden, false);
+  assert.ok(byText(content(journal, 'manual-finance-content'), 'button', 'Деталі'));
+  await act(() => toggle(journal, 'manual-finance-content').props.onClick());
+  assert.equal(content(journal, 'manual-finance-content').props.hidden, true);
 });
