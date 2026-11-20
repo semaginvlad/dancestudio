@@ -48,6 +48,13 @@ begin
   end if;
   if p_quantity = 0 then
     delete from public.attendance where id = v_att.id;
+    -- Keep activation in the same transaction as the attendance trigger's
+    -- usage/expiry reconciliation. No remaining attendance means no activation.
+    if v_att.sub_id is not null then
+      update public.subscriptions s
+      set activation_date = (select min(a.date) from public.attendance a where a.sub_id = s.id)
+      where s.id = v_att.sub_id;
+    end if;
   elsif p_quantity is distinct from coalesce(v_att.quantity, 1) then
     update public.attendance set quantity = p_quantity where id = v_att.id;
   end if;

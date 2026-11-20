@@ -234,3 +234,35 @@ test('separate legacy paid one-off on the same student, group and date blocks co
   await assert.rejects(correct(db,row.id,2),/Ця відмітка має підтверджену оплату/);
   assert.equal((await db.query('select quantity from attendance where id=$1',[row.id])).rows[0].quantity,1);
 });
+
+
+test('deleting the only historical attendance clears activation in the same transaction', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  await db.query("update subscriptions set activation_date='2026-01-10' where id=$1",[sub]);
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2) returning id`,[user,sub])).rows[0];
+  await correct(db,row.id,0);
+  const after=(await db.query('select activation_date::text, used_trainings, end_date::text from subscriptions where id=$1',[sub])).rows[0];
+  assert.deepEqual(after,{activation_date:null,used_trainings:0,end_date:'2026-02-01'});
+});
+
+test('deleting the first of multiple historical attendances moves activation to the earliest remaining date', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  await db.query("update subscriptions set activation_date='2026-01-10' where id=$1",[sub]);
+  const first=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',1) returning id`,[user,sub])).rows[0];
+  await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-20',$2,'subscription',1),($1,'g','2026-01-15',$2,'subscription',1)`,[user,sub]);
+  await correct(db,first.id,0);
+  const after=(await db.query('select activation_date::text, used_trainings, end_date::text from subscriptions where id=$1',[sub])).rows[0];
+  assert.deepEqual(after,{activation_date:'2026-01-15',used_trainings:2,end_date:'2026-01-20'});
+});
+
+test('failed activation update rolls back the attendance deletion and usage/expiry', async t => {
+  const db=await correctionDb(); t.after(()=>db.close());
+  await db.query("update subscriptions set activation_date='2026-01-10' where id=$1",[sub]);
+  const row=(await db.query(`insert into attendance(student_id,group_id,date,sub_id,entry_type,quantity) values ($1,'g','2026-01-10',$2,'subscription',2) returning id`,[user,sub])).rows[0];
+  await db.exec(`create function reject_activation() returns trigger language plpgsql as $$ begin raise exception 'activation failure'; end $$; create trigger reject_activation before update of activation_date on subscriptions for each row execute function reject_activation();`);
+  await assert.rejects(correct(db,row.id,0),/activation failure/);
+  assert.equal((await db.query('select count(*)::int as n from attendance where id=$1',[row.id])).rows[0].n,1);
+  assert.equal((await state(db)).used_trainings,2);
+  assert.equal((await state(db)).end_date,'2026-01-10');
+  assert.equal((await db.query('select activation_date::text from subscriptions where id=$1',[sub])).rows[0].activation_date,'2026-01-10');
+});
