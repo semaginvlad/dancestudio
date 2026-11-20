@@ -3,7 +3,7 @@ import { MANUAL_OPERATION_CATEGORIES } from '../manualFinancialOperations';
 import { btnS, cardSt, theme } from '../shared/constants';
 
 export default function FinancialOperationDetails({ row, manual = false, onClose, children }) {
-  const category = MANUAL_OPERATION_CATEGORIES[row.direction || 'income']?.find((item) => item.value === row.categoryCode)?.label || row.categoryCode || '—';
+  const category = row.categoryCode === 'individual_training' ? 'Індивідуальне тренування' : MANUAL_OPERATION_CATEGORIES[row.direction || 'income']?.find((item) => item.value === row.categoryCode)?.label || row.categoryCode || '—';
   const fields = [
     ['Напрям', (row.direction || 'income') === 'expense' ? 'Витрата' : 'Дохід'],
     ['Категорія', category],
@@ -13,7 +13,7 @@ export default function FinancialOperationDetails({ row, manual = false, onClose
     ['Дата', row.operationDate || '—'],
     ['Опис / коментар', row.note || '—'],
   ];
-  if (!manual && row.categoryCode === 'room_rental') {
+  if (!manual && ['room_rental', 'individual_training'].includes(row.categoryCode)) {
     fields.push(['Подія', row.title || '—'], ['Зал', row.roomName || '—'], ['Дата події', row.occurrenceDate || '—'], ['Час', [row.startTime, row.endTime].filter(Boolean).join('–') || '—'], ['Тренер', row.trainerName || '—'], ['Кількість людей', row.peopleCount ?? '—']);
   }
   return <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 16 }}>

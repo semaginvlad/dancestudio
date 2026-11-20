@@ -42,8 +42,8 @@ test('rental details show available booking information and retain confirmation 
   const dialog = renderer.root.findByProps({ 'aria-label': 'Деталі операції' });
   for (const value of ['Майстер-клас', 'Олена', 'Велика зала', '2026-11-12', '10:00', '11:00', '8', '300']) assert.match(textOf(renderer), new RegExp(value));
   assert.ok(byText(dialog, 'button', 'Скасувати'));
-  await act(() => byText(dialog, 'button', 'Підтвердити').props.onClick());
-  assert.ok(renderer.root.findByProps({ 'aria-label': 'Підтвердження оплати' }));
+  assert.equal(byText(dialog, 'button', 'Підтвердити'), undefined);
+  assert.match(textOf(renderer), /Підтвердження оплати доступне у вкладці/);
 });
 
 test('pending manual details use the existing confirmation flow', async () => {

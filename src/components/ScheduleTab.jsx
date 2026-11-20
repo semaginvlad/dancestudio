@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import SchedulePayment, { PaymentBadge, paymentForEvent, paymentLabel } from './SchedulePayment';
+import { fetchPendingIndividualIncome, fetchScheduleFinancialOperations } from '../db';
 import { getScheduleSlotStartTime, synchronizeScheduleSlotTime } from "../shared/groupSchedule";
 import { createPortal } from "react-dom";
 import { btnP, btnS, cardSt, inputSt, theme } from "../shared/constants";
@@ -392,6 +394,8 @@ export default function ScheduleTab({
   currentUser = null,
   scheduleScale = 100,
   bookingTariffs = [],
+  onConfirmSchedulePayment,
+  onSchedulePendingRefresh,
 }) {
   const DEFAULT_ROOM = "Основна зала";
   const NO_ROOM = "Без залу";
@@ -497,6 +501,22 @@ export default function ScheduleTab({
   const [bulkPlanSetup, setBulkPlanSetup] = useState(null);
   const [bulkPlanEdit, setBulkPlanEdit] = useState(null);
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
+  const [schedulePayments, setSchedulePayments] = useState([]);
+  const [schedulePaymentsError, setSchedulePaymentsError] = useState('');
+  useEffect(() => {
+    let active = true;
+    if (!isAdmin) { setSchedulePayments([]); return () => { active = false; }; }
+    // The existing pending RPC reconciles current occurrences before reading.
+    fetchPendingIndividualIncome().then(rows => { if (active && onSchedulePendingRefresh) onSchedulePendingRefresh(rows); return fetchScheduleFinancialOperations(); }).then(rows => {
+      if (active) { setSchedulePayments(rows); setSchedulePaymentsError(''); }
+    }).catch(error => { if (active) setSchedulePaymentsError(error?.message || 'Не вдалося завантажити оплати'); });
+    return () => { active = false; };
+  }, [isAdmin, roomBookings]);
+  const getPayment = event => paymentForEvent(schedulePayments, event, isAdmin);
+  const confirmPayment = async (row, payload) => {
+    const posted = await onConfirmSchedulePayment(row, payload);
+    setSchedulePayments(current => current.map(item => item.id === row.id ? { ...item, ...posted } : item));
+  };
   const [concurrentEvents, setConcurrentEvents] = useState(null);
   const concurrentDialogRef = useRef(null);
   const mobileWeekOverviewRef = useRef(null);
@@ -1271,7 +1291,7 @@ export default function ScheduleTab({
     }));
   };
   const activateScheduleEvent = (event, { editMutable = false } = {}) => {
-    if (isReadOnlyScheduleEvent(event) || !editMutable || !canMutateEvent(event)) {
+    if (getPayment(event) || isReadOnlyScheduleEvent(event) || !editMutable || !canMutateEvent(event)) {
       setSelectedEventDetails(event);
       return;
     }
@@ -2841,6 +2861,7 @@ export default function ScheduleTab({
         </div>
       )}
 
+      {isAdmin && schedulePaymentsError && <div role="alert">{schedulePaymentsError}</div>}
       {selectedEventDetails && (
         <div style={{ ...modalOverlaySt, zIndex: 5000, display: "grid", placeItems: "center", padding: 12 }}>
           <div role="dialog" aria-modal="true" aria-labelledby="schedule-event-details-title" tabIndex={-1} style={{ ...plannerPanelSt, width: "min(520px,94vw)", maxHeight: "86vh", overflow: "auto", borderRadius: 22 }}>
@@ -2862,10 +2883,11 @@ export default function ScheduleTab({
               })()}
             </div>
             <dl style={{ marginTop: 12, display: "grid", gridTemplateColumns: "max-content 1fr", gap: "8px 14px", fontSize: 13 }}>
-              {buildEventDetails(selectedEventDetails).map((field) => (
+              {buildEventDetails(selectedEventDetails).filter(field => isAdmin || !["Ціна", "Спосіб оплати"].includes(field.label)).map((field) => (
                 <React.Fragment key={field.label}><dt style={{ color: theme.textLight }}>{field.label}</dt><dd style={{ margin: 0 }}>{field.value}</dd></React.Fragment>
               ))}
             </dl>
+            {isAdmin && <SchedulePayment row={getPayment(selectedEventDetails)} event={selectedEventDetails} onConfirm={confirmPayment} />}
             {selectedEventDetails.kind === "booking" && canMutateEvent(selectedEventDetails) ? (
               <div aria-label="Дії бронювання" style={{ marginTop: 14, display: "flex", gap: 7, flexWrap: "wrap" }}>
                 <button type="button" style={btnP} disabled={detailsMutationBusy} onClick={() => { const event = selectedEventDetails; setSelectedEventDetails(null); startEdit(event); }}>Редагувати</button>
@@ -3368,6 +3390,7 @@ export default function ScheduleTab({
                     const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
                       <button type="button" key={e.id} title={`${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onClick={() => setSelectedEventDetails(e)} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
+                        <PaymentBadge row={getPayment(e)} />
                         {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", minWidth: planSeriesLabel ? 28 : 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto", padding: planSeriesLabel ? "0 4px" : 0 }}>✓{planSeriesLabel ? ` ${planSeriesLabel}` : ""}</span> : null}
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{e.startTime} {e.title}{selectedRoom === "all" ? ` · ${e.roomName || UNKNOWN_ROOM_NAME}` : ""}</span>
                       </button>
@@ -3486,6 +3509,7 @@ export default function ScheduleTab({
                           onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); activateScheduleEvent(e, { editMutable: true }); } }}
                           style={{ position: "absolute", left: isMobile ? 5 : 8, right: isMobile ? 5 : 8, top, height, border: `1px solid ${c.border}`, background: c.bg, borderRadius: isMobile ? 8 : 10, padding: isMobile ? 4 : 6, overflow: "hidden", zIndex: 4 }}
                         >
+                          {getPayment(e) && <span style={{ position: "absolute", bottom: 1, right: 1, zIndex: 6 }}><PaymentBadge row={getPayment(e)} /></span>}
                           {hasPlan ? <span title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: isMobile ? 4 : 5, right: isMobile ? 4 : 5, zIndex: 6, display: "inline-grid", placeItems: "center", width: isMobile ? 15 : 17, height: isMobile ? 15 : 17, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.9)" : "rgba(20,184,166,.92)", color: "#fff", fontSize: isMobile ? 9 : 10, fontWeight: 900, boxShadow: "0 4px 12px rgba(20,184,166,.28)" }}>✓</span> : null}
                           {planSeriesLabel ? <span title={`Порядок плану ${planSeriesLabel}`} style={{ position: "absolute", top: isMobile ? 20 : 24, right: isMobile ? 3 : 4, zIndex: 6, display: "inline-grid", placeItems: "center", minWidth: isMobile ? 22 : 26, height: isMobile ? 12 : 14, borderRadius: 999, padding: "0 4px", background: isDarkTheme ? "rgba(15,23,42,.82)" : "rgba(255,255,255,.86)", color: isDarkTheme ? "#99f6e4" : "#0f766e", border: `1px solid ${isDarkTheme ? "rgba(153,246,228,.25)" : "rgba(15,118,110,.18)"}`, fontSize: isMobile ? 8 : 9, fontWeight: 900, lineHeight: 1 }}>{planSeriesLabel}</span> : null}
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, minWidth: 0, paddingRight: hasPlan ? 18 : 0 }}>
@@ -3658,9 +3682,10 @@ export default function ScheduleTab({
                         const trainerName = getScheduleEventTrainerName(event);
                         const fullType = getEventTypeLabel(event.eventType);
                         const titleLineCount = Math.max(1, Math.floor((height - 23) / 12));
-                        const accessibleLabel = `${fullType}${trainerName ? ` · ${trainerName}` : ""} · ${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · Статус: ${status.text}`;
+                        const accessibleLabel = `${fullType}${trainerName ? ` · ${trainerName}` : ""} · ${event.title} · ${event.startTime}–${event.endTime} · ${lane.roomName} · Статус: ${status.text}${getPayment(event) ? ` · ${paymentLabel(getPayment(event))}` : ""}`;
                         return <React.Fragment key={event.id}>
                           <button type="button" data-event-card="1" aria-label={accessibleLabel} title={accessibleLabel} onClick={(clickEvent) => { clickEvent.stopPropagation(); setSelectedEventDetails(event); }} style={{ position: "absolute", top, left: `calc(${left}% + 2px)`, width: `calc(${width}% - 4px)`, height, minWidth: 0, zIndex: 5 + event.colIndex, padding: height < 24 ? "1px 3px" : (isMobile ? "3px 4px" : "4px 5px"), paddingRight: hasPlan ? 21 : (isMobile ? 4 : 5), border: `1px solid ${color.border}`, borderRadius: Math.min(7, height / 3), background: color.bg, color: theme.text, opacity: status.opacity, overflow: "hidden", textAlign: "left", cursor: "pointer" }}>
+                            {getPayment(event) && <span style={{ position: "absolute", bottom: 1, right: 1, zIndex: 1 }}><PaymentBadge row={getPayment(event)} /></span>}
                             {hasPlan ? <span aria-label={planSeriesLabel ? `Є план, порядок ${planSeriesLabel}` : "Є план"} title={planSeriesLabel ? `Є план · ${planSeriesLabel}` : "Є план"} style={{ position: "absolute", top: 2, right: 2, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 999, background: "#0f9f8f", color: "#fff", fontSize: 8, fontWeight: 900, display: "grid", placeItems: "center" }}>{planSeriesLabel || "✓"}</span> : null}
                             {height < 24 ? <span style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, height: "100%" }}>
                               {typeMark ? <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 6, lineHeight: "9px", minWidth: 9, height: 9, borderRadius: 999, textAlign: "center", background: typeMark === "І" ? INDIVIDUAL_TYPE_BADGE_BG : typeMark === "Г" ? GROUP_TYPE_BADGE_BG : color.border, color: "#fff", fontWeight: 900 }}>{typeMark}</span> : null}

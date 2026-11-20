@@ -502,7 +502,7 @@ test("mobile week mini-grid uses dynamic overlap columns and exact geometry", as
 test("week card accessible labels retain full type, trainer, title, time, room and status", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   assert.match(source, /const fullType = getEventTypeLabel\(event\.eventType\)/);
-  assert.match(source, /const accessibleLabel = `\$\{fullType\}\$\{trainerName \? ` · \$\{trainerName\}` : ""\} · \$\{event\.title\} · \$\{event\.startTime\}–\$\{event\.endTime\} · \$\{lane\.roomName\} · Статус: \$\{status\.text\}`/);
+  assert.match(source, /const accessibleLabel = `\$\{fullType\}\$\{trainerName \? ` · \$\{trainerName\}` : ""\} · \$\{event\.title\} · \$\{event\.startTime\}–\$\{event\.endTime\} · \$\{lane\.roomName\} · Статус: \$\{status\.text\}/);
   assert.match(source, /aria-label=\{accessibleLabel\} title=\{accessibleLabel\}/);
 });
 

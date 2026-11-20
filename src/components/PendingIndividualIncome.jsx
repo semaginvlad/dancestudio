@@ -54,7 +54,7 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
 
   return <section style={{ ...cardSt, background: theme.card, marginBottom: 24, display: 'grid', gap: 14 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оренда залів, ручні доходи та витрати · {rows.length}</div></div>
+      <div><h3 style={{ margin: 0, color: theme.textMain }}>Очікують підтвердження</h3><div style={{ marginTop: 4, color: theme.textMuted, fontSize: 13 }}>Оплати подій і ручні операції · {rows.length}</div></div>
       <button type="button" style={btnS} onClick={onRefresh} disabled={loading}>{loading ? 'Оновлення…' : 'Оновити'}</button>
     </div>
     {error && <div role="alert" style={{ color: theme.danger }}>{error}</div>}
@@ -66,14 +66,14 @@ export default function PendingIndividualIncome({ rows = [], loading = false, er
           <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 5 }}>{row.details || `${row.trainerName} · ${row.occurrenceDate} · ${row.startTime}–${row.endTime}`}</div>
           <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 3 }}>{row.secondaryDetails || `${row.roomName} · ${row.peopleCount} ос. · початкова сума ${row.amountUah.toLocaleString('uk-UA')} ₴`}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" style={btnS} onClick={() => setDetails(row)}>Деталі</button><button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>
-        {row.pendingType !== 'manual' && row.categoryCode === 'room_rental' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(row); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" style={btnS} onClick={() => setDetails(row)}>Деталі</button>{row.pendingType === 'manual' && <button type="button" style={btnP} onClick={() => openConfirmation(row)}>Підтвердити</button>}
+        {row.pendingType !== 'manual' && ['room_rental', 'individual_training'].includes(row.categoryCode) && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(row); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}</div>
       </article>)}
     </div>
     {details && <FinancialOperationDetails row={details} manual={details.pendingType === 'manual'} onClose={() => setDetails(null)}>
-      <button type="button" style={btnP} onClick={() => { setDetails(null); openConfirmation(details); }}>Підтвердити</button>
+      {details.pendingType === 'manual' ? <button type="button" style={btnP} onClick={() => { setDetails(null); openConfirmation(details); }}>Підтвердити</button> : <span>Підтвердження оплати доступне у вкладці «Графік».</span>}
       {details.pendingType === 'manual' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати операцію? Вона залишиться в журналі та не враховуватиметься у підсумках.')) return; try { await onVoidManual(details); setDetails(null); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати операцію'); } }}>Скасувати операцію</button>}
-      {details.pendingType !== 'manual' && details.categoryCode === 'room_rental' && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(details); setDetails(null); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}
+      {details.pendingType !== 'manual' && ['room_rental', 'individual_training'].includes(details.categoryCode) && <button type="button" style={btnS} onClick={async () => { if (!window.confirm('Скасувати оплату оренди? Бронювання залишиться без змін.')) return; try { await onVoid(details); setDetails(null); } catch (error) { window.alert(error?.message || 'Не вдалося скасувати оплату'); } }}>Скасувати</button>}
     </FinancialOperationDetails>}
     {selected && draft && <div role="dialog" aria-modal="true" aria-label="Підтвердження оплати" style={{ position: 'fixed', inset: 0, zIndex: 1300, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 16 }}>
       <div style={{ ...cardSt, width: 'min(460px,100%)', background: theme.card, display: 'grid', gap: 14 }}>
