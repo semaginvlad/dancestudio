@@ -20,7 +20,7 @@ test("one-off and unknown modes ignore stale recurrenceUntil", () => { for (cons
 test("weekly candidates align to the booking start using calendar days", () => { assert.deepEqual(bookingRecurrenceCandidates({date:"2026-01-01",recurrence:"weekly"},"2026-01-03","2026-01-20"),["2026-01-08"]); });
 test("monthly candidates skip invalid days and are capped to one Gregorian cycle", () => { assert.deepEqual(bookingRecurrenceCandidates({date:"2026-01-31",recurrence:"monthly"},"2026-02-01","2026-03-31"),["2026-03-31"]); assert.ok(bookingRecurrenceCandidates({date:"2026-01-31",recurrence:"monthly"},"2026-01-01","9999-12-31").length <= 4800); });
 test("all-room block expands into the legacy fallback room", () => { const occurrences=expandBookingBlocks([{...base,allRooms:true,startsOn:"2026-10-02",endsOn:"2026-10-02",weekdays:[5]}],"2026-10-02","2026-10-02",[]); assert.equal(occurrences.length,1); assert.equal(occurrences[0].roomName,"Основна зала"); });
-test("trainer is blocked while admin must explicitly confirm override", () => { const booking={date:"2026-10-02",startTime:"10:30",endTime:"11:30",roomId:"one"}; const trainer=getBookingBlockSaveGuard(booking,[base],rooms,false); const admin=getBookingBlockSaveGuard(booking,[base],rooms,true); assert.equal(trainer.blocked,true); assert.equal(trainer.requiresConfirmation,false); assert.equal(admin.blocked,false); assert.equal(admin.requiresConfirmation,true); });
+test("both trainer and admin are blocked", () => { const booking={date:"2026-10-02",startTime:"10:30",endTime:"11:30",roomId:"one"}; const trainer=getBookingBlockSaveGuard(booking,[base],rooms,false); const admin=getBookingBlockSaveGuard(booking,[base],rooms,true); assert.equal(trainer.blocked,true); assert.equal(trainer.requiresConfirmation,false); assert.equal(admin.blocked,true); assert.equal(admin.requiresConfirmation,false); });
 test("selected-room draft resolves current canonical names before existing-booking checks", () => { const draft=resolveBookingBlockRooms({...base,roomIds:["one"],roomNames:undefined},[{id:"one",name:"  Перейменована   зала  "},{id:"two",name:"Друга"}]); assert.deepEqual(draft.roomNames,["Перейменована зала"]); const matching={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"перейменована ЗАЛА"}; const other={...matching,roomName:"Друга"}; assert.ok(findBookingBlockConflict(matching,[draft],rooms)); assert.equal(findBookingBlockConflict(other,[draft],rooms),null); });
 test("room reconciliation uses stable IDs and current names after rename", () => { const original={...base,roomNames:["Стара назва"]}; const reconciled=reconcileBookingBlockRooms(original,[{id:"one",name:" Нова   назва ",isActive:true}]); assert.notEqual(reconciled,original); assert.deepEqual(reconciled.roomIds,["one"]); assert.deepEqual(reconciled.roomNames,["Нова назва"]); assert.deepEqual(original.roomNames,["Стара назва"]); const booking={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"нова НАЗВА"}; assert.ok(findBookingBlockConflict(booking,[reconciled],rooms)); assert.equal(blockMatchesRoom(reconciled,{name:"Стара назва"}),false); });
 test("archived and partially unresolved room associations survive unrelated edits", () => { const block={...base,title:"Нова причина",roomIds:["one","archived"],roomNames:["Стара активна","Архівна зала"]}; const reconciled=reconcileBookingBlockRooms(block,[{id:"one",name:"Актуальна"}]); assert.deepEqual(reconciled.roomIds,["one","archived"]); assert.deepEqual(reconciled.roomNames,["Актуальна","Архівна зала"]); assert.equal(reconciled.title,"Нова причина"); assert.ok(findBookingBlockConflict({date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"архівна  ЗАЛА"},[reconciled],rooms)); });
@@ -37,9 +37,9 @@ test("room picker offers active rooms and only archived rooms already bound to t
   ]);
 });
 test("reconciliation deduplicates names and clears associations for all-room rules", () => { const selected=reconcileBookingBlockRooms({...base,roomIds:["one","two"],roomNames:["OLD"," зал 1 "]},[{id:"one",name:"Зал 1"}]); assert.deepEqual(selected.roomIds,["one","two"]); assert.deepEqual(selected.roomNames,["Зал 1"]); const all=reconcileBookingBlockRooms({...base,allRooms:true,roomIds:["one"],roomNames:["Перша"]},rooms); assert.deepEqual(all.roomIds,[]); assert.deepEqual(all.roomNames,[]); });
-test("calendar expansion and save guard share the reconciled rule", () => { const canonicalRooms=[{id:"one",name:"Нова",isActive:true}]; const reconciled=reconcileBookingBlockRooms({...base,roomNames:["Стара"]},canonicalRooms); const display=buildBookingBlockDisplayRooms(canonicalRooms,[...reconciled.roomNames],"Основна зала"); assert.equal(expandBookingBlocks([reconciled],"2026-10-02","2026-10-02",display)[0].roomName,"Нова"); assert.ok(getBookingBlockSaveGuard({date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"Нова"},[reconciled],canonicalRooms,true).requiresConfirmation); });
+test("calendar expansion and save guard share the reconciled rule", () => { const canonicalRooms=[{id:"one",name:"Нова",isActive:true}]; const reconciled=reconcileBookingBlockRooms({...base,roomNames:["Стара"]},canonicalRooms); const display=buildBookingBlockDisplayRooms(canonicalRooms,[...reconciled.roomNames],"Основна зала"); assert.equal(expandBookingBlocks([reconciled],"2026-10-02","2026-10-02",display)[0].roomName,"Нова"); assert.ok(getBookingBlockSaveGuard({date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"Нова"},[reconciled],canonicalRooms,true).blocked); });
 test("new mutation presentation has no placeholder id while edits retain their UUID", () => { const created=resolveBookingBlockRooms({...base,id:undefined,roomNames:undefined},rooms); const updated=resolveBookingBlockRooms({...base,id:"11111111-1111-1111-1111-111111111111",roomNames:undefined},rooms); assert.notEqual(created.id,"draft"); assert.equal(updated.id,"11111111-1111-1111-1111-111111111111"); assert.deepEqual(created.roomNames,["Перша"]); });
-test("conflict-only id never enters the create/update mutation payload", async () => { const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8"); assert.match(source,/const conflictDraft = \{ \.\.\.presentationDraft, id: presentationDraft\.id \|\| "draft" \}/); assert.match(source,/findBookingBlockConflict\(booking, \[conflictDraft\]/); assert.match(source,/onSaveBookingBlock\?\.\(presentationDraft\)/); assert.doesNotMatch(source,/onSaveBookingBlock\?\.\(conflictDraft\)/); const app=await (await import("node:fs/promises")).readFile(new URL("../src/App.jsx",import.meta.url),"utf8"); assert.match(app,/block\.id \? await db\.updateScheduleBookingBlock\(block\.id, block\) : await db\.createScheduleBookingBlock\(block\)/); });
+test("conflict-only id never enters the create/update mutation payload", async () => { const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8"); assert.match(source,/const conflictDraft = \{ \.\.\.presentationDraft, id: presentationDraft\.id \|\| "draft" \}/); assert.match(source,/confirmBookingBlockOverlaps\(freshBookings, conflictDraft/); assert.match(source,/onSaveBookingBlock\?\.\(presentationDraft\)/); assert.doesNotMatch(source,/onSaveBookingBlock\?\.\(conflictDraft\)/); const app=await (await import("node:fs/promises")).readFile(new URL("../src/App.jsx",import.meta.url),"utf8"); assert.match(app,/block\.id \? await db\.updateScheduleBookingBlock\(block\.id, block\) : await db\.createScheduleBookingBlock\(block\)/); });
 test("draft warning keeps all-room, adjacent and cancelled semantics", () => { const booking={date:"2026-10-02",startTime:"10:30",endTime:"10:45",roomName:"Друга"}; assert.ok(findBookingBlockConflict(booking,[{...base,allRooms:true,roomIds:[],roomNames:[]}],rooms)); assert.equal(findBookingBlockConflict({...booking,startTime:"11:00",endTime:"12:00"},[{...base,allRooms:true}],rooms),null); assert.equal(findBookingBlockConflict({...booking,status:"cancelled"},[{...base,allRooms:true}],rooms),null); });
 test("display rooms merge active and legacy lanes with canonical active priority", () => { const display=buildBookingBlockDisplayRooms([{id:"active",name:" Зал 1 ",isActive:true}],["зал   1","Legacy"],"Основна зала"); assert.deepEqual(display,[{id:"active",name:"Зал 1",isActive:true},{id:"legacy:legacy",name:"Legacy",isActive:true}]); const all=expandBookingBlocks([{...base,allRooms:true,startsOn:"2026-10-02",endsOn:"2026-10-02",weekdays:[5]}],"2026-10-02","2026-10-02",display); assert.deepEqual(all.map(item=>item.roomName),["Зал 1","Legacy"]); });
 test("specific room stays in its lane and default appears only with no rooms", () => { const display=buildBookingBlockDisplayRooms([], ["Legacy"], "Основна зала"); const selected={...base,roomIds:[],roomNames:["legacy"],startsOn:"2026-10-02",endsOn:"2026-10-02",weekdays:[5]}; assert.deepEqual(expandBookingBlocks([selected],"2026-10-02","2026-10-02",display).map(item=>item.roomName),["Legacy"]); assert.deepEqual(buildBookingBlockDisplayRooms([],[],"Основна зала").map(room=>room.name),["Основна зала"]); assert.deepEqual(display.map(room=>room.name),["Legacy"]); });
@@ -64,7 +64,7 @@ test("booking-block mutation guard clears after failure and permits create/updat
 
 test("booking-block manager disables save, preserves failed draft, and shares guard for create/update", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady[\s\S]*?\}>\{blockSaving \? "Збереження…" : "Зберегти"\}/);
+  assert.match(source,/disabled=\{blockSaving \|\| !bookingBlockMutationsReady[\s\S]*?\}>\{blockSaving \? "Збереження…" : "Зберегти закриття"\}/);
   assert.match(source,/runBookingBlockMutation\(blockSavingRef, setBlockSaving, async \(\) =>/);
   assert.match(source,/return onSaveBookingBlock\?\.\(presentationDraft\)/);
   assert.match(source,/catch \(error\) \{ setBlockError/);
@@ -130,29 +130,18 @@ test("room-booking loading fails closed and fresh rows drive block warnings", as
   assert.doesNotMatch(app,/setRoomBookings\(rb \|\| \[\]\)/);
   assert.match(app,/const bookings = await \(isAdmin \? db\.fetchRoomBookings\(\) : db\.fetchScheduleRoomBookings\(\)\)/);
   assert.match(schedule,/const freshBookings = await onRetryRoomBookings\?\.\(\)/);
-  assert.match(schedule,/freshBookings\.some\(\(booking\) => findBookingBlockConflict/);
+  assert.match(schedule,/freshBookings\.filter\(\(booking\) => findBookingBlockConflict/);
   assert.match(schedule,/role=\{roomBookingsLoadStatus === "error" \? "alert" : "status"\}/);
-  assert.match(schedule,/if \(block\.isActive\) \{ await onToggleBookingBlock\?\.\(block\); return; \}/);
+  assert.match(schedule,/if \(block\.isActive\) \{\s*if \(window\.confirm/);
 });
 
-test("admin override is explicit and a newly discovered server conflict requires confirmation", async () => {
-  const fs=await import("node:fs/promises");
-  const app=await fs.readFile(new URL("../src/App.jsx",import.meta.url),"utf8");
-  const schedule=await fs.readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
-  const db=await fs.readFile(new URL("../src/db.js",import.meta.url),"utf8");
-  assert.match(app,/options\.overrideBookingBlock[\s\S]*db\.adminOverrideInsertRoomBooking/);
-  assert.match(app,/options\.overrideBookingBlock[\s\S]*db\.adminOverrideUpdateRoomBooking/);
-  assert.match(schedule,/await onRetryBookingBlocks\?\.\(\);[\s\S]*Явно підтвердити обхід[\s\S]*persistBooking\(true\)/);
-  assert.match(db,/crm_admin_override_create_room_booking/);
-  assert.match(db,/crm_admin_override_update_room_booking/);
-});
-
-test("trainer refreshes stale conflicting blocks before the shared mutation rejects", async () => {
+test("a block conflict rejects both roles and refreshes server conflicts", async () => {
   const source=await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx",import.meta.url),"utf8");
   assert.match(source,/getFreshBookingBlockSaveGuard\([\s\S]*async \(\) => onRetryBookingBlocks\?\.\(\)/);
-  assert.match(source,/if \(guard\.conflict && !isAdmin\) throw new Error\(bookingBlockMessage\(guard\.conflict\)\)/);
+  assert.match(source,/if \(guard\.conflict\) throw new Error\(bookingBlockMessage\(\)\)/);
+  assert.match(source,/persistBooking\(false\)/);
+  assert.doesNotMatch(source,/persistBooking\(true\)/);
   assert.match(source,/bookingMutationRef\.current = true[\s\S]*finally \{[\s\S]*bookingMutationRef\.current = false/);
-  assert.match(source,/if \(!isAdmin\) throw error;[\s\S]*window\.confirm[\s\S]*persistBooking\(true\)/);
 });
 
 test("fresh trainer guard releases deleted blocks, retains active blocks, and fails closed", async () => {
@@ -167,7 +156,7 @@ test("fresh trainer guard releases deleted blocks, retains active blocks, and fa
   assert.equal(deletedForAdmin.conflict,null);
   assert.equal(refreshed,true);
   const activeForAdmin=await getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>[base]);
-  assert.equal(activeForAdmin.requiresConfirmation,true);
+  assert.equal(activeForAdmin.blocked,true);
   await assert.rejects(getFreshBookingBlockSaveGuard(booking,[base],rooms,true,async()=>{throw new Error("admin refresh failed");}),/admin refresh failed/);
 });
 

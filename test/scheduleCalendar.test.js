@@ -495,7 +495,7 @@ test("mobile week mini-grid uses dynamic overlap columns and exact geometry", as
   assert.match(overview, /sameRoomConflictIds\.has\(event\.id\)/);
   assert.match(overview, /pointerEvents: "none"/);
   const blocks = overview.slice(overview.indexOf('return <span key={event.id}'), overview.indexOf('</span>;'));
-  assert.match(blocks, /\{event\.title\}/);
+  assert.match(blocks, /isBookingBlockEvent\(event\) \? "🔒" : event\.title/);
   assert.doesNotMatch(blocks, /typeMark|trainerInitials|event\.startTime|event\.roomName/);
 });
 
@@ -509,7 +509,8 @@ test("week card accessible labels retain full type, trainer, title, time, room a
 test("time-grid cards use a full-width stacked header and title", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/components/ScheduleTab.jsx", import.meta.url), "utf8");
   const roomCards = source.slice(source.indexOf("{lane.events.map((event)"), source.indexOf("{concurrentEvents?.length"));
-  const visibleCard = roomCards.slice(roomCards.indexOf('<button type="button" data-event-card="1"'), roomCards.indexOf('</button>'));
+  const cardStart = roomCards.indexOf('<button type="button" data-event-card="1"');
+  const visibleCard = roomCards.slice(cardStart, roomCards.indexOf('</button>', cardStart));
   assert.doesNotMatch(visibleCard, /gridTemplateColumns|borderRight/);
   assert.match(visibleCard, /gridTemplateRows: "13px minmax\(0,1fr\)"/);
   assert.match(visibleCard, /\{typeMark \? <span/);

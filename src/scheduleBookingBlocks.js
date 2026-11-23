@@ -167,6 +167,23 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
   return occurrences;
 }
 
+// A weekly rule can end after its last actual occurrence.
+export function hasFutureBookingBlockOccurrence(block, now = new Date()) {
+  if (block?.isActive === false) return false;
+  const today = formatDateOnly(now);
+  if (!parseDateOnly(block?.endsOn) || block.endsOn < today) return false;
+  const first = block.startsOn > today ? block.startsOn : today;
+  const start = parseDateOnly(first);
+  if (!start) return false;
+  for (let i = 0; i < 8; i += 1) {
+    const key = formatDateOnly(addCalendarDays(start, i));
+    if (key > block.endsOn) break;
+    const interval = bookingBlockIntervalForDate(block, key);
+    if (interval && (key > today || timeMinutes(interval.endTime) > now.getHours() * 60 + now.getMinutes())) return true;
+  }
+  return false;
+}
+
 export function findBookingBlockConflict(booking, blocks, rooms = []) {
   if (!booking || booking.status === "cancelled") return null;
   const room = rooms.find((item) => String(item.id) === String(booking.roomId)) || { id: booking.roomId, name: booking.roomName };
@@ -196,9 +213,14 @@ export function findBookingBlockConflict(booking, blocks, rooms = []) {
   return null;
 }
 
+export function confirmBookingBlockOverlaps(bookings, block, rooms, confirm) {
+  const count = bookings.filter((booking) => findBookingBlockConflict(booking, [block], rooms)).length;
+  return count === 0 || confirm(`У цей період уже є ${count} бронювань. Вони залишаться активними, але нові бронювання в закритий час створити не можна`);
+}
+
 export const getBookingBlockSaveGuard = (booking, blocks, rooms, isAdmin) => {
   const conflict = findBookingBlockConflict(booking, blocks, rooms);
-  return { conflict, blocked: Boolean(conflict) && !isAdmin, requiresConfirmation: Boolean(conflict) && Boolean(isAdmin) };
+  return { conflict, blocked: Boolean(conflict), requiresConfirmation: false };
 };
 
 export async function getFreshBookingBlockSaveGuard(booking, blocks, rooms, isAdmin, refreshBlocks) {
@@ -225,8 +247,7 @@ export async function runBookingBlockMutation(inFlightRef, setSaving, mutation) 
 
 export function validateBookingBlock(input) {
   const errors = {};
-  if (!String(input?.title || "").trim()) errors.title = "Вкажіть назву";
-  else if (String(input.title).trim().length > 120) errors.title = "Максимум 120 символів";
+  if (String(input?.title || "").trim().length > 120) errors.title = "Максимум 120 символів";
   if (String(input?.note || "").length > 2000) errors.note = "Максимум 2000 символів";
   if (!parseDateOnly(input?.startsOn) || !parseDateOnly(input?.endsOn) || input.startsOn > input.endsOn) errors.dates = "Перевірте діапазон дат";
   const weekdays = [...new Set((input?.weekdays || []).map(Number))];
