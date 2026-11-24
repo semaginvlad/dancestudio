@@ -1,3 +1,4 @@
+import { ClosureOverlay, groupClosureLanes, deduplicateClosureEvents } from "./ClosureOverlay";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import SchedulePayment, { PaymentBadge, paymentForEvent, paymentLabel } from './SchedulePayment';
 import { fetchPendingIndividualIncome, fetchScheduleFinancialOperations } from '../db';
@@ -2379,6 +2380,8 @@ export default function ScheduleTab({
     return Array.from(byRoom.entries()).slice(0, limit);
   }, [selectedRoom, selectedDateByRoom, selectedDateEvents, activeStudioRooms, primaryRoomName, dayRoomColumnLimit]);
 
+  const dayClosureGroups = useMemo(() => groupClosureLanes(dayRoomsToRender.map(([, events]) => ({ events }))), [dayRoomsToRender]);
+
   const dayRoomGridTemplate = useMemo(() => {
     if (selectedRoom !== "all") return isMobile ? "minmax(100%, 1fr)" : "minmax(260px,1fr)";
     const count = Math.max(1, dayRoomsToRender.length);
@@ -3383,7 +3386,7 @@ export default function ScheduleTab({
                 ? monthDayEvents
                 : monthDayEvents.filter((e) => (e.roomName || UNKNOWN_ROOM_NAME) === selectedRoom);
               const inMonth = d.getMonth() === monthStart.getMonth();
-              const sortedItems = items.slice().sort((a, b) => a.startMin - b.startMin);
+              const sortedItems = deduplicateClosureEvents(items).sort((a, b) => a.startMin - b.startMin);
               const { visible: previewItems, remaining } = monthPreview(sortedItems, isMobile ? 1 : (selectedRoom === "all" ? 3 : 2));
               return (
                 <div key={key} style={{ textAlign: "left", width: "100%", minWidth: 0, boxSizing: "border-box", minHeight: isMobile ? 92 : 116, height: isMobile ? 92 : undefined, border: `1px solid ${key === toLocalDateKey(new Date()) ? "#6366f1" : theme.border}`, borderRadius: isMobile ? 10 : 12, background: inMonth ? (isDarkTheme ? "rgba(255,255,255,.025)" : "#ffffff") : (isDarkTheme ? "rgba(255,255,255,.01)" : "#f8fafc"), color: theme.text, padding: isMobile ? 5 : 8, display: "grid", alignContent: "start", gap: isMobile ? 2 : 5, overflow: "hidden" }}>
@@ -3393,10 +3396,10 @@ export default function ScheduleTab({
                     const hasPlan = hasLessonPlanForEvent(e);
                     const planSeriesLabel = hasPlan ? getLessonPlanSeriesLabelForEvent(e) : "";
                     return (
-                      <button type="button" key={e.id} title={`${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onClick={() => activateScheduleEvent(e)} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
+                      <button type="button" key={e.id} title={isBookingBlockEvent(e) ? "Закритий час" : `${e.startTime} ${e.title} · ${e.roomName || UNKNOWN_ROOM_NAME}`} onClick={() => activateScheduleEvent(e)} style={{ border: `1px solid ${c.border}`, background: c.bg, borderRadius: 8, padding: "2px 6px", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", opacity: 0.92, display: "flex", alignItems: "center", gap: 4 }}>
                         <PaymentBadge row={getPayment(e)} />
                         {hasPlan ? <span style={{ display: "inline-grid", placeItems: "center", minWidth: planSeriesLabel ? 28 : 12, height: 12, borderRadius: 999, background: isDarkTheme ? "rgba(20,184,166,.28)" : "rgba(20,184,166,.16)", color: isDarkTheme ? "#99f6e4" : "#0f766e", fontSize: 8, fontWeight: 900, flex: "0 0 auto", padding: planSeriesLabel ? "0 4px" : 0 }}>✓{planSeriesLabel ? ` ${planSeriesLabel}` : ""}</span> : null}
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{isBookingBlockEvent(e) ? "🔒" : `${e.startTime} ${e.title}`}{selectedRoom === "all" ? ` · ${e.roomName || UNKNOWN_ROOM_NAME}` : ""}</span>
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{isBookingBlockEvent(e) ? "🔒" : `${e.startTime} ${e.title}`}{selectedRoom === "all" && !isBookingBlockEvent(e) ? ` · ${e.roomName || UNKNOWN_ROOM_NAME}` : ""}</span>
                       </button>
                     );
                   })}
@@ -3435,9 +3438,9 @@ export default function ScheduleTab({
           <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: selectedRoom === "all" ? "auto" : "visible", overflowY: "visible", WebkitOverflowScrolling: "touch", touchAction: selectedRoom === "all" ? "pan-x pan-y" : "auto", overscrollBehaviorX: "contain" }}>
             {selectedRoom === "all" && isMobile ? <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>{dayRoomsToRender.map(([room]) => <span key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 999, padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>{room || NO_ROOM}{isRoomBookingClosed(room) ? " · Тимчасово недоступний" : ""}</span>)}</div> : null}
             <div style={{ display: "grid", gap: isMobile ? 6 : 10, gridTemplateColumns: dayRoomGridTemplate, width: dayRoomScrollWidth, minWidth: selectedRoom === "all" && (!isMobile || dayRoomColumnLimit !== "1") ? (dayRoomScrollWidth || `max-content`) : undefined }}>
-              {dayRoomsToRender.map(([room, items]) => (
-                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "hidden", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : undefined }}>
-                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800 }}>{room || NO_ROOM}{isRoomBookingClosed(room) ? <div style={{ marginTop: 2, color: theme.danger, fontSize: 11 }}>Тимчасово недоступний</div> : null}</div>
+              {dayRoomsToRender.map(([room, items], laneIndex) => (
+                <div key={room} style={{ border: `1px solid ${theme.border}`, borderRadius: 14, overflow: "visible", minWidth: isMobile ? (selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : "100%") : 240, width: isMobile && selectedRoom === "all" && dayRoomColumnLimit !== "1" ? dayRoomMinWidth : undefined }}>
+                  <div style={{ padding: "8px 10px", borderBottom: `1px solid ${theme.border}`, fontWeight: 800, height: 64, boxSizing: "border-box", overflow: "auto" }}>{room || NO_ROOM}{isRoomBookingClosed(room) ? <div style={{ marginTop: 2, color: theme.danger, fontSize: 11 }}>Тимчасово недоступний</div> : null}</div>
                   <div style={{ position: "relative", minHeight: (DAY_END_HOUR - DAY_START_HOUR) * dayHourPx, background: "rgba(255,255,255,.01)" }}>
                     {canManageBookings ? (
                       <div
@@ -3485,12 +3488,13 @@ export default function ScheduleTab({
                     {isTodaySelected ? (
                       <div style={{ position: "absolute", left: 0, right: 0, top: ((nowMinute - DAY_START_HOUR * 60) / 60) * dayHourPx, borderTop: "1px solid #ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,.2)" }} />
                     ) : null}
+                    {dayClosureGroups.filter((group) => group.indices[0] === laneIndex).map((group) => <ClosureOverlay key={group.key} group={group} hourPx={dayHourPx} startHour={DAY_START_HOUR} endHour={DAY_END_HOUR} gap={(isMobile ? 6 : 10) + 2} isAdmin={isAdmin} onOpen={openBlockEvent} />)}
                     {items.sort((a,b)=>a.startMin-b.startMin).map((e) => {
                       const geometry = weekEventGeometry(e.startMin, e.endMin, dayHourPx, DAY_START_HOUR, DAY_END_HOUR);
                       if (!geometry) return null;
                       const { top } = geometry;
                       const height = Math.max(scheduleMinEventHeight, geometry.height);
-                      if (isBookingBlockEvent(e)) return <button key={e.id} type="button" aria-label="Закритий час" onClick={() => openBlockEvent(e)} style={{position:"absolute",left:1,top,width: isAdmin ? 30 : 18,height:geometry.height,zIndex:3,border:0,borderLeft:"3px solid #64748b",background:"rgba(100,116,139,.16)",color:theme.textLight,overflow:"hidden",padding:1,cursor:isAdmin ? "pointer" : "default"}}>🔒</button>;
+                      if (isBookingBlockEvent(e)) return null;
                       const c = e.color ? { bg: `${e.color}22`, border: e.color } : palette[colorKey(e)] || palette.default;
                       const typeMark = getEventTypeMark(e);
                       const trainerInitials = height >= 42 ? (getEventTrainerInitials(e) || getTrainerInitials(trainerMap.get(String(e.trainerId || e.trainer_id || "")))) : "";
@@ -3560,7 +3564,7 @@ export default function ScheduleTab({
                 const dayWidth = "clamp(118px, 34vw, 136px)";
                 const overviewDays = weekDays.map((day) => {
                   const date = toLocalDateKey(day);
-                  const events = roomFilteredEventsByDay.get(date) || [];
+                  const events = deduplicateClosureEvents(roomFilteredEventsByDay.get(date) || []);
                   const sameRoomConflictIds = new Set(roomLaneLayout(events, weekCanonicalRooms, UNKNOWN_ROOM_NAME).flatMap((lane) => lane.events.filter((event) => event.hasRoomConflict).map((event) => event.id)));
                   return { day, date, events: overlapEventLayout(events), sameRoomConflictIds };
                 });
@@ -3602,7 +3606,8 @@ export default function ScheduleTab({
               const shownDays = isMobile ? weekDays.filter((day) => toLocalDateKey(day) === selectedDate) : weekDays;
               const dayLayouts = shownDays.map((day) => {
                 const date = toLocalDateKey(day);
-                return { day, date, lanes: roomLaneLayout(roomFilteredEventsByDay.get(date) || [], weekCanonicalRooms, UNKNOWN_ROOM_NAME) };
+                const lanes = roomLaneLayout(roomFilteredEventsByDay.get(date) || [], weekCanonicalRooms, UNKNOWN_ROOM_NAME);
+                return { day, date, lanes, closureGroups: groupClosureLanes(lanes) };
               });
               const laneWidth = selectedRoom === "all" ? (isMobile ? "clamp(138px, 40vw, 156px)" : 84) : (isMobile ? 280 : 180);
               const laneWidthEstimate = selectedRoom === "all" && isMobile ? 150 : Number(laneWidth);
@@ -3627,7 +3632,7 @@ export default function ScheduleTab({
                   <div style={{ position: "sticky", left: 0, zIndex: 20, width: weekTimeColumnWidth, flex: "0 0 auto", background: theme.card, borderRight: `1px solid ${theme.border}` }}>
                     {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, i) => <div key={i} style={{ position: "absolute", top: i * weekHourPx - 7, left: 7, fontSize: 10, color: theme.textLight }}>{String(DAY_START_HOUR + i).padStart(2, "0")}:00</div>)}
                   </div>
-                  {dayLayouts.map(({ date, lanes }, dayIndex) => {
+                  {dayLayouts.map(({ date, lanes, closureGroups }, dayIndex) => {
                     const isToday = date === toLocalDateKey(new Date());
                     const divider = dayIndex > 0 ? `3px solid ${isToday ? theme.primary : weekDayDividerColor}` : `1px solid ${weekRoomDividerColor}`;
                     return <div key={date} data-day-divider="body" style={{ width: dayWidths[dayIndex], flex: "0 0 auto", display: "flex", borderLeft: divider, background: dayIndex % 2 ? (isDarkTheme ? "rgba(148,163,184,.025)" : "rgba(148,163,184,.035)") : "transparent" }}>
@@ -3671,11 +3676,12 @@ export default function ScheduleTab({
                       /> : null}
                       {canManageBookings && hoverSlot?.date === date && hoverSlot?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((hoverSlot.minute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: weekHourPx / 4, background: "rgba(99,102,241,.14)", pointerEvents: "none", zIndex: 2 }} /> : null}
                       {canManageBookings && selection?.date === date && selection?.roomName === lane.roomName ? <div style={{ position: "absolute", left: 0, right: 0, top: ((selection.startMinute - DAY_START_HOUR * 60) / 60) * weekHourPx, height: ((selection.endMinute - selection.startMinute) / 60) * weekHourPx, background: "rgba(59,130,246,.16)", border: "1px dashed #3b82f6", pointerEvents: "none", zIndex: 3 }} /> : null}
+                      {closureGroups.filter((group) => group.indices[0] === laneIndex).map((group) => <ClosureOverlay key={group.key} group={group} hourPx={weekHourPx} startHour={DAY_START_HOUR} endHour={DAY_END_HOUR} gap={1} isAdmin={isAdmin} onOpen={openBlockEvent} />)}
                       {lane.events.map((event) => {
                         const geometry = weekEventGeometry(event.startMin, event.endMin, weekHourPx, DAY_START_HOUR, DAY_END_HOUR);
                         if (!geometry) return null;
                         const { top, height } = geometry;
-                        if (isBookingBlockEvent(event)) return <button key={event.id} type="button" aria-label="Закритий час" onClick={() => openBlockEvent(event)} style={{position:"absolute",left:1,top,width:isAdmin ? 30 : 18,height,zIndex:3,border:0,borderLeft:"3px solid #64748b",background:"rgba(100,116,139,.16)",color:theme.textLight,overflow:"hidden",padding:1,cursor:isAdmin ? "pointer" : "default"}}>🔒</button>;
+                        if (isBookingBlockEvent(event)) return null;
                         const status = collisionStatusPresentation(event.status || (event.cancelled ? "cancelled" : "active"));
                         const color = event.color ? { bg: `${event.color}22`, border: event.color } : palette[colorKey(event)] || palette.default;
                         const conflictCount = event.hasRoomConflict ? event.simultaneous.length : 1;
