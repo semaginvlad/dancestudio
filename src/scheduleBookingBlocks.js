@@ -148,12 +148,35 @@ export function bookingRecurrenceCandidates(booking, rangeStartKey, rangeEndKey)
   return candidates;
 }
 
+// A rule may reach the calendar more than once during a refresh. Resolve its
+// exceptions across all copies before producing any room or time overlays.
+export function coalesceBookingBlocks(blocks = []) {
+  const result = [];
+  const byId = new Map();
+  for (const block of blocks || []) {
+    if (!block) continue;
+    if (block.id == null) { result.push(block); continue; }
+    const key = String(block.id);
+    const previous = byId.get(key);
+    if (!previous) {
+      const entry = { ...block, exceptions: [...(block.exceptions || [])] };
+      byId.set(key, entry);
+      result.push(entry);
+      continue;
+    }
+    const byDate = new Map((previous.exceptions || []).map((exception) => [exception.date, exception]));
+    for (const exception of block.exceptions || []) byDate.set(exception.date, exception);
+    Object.assign(previous, block, { exceptions: [...byDate.values()] });
+  }
+  return result;
+}
+
 export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
   const start = parseDateOnly(rangeStart);
   const end = parseDateOnly(rangeEnd);
   if (!start || !end || start > end) return [];
   const occurrences = [];
-  for (const block of blocks || []) {
+  for (const block of coalesceBookingBlocks(blocks)) {
     if (block?.isActive === false) continue;
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = formatDateOnly(date);
@@ -190,7 +213,7 @@ export function hasFutureBookingBlockOccurrence(block, now = new Date()) {
 
 export function findBookingBlockConflict(booking, blocks, rooms = []) {
   const segments = [];
-  for (const block of blocks || []) {
+  for (const block of coalesceBookingBlocks(blocks)) {
     if (block.startsOn === block.endsOn || isContinuousBookingBlock(block) || !block.exceptions?.length) { segments.push(block); continue; }
     let from = block.startsOn;
     for (const exception of [...block.exceptions].sort((a, b) => a.date.localeCompare(b.date))) {

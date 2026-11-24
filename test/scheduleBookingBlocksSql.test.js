@@ -268,7 +268,27 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await db.query('select crm_admin_delete_booking_block_exception($1,$2)', [bid,'2027-01-12']);
     await expectDatabaseError(() => book('2027-01-12','10:15','Закрита перейменована зала'), /Цей час закритий/);
     await setException('2027-01-12','override');
+    const allRoomsRule = '20000000-0000-0000-0000-000000000098';
+    const secondRoom = '10000000-0000-0000-0000-000000000098';
+    await db.exec(`insert into studio_rooms(id,name) values('${secondRoom}','Тест зала 2'),('10000000-0000-0000-0000-000000000097','Тест зала 3');
+      insert into schedule_booking_blocks(id,title,note,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
+      values('${allRoomsRule}','Приватне правило','Приватна причина','2027-02-02','2027-02-16','08:00','13:00',true,array[2]::smallint[],'00000000-0000-0000-0000-000000000001');`);
+    await db.query("select crm_admin_save_booking_block_exception($1,'2027-02-09','override','Приватний виняток','Приватна нотатка','16:00','18:00',false,array[$2]::uuid[])", [allRoomsRule,secondRoom]);
+    await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2027-02-09','08:30','09:00','Base time released','Тест зала 3')");
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2027-02-09','16:30','17:00','Override denied','Тест зала 2')"), /Цей час закритий/);
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2027-02-16','08:30','09:00','Adjacent denied','Тест зала 3')"), /Цей час закритий/);
+    await db.query("select crm_admin_save_booking_block_exception($1,'2027-02-09','skip',null,null,null,null,null,array[]::uuid[])", [allRoomsRule]);
+    await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2027-02-09','16:30','17:00','Skipped override','Тест зала 2')");
+    await db.query("select crm_admin_save_booking_block_exception($1,'2027-02-09','override','Приватний виняток','Приватна нотатка','16:00','18:00',false,array[$2]::uuid[])", [allRoomsRule,secondRoom]);
     await db.exec(`select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    const trainerRule = (await db.query("select * from crm_fetch_schedule_booking_blocks() where starts_on='2027-02-02'")).rows[0];
+    const trainerOverride = (await db.query("select * from crm_fetch_booking_block_exceptions() where occurrence_date='2027-02-09'")).rows[0];
+    assert.equal(trainerOverride.block_id,trainerRule.id);
+    assert.equal(trainerRule.title,null); assert.equal(trainerRule.note,null);
+    assert.equal(trainerOverride.title,null); assert.equal(trainerOverride.note,null);
+    assert.equal(String(trainerOverride.start_time).slice(0,5),'16:00');
+    assert.equal(String(trainerOverride.end_time).slice(0,5),'18:00');
+    assert.deepEqual(trainerOverride.room_ids,[secondRoom]);
     const privateException = (await db.query("select * from crm_fetch_booking_block_exceptions() where occurrence_date='2027-01-12'")).rows[0];
     assert.notEqual(privateException.block_id,bid);
     assert.equal(privateException.title,null); assert.equal(privateException.note,null);
