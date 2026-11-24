@@ -217,6 +217,27 @@ test("booking-block trigger and explicit override RPC are transactionally author
     await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Blocked by rule','Закрита перейменована зала')"), /Toggle rule/);
     await db.exec("update schedule_booking_blocks set is_active=false where title='Toggle rule'; insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Disabled rule','Закрита перейменована зала'); update schedule_booking_blocks set is_active=true where title='Toggle rule'; delete from schedule_booking_blocks where title='Toggle rule'; insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-11-17','10:00','11:00','Deleted rule','Закрита перейменована зала')");
     assert.equal((await db.query("select count(*)::int as n from room_bookings where title in ('Reopened booking','Disabled rule','Deleted rule','Cancel closed single','Cancel closed series')")).rows[0].n, 5);
+
+    // Apply the new migration locally only, after checking the historical behavior.
+    await db.exec(await readFile(new URL("../supabase/migrations/20261123090000_schedule_closures_privacy_and_enforcement.sql", import.meta.url), "utf8"));
+    await db.exec(`select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false);
+      insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-12-01','10:15','10:45','Existing before closure','Інша зала');
+      insert into schedule_booking_blocks(title,note,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
+      values('Private reason','Private note','2026-12-01','2026-12-01','10:00','11:00',true,array[1]::smallint[],'00000000-0000-0000-0000-000000000001');`);
+    const adminView = (await db.query("select * from crm_fetch_schedule_booking_blocks() where title='Private reason'")).rows[0];
+    assert.equal(adminView.note, 'Private note');
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-12-01','10:15','10:45','New blocked','Інша зала')"), /Цей час закритий адміністратором/);
+    await expectDatabaseError(() => db.query(`select public.crm_admin_override_create_room_booking('2026-12-01','10:15','10:45',null,null,'Override denied','individual',null,null,null,null,'room_booking',null,null,'none',null,null,'active','Інша зала')`), /Цей час закритий адміністратором/);
+    await expectDatabaseError(() => db.exec("update room_bookings set title='Edited' where title='Existing before closure'"), /Цей час закритий адміністратором/);
+    await db.exec("update room_bookings set status='cancelled' where title='Existing before closure'");
+    await expectDatabaseError(() => db.exec("update room_bookings set status='active' where title='Existing before closure'"), /Цей час закритий адміністратором/);
+    await db.exec(`select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    const trainerView = (await db.query("select * from crm_fetch_schedule_booking_blocks() where starts_on='2026-12-01'")).rows[0];
+    assert.ok(trainerView);
+    for (const field of ['title','note','created_by','created_at','updated_at']) assert.equal(trainerView[field], null);
+    assert.notEqual(trainerView.id, adminView.id);
+    await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-12-01','10:15','10:45','Trainer blocked','Інша зала')"), /Цей час закритий адміністратором(?!:)/);
+
   } finally {
     await db.close();
   }
