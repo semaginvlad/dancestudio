@@ -238,6 +238,43 @@ test("booking-block trigger and explicit override RPC are transactionally author
     assert.notEqual(trainerView.id, adminView.id);
     await expectDatabaseError(() => db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2026-12-01','10:15','10:45','Trainer blocked','Інша зала')"), /Цей час закритий адміністратором(?!:)/);
 
+    // Apply the occurrence migration to this local PGlite database; no Supabase SQL is run.
+    await db.exec(await readFile(new URL("../supabase/migrations/20261124090000_booking_block_occurrence_exceptions.sql", import.meta.url), "utf8"));
+    await db.exec(`select set_config('test.jwt','{"email":"semagin.vlad@gmail.com"}',false); select set_config('test.trainer','off',false);
+      insert into studio_rooms(id,name) values('10000000-0000-0000-0000-000000000099','Виняток зала');
+      insert into schedule_booking_blocks(id,title,note,starts_on,ends_on,start_time,end_time,all_rooms,weekdays,created_by)
+      values('20000000-0000-0000-0000-000000000099','Серія','Таємна нотатка','2027-01-05','2027-01-26','10:00','11:00',false,array[2]::smallint[],'00000000-0000-0000-0000-000000000001');
+      insert into schedule_booking_block_rooms values('20000000-0000-0000-0000-000000000099','${roomId}');`);
+    const bid = '20000000-0000-0000-0000-000000000099';
+    const setException = (date, kind, room = '10000000-0000-0000-0000-000000000099') => db.query("select crm_admin_save_booking_block_exception($1,$2,$3,'Приватна зміна','Приватна нотатка','12:00','13:00',false,array[$4]::uuid[])", [bid,date,kind,room]);
+    const book = (date, start, room, recurrence = 'none', until = null) => db.query("insert into room_bookings(date,start_time,end_time,title,room_name,recurrence,recurrence_until) values($1,$2,$3,'Exception test',$4,$5,$6)", [date,start,start === '10:15' ? '10:45' : '12:45',room,recurrence,until]);
+    await db.exec("insert into room_bookings(date,start_time,end_time,title,room_name) values('2027-01-12','12:15','12:45','Existing exception overlap','Виняток зала')");
+    await setException('2027-01-12','override');
+    assert.equal((await db.query("select status from room_bookings where title='Existing exception overlap'")).rows[0].status, 'active');
+    await expectDatabaseError(() => db.exec("update room_bookings set title='Edited overlap' where title='Existing exception overlap'"), /Цей час закритий/);
+    await db.exec("update room_bookings set status='cancelled' where title='Existing exception overlap'");
+    await expectDatabaseError(() => db.exec("update room_bookings set status='active' where title='Existing exception overlap'"), /Цей час закритий/);
+    await book('2027-01-12','10:15','Закрита перейменована зала');
+    await expectDatabaseError(() => book('2027-01-12','12:15','Виняток зала'), /Цей час закритий/);
+    await expectDatabaseError(() => book('2027-01-05','10:15','Закрита перейменована зала'), /Цей час закритий/);
+    await expectDatabaseError(() => book('2027-01-19','10:15','Закрита перейменована зала'), /Цей час закритий/);
+    await expectDatabaseError(() => book('2027-01-05','12:15','Виняток зала','weekly','2027-01-26'), /Цей час закритий/);
+    await setException('2027-01-12','skip');
+    await book('2027-01-12','12:15','Виняток зала');
+    await book('2027-01-12','10:15','Закрита перейменована зала');
+    await db.query('select crm_admin_delete_booking_block_exception($1,$2)', [bid,'2027-01-12']);
+    await expectDatabaseError(() => book('2027-01-12','10:15','Закрита перейменована зала'), /Цей час закритий/);
+    await setException('2027-01-12','override');
+    await db.query('select crm_admin_delete_booking_block_exception($1,$2)', [bid,'2027-01-12']);
+    await expectDatabaseError(() => book('2027-01-12','10:15','Закрита перейменована зала'), /Цей час закритий/);
+    await setException('2027-01-12','override');
+    await db.exec(`select set_config('test.jwt','{"email":"trainer@example.com"}',false); select set_config('test.trainer','on',false)`);
+    const privateException = (await db.query("select * from crm_fetch_booking_block_exceptions() where occurrence_date='2027-01-12'")).rows[0];
+    assert.notEqual(privateException.block_id,bid);
+    assert.equal(privateException.title,null); assert.equal(privateException.note,null);
+    await expectDatabaseError(() => setException('2027-01-12','skip'), /Лише адміністратор/);
+    await expectDatabaseError(() => db.query('select crm_admin_delete_booking_block_exception($1,$2)', [bid,'2027-01-12']), /Лише адміністратор/);
+
   } finally {
     await db.close();
   }

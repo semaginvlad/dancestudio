@@ -159,9 +159,13 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
       const key = formatDateOnly(date);
       const interval = bookingBlockIntervalForDate(block, key);
       if (!interval) continue;
+      const exception = block.startsOn !== block.endsOn && !isContinuousBookingBlock(block) ? (block.exceptions || []).find((item) => item.date === key) : null;
+      if (exception?.kind === "skip") continue;
+      const effective = exception?.kind === "override" ? reconcileBookingBlockRooms({ ...block, ...exception }, rooms) : block;
+      const effectiveInterval = exception?.kind === "override" ? { startTime: exception.startTime, endTime: exception.endTime } : interval;
       const availableRooms = rooms.length ? rooms : [{ id: "legacy:default", name: "Основна зала", isActive: true }];
-      const matchingRooms = block.allRooms ? availableRooms.filter((room) => room.isActive !== false) : availableRooms.filter((room) => blockMatchesRoom(block, room));
-      matchingRooms.forEach((room) => occurrences.push({ ...block, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: block.title, startTime: interval.startTime, endTime: interval.endTime, startMin: timeMinutes(interval.startTime), endMin: timeMinutes(interval.endTime), readOnly: true }));
+      const matchingRooms = effective.allRooms ? availableRooms.filter((room) => room.isActive !== false) : availableRooms.filter((room) => blockMatchesRoom(effective, room));
+      matchingRooms.forEach((room) => occurrences.push({ ...effective, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: effective.title, startTime: effectiveInterval.startTime, endTime: effectiveInterval.endTime, startMin: timeMinutes(effectiveInterval.startTime), endMin: timeMinutes(effectiveInterval.endTime), readOnly: true }));
     }
   }
   return occurrences;
@@ -185,6 +189,23 @@ export function hasFutureBookingBlockOccurrence(block, now = new Date()) {
 }
 
 export function findBookingBlockConflict(booking, blocks, rooms = []) {
+  const segments = [];
+  for (const block of blocks || []) {
+    if (block.startsOn === block.endsOn || isContinuousBookingBlock(block) || !block.exceptions?.length) { segments.push(block); continue; }
+    let from = block.startsOn;
+    for (const exception of [...block.exceptions].sort((a, b) => a.date.localeCompare(b.date))) {
+      if (exception.date < block.startsOn || exception.date > block.endsOn) continue;
+      const previous = formatDateOnly(addCalendarDays(parseDateOnly(exception.date), -1));
+      if (from <= previous && (from !== previous || blockMatchesDate(block, from))) segments.push({ ...block, startsOn: from, endsOn: previous, exceptions: [] });
+      if (exception.kind === "override" && blockMatchesDate(block, exception.date)) segments.push(reconcileBookingBlockRooms({ ...block, ...exception, startsOn: exception.date, endsOn: exception.date, exceptions: [] }, rooms));
+      from = formatDateOnly(addCalendarDays(parseDateOnly(exception.date), 1));
+    }
+    if (from <= block.endsOn && (from !== block.endsOn || blockMatchesDate(block, from))) segments.push({ ...block, startsOn: from, endsOn: block.endsOn, exceptions: [] });
+  }
+  return findBookingBlockConflictInSegments(booking, segments, rooms);
+}
+
+function findBookingBlockConflictInSegments(booking, blocks, rooms = []) {
   if (!booking || booking.status === "cancelled") return null;
   const room = rooms.find((item) => String(item.id) === String(booking.roomId)) || { id: booking.roomId, name: booking.roomName };
   if (!parseDateOnly(booking.date)) return null;

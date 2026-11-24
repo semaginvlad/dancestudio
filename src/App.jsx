@@ -2234,14 +2234,14 @@ export default function App() {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
     if (roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань не завантажений. Правило не збережено.");
     const saved = block.id ? await db.updateScheduleBookingBlock(block.id, block) : await db.createScheduleBookingBlock(block);
-    setScheduleBookingBlocks((previous) => block.id ? previous.map((item) => item.id === saved.id ? saved : item) : [...previous, saved]);
+    setScheduleBookingBlocks((previous) => block.id ? previous.map((item) => item.id === saved.id ? { ...saved, exceptions: item.exceptions || [] } : item) : [...previous, saved]);
     return saved;
   };
   const toggleScheduleBookingBlockAction = async (block) => {
     if (bookingBlocksLoadStatusRef.current !== "ready") throw new Error("Список правил недоступності не завантажений.");
     if (!block.isActive && roomBookingsLoadStatusRef.current !== "ready") throw new Error("Список бронювань не завантажений. Правило не активовано.");
     const saved = await db.setScheduleBookingBlockActive(block, !block.isActive);
-    setScheduleBookingBlocks((previous) => previous.map((item) => item.id === saved.id ? saved : item));
+    setScheduleBookingBlocks((previous) => previous.map((item) => item.id === saved.id ? { ...saved, exceptions: item.exceptions || [] } : item));
     return saved;
   };
   const deleteScheduleBookingBlockAction = async (id) => {
@@ -2263,6 +2263,16 @@ export default function App() {
       setBookingBlocksLoadStatus("error");
       throw error;
     }
+  };
+  const saveScheduleBookingBlockExceptionAction = async (block) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready" || roomBookingsLoadStatusRef.current !== "ready") throw new Error("Оновіть правила та бронювання.");
+    await db.saveScheduleBookingBlockException(block);
+    await reloadScheduleBookingBlocksAction();
+  };
+  const deleteScheduleBookingBlockExceptionAction = async (blockId, date) => {
+    if (bookingBlocksLoadStatusRef.current !== "ready" || roomBookingsLoadStatusRef.current !== "ready") throw new Error("Оновіть правила та бронювання.");
+    await db.deleteScheduleBookingBlockException(blockId, date);
+    await reloadScheduleBookingBlocksAction();
   };
   const reloadScheduleRoomBookingsAction = async () => {
     roomBookingsLoadStatusRef.current = "loading";
@@ -2663,7 +2673,7 @@ export default function App() {
             onDeleteBooking={deleteRoomBookingAction}
             onUpdateBooking={updateRoomBookingAction}
             onRemoveBookingOccurrence={removeRoomBookingOccurrenceAction}
-            {...(isAdmin ? { onSaveBookingBlock: saveScheduleBookingBlockAction, onToggleBookingBlock: toggleScheduleBookingBlockAction, onDeleteBookingBlock: deleteScheduleBookingBlockAction } : {})}
+            {...(isAdmin ? { onSaveBookingBlock: saveScheduleBookingBlockAction, onToggleBookingBlock: toggleScheduleBookingBlockAction, onDeleteBookingBlock: deleteScheduleBookingBlockAction, onSaveBookingBlockException: saveScheduleBookingBlockExceptionAction, onDeleteBookingBlockException: deleteScheduleBookingBlockExceptionAction } : {})}
             onUpdateGroupSchedule={updateGroupScheduleAction}
             onAddGroupLessonOverride={addGroupLessonOverrideAction}
             onUpdateGroupLessonOverride={updateGroupLessonOverrideAction}
