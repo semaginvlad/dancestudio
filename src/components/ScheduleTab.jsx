@@ -385,6 +385,8 @@ export default function ScheduleTab({
   onSaveBookingBlock,
   onToggleBookingBlock,
   onDeleteBookingBlock,
+  onSaveBookingBlockException,
+  onDeleteBookingBlockException,
   onRetryBookingBlocks,
   onRetryRoomBookings,
   onUpdateGroupSchedule,
@@ -485,6 +487,7 @@ export default function ScheduleTab({
   const [showPastBlocks, setShowPastBlocks] = useState(false);
   const [blockError, setBlockError] = useState("");
   const [blockDraft, setBlockDraft] = useState(null);
+  const [blockChoice, setBlockChoice] = useState(null);
   const [blockSaving, setBlockSaving] = useState(false);
   const blockSavingRef = useRef(false);
   const [newRoomName, setNewRoomName] = useState("");
@@ -858,7 +861,7 @@ export default function ScheduleTab({
     if (rangeKeys.length) {
       const displayBlockRooms = buildBookingBlockDisplayRooms(
         activeStudioRooms,
-        [...Array.from(map.values()).flat().map((event) => event.roomName), ...reconciledBookingBlocks.flatMap((block) => block.roomNames || [])].filter(Boolean),
+        [...Array.from(map.values()).flat().map((event) => event.roomName), ...reconciledBookingBlocks.flatMap((block) => [...(block.roomNames || []), ...(block.exceptions || []).flatMap((exception) => exception.roomNames || [])])].filter(Boolean),
         DEFAULT_ROOM,
       );
       expandBookingBlocks(reconciledBookingBlocks, rangeKeys[0], rangeKeys[rangeKeys.length - 1], displayBlockRooms)
@@ -1120,16 +1123,24 @@ export default function ScheduleTab({
     setBlockDraft({ title: "", note: "", startsOn: date, endsOn: date, startTime: slot.startTime || "10:00", endTime: slot.endTime || "11:00", allRooms: !room, roomIds: room ? [room.id] : [], weekdays: [1,2,3,4,5,6,7], repeats: false, isActive: true });
   };
   const editBlock = (block) => { setBlockError(""); setBlockDraft({ ...block, title: block.title === "Закрито" ? "" : block.title, repeats: isRepeatingBookingBlock(block) }); };
+  const editBlockOccurrence = (block, date) => {
+    const exception = (block.exceptions || []).find((item) => item.date === date);
+    const effective = exception?.kind === "override" ? { ...block, ...exception } : block;
+    setBlockError("");
+    setBlockDraft({ ...effective, id: undefined, blockId: block.id, occurrenceDate: date, startsOn: date, endsOn: date, repeats: false, kind: exception?.kind || "override", hasException: !!exception });
+  };
   const openBlockEvent = (event) => {
     if (!isAdmin) return;
     const block = reconciledBookingBlocks.find((item) => item.id === event.blockId);
-    if (block) editBlock(block);
+    if (!block) return;
+    if (block.startsOn !== block.endsOn && block.endTime > block.startTime) setBlockChoice({ block, date: event.date });
+    else editBlock(block);
   };
   const saveBlock = async () => {
     if (!bookingBlockMutationsReady) { setBlockError("Правила недоступності або бронювання ще не завантажені."); return; }
     if (blockSavingRef.current) return;
     const validation = validateBookingBlock(blockDraft);
-    if (!validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
+    if (blockDraft.kind !== "skip" && !validation.valid) { setBlockError(Object.values(validation.errors)[0]); return; }
     const presentationDraft = reconcileBookingBlockRooms(
       { ...blockDraft, title: blockDraft.title.trim() || "Закрито", weekdays: blockDraft.repeats && blockDraft.startsOn !== blockDraft.endsOn ? blockDraft.weekdays : [1,2,3,4,5,6,7] },
       studioRooms,
@@ -1139,7 +1150,10 @@ export default function ScheduleTab({
         const freshBookings = await onRetryRoomBookings?.();
         if (!Array.isArray(freshBookings)) throw new Error("Не вдалося оновити список бронювань.");
         const conflictDraft = { ...presentationDraft, id: presentationDraft.id || "draft" };
-        if (!confirmBookingBlockOverlaps(freshBookings, conflictDraft, studioRooms, (message) => window.confirm(message))) return { cancelled: true };
+        if (presentationDraft.kind !== "skip") {
+          if (!confirmBookingBlockOverlaps(freshBookings, conflictDraft, studioRooms, (message) => window.confirm(message))) return { cancelled: true };
+        }
+        if (presentationDraft.blockId) return onSaveBookingBlockException?.(presentationDraft);
         return onSaveBookingBlock?.(presentationDraft);
       });
       if (result.skipped) return;
@@ -2693,6 +2707,7 @@ export default function ScheduleTab({
         {roomBookingsLoadStatus === "error" && onRetryRoomBookings ? <button type="button" style={btnS} onClick={() => onRetryRoomBookings().catch((error) => setBlockError(error?.message || "Повторне завантаження бронювань не вдалося"))}>Спробувати ще раз</button> : null}
       </div> : null}
 
+      {isAdmin && blockChoice ? <div role="dialog" aria-modal="true" style={{ position:"fixed", inset:0, zIndex:5200, background:editorOverlay, display:"grid", placeItems:"center", padding:12 }}><div style={{...cardSt, background:editorSurface, display:"grid", gap:8}}><b>Закриття на {blockChoice.date}</b><button style={btnP} onClick={() => { editBlockOccurrence(blockChoice.block, blockChoice.date); setBlockChoice(null); }}>Змінити лише цю дату</button><button style={btnS} onClick={() => { editBlock(blockChoice.block); setBlockChoice(null); }}>Змінити всю серію</button><button style={btnS} onClick={() => setBlockChoice(null)}>Скасувати</button></div></div> : null}
       {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>Закриття</b><button style={btnP} disabled={!bookingBlockMutationsReady} onClick={() => openNewBlock()}>+ Закрити години</button><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
         {blockError ? <div role="alert" style={{color:theme.danger}}>{blockError}</div> : null}
@@ -2701,15 +2716,17 @@ export default function ScheduleTab({
           <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span><span>{!isRepeatingBookingBlock(block) ? "Без повторення" : `Повторення: ${block.weekdays.join(", ")}`}</span><span>{block.isActive ? "Активне" : "Вимкнене"}</span>
           <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlock(block)}>Редагувати</button>
           <button style={btnS} disabled={!bookingBlocksReady || (!block.isActive && !roomBookingsReady)} onClick={() => toggleBlock(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
+          {(block.exceptions || []).map(exception => <div key={exception.date} style={{width:"100%", display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}><span>{exception.date}: {exception.kind === "skip" ? "вимкнено" : "змінено"}</span><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlockOccurrence(block, exception.date)}>Редагувати дату</button><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={async () => { try { const bookings = await onRetryRoomBookings?.(); if (!Array.isArray(bookings)) throw new Error("Не вдалося оновити бронювання."); const restored = {...block, startsOn:exception.date, endsOn:exception.date, exceptions:[]}; if (!confirmBookingBlockOverlaps(bookings, restored, studioRooms, message => window.confirm(message))) return; await onDeleteBookingBlockException?.(block.id, exception.date); } catch (error) { setBlockError(error?.message || "Не вдалося видалити виняток"); } }}>Повернути базове закриття</button></div>)}
           <button style={{...btnS,color:theme.danger}} disabled={!bookingBlocksReady} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
         </div>)}
       </div> : null}
       {isAdmin && blockDraft ? <div style={{ position:"fixed", inset:0, zIndex:5200, background:editorOverlay, display:"grid", placeItems:"center", padding:12 }}><div style={{ ...cardSt, width:"min(520px, 96vw)", maxHeight:"90vh", overflowY:"auto", background:editorSurface, display:"grid", gap:8, gridTemplateColumns:isMobile ? "1fr" : "repeat(2,minmax(0,1fr))" }}>
-          <b style={{gridColumn:"1/-1"}}>Закрити години</b>
+          <b style={{gridColumn:"1/-1"}}>{blockDraft.blockId ? "Закриття лише на цю дату" : "Закрити години"}</b>
+          {blockDraft.blockId ? <label style={{gridColumn:"1/-1"}}><input type="checkbox" checked={blockDraft.kind === "skip"} onChange={e=>setBlockDraft(p=>({...p,kind:e.target.checked ? "skip" : "override"}))}/> Вимкнути закриття на цю дату</label> : null}
           <input style={inputSt} maxLength={120} value={blockDraft.title} onChange={e=>setBlockDraft(p=>({...p,title:e.target.value}))} placeholder="Назва / причина" />
 
-          {blockDraft.id && blockDraft.note ? <label style={{gridColumn:"1/-1"}}>Наявна нотатка<input style={inputSt} maxLength={2000} value={blockDraft.note} onChange={e=>setBlockDraft(p=>({...p,note:e.target.value}))} /></label> : null}
-          <label>Дата початку<input aria-label="Дата початку" style={inputSt} type="date" value={blockDraft.startsOn} onChange={e=>setBlockDraft(p=>({...p,startsOn:e.target.value}))}/></label><label>{blockDraft.repeats ? "Повторювати до" : "Дата завершення"}<input aria-label={blockDraft.repeats ? "Повторювати до" : "Дата завершення"} style={inputSt} type="date" value={blockDraft.endsOn} onChange={e=>setBlockDraft(p=>({...p,endsOn:e.target.value}))}/></label>
+          <label style={{gridColumn:"1/-1"}}>Нотатка<input style={inputSt} maxLength={2000} value={blockDraft.note} onChange={e=>setBlockDraft(p=>({...p,note:e.target.value}))} /></label>
+          <label>Дата початку<input aria-label="Дата початку" style={inputSt} type="date" disabled={!!blockDraft.blockId} value={blockDraft.startsOn} onChange={e=>setBlockDraft(p=>({...p,startsOn:e.target.value}))}/></label><label>{blockDraft.repeats ? "Повторювати до" : "Дата завершення"}<input aria-label={blockDraft.repeats ? "Повторювати до" : "Дата завершення"} style={inputSt} type="date" disabled={!!blockDraft.blockId} value={blockDraft.endsOn} onChange={e=>setBlockDraft(p=>({...p,endsOn:e.target.value}))}/></label>
           <input style={inputSt} type="time" value={blockDraft.startTime} onChange={e=>setBlockDraft(p=>({...p,startTime:e.target.value}))}/><input style={inputSt} type="time" value={blockDraft.endTime} onChange={e=>setBlockDraft(p=>({...p,endTime:e.target.value}))}/>
           <label><input name="booking-block-room-scope" type="radio" checked={blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:true}))}/> Усі зали</label><label><input name="booking-block-room-scope" type="radio" checked={!blockDraft.allRooms} onChange={()=>setBlockDraft(p=>({...p,allRooms:false}))}/> Обрані зали</label>
           {!blockDraft.allRooms ? <div style={{gridColumn:"1/-1",display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2718,10 +2735,10 @@ export default function ScheduleTab({
             {studioRoomsLoadStatus === "ready" && !selectableBlockRooms.length ? <span>Немає доступних залів.</span> : null}
             {studioRoomsLoadStatus === "ready" ? selectableBlockRooms.map(room=><label key={room.id}><input type="checkbox" checked={(blockDraft.roomIds || []).map(String).includes(String(room.id))} onChange={()=>setBlockDraft(p=>({...p,roomIds:(p.roomIds || []).map(String).includes(String(room.id))?p.roomIds.filter(id=>String(id)!==String(room.id)):[...p.roomIds,room.id]}))}/>{room.name}{room.isActive === false ? " (архівна)" : ""}</label>) : null}
           </div>:null}
-          <label><input type="checkbox" checked={!!blockDraft.repeats} onChange={e=>setBlockDraft(p=>({...p,repeats:e.target.checked,weekdays:e.target.checked ? [new Date(`${p.startsOn}T12:00:00`).getDay() || 7] : [1,2,3,4,5,6,7]}))}/> Повторювати щотижня</label>
+          {!blockDraft.blockId ? <label><input type="checkbox" checked={!!blockDraft.repeats} onChange={e=>setBlockDraft(p=>({...p,repeats:e.target.checked,weekdays:e.target.checked ? [new Date(`${p.startsOn}T12:00:00`).getDay() || 7] : [1,2,3,4,5,6,7]}))}/> Повторювати щотижня</label> : null}
           {blockDraft.repeats ? <div style={{gridColumn:"1/-1",display:"flex",gap:5,flexWrap:"wrap"}}>{[{v:1,l:"ПН"},{v:2,l:"ВТ"},{v:3,l:"СР"},{v:4,l:"ЧТ"},{v:5,l:"ПТ"},{v:6,l:"СБ"},{v:7,l:"НД"}].map(day=><button type="button" key={day.v} style={blockDraft.weekdays.includes(day.v)?btnP:btnS} onClick={()=>setBlockDraft(p=>({...p,weekdays:p.weekdays.includes(day.v)?p.weekdays.filter(v=>v!==day.v):[...p.weekdays,day.v].sort()}))}>{day.l}</button>)}</div> : null}
           {blockError ? <div role="alert" style={{gridColumn:"1/-1",color:theme.danger}}>{blockError}</div>:null}
-          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady || (!blockDraft.allRooms && (!(blockDraft.roomIds || []).length || studioRoomsLoadStatus !== "ready"))}>{blockSaving ? "Збереження…" : "Зберегти закриття"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
+          <div style={{gridColumn:"1/-1",display:"flex",gap:8}}><button style={btnP} onClick={saveBlock} disabled={blockSaving || !bookingBlockMutationsReady || (blockDraft.kind !== "skip" && !blockDraft.allRooms && (!(blockDraft.roomIds || []).length || studioRoomsLoadStatus !== "ready"))}>{blockSaving ? "Збереження…" : "Зберегти закриття"}</button><button style={btnS} onClick={()=>setBlockDraft(null)}>Скасувати</button></div>
         </div></div> : null}
 
       {canManageBookings && showForm && (

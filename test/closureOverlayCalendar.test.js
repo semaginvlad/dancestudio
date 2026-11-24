@@ -29,3 +29,22 @@ test('the real weekly calendar shows one closure and opens an overlapping bookin
   assert.equal(tree.root.findAllByProps({ 'aria-labelledby': 'schedule-event-details-title' }).length, 1);
   await act(async () => tree.unmount());
 });
+
+test('admin chooses one occurrence and receives its effective fields', async () => {
+  const start = new Date(`${date}T12:00:00`); start.setDate(start.getDate()-7);
+  const end = new Date(`${date}T12:00:00`); end.setDate(end.getDate()+7);
+  const key = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const recurring = {...block,title:'Базова назва',note:'Базова нотатка',startsOn:key(start),endsOn:key(end),weekdays:[new Date(`${date}T12:00:00`).getDay() || 7],exceptions:[{date,kind:'override',title:'Назва винятку',note:'Нотатка винятку',startTime:'12:00',endTime:'13:00',allRooms:true,roomIds:[],roomNames:[]}]};
+  let tree;
+  await act(async () => { tree = create(React.createElement(ScheduleTab, { isAdmin:true, bookingBlocks:[recurring],bookingBlocksLoadStatus:'ready',roomBookings:[],roomBookingsLoadStatus:'ready' })); });
+  const overlay = tree.root.findAllByProps({'aria-label':'Закритий час'}).find(node=>node.props.onClick);
+  await act(async () => overlay.props.onClick());
+  const choose = tree.root.findAllByType('button').find(node=>node.children.includes('Змінити лише цю дату'));
+  assert.ok(choose);
+  await act(async () => choose.props.onClick());
+  assert.ok(tree.root.findAllByType('input').some(node=>node.props.value==='Назва винятку'));
+  assert.ok(tree.root.findAllByType('input').some(node=>node.props.value==='Нотатка винятку'));
+  assert.ok(tree.root.findAllByType('input').some(node=>node.props.value==='12:00'));
+  assert.ok(tree.root.findAllByType('input').some(node=>node.props.value===date && node.props.disabled));
+  await act(async () => tree.unmount());
+});

@@ -1865,9 +1865,18 @@ const requireBlockId = (data, operation, block = {}) => {
 };
 
 export async function fetchScheduleBookingBlocks() {
-  const { data, error } = await supabase.rpc('crm_fetch_schedule_booking_blocks');
+  const [blocks, exceptions] = await Promise.all([supabase.rpc('crm_fetch_schedule_booking_blocks'), supabase.rpc('crm_fetch_booking_block_exceptions')]);
+  if (blocks.error) throw blocks.error;
+  if (exceptions.error) throw exceptions.error;
+  return (blocks.data || []).map((row) => ({ ...mapScheduleBookingBlock(row), exceptions: (exceptions.data || []).filter((e) => e.block_id === row.id).map((e) => ({ date: String(e.occurrence_date).slice(0, 10), kind: e.kind, title: e.title || '', note: e.note || '', startTime: String(e.start_time || '').slice(0, 5), endTime: String(e.end_time || '').slice(0, 5), allRooms: e.all_rooms === true, roomIds: e.room_ids || [], roomNames: e.room_names || [] })) }));
+}
+export async function saveScheduleBookingBlockException(block) {
+  const { error } = await supabase.rpc('crm_admin_save_booking_block_exception', { p_block_id: block.blockId, p_date: block.occurrenceDate, p_kind: block.kind, p_title: block.title || null, p_note: block.note || null, p_start_time: block.startTime || null, p_end_time: block.endTime || null, p_all_rooms: !!block.allRooms, p_room_ids: block.allRooms ? [] : block.roomIds || [] });
   if (error) throw error;
-  return (data || []).map(mapScheduleBookingBlock);
+}
+export async function deleteScheduleBookingBlockException(blockId, date) {
+  const { error } = await supabase.rpc('crm_admin_delete_booking_block_exception', { p_block_id: blockId, p_date: date });
+  if (error) throw error;
 }
 export async function createScheduleBookingBlock(block) {
   const { data, error } = await supabase.rpc('crm_admin_create_schedule_booking_block', bookingBlockRpcPayload(block));
