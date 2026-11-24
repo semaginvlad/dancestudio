@@ -36,3 +36,19 @@ test('time-only and room-only overrides leave the rest of the series unchanged',
  assert.equal(events({...base,exceptions:[timeOnly]})[1].startTime,'12:00');
  assert.equal(events({...base,exceptions:[roomOnly]})[1].roomName,'B');
 });
+
+test('all-room rule is completely replaced before rendering rooms, even with duplicate rule copies', () => {
+ const threeRooms = [{id:'1',name:'Зал 1'},{id:'2',name:'Зал 2'},{id:'3',name:'Зал 3'}];
+ const rule = {...base,allRooms:true,roomIds:[],roomNames:[],startTime:'08:00',endTime:'13:00'};
+ const changed = {date:'2027-01-12',kind:'override',title:'Зміна',note:'Приватно',startTime:'16:00',endTime:'18:00',allRooms:false,roomIds:['2'],roomNames:['Зал 2']};
+ for (const copies of [[rule,{...rule,exceptions:[changed]}],[{...rule,exceptions:[changed]},rule]]) {
+  const shown=expandBookingBlocks(copies,'2027-01-12','2027-01-12',threeRooms);
+  assert.deepEqual(shown.map(({roomName,startTime,endTime})=>({roomName,startTime,endTime})),[{roomName:'Зал 2',startTime:'16:00',endTime:'18:00'}]);
+  assert.equal(expandBookingBlocks(copies,'2027-01-19','2027-01-19',threeRooms).length,3);
+  assert.equal(findBookingBlockConflict({date:'2027-01-12',startTime:'08:30',endTime:'09:00',roomName:'Зал 1'},copies,threeRooms),null);
+  assert.ok(findBookingBlockConflict({date:'2027-01-12',startTime:'16:30',endTime:'17:00',roomName:'Зал 2'},copies,threeRooms));
+ }
+ const skipped = [rule,{...rule,exceptions:[{date:'2027-01-12',kind:'skip'}]}];
+ assert.deepEqual(expandBookingBlocks(skipped,'2027-01-12','2027-01-12',threeRooms),[]);
+ assert.equal(expandBookingBlocks(skipped,'2027-01-19','2027-01-19',threeRooms).length,3);
+});

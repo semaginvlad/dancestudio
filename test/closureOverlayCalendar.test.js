@@ -48,3 +48,23 @@ test('admin chooses one occurrence and receives its effective fields', async () 
   assert.ok(tree.root.findAllByType('input').some(node=>node.props.value===date && node.props.disabled));
   await act(async () => tree.unmount());
 });
+
+test('both roles render only the effective closure when a rule arrives twice', async () => {
+  const start = new Date(`${date}T12:00:00`); start.setDate(start.getDate()-7);
+  const end = new Date(`${date}T12:00:00`); end.setDate(end.getDate()+7);
+  const key = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const rule = {...block,title:'',note:'',startsOn:key(start),endsOn:key(end),startTime:'08:00',endTime:'13:00',weekdays:[new Date(`${date}T12:00:00`).getDay() || 7],allRooms:true,roomIds:[],roomNames:[]};
+  const exception = {date,kind:'override',title:'',note:'',startTime:'16:00',endTime:'18:00',allRooms:false,roomIds:['r2'],roomNames:['Зала 2']};
+  for (const isAdmin of [true,false]) {
+    let tree;
+    const props = {isAdmin,bookingBlocks:[rule,{...rule,exceptions:[exception]}],bookingBlocksLoadStatus:'ready',roomBookings:[],roomBookingsLoadStatus:'ready'};
+    await act(async () => { tree = create(React.createElement(ScheduleTab,props)); });
+    const overlays = tree.root.findAll(node=>node.props['data-closure-overlay']);
+    assert.equal(overlays.length,1);
+    assert.deepEqual(JSON.parse(overlays[0].props['data-closure-overlay']),['rule',date,'16:00','18:00']);
+    assert.equal(JSON.stringify(tree.toJSON()).includes('Приватна нотатка'),false);
+    await act(async () => tree.update(React.createElement(ScheduleTab,{...props,bookingBlocks:[rule,{...rule,exceptions:[{date,kind:'skip'}]}]})));
+    assert.equal(tree.root.findAll(node=>node.props['data-closure-overlay']).length,0);
+    await act(async () => tree.unmount());
+  }
+});
