@@ -11,7 +11,7 @@ import { buildEventDetails, calendarPeriodLabel, calendarStateForDate, canMutate
 import { useStickyState } from "../shared/utils";
 import { getOperationalTrainers } from "../shared/trainers";
 import { getInternalGroupLabel } from "../shared/groupLabels";
-import { buildBookingBlockDisplayRooms, confirmBookingBlockOverlaps, expandBookingBlocks, findBookingBlockConflict, getFreshBookingBlockSaveGuard, hasFutureBookingBlockOccurrence, isRepeatingBookingBlock, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
+import { buildBookingBlockDisplayRooms, confirmBookingBlockOverlaps, effectiveBookingBlockOnDate, expandBookingBlocks, findBookingBlockConflict, findBookingBlockRuleOverlaps, getFreshBookingBlockSaveGuard, hasFutureBookingBlockOccurrence, isRepeatingBookingBlock, reconcileBookingBlockRooms, runBookingBlockMutation, selectBookingBlockRooms, validateBookingBlock } from "../scheduleBookingBlocks";
 import { isStudioRoomBookingOpen, isStudioRoomBookingOpenForActor, loadStudioRoomsState, refreshStudioRoomBookingAvailability, resolveStudioRoomBookingSelection, ROOM_BOOKING_CLOSED_MESSAGE } from "../studioRooms";
 
 const DAY_START_HOUR = 8;
@@ -488,8 +488,10 @@ export default function ScheduleTab({
   const [blockError, setBlockError] = useState("");
   const [blockDraft, setBlockDraft] = useState(null);
   const [blockChoice, setBlockChoice] = useState(null);
+  const [managedBlockId, setManagedBlockId] = useState(null);
   const [blockSaving, setBlockSaving] = useState(false);
   const blockSavingRef = useRef(false);
+  const blockManagerRef = useRef(null);
   const [newRoomName, setNewRoomName] = useState("");
   const [renamingRoomId, setRenamingRoomId] = useState(null);
   const [renamingRoomName, setRenamingRoomName] = useState("");
@@ -508,6 +510,9 @@ export default function ScheduleTab({
   const [selectedEventDetails, setSelectedEventDetails] = useState(null);
   const [schedulePayments, setSchedulePayments] = useState([]);
   const [schedulePaymentsError, setSchedulePaymentsError] = useState('');
+  useEffect(() => {
+    if (showBlocksManager && managedBlockId) blockManagerRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [showBlocksManager, managedBlockId]);
   useEffect(() => {
     let active = true;
     if (!isAdmin) { setSchedulePayments([]); return () => { active = false; }; }
@@ -1132,9 +1137,16 @@ export default function ScheduleTab({
   const openBlockEvent = (event) => {
     if (!isAdmin) return;
     const block = reconciledBookingBlocks.find((item) => item.id === event.blockId);
-    if (!block) return;
-    if (block.startsOn !== block.endsOn && block.endTime > block.startTime) setBlockChoice({ block, date: event.date });
-    else editBlock(block);
+    const effective = block && effectiveBookingBlockOnDate(block, event.date, studioRooms);
+    if (!effective) return;
+    setBlockChoice({ blockId: block.id, date: event.date, anchor: { ...effective, id: block.id, startsOn: event.date, endsOn: event.date, exceptions: [] } });
+  };
+  const confirmOtherClosureRules = (draft, blocks) => {
+    const overlaps = findBookingBlockRuleOverlaps(draft, blocks, studioRooms);
+    if (!overlaps.length) return true;
+    const details = overlaps.map(({ block, date, startTime, endTime, roomNames }) =>
+      `• ${block.title || "Закриття"}: перший знайдений збіг ${date}, ${startTime}–${endTime}, ${roomNames.join(", ")} (правило ${block.startsOn} — ${block.endsOn})`).join("\n");
+    return window.confirm(`Закриття перетинається з іншими правилами:\n${details}\n\nЦі правила залишаться активними. Продовжити?`);
   };
   const saveBlock = async () => {
     if (!bookingBlockMutationsReady) { setBlockError("Правила недоступності або бронювання ще не завантажені."); return; }
@@ -1150,6 +1162,9 @@ export default function ScheduleTab({
         const freshBookings = await onRetryRoomBookings?.();
         if (!Array.isArray(freshBookings)) throw new Error("Не вдалося оновити список бронювань.");
         const conflictDraft = { ...presentationDraft, id: presentationDraft.id || "draft" };
+        const freshBlocks = onRetryBookingBlocks ? await onRetryBookingBlocks() : reconciledBookingBlocks;
+        if (!Array.isArray(freshBlocks)) throw new Error("Не вдалося оновити правила закриття.");
+        if (presentationDraft.kind !== "skip" && !confirmOtherClosureRules(conflictDraft, freshBlocks)) return { cancelled: true };
         if (presentationDraft.kind !== "skip") {
           if (!confirmBookingBlockOverlaps(freshBookings, conflictDraft, studioRooms, (message) => window.confirm(message))) return { cancelled: true };
         }
@@ -1237,6 +1252,9 @@ export default function ScheduleTab({
     try {
       const freshBookings = await onRetryRoomBookings?.();
       if (!Array.isArray(freshBookings)) throw new Error("Не вдалося оновити список бронювань.");
+      const freshBlocks = onRetryBookingBlocks ? await onRetryBookingBlocks() : reconciledBookingBlocks;
+      if (!Array.isArray(freshBlocks)) throw new Error("Не вдалося оновити правила закриття.");
+      if (!confirmOtherClosureRules({ ...block, isActive: true }, freshBlocks)) return;
       const overlapCount = freshBookings.filter((booking) => findBookingBlockConflict(booking, [{ ...block, isActive: true }], studioRooms)).length;
       if (!window.confirm(overlapCount ? `У цей період уже є ${overlapCount} бронювань. Вони залишаться активними, але нові бронювання в закритий час створити не можна` : "Увімкнути це закриття?")) return;
       await onToggleBookingBlock?.(block);
@@ -2645,7 +2663,7 @@ export default function ScheduleTab({
                 ) : null}
               </div>
             ) : null}
-            {isAdmin ? <button style={{ ...mobileToolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => setShowBlocksManager(v => !v)}>🔒 Закриті години</button> : null}
+            {isAdmin ? <button style={{ ...mobileToolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => { setManagedBlockId(null); setShowBlocksManager(v => !v); }}>🔒 Закриті години</button> : null}
             <div style={{ fontSize: 10.5, color: theme.textLight, textAlign: "center", lineHeight: 1.2 }}>
               {periodLabel}
             </div>
@@ -2674,7 +2692,7 @@ export default function ScheduleTab({
                 {allKnownRooms.map((room) => <option key={room} value={room}>{room}{isRoomBookingClosed(room) ? " — Тимчасово недоступний" : ""}</option>)}
               </select></label>
               {isAdmin ? <button style={toolbarBtnSt} onClick={() => setShowRoomsManager((v) => !v)}>Зали</button> : null}
-              {isAdmin ? <button style={{ ...toolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => setShowBlocksManager(v => !v)}>🔒 Закриті години</button> : null}
+              {isAdmin ? <button style={{ ...toolbarBtnSt, color: theme.danger }} disabled={!bookingBlockMutationsReady} onClick={() => { setManagedBlockId(null); setShowBlocksManager(v => !v); }}>🔒 Закриті години</button> : null}
               {canOpenBulkPlanner ? <button style={toolbarBtnSt} onClick={openBulkPlanSetup}>План на період</button> : null}
               <div style={{ marginLeft: "auto", fontSize: 12, color: theme.textLight }}>{periodLabel}</div>
               {canManageBookings && (
@@ -2707,16 +2725,43 @@ export default function ScheduleTab({
         {roomBookingsLoadStatus === "error" && onRetryRoomBookings ? <button type="button" style={btnS} onClick={() => onRetryRoomBookings().catch((error) => setBlockError(error?.message || "Повторне завантаження бронювань не вдалося"))}>Спробувати ще раз</button> : null}
       </div> : null}
 
-      {isAdmin && blockChoice ? <div role="dialog" aria-modal="true" style={{ position:"fixed", inset:0, zIndex:5200, background:editorOverlay, display:"grid", placeItems:"center", padding:12 }}><div style={{...cardSt, background:editorSurface, display:"grid", gap:8}}><b>Закриття на {blockChoice.date}</b><button style={btnP} onClick={() => { editBlockOccurrence(blockChoice.block, blockChoice.date); setBlockChoice(null); }}>Змінити лише цю дату</button><button style={btnS} onClick={() => { editBlock(blockChoice.block); setBlockChoice(null); }}>Змінити всю серію</button><button style={btnS} onClick={() => setBlockChoice(null)}>Скасувати</button></div></div> : null}
-      {isAdmin && showBlocksManager ? <div style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>Закриття</b><button style={btnP} disabled={!bookingBlockMutationsReady} onClick={() => openNewBlock()}>+ Закрити години</button><button style={btnS} onClick={() => { setShowBlocksManager(false); setBlockDraft(null); }}>Закрити</button></div>
+      {isAdmin && blockChoice && !blockDraft ? (() => {
+        const selected = reconciledBookingBlocks.find((item) => item.id === blockChoice.blockId);
+        if (!selected) return null;
+        const current = effectiveBookingBlockOnDate(selected, blockChoice.date, studioRooms);
+        const skipped = (selected.exceptions || []).some((item) => item.date === blockChoice.date && item.kind === "skip");
+        const currentAnchor = current ? { ...current, id:selected.id, startsOn:blockChoice.date, endsOn:blockChoice.date, exceptions:[] } : null;
+        const overlaps = [
+          ...findBookingBlockRuleOverlaps(blockChoice.anchor, reconciledBookingBlocks, studioRooms),
+          ...(currentAnchor ? findBookingBlockRuleOverlaps(currentAnchor, reconciledBookingBlocks, studioRooms) : []),
+        ];
+        const others = [...new Map(overlaps.map((item) => [item.block.id, item])).values()];
+        const roomLabel = (block) => block.allRooms ? "Усі зали" : (block.roomNames || []).join(", ");
+        const manage = (block) => { setManagedBlockId(block.id); setShowPastBlocks(true); setShowBlocksManager(true); setBlockChoice(null); };
+        return <div role="dialog" aria-modal="true" aria-label="Правила закриття" style={{ position:"fixed", inset:0, zIndex:5200, background:editorOverlay, display:"grid", placeItems:"center", padding:12 }}><div style={{...cardSt, width:"min(560px, 96vw)", maxHeight:"90vh", overflowY:"auto", background:editorSurface, display:"grid", gap:8}}>
+          <b>Закриття на {blockChoice.date}</b>
+          <span>Обраний проміжок: {blockChoice.anchor.startTime}–{blockChoice.anchor.endTime}, {roomLabel(blockChoice.anchor)}</span>
+          <div style={{border:`1px solid ${theme.border}`, borderRadius:8, padding:8, display:"grid", gap:6}}>
+            <b>{selected.title || "Закриття"}</b>
+            <span>{current ? `${current.title || selected.title || "Закриття"}: ${current.startTime}–${current.endTime}, ${roomLabel(current)}` : skipped ? "Це входження вимкнено на цю дату" : "Це правило не діє на цю дату"}</span>
+            <span>Правило: {selected.startsOn} — {selected.endsOn}</span>
+            {selected.startsOn !== selected.endsOn && selected.endTime > selected.startTime ? <button style={btnP} disabled={!bookingBlockMutationsReady} onClick={() => editBlockOccurrence(selected, blockChoice.date)}>Змінити лише цю дату</button> : null}
+            <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlock(selected)}>{selected.startsOn === selected.endsOn ? "Змінити це одноразове правило" : selected.endTime > selected.startTime ? "Змінити всю серію" : "Змінити весь період"}</button>
+            <button style={btnS} onClick={() => manage(selected)}>Керування цим правилом</button>
+          </div>
+          {others.length ? <div role="status" style={{display:"grid", gap:6}}><b>Інші незалежні правила також закривають цей проміжок</b>{others.map(({ block, date, startTime, endTime, roomNames }) => <div key={block.id} style={{border:`1px solid ${theme.border}`,borderRadius:8,padding:8,display:"grid",gap:4}}><span>{block.title || "Закриття"}: {date}, {startTime}–{endTime}, {roomNames.join(", ")}</span><span>Правило: {block.startsOn} — {block.endsOn}. Воно залишається активним, тому ці зали в цей час закриті.</span><button style={btnS} onClick={() => { setBlockChoice({ ...blockChoice, blockId: block.id, anchor: { ...blockChoice.anchor, id: block.id } }); }}>Переглянути це правило</button><button style={btnS} onClick={() => manage(block)}>Керування цим правилом</button></div>)}</div> : <span>Інших правил для цього проміжку немає.</span>}
+          <button style={btnS} onClick={() => setBlockChoice(null)}>Закрити</button>
+        </div></div>;
+      })() : null}
+      {isAdmin && showBlocksManager ? <div ref={blockManagerRef} style={{ ...cardSt, border: `1px solid ${theme.danger}`, display: "grid", gap: 10 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}><b>Закриття</b>{managedBlockId ? <button style={btnS} onClick={() => setManagedBlockId(null)}>Показати всі правила</button> : null}<button style={btnP} disabled={!bookingBlockMutationsReady} onClick={() => openNewBlock()}>+ Закрити години</button><button style={btnS} onClick={() => { setShowBlocksManager(false); setManagedBlockId(null); setBlockDraft(null); }}>Закрити</button></div>
         {blockError ? <div role="alert" style={{color:theme.danger}}>{blockError}</div> : null}
         <label><input type="checkbox" checked={showPastBlocks} onChange={e => setShowPastBlocks(e.target.checked)} /> Показати минулі та вимкнені</label>
-        {reconciledBookingBlocks.filter((block) => showPastBlocks || hasFutureBookingBlockOccurrence(block)).sort((a,b) => a.startsOn.localeCompare(b.startsOn)).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
+        {reconciledBookingBlocks.filter((block) => (!managedBlockId || block.id === managedBlockId) && (showPastBlocks || hasFutureBookingBlockOccurrence(block))).sort((a,b) => a.startsOn.localeCompare(b.startsOn)).map((block) => <div key={block.id} style={{ padding:10, border:`1px solid ${theme.border}`, borderRadius:10, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", opacity:block.isActive ? 1 : .6 }}>
           <b>{block.title}</b><span>{block.startsOn} — {block.endsOn}, {block.startTime}–{block.endTime}</span><span>{block.allRooms ? "Усі зали" : block.roomNames.join(", ")}</span><span>{!isRepeatingBookingBlock(block) ? "Без повторення" : `Повторення: ${block.weekdays.join(", ")}`}</span><span>{block.isActive ? "Активне" : "Вимкнене"}</span>
           <button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlock(block)}>Редагувати</button>
           <button style={btnS} disabled={!bookingBlocksReady || (!block.isActive && !roomBookingsReady)} onClick={() => toggleBlock(block)}>{block.isActive ? "Вимкнути" : "Увімкнути"}</button>
-          {(block.exceptions || []).map(exception => <div key={exception.date} style={{width:"100%", display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}><span>{exception.date}: {exception.kind === "skip" ? "вимкнено" : "змінено"}</span><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlockOccurrence(block, exception.date)}>Редагувати дату</button><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={async () => { try { const bookings = await onRetryRoomBookings?.(); if (!Array.isArray(bookings)) throw new Error("Не вдалося оновити бронювання."); const restored = {...block, startsOn:exception.date, endsOn:exception.date, exceptions:[]}; if (!confirmBookingBlockOverlaps(bookings, restored, studioRooms, message => window.confirm(message))) return; await onDeleteBookingBlockException?.(block.id, exception.date); } catch (error) { setBlockError(error?.message || "Не вдалося видалити виняток"); } }}>Повернути базове закриття</button></div>)}
+          {(block.exceptions || []).map(exception => <div key={exception.date} style={{width:"100%", display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}><span>{exception.date}: {exception.kind === "skip" ? "вимкнено" : "змінено"}</span><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={() => editBlockOccurrence(block, exception.date)}>Редагувати дату</button><button style={btnS} disabled={!bookingBlockMutationsReady} onClick={async () => { try { const bookings = await onRetryRoomBookings?.(); if (!Array.isArray(bookings)) throw new Error("Не вдалося оновити бронювання."); const restored = {...block, startsOn:exception.date, endsOn:exception.date, exceptions:[]}; const freshBlocks = onRetryBookingBlocks ? await onRetryBookingBlocks() : reconciledBookingBlocks; if (!Array.isArray(freshBlocks)) throw new Error("Не вдалося оновити правила закриття."); if (!confirmOtherClosureRules(restored, freshBlocks)) return; if (!confirmBookingBlockOverlaps(bookings, restored, studioRooms, message => window.confirm(message))) return; await onDeleteBookingBlockException?.(block.id, exception.date); } catch (error) { setBlockError(error?.message || "Не вдалося видалити виняток"); } }}>Повернути базове закриття</button></div>)}
           <button style={{...btnS,color:theme.danger}} disabled={!bookingBlocksReady} onClick={async()=>{if(window.confirm("Видалити правило закритих годин?")) await onDeleteBookingBlock?.(block.id);}}>Видалити</button>
         </div>)}
       </div> : null}

@@ -110,6 +110,55 @@ const addCalendarDays = (date, days) => {
   return parseDateOnly(`${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`);
 };
 
+// Resolve the whole occurrence first: an exception replaces every base room.
+export function effectiveBookingBlockOnDate(block, date, rooms = []) {
+  const interval = bookingBlockIntervalForDate(block, date);
+  if (!interval) return null;
+  const exception = block.startsOn !== block.endsOn && !isContinuousBookingBlock(block)
+    ? (block.exceptions || []).find((item) => item.date === date) : null;
+  if (exception?.kind === "skip") return null;
+  const effective = exception?.kind === "override" ? reconcileBookingBlockRooms({ ...block, ...exception }, rooms) : block;
+  return { ...effective, date, startTime: exception?.kind === "override" ? exception.startTime : interval.startTime, endTime: exception?.kind === "override" ? exception.endTime : interval.endTime };
+}
+
+// Weekly patterns repeat within seven days between the finite set of changes
+// (exceptions and continuous-rule boundaries), so long rules need no day scan.
+export function findBookingBlockRuleOverlaps(draft, blocks, rooms = []) {
+  if (!draft || draft.isActive === false || draft.kind === "skip") return [];
+  const overlaps = [];
+  for (const block of blocks || []) {
+    if (!block || block.isActive === false || String(block.id) === String(draft.blockId || draft.id || "")) continue;
+    const from = [draft.startsOn, block.startsOn].sort().at(-1);
+    const to = [draft.endsOn, block.endsOn].sort()[0];
+    if (!parseDateOnly(from) || !parseDateOnly(to) || from > to) continue;
+    const breakpoints = [from, to, draft.startsOn, draft.endsOn, block.startsOn, block.endsOn,
+      ...(draft.exceptions || []).map((item) => item.date), ...(block.exceptions || []).map((item) => item.date)];
+    const candidates = new Set();
+    for (const key of breakpoints) {
+      const day = parseDateOnly(key);
+      if (!day) continue;
+      for (let offset = -7; offset <= 7; offset += 1) {
+        const candidate = addCalendarDays(day, offset);
+        if (!candidate) continue;
+        const date = formatDateOnly(candidate);
+        if (date >= from && date <= to) candidates.add(date);
+      }
+    }
+    for (const date of [...candidates].sort()) {
+      const left = effectiveBookingBlockOnDate(draft, date, rooms);
+      const right = effectiveBookingBlockOnDate(block, date, rooms);
+      if (!left || !right || !intervalsOverlap(left.startTime,left.endTime,right.startTime,right.endTime)) continue;
+      const names = [...(left.roomNames || []), ...(right.roomNames || [])];
+      const displayRooms = buildBookingBlockDisplayRooms(rooms, names);
+      const sharedRooms = displayRooms.filter((room) => blockMatchesRoom(left,room) && blockMatchesRoom(right,room)).map((room) => room.name);
+      if (!sharedRooms.length) continue;
+      overlaps.push({ block, date, startTime: right.startTime, endTime: right.endTime, roomNames: sharedRooms, allRooms: right.allRooms });
+      break;
+    }
+  }
+  return overlaps;
+}
+
 export function bookingRecurrenceCandidates(booking, rangeStartKey, rangeEndKey) {
   const first = parseDateOnly(booking?.date);
   const blockStart = parseDateOnly(rangeStartKey);
@@ -157,12 +206,9 @@ export function expandBookingBlocks(blocks, rangeStart, rangeEnd, rooms = []) {
     if (block?.isActive === false) continue;
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
       const key = formatDateOnly(date);
-      const interval = bookingBlockIntervalForDate(block, key);
-      if (!interval) continue;
-      const exception = block.startsOn !== block.endsOn && !isContinuousBookingBlock(block) ? (block.exceptions || []).find((item) => item.date === key) : null;
-      if (exception?.kind === "skip") continue;
-      const effective = exception?.kind === "override" ? reconcileBookingBlockRooms({ ...block, ...exception }, rooms) : block;
-      const effectiveInterval = exception?.kind === "override" ? { startTime: exception.startTime, endTime: exception.endTime } : interval;
+      const effective = effectiveBookingBlockOnDate(block, key, rooms);
+      if (!effective) continue;
+      const effectiveInterval = { startTime: effective.startTime, endTime: effective.endTime };
       const availableRooms = rooms.length ? rooms : [{ id: "legacy:default", name: "Основна зала", isActive: true }];
       const matchingRooms = effective.allRooms ? availableRooms.filter((room) => room.isActive !== false) : availableRooms.filter((room) => blockMatchesRoom(effective, room));
       matchingRooms.forEach((room) => occurrences.push({ ...effective, id: `${block.id}:${key}:${room.id}`, blockId: block.id, kind: "booking_block", eventType: "booking_block", date: key, roomId: room.id, roomName: room.name, title: effective.title, startTime: effectiveInterval.startTime, endTime: effectiveInterval.endTime, startMin: timeMinutes(effectiveInterval.startTime), endMin: timeMinutes(effectiveInterval.endTime), readOnly: true }));
